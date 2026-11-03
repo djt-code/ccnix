@@ -1,6 +1,6 @@
 -- ping.lua -- send ICMP echo requests and time the replies
 --
---   ping [-c count] [-i seconds] [-t ttl] [-W seconds] host
+--   ping [-c count] [-i seconds] [-t ttl] [-W seconds] [-I iface|addr] host
 --
 -- host is an address (10.0.2.5) or a name: lib/netdb looks it up (`ip
 -- host`'s names, then DNS: `ip dns`).  Sends `count`
@@ -10,14 +10,18 @@
 -- router or this computer (no route: net; no ARP answer: host), "administratively
 -- prohibited" (a filter: a Network Gateway in NAT mode carries no ICMP past it, though it answers ping itself),
 -- or time exceeded (the TTL ran out on the way: a routing loop, or -t too small).
+-- -I sends from an interface ("back.20": its address, and out of it only,
+-- whatever the routes would otherwise pick) or from one of this computer's
+-- addresses (the routes pick the way, as ever).  The answer comes back to
+-- that address, so it shows whether the far side can reach it.
 -- Exit status 0 if any reply came, 1 if none, 2 for trouble (the network
 -- isn't up, a name that can't be looked up).
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
-local cu = require("cu").init("ping", "ping [-c count] [-i seconds] [-t ttl] [-W seconds] host")
+local cu = require("cu").init("ping", "ping [-c count] [-i seconds] [-t ttl] [-W seconds] [-I iface|addr] host")
 local net = require("net")
 local netdb = require("netdb")
-local opts, operands = cu.getopt({ ... }, "c:i:t:W:")
+local opts, operands = cu.getopt({ ... }, "c:i:t:W:I:")
 if #operands ~= 1 then cu.usageError() end
 local count = tonumber(opts.c or 4)
 local interval, wait, ttl = tonumber(opts.i or 1), tonumber(opts.W or 2), opts.t and tonumber(opts.t)
@@ -30,14 +34,30 @@ local ai, why2 = netdb.getaddrinfo(host, nil, { socktype = netdb.SOCK_RAW })
 if not ai then cu.fail(host .. ": " .. why2, 2); return cu.exit() end
 local dst = net.parseIP(ai[1].addr)
 
+-- -I: an interface (its address, and out of it only) or one of ours
+local src, iface
+if opts.I then
+    if S.ifaces[opts.I] then
+        iface = opts.I
+        src = S.ifaces[iface].ip
+    else
+        src = net.parseIP(opts.I)
+        if not src then cu.usageError("no interface " .. opts.I .. " (ip addr lists them)") end
+        if not S.isMine(src) or math.floor(src / 16777216) == 127 then
+            cu.usageError(opts.I .. " isn't one of this computer's addresses (ip addr lists them)")
+        end
+    end
+end
+
 local id = math.random(1, 65535)
 local sent, got, total, told = 0, 0, 0, false
 -- said once, after the first "administratively prohibited"
 local HINT = "a Network Gateway in NAT mode carries TCP and UDP only, no ICMP past it; it answers ping itself"
-io.write(string.format("PING %s (%s)\n", host, net.ipString(dst)))
+io.write(string.format("PING %s (%s)%s\n", host, net.ipString(dst),
+    src and (" from " .. net.ipString(src) .. (iface and (" " .. iface) or "")) or ""))
 for seq = 1, count do
     local t0 = os.epoch("utc")
-    local ok, err = S.echo(dst, id, seq, ttl)
+    local ok, err = S.echo(dst, id, seq, ttl, src, iface)
     if not ok then cu.fail(err, 2); break end
     sent = sent + 1
     -- (a reply: kind, from, id, seq, ttl; an error: kind, from, code, the packet it's about)

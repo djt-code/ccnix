@@ -255,11 +255,13 @@ function N.new(opts)
         return gone
     end
 
-    -- The route to dst: the longest prefix that holds it.
-    function S.route(dst)
+    -- The route to dst: the longest prefix that holds it (of those by
+    -- interface iface, if given).
+    function S.route(dst, iface)
         local best
         for _, r in ipairs(S.routes) do
-            if netOf(dst, r.len) == r.net and (not best or r.len > best.len) and S.ifaces[r.iface] then best = r end
+            if netOf(dst, r.len) == r.net and (not best or r.len > best.len) and S.ifaces[r.iface]
+                and (iface == nil or r.iface == iface) then best = r end
         end
         return best
     end
@@ -339,8 +341,9 @@ function N.new(opts)
     -- false and why (no route).  An ARP that gets no answer comes back
     -- later as a net_unreachable event.  The source is src if it's one of
     -- this computer's addresses (an answer comes from the address it was
-    -- sent to, as RFC 1122 has it), else the outgoing interface's.
-    function S.sendIP(dst, proto, data, ttl, src)
+    -- sent to, as RFC 1122 has it), else the outgoing interface's.  With
+    -- iface, it goes out of that interface or not at all (ping -I).
+    function S.sendIP(dst, proto, data, ttl, src, iface)
         dst = N.parseIP(dst)
         if not dst then return false, "bad address" end
         nextId = nextId + 1
@@ -351,14 +354,16 @@ function N.new(opts)
         if dst == N.ALL then
             local any = false
             for _, ifc in pairs(S.ifaces) do
-                sendFrame(ifc, N.BROADCAST, "ip",
-                    { src = ifc.ip, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId })
-                any = true
+                if iface == nil or ifc.name == iface then
+                    sendFrame(ifc, N.BROADCAST, "ip",
+                        { src = ifc.ip, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId })
+                    any = true
+                end
             end
             return any, not any and "no interfaces" or nil
         end
-        local r = S.route(dst)
-        if not r then return false, "no route to " .. N.ipString(dst) end
+        local r = S.route(dst, iface)
+        if not r then return false, "no route to " .. N.ipString(dst) .. (iface and (" via " .. iface) or "") end
         local ifc = S.ifaces[r.iface]
         if not (src and src ~= N.ALL and math.floor(src / 16777216) ~= 127 and isMine(src)) then src = ifc.ip end
         output({ src = src, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId }, r, true)
@@ -553,8 +558,9 @@ function N.new(opts)
         if sock and sock.queue[1] then return table.remove(sock.queue, 1) end
     end
 
-    function S.echo(dst, id, seq, ttl)
-        return S.sendIP(dst, "icmp", { type = "echo", id = id, seq = seq }, ttl)
+    -- An echo request (src and iface as sendIP's).
+    function S.echo(dst, id, seq, ttl, src, iface)
+        return S.sendIP(dst, "icmp", { type = "echo", id = id, seq = seq }, ttl, src, iface)
     end
 
     ----------------------------------------------------------------------

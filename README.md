@@ -1114,7 +1114,7 @@ ip addr add <iface> <addr/len>     ip route add <net/len|default> via <gw>
 ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip host <name> <addr>
 ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)
 ip dns <primary> [<secondary>]     host name | host address    (DNS)
-ping [-c n] [-t ttl] host          traceroute [-n] host
+ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host
 tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
 router                             (on a router: forwarding on, and a status screen)

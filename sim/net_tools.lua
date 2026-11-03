@@ -165,6 +165,32 @@ r = W:run("ping", "nowhere")
 check("ping an unknown name: status 2", r.status == 2 and r.errText:find("nowhere: Name or service not known"),
     show(r.errText))
 
+-- ping -I: from an interface (out of it only) or from one of this computer's addresses
+assert(ME.addInterface("top", "10.0.50.2/24"))          -- (on no wire: nothing beyond it)
+assert(R.addRoute("10.0.50.0/24", "10.0.1.2"))          -- (so B's answers to 10.0.50.2 come back)
+r = W:run("ping", "-c", "1", "-I", "back", "b")
+check("ping -I back: from back's address, out of back", r.status == 0
+    and r.out:find("^PING b %(10%.0%.2%.5%) from 10%.0%.1%.2 back\n") and r.out:find("reply from 10%.0%.2%.5"), show(r.out))
+r = W:run("ping", "-c", "1", "-I", "top", "10.0.2.5")
+check("ping -I top, where top has no way there: no route via top (the default route is back's), status 2",
+    r.status == 2 and r.errText:find("no route to 10%.0%.2%.5 via top"), show(r.out) .. show(r.errText))
+local srcSeen
+B.taps.t = function(dir, _, f)
+    if dir == "in" and f.type == "ip" and f.data.proto == "icmp" and f.data.data.type == "echo" then srcSeen = f.data.src end
+end
+r = W:run("ping", "-c", "1", "-I", "10.0.50.2", "b")
+B.taps.t = nil
+check("ping -I <one of ours>: that source (top's), the way the routes say (back), and the reply comes back to it",
+    r.status == 0 and r.out:find("^PING b %(10%.0%.2%.5%) from 10%.0%.50%.2\n") and srcSeen == N.parseIP("10.0.50.2")
+        and r.out:find("reply from 10%.0%.2%.5"), show(r.out) .. show(r.errText))
+r = W:run("ping", "-I", "nowhere", "b")
+r2 = W:run("ping", "-I", "10.9.9.9", "b")
+check("ping -I with no such interface, or an address not this computer's: a usage error",
+    r.status == 2 and r.errText:find("no interface nowhere") and r2.status == 2
+        and r2.errText:find("10%.9%.9%.9 isn't one of this computer's addresses"), show(r.errText) .. show(r2.errText))
+ME.removeInterface("top")
+R.deleteRoute("10.0.50.0/24")
+
 r = W:run("traceroute", "-q", "1", "b")
 local lines = {}
 for l in r.out:gmatch("[^\n]+") do lines[#lines + 1] = l end
