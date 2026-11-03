@@ -136,7 +136,9 @@ local function compile(words)
         elseif t == "ether" then
             local q = take("host, src, dst or broadcast")
             if q == "broadcast" then return function(r) return r.frame.dst == net.BROADCAST end end
-            local mac = take("a MAC")
+            local m = take("a MAC")
+            local mac = net.parseMAC(m)
+            if not mac then error("not a MAC: " .. m .. " (02:cc:00:00:0c:05)", 0) end
             if q == "host" then return function(r) return r.frame.src == mac or r.frame.dst == mac end
             elseif q == "src" then return function(r) return r.frame.src == mac end
             elseif q == "dst" then return function(r) return r.frame.dst == mac end end
@@ -342,7 +344,7 @@ local function handle(rec)
     seen = seen + 1
     local f = rec.frame
     if opts.p and rec.dir == "in" and type(f) == "table" then
-        local mine = (S and S.ifaces[rec.iface] and S.ifaces[rec.iface].mac) or (os.getComputerID() .. ":" .. rec.iface)
+        local mine = (S and S.ifaces[rec.iface] and S.ifaces[rec.iface].mac) or net.mac(os.getComputerID(), (net.link(rec.iface)))
         if f.dst ~= mine and f.dst ~= net.BROADCAST then return end
     end
     local okF, keep = pcall(filter, rec)

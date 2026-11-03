@@ -1128,7 +1128,12 @@ computer hearing everything (as with rednet):
   (`back`, `top`, `modem_0`), wired or wireless. It sends and listens on
   channel 60000, which works like an Ethernet segment: every computer on
   that wire (or in wireless range) hears a frame, and only the one it's
-  addressed to takes it. A MAC address is `<computer id>:<interface>`.
+  addressed to takes it. A MAC address is a locally administered one,
+  `02:cc:` then the computer's ID in three bytes and a port byte: top 0,
+  bottom 1, left 2, right 3, front 4, back 5, a remote `modem_N` 6 + N
+  (computer 12's back is `02:cc:00:00:0c:05`). VLANs share their modem's
+  MAC. `02:cc:ff` is the mod's (the gateway is `02:cc:ff:00:00:00`);
+  broadcast is `ff:ff:ff:ff:ff:ff`.
 - **VLANs:** `back.20` is VLAN 20 on the back modem: channel 60000 + 20, a
   network of its own on the same wire, that the untagged one (and every
   other VLAN) doesn't hear. One modem can carry several networks: a router

@@ -48,7 +48,10 @@ Forces:
   translation, `carries()`/`nativeVlan()` on `Gateway.Port`, flooding to one
   block per cable, a 64-entry identity ring (`seen`) and stats; co-cabled
   blocks find each other by beacons and all but one stand by. The kernel sees
-  only `Ipv4`'s bytes; MACs are free strings (`"12:back.20"`, `"*"`).
+  only `Ipv4`'s bytes. MACs are real 48-bit ones since ccnix 0.8.0
+  (locally administered: `02:cc:` + computer ID + port byte; the mod's
+  `02:cc:ff:…`, the gateway `02:cc:ff:00:00:00`; broadcast
+  `ff:ff:ff:ff:ff:ff`), so they cross to Ethernet as they are.
 - **Admin, ops, owners.** The admin owns config, Ansible and host; ops get
   bounded `/ccnix` commands; a block's owner or a level-2 op sets it.
 - **Two codependent repos**, `deploy/version` 0.3.4, `mod_version` 0.11.0;
@@ -73,7 +76,7 @@ against `ovs-vswitchd.conf.db(5)`, two review rounds. Found along the way:
    states, proposal/agreement on point-to-point links, edge ports, topology
    change as a flag; no 802.1D compatibility, per-VLAN trees or MSTP. On by
    default: a loop through a Lua switch storms until queues fill.
-3. **A BPDU is a lib/net frame**, `dst="stp"`, `type="stp"`, untagged. Its
+3. **A BPDU is a lib/net frame**, `dst="01:80:c2:00:00:00"` (802.1D's bridge group address), `type="stp"`, untagged. Its
    channel (D4) and IDs (D5) are open.
 4. **One pure engine written twice**, `lib/stp.lua` and `core/Stp.java`,
    kept equal by one table of vectors a sim and a JUnit test both run.
@@ -104,7 +107,7 @@ against `ovs-vswitchd.conf.db(5)`, two review rounds. Found along the way:
    at once. Lua switches use `peripheral_detach` (Healing). Ageing after 3
    missed hellos stays the fallback.
 10. **lib/net's frame and behaviour don't change for switches:** only its
-    header and `doc/network.txt` reserve `"stp"`. The tick fix is separate.
+    header and `doc/network.txt` reserve `01:80:c2:00:00:00`. The tick fix is separate.
 11. **Open vSwitch is a neighbour** (D6 B): later and optional, one host
     trunk from the exchange, a TAP the admin plugs into OVS or a
     VLAN-filtering Linux bridge; admin-only, off by default, Linux only, in
@@ -153,7 +156,7 @@ into one segment, a switch on two of them blocks one even with no shared VLAN.
 
 ### D4. The BPDU channel
 
-**A: 60000 with dst "stp"**, over B, a channel no host opens (e.g. 59999). A
+**A: 60000 with dst 01:80:c2:00:00:00**, over B, a channel no host opens (e.g. 59999). A
 costs hosts on 60000 an event per BPDU (~0.5/s per designated port on their
 segment; in Phase 1 the interim exchange repeats every gateway cable's to
 all of them), dropped at the destination check as ARP broadcasts already are; B costs every Lua switch one of a
@@ -198,7 +201,7 @@ fdWhile, rrWhile, rbWhile, tcWhile, rcvdInfoWhile and flags proposing,
 proposed, sync, synced, agreed; roles are a pure function of stored vectors.
 
 **BPDUs** go on channel 60000 untagged, fields and IDs as in item 4; `src` is
-for display ("12:back", "s7:3", "g:5"), identity is the bridge and port ID.
+the port's MAC, for display; identity is the bridge and port ID.
 STP bridges consume them; non-STP elements (the interim exchange, a Lua
 switch with STP off) pass them on like a hub; hosts drop them at the
 destination check (`lib/net.lua:428`). Bridges don't learn from BPDUs, drop
@@ -304,11 +307,9 @@ through the lab's routing; CC routers can still route lab to CC networks.
 mapped) and IPv4 (through `Ipv4.fromCc`/`toCc`) cross; other CC types
 (`"stp"` too), other ethertypes, IPv4 multicast, packets over `[l2].mtu` and
 host fragments are dropped and counted (TCP fine at MSS 536, big UDP fails).
-A CC source seen on a carried VLAN maps to `02:cc:` plus a hash of a
-per-world salt and the string (stable without state; a collision with a
-live entry refused and counted; a capped reverse table). `"*"` is broadcast,
-a real MAC is `"eth:aa:bb:cc:dd:ee:ff"` in CC, any other CC dst is dropped.
-`fromCc` drops frames from non-TAP ports whose src or ARP sha starts `eth:`,
+MACs cross unchanged: CC's are already real (`02:cc:…`, broadcast
+`ff:ff:ff:ff:ff:ff`), and a host's appears in CC as itself. `fromCc` drops
+frames from non-TAP ports whose src or ARP sha isn't a `02:cc` unicast MAC,
 before learning; the TapPort drops host frames from multicast or `02:cc` MACs.
 
 **Spanning tree.** No shared tree: the TapPort is an edge port passing no
@@ -367,7 +368,7 @@ one edge the admin sets up: CC traffic stays lossless and off the host.
 5. **The neighbour-gone signal (Decision 9).** Recommended: yes, on switch
    ports and gateway blocks too, so a backup block takes over at once on a
    cable cut; no methods on the peripheral at first.
-6. **Interop (D4).** Recommended: 60000 with dst "stp"; no hop count in data
+6. **Interop (D4).** Recommended: 60000 with dst 01:80:c2:00:00:00; no hop count in data
    frames; wireless ports at cost 200000.
 7. **Limits, recipes, look.** Recommended: only controllers count against
    `switch.maxPerPlayer` (5), ports and chassis capped per switch; any
@@ -385,7 +386,7 @@ one edge the admin sets up: CC traffic stays lossless and off the host.
 10. **The two bugs found.** Recommended: fixed first (items 1 and 2).
 11. **Open vSwitch (D6).** Recommended: B, here rather than in ADR-0004, as
     Phase 4 after Phase 2; C and D rejected, E later if ever. One TAP, on
-    the exchange; salted-hash MACs, real ones as `eth:`; bridged VLANs
+    the exchange; MACs unchanged both ways; bridged VLANs
     op-only (level 2) on gateway blocks (any owner picks any VLAN today);
     oversize and fragments dropped; the playbook attaches to the admin's
     named bridge and creates none.
@@ -404,10 +405,10 @@ in ccnix-mod. Pointers bumped after every release in either repo, ccnix-mod's
 
 ### Phase 1: engine and Lua switch: ccnix 0.4.0, ccnix-mod 0.12.0
 
-4. [ ] The vectors format: event sequences in (BPDUs, ticks, port up and down, `linkLost`), roles and states out, a Lua table file the JUnit test reads from the `ccnix/` submodule. Its first cases fix the BPDU, `{ ccnet=1, dst="stp", src=<port MAC>, type="stp", data={ v=2, inst=0, root, cost, bridge, port, role, proposal, agreement, p2p, learning, forwarding, tc, age, maxAge, hello, fwdDelay } }`, and the IDs: bridge `"%05d.%d.%010d"`, priority (0-61440 in steps of 4096, default 32768), kind (0 the exchange, number 0; 1 a multiblock, the controller's registry ID; 2 a Lua switch, the computer ID) and number, fixed width so string order is numeric order in both languages without CC's integer/double ambiguity; port `"%03d.%04d"`, priority (default 128, steps of 16) and number 1-4095.
+4. [ ] The vectors format: event sequences in (BPDUs, ticks, port up and down, `linkLost`), roles and states out, a Lua table file the JUnit test reads from the `ccnix/` submodule. Its first cases fix the BPDU, `{ ccnet=1, dst="01:80:c2:00:00:00", src=<port MAC>, type="stp", data={ v=2, inst=0, root, cost, bridge, port, role, proposal, agreement, p2p, learning, forwarding, tc, age, maxAge, hello, fwdDelay } }`, and the IDs: bridge `"%05d.%d.%010d"`, priority (0-61440 in steps of 4096, default 32768), kind (0 the exchange, number 0; 1 a multiblock, the controller's registry ID; 2 a Lua switch, the computer ID) and number, fixed width so string order is numeric order in both languages without CC's integer/double ambiguity; port `"%03d.%04d"`, priority (default 128, steps of 16) and number 1-4095.
 5. [ ] `lib/stp.lua` (~400 lines) and `sim/stp.lua` on the vectors: root by priority then ID, a ring of three, two ports on one cable (backup and its takeover), auto-edge and its loss, the `p2p` agreement (a second agreement or bridge port makes it shared; announce on port up), rrWhile and rbWhile, info ageing (~6 s), `linkLost` (alternate to root in under 1 s), TC flush, loop guard.
 6. [ ] `lib/switch.lua` and `sim/net_switch.lua` with lib/net hosts: access isolation, learning and ageing, a trunk between two switches (channel rewritten, tagged-native dropped, unlisted VLAN filtered), router on a stick, the channel budget (127 accepted, 128 refused, lib/net interfaces counted), a loop with STP off trips the harness and with STP on heals after a cut, hosts' rx unchanged by BPDUs, hellos survive a full queue, `switch_drain` leftovers with lib/net on the same computer still served, a `ccnix_port_*` detach naming a port's stored neighbour raises `linkLost`, while another bridge port's on the same cable and other detaches don't, a switch stalled 8 s then resumed, config parsing.
-7. [ ] `pc/switch.lua`, help from its top comment; `switch.boot` in `deploy/boot.lua`, autostart in `bin/init.lua`, `deploy/setup.lua`, `deploy/install.lua`; lib/net's header reserves `"stp"`; a Switches paragraph in `doc/network.txt` (the `ccnix_port_*` peripherals included); `deploy/version` 0.4.0.
+7. [ ] `pc/switch.lua`, help from its top comment; `switch.boot` in `deploy/boot.lua`, autostart in `bin/init.lua`, `deploy/setup.lua`, `deploy/install.lua`; lib/net's header reserves `01:80:c2:00:00:00`; a Switches paragraph in `doc/network.txt` (the `ccnix_port_*` peripherals included); `deploy/version` 0.4.0.
 8. [ ] ccnix-mod 0.12.0: the interim pass-through (The exchange); the executor cap with a counter in `/ccnix`; tests: a BPDU crosses blocks with different natives and native none, is never learned, isn't relayed twice via a standby block, and a `tc` flushes.
 9. [ ] In game: two modems of one computer on one cable end as backup; a loop between two Lua switches is cut and heals in ~6 s when a cable is broken; a Lua switch with ports on two gateway networks blocks one, even when the blocks share no VLAN; `switch` counters under traffic.
 
@@ -432,8 +433,8 @@ in ccnix-mod. Pointers bumped after every release in either repo, ccnix-mod's
 
 ### Phase 4: the host trunk (optional, after Phase 2): ccnix-mod 0.15.0, ccnix 0.4.3
 
-23. [ ] `ccnix-tun --tap` (usage check and hint updated) and a second `TunHelper` instance for `[l2].device`; `core/Eth.java` (frame, 802.1Q, ARP, padding, MTU, ethertype and multicast policy) and the MAC mapper (salted hash, collision refusal, reverse table, cap, dst policy); `EthTest`, both spoof refusals included.
-24. [ ] `TapPort`, `[l2]` (`mtu` included), rate limits and MAC cap, bridged VLANs op-only on blocks, `eth:` sources refused from blocks before learning, `/ccnix` status; `GatewayTest` with a fake TapPort (untagged at base+0, VLAN mapping, native none, learning, VLAN 1 refused, `02:cc` and multicast sources refused, cap and rate); a `CcWorld` scenario: a lib/net host pings a fake real host through the TAP.
+23. [ ] `ccnix-tun --tap` (usage check and hint updated) and a second `TunHelper` instance for `[l2].device`; `core/Eth.java` (frame, 802.1Q, ARP, padding, MTU, ethertype and multicast policy) (MACs unchanged; the dst policy and cap); `EthTest`, both spoof refusals included.
+24. [ ] `TapPort`, `[l2]` (`mtu` included), rate limits and MAC cap, bridged VLANs op-only on blocks, sources other than `02:cc` unicast refused from blocks before learning, `/ccnix` status; `GatewayTest` with a fake TapPort (untagged at base+0, VLAN mapping, native none, learning, VLAN 1 refused, `02:cc` and multicast sources refused, cap and rate); a `CcWorld` scenario: a lib/net host pings a fake real host through the TAP.
 25. [ ] Ansible: `ccnix_l2_device` ("": off), `ccnix_l2_bridge`, `ccnix_l2_vlans` (refused empty when a device is set), `ccnix_l2_native` (0), `ccnix_l2_mtu` (1500, the TAP's and `[l2].mtu`), `ccnix_l2_ovs` (true, else a Linux bridge), the OVS service name. `ccnix-tap-setup`: `ip tuntap add dev <tap> mode tap user <server user>`, MTU, up; on OVS `ovs-vsctl --timeout=10 --may-exist add-port <bridge> <tap> -- set port <tap> vlan_mode=trunk trunks=<list> other_config:rstp-port-admin-edge=true` (native 0) or `... vlan_mode=native-untagged tag=<n> trunks=<list> ...` (native n, refused if 1), `<list>` with ranges expanded and the native kept in it (OVS passes it either way, and the list never ends up empty, which OVS reads as all VLANs); on a Linux bridge, refuse unless `/sys/class/net/<bridge>/bridge/vlan_filtering` is 1, `bridge vlan del dev <tap> vid 1`, `bridge vlan add dev <tap> vid <v>` per VLAN, `vid <n> pvid untagged` for the native. A `ccnix-tap.service` oneshot After= and Wants= the OVS service, before `minecraft.service`; `--remove` (`ovs-vsctl --if-exists del-port`, then `ip link del`) when unset. An `[l2]` section line (as `[nat]` is added) and `{ section: l2, ... }` entries in the settings loop; `[l2]` in the template for new installs.
-26. [ ] ccnix 0.4.3: `doc/network.txt` and `help network` on bridged VLANs, the addressing rule, the `eth:` MAC form and the MTU limit; `ip neigh` widths checked.
+26. [ ] ccnix 0.4.3: `doc/network.txt` and `help network` on bridged VLANs, the addressing rule and the MTU limit; `ip neigh` widths checked.
 27. [ ] On the VM: a netns on an OVS VLAN pings, telnets and nc's a CC computer through a gateway block, `[l2].native` set and unset; `ovs-appctl fdb/show` lists the `02:cc` MACs; a host broadcast storm is limited; the TAP's link-up delay with the bridge on RSTP and on 802.1D; the port's carrier across helper restarts.

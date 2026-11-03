@@ -101,7 +101,7 @@ r = W:run("ip", "up")
 check("ip up: two interfaces, the channels opened (VLAN 20: 60020)", r.out:find("up: 2 interfaces")
     and OPENED["back:60000"] and OPENED["back:60020"] and _G.ccnet ~= nil, show(r.out) .. show(r.errText))
 r = W:run("ip")
-check("ip: up, the interfaces and routes", r.out:find("^up") and r.out:find("back%s+10%.0%.1%.2/24%s+1:back")
+check("ip: up, the interfaces and routes", r.out:find("^up") and r.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 rx")
     and r.out:find("back%.20.*vlan 20") and r.out:find("default%s+via 10%.0%.1%.1 dev back"), show(r.out))
 r = W:run("ip", "down")
 check("ip down: channels closed", r.out:find("down") and not OPENED["back:60000"] and _G.ccnet == nil)
@@ -261,11 +261,11 @@ r = W:run("tcpdump", "-c", "2", "-w", "cap", "icmp", { events = {}, onPull = onc
 check("tcpdump -w: written, not printed", r.out == "" and (W:read("cap") or ""):find("^%-%- ccnet frames"), show(r.out))
 r = W:run("tcpdump", "-r", "cap", "-n", "-t", "-e")
 check("tcpdump -r: read back, with the interface, the way, and (-e) the MACs",
-    r.out:find("^back Out 1:back > 10:left, ip: IP 10%.0%.1%.2 > 10%.0%.2%.5: ICMP echo request, id 7, seq 1\n")
-        and r.out:find("back In 10:left > 1:back, ip: IP 10%.0%.2%.5 > 10%.0%.1%.2: ICMP echo reply", 1, false), show(r.out))
+    r.out:find("^back Out 02:cc:00:00:01:05 > 02:cc:00:00:0a:02, ip: IP 10%.0%.1%.2 > 10%.0%.2%.5: ICMP echo request, id 7, seq 1\n")
+        and r.out:find("back In 02:cc:00:00:0a:02 > 02:cc:00:00:01:05, ip: IP 10%.0%.2%.5 > 10%.0%.1%.2: ICMP echo reply", 1, false), show(r.out))
 r = W:run("tcpdump", "-n", "-t", "-c", "1", "-i", "top", { events = { { "modem_message", "top", N.CHANNEL, N.CHANNEL,
-    { ccnet = 1, src = "7:back", dst = "*", type = "arp",
-      data = { op = "request", sha = "7:back", spa = N.parseIP("10.0.1.7"), tpa = N.parseIP("10.0.1.9") } }, 5 } } })
+    { ccnet = 1, src = N.mac(7, "back"), dst = N.BROADCAST, type = "arp",
+      data = { op = "request", sha = N.mac(7, "back"), spa = N.parseIP("10.0.1.7"), tpa = N.parseIP("10.0.1.9") } }, 5 } } })
 check("tcpdump -i top (not one of the network's): its own channel, opened and closed again",
     r.out == "ARP, Request who-has 10.0.1.9 tell 10.0.1.7\n" and not OPENED["top:60000"], show(r.out) .. show(r.errText))
 r = W:run("tcpdump", "-D")

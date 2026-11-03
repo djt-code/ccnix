@@ -15,8 +15,13 @@
 --    channel is its own segment (and broadcast domain) on the shared wire,
 --    so one modem can carry several networks, a router's trunk.  VLANs
 --    1-4094.  A frame is { ccnet = 1, dst = MAC, src = MAC, type = "arp" |
---    "ip", data = ... }; a MAC is "<computer id>:<interface>" ("12:back.20"),
---    the broadcast MAC "*".  A frame for another MAC is ignored.
+--    "ip", data = ... }.  A MAC is a locally administered one, 02:cc: then
+--    the computer's ID (3 bytes) and the modem's port byte: the sides
+--    top 0, bottom 1, left 2, right 3, front 4, back 5, a remote modem
+--    "modem_N" 6 + N ("02:cc:00:00:0c:05" is computer 12's back).  VLANs
+--    share their modem's MAC, as on a real router.  02:cc:ff is the ccnix
+--    mod's (the gateway is 02:cc:ff:00:00:00); the broadcast MAC is
+--    ff:ff:ff:ff:ff:ff.  A frame for another MAC is ignored.
 --  * ARP: who has 10.0.1.5?  A request is broadcast; the owner answers
 --    with its MAC.  Answers are kept ARP_TTL seconds.  Packets wait while
 --    an address is asked for (ARP_TRIES requests, a second apart), then
@@ -84,7 +89,7 @@
 local N = {}
 N.CHANNEL = 60000              -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
                                -- rednet's, a computer's ID, but for IDs past 60000)
-N.BROADCAST = "*"
+N.BROADCAST = "ff:ff:ff:ff:ff:ff"
 N.TTL = 64
 N.ALL = 4294967295              -- 255.255.255.255
 local ARP_TTL = 300
@@ -140,6 +145,35 @@ function N.link(name)
     vlan = tonumber(vlan)
     if vlan < 1 or vlan > 4094 then return nil end
     return modem, N.CHANNEL + vlan, vlan
+end
+
+-- MACs: 02:cc:<computer ID, 3 bytes>:<port byte> (see the top).
+N.SIDES = { top = 0, bottom = 1, left = 2, right = 3, front = 4, back = 5 }
+
+-- A modem's port byte: its side's, 6 + N for a remote "modem_N" (N up to
+-- 249), else a hash of its name into 6-255.
+function N.port(modem)
+    if N.SIDES[modem] then return N.SIDES[modem] end
+    local n = tonumber(modem:match("^modem_(%d+)$"))
+    if n and n <= 249 then return 6 + n end
+    local h = 0
+    for i = 1, #modem do h = (h * 31 + modem:byte(i)) % 250 end
+    return 6 + h
+end
+
+-- Computer id's MAC on a modem (an ID past 0xfeffff wraps: 02:cc:ff is the mod's).
+function N.mac(id, modem)
+    local n = math.floor(tonumber(id) or 0) % 0xff0000
+    return string.format("02:cc:%02x:%02x:%02x:%02x", math.floor(n / 65536), math.floor(n / 256) % 256, n % 256,
+        N.port(modem))
+end
+
+-- "02:CC:00:00:0C:05" or "02-cc-00-00-0c-05" -> "02:cc:00:00:0c:05"; nil if not a MAC.
+function N.parseMAC(s)
+    if type(s) ~= "string" then return nil end
+    local b = { s:lower():match("^(%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)$") }
+    if #b ~= 6 then return nil end
+    return table.concat(b, ":")
 end
 
 local function netOf(ip, len)
@@ -205,7 +239,7 @@ function N.new(opts)
         local modem, channel, vlan = N.link(name)
         if not modem then return false, "bad VLAN in " .. name .. " (1-4094)" end
         if S.ifaces[name] then S.links[S.ifaces[name].modem .. "|" .. S.ifaces[name].channel] = nil end
-        S.ifaces[name] = { name = name, ip = ip, len = len, mac = S.id .. ":" .. name, rx = 0, tx = 0,
+        S.ifaces[name] = { name = name, ip = ip, len = len, mac = N.mac(S.id, modem), rx = 0, tx = 0,
                            modem = modem, channel = channel, vlan = vlan }
         S.links[modem .. "|" .. channel] = name
         S.arp[name] = S.arp[name] or {}

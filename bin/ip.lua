@@ -176,7 +176,7 @@ local function showAddr(S)
         table.sort(names)
         for _, name in ipairs(names) do
             local i = S.ifaces[name]
-            out(string.format("%-12s %-18s %-14s rx %d tx %d%s", name, net.cidrString(i.ip, i.len), i.mac, i.rx, i.tx,
+            out(string.format("%-12s %-18s %-17s rx %d tx %d%s", name, net.cidrString(i.ip, i.len), i.mac, i.rx, i.tx,
                 i.vlan and (" (vlan " .. i.vlan .. ")") or ""))
         end
     else
@@ -353,7 +353,7 @@ elseif cmd == "neighbour" then
     for iface, cache in pairs(S.arp) do
         for ip, e in pairs(cache) do
             any = true
-            out(string.format("%-16s %-14s dev %s", net.ipString(ip), e.mac, iface))
+            out(string.format("%-16s %-17s dev %s", net.ipString(ip), e.mac, iface))
         end
     end
     if not any then out("(empty)") end

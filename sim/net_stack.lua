@@ -123,8 +123,8 @@ run()
 local d = C.udpTake(7)
 check("UDP to a host on the same segment: ARP, then delivered",
     d and d.data == "hello C" and d.src == "10.0.1.2" and d.sport == 5000 and #events(3, "net_udp") == 1)
-check("each side learned the other's MAC", A.arp.back[N.parseIP("10.0.1.3")].mac == "3:top"
-    and C.arp.top[N.parseIP("10.0.1.2")].mac == "1:back")
+check("each side learned the other's MAC", A.arp.back[N.parseIP("10.0.1.3")].mac == N.mac(3, "top")
+    and C.arp.top[N.parseIP("10.0.1.2")].mac == N.mac(1, "back"))
 local r1rx = R1.ifaces.left.rx
 A.udpSend(pa, "10.0.1.3", 7, "again")
 run()
@@ -216,8 +216,11 @@ run()
 e = events(4, "net_icmp")[1]
 check("but reaches it through the router's trunk (left.20 -> left): a reply, TTL one less",
     e and e[2] == "reply" and e[3] == "10.0.1.2" and e[6] == N.TTL - 1, e and tostring(e[2]))
-check("the router's two interfaces on one modem: one MAC each", R1.ifaces["left.20"].mac == "10:left.20"
-    and R1.ifaces.left.mac == "10:left")
+check("the router's two interfaces on one modem: the modem's MAC (02:cc, computer 10, left 2)",
+    R1.ifaces["left.20"].mac == "02:cc:00:00:0a:02" and R1.ifaces.left.mac == "02:cc:00:00:0a:02")
+check("MACs: a remote modem_N is port 6 + N, other names hash past the sides, IDs wrap short of 02:cc:ff",
+    N.mac(12, "modem_3") == "02:cc:00:00:0c:09" and N.port("wan") >= 6 and N.mac(0xff0001, "top") == "02:cc:00:00:01:00"
+        and N.parseMAC("02-CC-00-00-0A-02") == "02:cc:00:00:0a:02" and N.parseMAC("10:left") == nil)
 
 -- 9. a closed port
 clear()
@@ -239,7 +242,7 @@ check("a computer with no route there: sendIP says so",
 -- 10b. forged sources (BCP 38): a datagram for B with whatever source,
 -- as if A sent it to R1's left
 local function forge(src, ttl)
-    R1.receive("left", N.CHANNEL, { ccnet = 1, dst = R1.ifaces.left.mac, src = "1:back", type = "ip",
+    R1.receive("left", N.CHANNEL, { ccnet = 1, dst = R1.ifaces.left.mac, src = N.mac(1, "back"), type = "ip",
         data = { src = N.parseIP(src), dst = N.parseIP("10.0.2.5"), ttl = ttl or N.TTL, id = 1, proto = "udp",
                  data = { sport = 1000, dport = 53, data = src } } })
     run()
@@ -265,7 +268,7 @@ check("whatever rpfilter says, a source that can't be isn't: 0.x, 127.x, 224.x a
         and not forge("10.0.1.255") and not forge("10.0.2.1"))
 R1.rpfilter = "loose"
 local pa7 = A.udpOpen(7007)
-A.receive("back", N.CHANNEL, { ccnet = 1, dst = A.ifaces.back.mac, src = "3:top", type = "ip",
+A.receive("back", N.CHANNEL, { ccnet = 1, dst = A.ifaces.back.mac, src = N.mac(3, "top"), type = "ip",
     data = { src = N.parseIP("10.0.1.2"), dst = N.parseIP("10.0.1.2"), ttl = N.TTL, id = 1, proto = "udp",
              data = { sport = 1, dport = 7007, data = "me?" } } })
 check("a host drops a packet that says it's from the host itself", A.udpTake(pa7) == nil)
@@ -292,8 +295,8 @@ local function waiter(tag)
 end
 local c1, c2 = waiter("one"), waiter("two")
 coroutine.resume(c1); coroutine.resume(c2)
-local frame = { ccnet = 1, dst = N.BROADCAST, src = "1:back", type = "arp",
-                data = { op = "request", sha = "1:back", spa = N.parseIP("10.0.1.2"), tpa = N.parseIP("10.0.1.20") } }
+local frame = { ccnet = 1, dst = N.BROADCAST, src = N.mac(1, "back"), type = "arp",
+                data = { op = "request", sha = N.mac(1, "back"), spa = N.parseIP("10.0.1.2"), tpa = N.parseIP("10.0.1.20") } }
 coroutine.resume(c1, "modem_message", "back", N.CHANNEL, N.CHANNEL, frame, 3)
 coroutine.resume(c2, "modem_message", "back", N.CHANNEL, N.CHANNEL, frame, 3)
 check("hooked: a frame two coroutines see is handled once, and neither returns for it",
