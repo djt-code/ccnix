@@ -9,7 +9,7 @@
 --   ccsh                            the POSIX-style shell, started at boot
 --   diskclone                          for a computer with a disk drive
 --   fileserver                         its disk drives as one folder, /jbod
---   net                                the network: ip, ping, traceroute, nc, host, tcpdump;
+--   net                                the network: ip, ping, traceroute, nc, host, tcpdump, curl;
 --                                      up at every boot
 --   router                             the network, and routing between
 --                                      networks: forwarding on, up at boot
@@ -61,8 +61,8 @@ local DIR = "/ccnix"
 
 -- What each app needs.  A path ending in / is a whole folder.
 local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lua" }
-local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/tcpdump.lua", "lib/net.lua",
-              "lib/netdb.lua", "lib/cu.lua", "help/network.txt" }
+local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/tcpdump.lua", "bin/curl.lua", "lib/net.lua",
+              "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
 local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/cu.lua" }
 local APPS = {
     mine = { "turtle/mine.lua", TURTLE },

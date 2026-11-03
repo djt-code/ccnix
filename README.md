@@ -1118,6 +1118,7 @@ ip dns <primary> [<secondary>]     host name | host address    (DNS)
 ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host
 tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
+curl [-iILfsv] [-d data] url       HTTP: a page, headers, POSTs, redirects (-L); lib/httpc for programs
 router                             (on a router: forwarding on, and a status screen)
 ```
 
@@ -1293,6 +1294,16 @@ it's up. `ip host router 10.0.1.1` lets `ping router` work; with a way out
 no DHCP: addresses are set by hand. `help network` on a computer walks through a lab
 of three computers, two networks and a router (with the one-cable VLAN
 variant and what to look at when it doesn't work); it's `doc/network.txt`.
+
+**curl** fetches over HTTP: `curl http://10.0.2.20/`, `curl -i` (the
+headers too), `-I` (HEAD), `-L` (follow redirects), `-d a=1` (POST), `-H`,
+`-u user:pass`, `-o file`, `-f`, `-m secs`, `-v`, with curl's exit codes.
+HTTP/1.1 only, no HTTPS (CC's own `http` API does that, from the server).
+Programs use `lib/httpc.lua` (`httpc.get(url)`, `httpc.post(url, body)`,
+`httpc.request{...}`). curl is Daniel Stenberg's: he created it and leads
+the curl project (https://curl.se) and its many contributors. This isn't
+that curl, only a small one for ccnix that borrows its name, some options
+and its exit codes, with thanks.
 
 ## Telnet
 

@@ -19,6 +19,7 @@ Anywhere (bin/):
   ccnix: this computer's ccnix: where it comes from, and updates
   ccsh: ccsh, a small POSIX-style shell for CraftOS
   cmp: compare two files byte by byte (POSIX cmp)
+  curl: fetch a URL over HTTP, a small curl for ccnix (lib/httpc.lua)
   cut: write selected parts of each line (POSIX cut)
   df: report free disk space (POSIX df)
   diff: show the differences between two files (POSIX diff)

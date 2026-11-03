@@ -1,6 +1,6 @@
 -- sim/net_tools.lua
 --
--- ip, ping, traceroute and nc in a shellworld, against stacks (lib/net.lua)
+-- ip, ping, traceroute, nc, tcpdump and curl in a shellworld, against stacks (lib/net.lua)
 -- joined by mock wires that answer at once:
 --
 --     this computer 10.0.1.2 --- [left] R 10.0.1.1 | 10.0.2.1 [right] --- B 10.0.2.5
@@ -340,6 +340,147 @@ check("nc -l -v port: one connection, who it's from, what it sent, then the end"
 r = W:run("nc", "10.0.2.5", "99", { events = {} })
 check("nc to a port nobody listens on: connection refused, status 1",
     r.status == 1 and r.err[1] == "nc: 10.0.2.5 99: connection refused", show(r.errText))
+
+--------------------------------------------------------------------------
+-- curl (lib/httpc), against a small HTTP server on B
+--------------------------------------------------------------------------
+local httpc = require("httpc")
+check("httpc.parseURL: scheme, user, host, port, path and query; no scheme is http; https refused",
+    httpc.parseURL("http://u:p%40w@Wiki:8080/a/b?x=1#top").url == "http://wiki:8080/a/b?x=1"
+        and httpc.parseURL("http://u:p%40w@wiki:8080/").user == "u:p@w" and httpc.parseURL("10.0.2.5").path == "/"
+        and httpc.parseURL("b?q").path == "/?q" and select(3, httpc.parseURL("https://x/")) == "protocol"
+        and select(3, httpc.parseURL("http://")) == "url" and select(3, httpc.parseURL("http://x:0/")) == "url")
+check("httpc.resolve: absolute, //host, /path, relative, ?query and .. against the URL redirected from",
+    httpc.resolve("http://a/b/c", "http://z/") == "http://z/" and httpc.resolve("http://a:81/b/c", "//z/y") == "http://z/y"
+        and httpc.resolve("http://a:81/b/c", "/y") == "http://a:81/y" and httpc.resolve("http://a/b/c", "d") == "http://a/b/d"
+        and httpc.resolve("http://a/b/c?q", "?r") == "http://a/b/c?r" and httpc.resolve("http://a/b/c/d", "../e") == "http://a/b/e"
+        and httpc.resolve("http://a/b/c", "./") == "http://a/b/", httpc.resolve("http://a/b/c/d", "../e"))
+check("httpc.base64 (RFC 4648's examples)", httpc.base64("") == "" and httpc.base64("f") == "Zg==" and httpc.base64("fo") == "Zm8="
+    and httpc.base64("foo") == "Zm9v" and httpc.base64("foobar") == "Zm9vYmFy" and httpc.base64("user:pass") == "dXNlcjpwYXNz")
+
+-- B answers on port 80: each request (head, body) is kept, and answered
+-- from PAGES by its path, then closed.
+local PAGES = {
+    ["/"] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\nhello\n",
+    ["/chunked"] = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n7;x=y\r\n world\n\r\n0\r\nX-Trailer: 1\r\n\r\n",
+    ["/old"] = "HTTP/1.0 200 OK\r\nServer: an old one\r\n\r\nuntil it closes\n",
+    ["/moved"] = "HTTP/1.1 302 Found\r\nLocation: /dir/../new?from=moved\r\nContent-Length: 0\r\n\r\n",
+    ["/new?from=moved"] = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nnew\n",
+    ["/loop"] = "HTTP/1.1 301 Moved Permanently\r\nLocation: http://b/loop\r\nContent-Length: 0\r\n\r\n",
+    ["/missing"] = "HTTP/1.1 404 Not Found\r\nContent-Length: 10\r\n\r\nnot here!\n",
+    ["/short"] = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nonly this",
+    ["/silent"] = "",
+    ["/continue"] = "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 3\r\n\r\nok\n",
+}
+local requests = {}
+local serving = {}
+assert(B.tcpListen(80))
+local function server()
+    local c = B.tcpAccept(80)
+    if c then serving[#serving + 1] = { c = c, buf = "" } end
+    for _, k in ipairs(serving) do
+        if not k.done then
+            k.buf = k.buf .. (B.tcpRead(k.c) or "")
+            local head, rest = k.buf:match("^(.-)\r\n\r\n(.*)$")
+            local len = head and tonumber(head:lower():match("\r\ncontent%-length:%s*(%d+)")) or 0
+            if head and #rest >= len then
+                k.done = true
+                requests[#requests + 1] = { head = head, body = rest:sub(1, len) }
+                local method, path = head:match("^(%u+) (%S+)")
+                local page = PAGES[path] or PAGES["/missing"]
+                if method == "HEAD" then page = page:match("^(.-\r\n\r\n)") or page end
+                if method == "POST" or method == "PUT" then
+                    page = "HTTP/1.1 200 OK\r\nContent-Length: " .. #rest .. "\r\n\r\n" .. rest:sub(1, len)
+                end
+                if path == "/hang" then return end      -- (never a word, never closed)
+                if page ~= "" then B.tcpSend(k.c, page) end
+                B.tcpClose(k.c)
+            end
+        end
+    end
+end
+local function curl(...)
+    local args = table.pack(...)
+    args[args.n + 1] = { events = {}, onPull = server }
+    return W:run("curl", table.unpack(args, 1, args.n + 1))
+end
+local function sent(n) return requests[#requests - (n or 0)] end
+
+r = curl("http://10.0.2.5/")
+check("curl url: the body; the request a plain HTTP/1.1 GET with Host, User-Agent, Accept and Connection: close",
+    r.status == 0 and r.out == "hello\n" and sent().head
+        == "GET / HTTP/1.1\r\nHost: 10.0.2.5\r\nUser-Agent: ccnix-curl\r\nAccept: */*\r\nConnection: close",
+    show(r.out) .. show(r.errText) .. show(sent() and sent().head))
+r = curl("b/chunked")
+check("curl b/chunked: no scheme is http, the name from ip host, a chunked body joined (an extension and trailer skipped)",
+    r.status == 0 and r.out == "hello world\n" and sent().head:find("^GET /chunked HTTP/1%.1\r\nHost: b\r\n"), show(r.out) .. show(r.errText))
+r = curl("http://b/old")
+check("curl: an HTTP/1.0 answer with no length: the body until it closes", r.status == 0 and r.out == "until it closes\n",
+    show(r.out) .. show(r.errText))
+r = curl("-i", "http://b/")
+r2 = curl("-i", "-o", "raw", "http://b/")
+check("curl -i: the status line and headers first, then a blank line (on the screen without \\r; to a file as they came)",
+    r.status == 0 and r.out == "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 6\n\nhello\n"
+        and W:read("raw") == "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\nhello\n", show(r.out))
+r = curl("http://b/", "--head")
+check("curl url --head (options after the URL, long ones too): HEAD, the headers alone",
+    r.status == 0 and sent().head:find("^HEAD / ") and r.out == "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 6\n\n",
+    show(r.out) .. show(r.errText))
+r = curl("http://b/moved")
+r2 = curl("-L", "-v", "http://b/moved")
+check("curl: a redirect not followed (its empty body), then -L: followed to the resolved Location; -v shows both ways",
+    r.status == 0 and r.out == "" and r2.status == 0 and r2.out == "new\n" and sent().head:find("^GET /new%?from=moved ")
+        and r2.errText:find("> GET /moved HTTP/1%.1") and r2.errText:find("< HTTP/1%.1 302 Found")
+        and r2.errText:find("%* Issue another request to this URL: 'http://b/new%?from=moved'"),
+    show(r2.out) .. show(r2.errText))
+r = curl("-L", "http://b/loop")
+check("curl -L round and round: 50 redirects followed, then (47)", r.status == 47
+    and r.errText:find("curl: %(47%) maximum %(50%) redirects followed"), show(r.errText))
+r = curl("-d", "a=1", "--data", "b=2", "http://b/form")
+check("curl -d a=1 --data b=2: a POST of a=1&b=2, form-encoded, with its length",
+    r.status == 0 and r.out == "a=1&b=2" and sent().head:find("^POST /form HTTP/1%.1\r\n")
+        and sent().head:find("\r\nContent%-Type: application/x%-www%-form%-urlencoded")
+        and sent().head:find("\r\nContent%-Length: 7") and sent().body == "a=1&b=2", show(r.out) .. show(sent().head))
+W:file("msg.txt", "line one\nline two\n")
+r = curl("-X", "PUT", "-H", "Content-Type: text/plain", "-H", "Accept:", "-H", "X-Empty;", "-d", "@msg.txt", "http://b/doc")
+check("curl -X PUT -H ... -d @file: the method, a Content-Type kept, Accept left out, an empty header, the file less its newlines",
+    r.status == 0 and sent().head:find("^PUT /doc ") and sent().head:find("\r\nContent%-Type: text/plain")
+        and not sent().head:find("form%-urlencoded") and not sent().head:find("Accept") and sent().head:find("\r\nX%-Empty: ")
+        and sent().body == "line oneline two", show(sent().head) .. show(sent().body))
+r = curl("-u", "user:pass", "-A", "probe/1", "http://b/")
+check("curl -u user:pass -A probe/1: Basic authentication and the agent",
+    sent().head:find("\r\nAuthorization: Basic dXNlcjpwYXNz") and sent().head:find("\r\nUser%-Agent: probe/1"), show(sent().head))
+r = curl("http://b/missing")
+r2 = curl("-f", "http://b/missing")
+check("curl: a 404 prints its body; -f: nothing, (22), status 22",
+    r.status == 0 and r.out == "not here!\n" and r2.status == 22 and r2.out == ""
+        and r2.errText:find("curl: %(22%) the requested URL returned error: 404"), show(r2.out) .. show(r2.errText))
+r = curl("-o", "page.txt", "http://b/")
+r2 = curl("-O", "http://b/chunked")
+check("curl -o file, -O: the body written to the file, nothing printed",
+    r.status == 0 and r.out == "" and W:read("page.txt") == "hello\n" and r2.status == 0 and W:read("chunked") == "hello world\n",
+    show(r.out) .. show(W:read("page.txt")))
+r = curl("http://b/continue")
+check("curl: a 100 Continue passed over for the answer after it", r.status == 0 and r.out == "ok\n", show(r.out) .. show(r.errText))
+r = curl("http://b/short")
+r2 = curl("http://b/silent")
+check("curl: closed short of Content-Length (18); closed without a word (52)",
+    r.status == 18 and r.out == "only this" and r.errText:find("%(18%) it closed with 91 of 100 bytes to come")
+        and r2.status == 52 and r2.errText:find("%(52%)"), show(r.errText) .. show(r2.errText))
+local bad = { curl("https://b/"), curl("http://:80/"), curl("http://nowhere/"), curl("http://10.0.2.5:99/"), curl("-s", "http://10.0.2.5:99/"),
+              curl(), curl("-Z", "b"), curl("--frob", "b") }
+check("curl: https (1), a bad URL (3), no such host (6), refused (7; -s quiet), no URL or a bad option (2)",
+    bad[1].status == 1 and bad[1].errText:find('protocol "https" not supported') and bad[2].status == 3 and bad[3].status == 6
+        and bad[4].status == 7 and bad[4].errText:find("curl: %(7%) failed to connect to 10%.0%.2%.5 port 99: connection refused")
+        and bad[5].status == 7 and bad[5].errText == "" and bad[6].status == 2 and bad[7].status == 2 and bad[8].status == 2
+        and bad[8].errText:find("option %-%-frob: is unknown"),
+    show(bad[1].errText) .. show(bad[3].errText) .. show(bad[4].errText) .. show(bad[5].errText))
+r = curl("-m", "0", "http://b/hang")
+check("curl -m 0 and no answer: (28), the deadline past (the sim has no time going by)", r.status == 28 and r.errText:find("curl: %(28%) timed out"),
+    show(r.errText))
+r = curl("-h")
+check("curl -h: the usage, and whose curl is", r.status == 0 and r.out:find("usage: curl") and r.out:find("Daniel Stenberg"), show(r.out))
+B.tcpUnlisten(80)
 W.yieldEvents = false
 parallel = parallelWas
 _G.ccnet = nil

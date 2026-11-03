@@ -1,0 +1,39 @@
+curl: fetch a URL over HTTP, a small curl for ccnix (lib/httpc.lua)
+
+  curl [options] url
+
+curl is Daniel Stenberg's: he created it and leads the curl project (https://curl.se), whose many contributors keep it going.  This isn't that curl, only a small HTTP-only tool for ccnix that borrows its name, some of its options and its exit codes, with thanks to him and to them.
+
+The body goes to the output (on the screen without its carriage returns), the headers too with -i.  Options may come before or after the URL, short or long:
+  -X, --request <method>
+      GET unless -d or -I say otherwise
+  -d, --data <data>
+      send data, a POST (form-encoded unless -H says another Content-Type); several are joined with &; @file reads a file (@- the input), less its newlines
+  -H, --header <line>
+      a header to send, "Name: value"; "Name:" leaves out one curl sends, "Name;" sends it empty
+  -A, --user-agent <name>
+      the User-Agent (ccnix-curl)
+  -u, --user <user:pass>
+      Basic authentication (asks for the password if there's no colon)
+  -L, --location
+      follow redirects (at most 50)
+  -i, --include
+      the response's status line and headers first
+  -I, --head
+      a HEAD request: the headers alone
+  -o, --output <file>
+      write the body to file
+  -O, --remote-name
+      write it to the file the URL's path names
+  -f, --fail
+      an HTTP error (400 and up): no body, exit 22
+  -m, --max-time <secs>
+      give up after that long, exit 28
+  -s, --silent
+      no error messages (-S, --show-error: those)
+  -v, --verbose
+      what's sent (> lines) and received (< lines)
+  -h, --help
+      this, briefly
+
+HTTP only: https:// and other schemes exit 1 (CC's own http API does HTTPS from the server).  A URL with no scheme is http.  Names are looked up as everywhere (`ip host`, then DNS).  There's no progress meter. Exit status, as curl's: 0, 1 (not HTTP), 2 (usage), 3 (a bad URL), 6 (no such host), 7 (couldn't connect), 18 (the body cut short), 22 (-f and an HTTP error), 23 (couldn't write the output), 26 (couldn't read a -d @file), 28 (timed out), 47 (too many redirects), 52 (an empty reply), 55 (couldn't send), 56 (the connection broke).  The network must be up (`ip up`).
