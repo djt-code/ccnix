@@ -59,6 +59,38 @@ check("ip host: a name kept", tostring(STORE["net.hosts"]):find("b=10.0.2.5") ~=
 r = W:run("ip", "link")
 check("ip link: the modems, wired or wireless, and what's set on them",
     r.out:find("back%s+wired%s+back back.20") and r.out:find("top%s+wireless%s+%(not set up%)"), show(r.out))
+-- words cut short, as far as they stay clear
+r = W:run("ip", "r", "a", "10.0.8.0/24", "v", "10.0.1.6")
+r2 = W:run("ip", "ro", "d", "10.0.8.0/24")
+check("ip r a <net> v <gw>, then ip ro d <net>: route add and del, cut short",
+    r.status == 0 and r.out == "10.0.8.0/24 via 10.0.1.6\n" and r2.status == 0
+        and STORE["net.routes"] == "default via 10.0.1.1", show(r.out) .. show(r.errText) .. show(r2.errText))
+r = W:run("ip", "a", "a", "back.30", "10.0.30.2/24")
+r2 = W:run("ip", "addr", "del", "back.30")
+check("ip a a, ip addr del: address add and del", r.status == 0 and r2.status == 0 and STORE["net.if.back.30"] == nil
+    and r.out == "back.30 10.0.30.2/24\n", show(r.out) .. show(r.errText))
+r = W:run("ip", "rp", "s")
+r2 = W:run("ip", "RPFILTER", "loose")
+check("ip rp s: rpfilter strict; capitals too", r.out == "rpfilter strict\n" and r2.out == "rpfilter loose\n"
+    and STORE["net.rpfilter"] == "loose", show(r.out) .. show(r2.out))
+r = W:run("ip", "d")
+check("ip d: down or dns? refused, with how to say each", r.status == 2
+    and r.errText:find('ip: "d" could be down or dns: say do%[wn%] or dn%[s%]'), show(r.errText))
+r = W:run("ip", "rout")
+r2 = W:run("ip", "routes")
+check("ip rout is route; ip routes isn't, and says what was meant, and the commands",
+    r.status == 0 and r2.status == 2 and r2.errText:find('no command "routes" %(did you mean "route"%?%)')
+        and r2.errText:find("commands: u%[p%] do%[wn%] b%[oot%] l%[ink%] a%[ddress%] r%[oute%]"), show(r2.errText))
+r = W:run("ip", "route", "add", "10.0.8.0/24")
+r2 = W:run("ip", "addr", "frob")
+check("a command's words wrong: why, then that command's usage",
+    r.status == 2 and r.errText:find("ip: route: add takes via and the router")
+        and r.errText:find("usage: ip r%[oute%] %[show | add <net/len|default> via <gw>")
+        and r2.status == 2 and r2.errText:find('ip: address: no "frob"'), show(r.errText) .. show(r2.errText))
+r = W:run("ip", "help")
+check("ip help: each command, as short as it may be, and what it does",
+    r.status == 0 and r.out:find("  rp%[filter%]%s+which sources a router passes on") and r.out:find("  n%[eighbour%]"),
+    show(r.out))
 r = W:run("ip", "route")
 check("ip route while down: the saved routes", r.out:find("default%s+via 10%.0%.1%.1 %(not up%)"), show(r.out))
 

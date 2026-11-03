@@ -1109,6 +1109,7 @@ it has nothing left to compost it sleeps until you give it more.
 
 ```
 ip                                 what's set up, and whether it's up
+ip help                            the commands; words cut short as far as they're clear: ip a, ip r a ... v ...
 ip addr add <iface> <addr/len>     ip route add <net/len|default> via <gw>
 ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip host <name> <addr>
 ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)

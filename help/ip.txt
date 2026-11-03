@@ -27,5 +27,9 @@ ip: set up and look at the network (lib/net.lua)
       names for addresses (ping router)
   ip dns [<primary> [<secondary>] | off]
       the DNS servers names are looked up at after the hosts (lib/netdb); none: the hosts alone
+  ip help
+      the commands, and how short each may be
+
+Words may be shortened, as iproute2's may, as far as they stay clear: `ip a` is ip address, `ip r a 10.0.3.0/24 v 10.0.1.1` ip route add ... via, `ip n` ip neighbour, `ip rp strict` ip rpfilter; `ip help` shows how short each command may be.  One too short to tell apart (`ip d`: down or dns?) is refused, with what it could be.
 
 An interface is a modem by its peripheral name ("back", "modem_0"), or a VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on the same wire.  What's set is kept in settings (net.if.<iface>, net.routes, net.forward, net.rpfilter, net.hosts, net.dns) and applies at once if the network is up.  The network runs alongside everything else once `ip up` has started it: see lib/net.lua.  `help network` walks through setting up two networks and a router.
