@@ -57,8 +57,19 @@ check("ip route add/del: kept in settings", STORE["net.routes"] == "default via 
 W:run("ip", "host", "b", "10.0.2.5")
 check("ip host: a name kept", tostring(STORE["net.hosts"]):find("b=10.0.2.5") ~= nil)
 r = W:run("ip", "link")
-check("ip link: the modems, wired or wireless, and what's set on them",
-    r.out:find("back%s+wired%s+back back.20") and r.out:find("top%s+wireless%s+%(not set up%)"), show(r.out))
+check("ip link: the modems, wired or wireless, their MACs, and what's set on them",
+    r.out:find("back%s+wired%s+02:cc:00:00:01:05 back back.20")
+        and r.out:find("top%s+wireless%s+02:cc:00:00:01:00 %(not set up%)"), show(r.out))
+r = W:run("ip", "addr")
+r2 = W:run("ip", "-d", "addr")
+check("ip addr while down: no MACs; ip -d addr: each one's MAC (VLANs share their modem's)",
+    not r.out:find("02:cc") and r2.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 %(not up%)")
+        and r2.out:find("back%.20%s+10%.0%.20%.2/24%s+02:cc:00:00:01:05 %(not up%)"), show(r.out) .. show(r2.out))
+r = W:run("ip", "-x", "addr")
+r2 = W:run("ip", "--detail", "a")
+check("ip -x: no such option, status 2, the usage; --detail is -d cut short",
+    r.status == 2 and r.errText:find('ip: no option "%-x"') and r.errText:find("usage: ip %[%-d%[etails%]%]")
+        and r2.status == 0 and r2.out:find("02:cc:00:00:01:05"), show(r.errText) .. show(r2.out))
 -- words cut short, as far as they stay clear
 r = W:run("ip", "r", "a", "10.0.8.0/24", "v", "10.0.1.6")
 r2 = W:run("ip", "ro", "d", "10.0.8.0/24")
@@ -101,8 +112,11 @@ r = W:run("ip", "up")
 check("ip up: two interfaces, the channels opened (VLAN 20: 60020)", r.out:find("up: 2 interfaces")
     and OPENED["back:60000"] and OPENED["back:60020"] and _G.ccnet ~= nil, show(r.out) .. show(r.errText))
 r = W:run("ip")
-check("ip: up, the interfaces and routes", r.out:find("^up") and r.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 rx")
-    and r.out:find("back%.20.*vlan 20") and r.out:find("default%s+via 10%.0%.1%.1 dev back"), show(r.out))
+check("ip: up, the interfaces (no MACs) and routes", r.out:find("^up") and r.out:find("back%s+10%.0%.1%.2/24%s+rx 0")
+    and not r.out:find("02:cc") and r.out:find("back%.20.*vlan 20") and r.out:find("default%s+via 10%.0%.1%.1 dev back"),
+    show(r.out))
+r = W:run("ip", "-d", "a")
+check("ip -d a while up: the MACs", r.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 rx 0"), show(r.out))
 r = W:run("ip", "down")
 check("ip down: channels closed", r.out:find("down") and not OPENED["back:60000"] and _G.ccnet == nil)
 r = W:run("ping", "10.0.1.1")

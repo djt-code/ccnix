@@ -5,8 +5,10 @@
 --   ip boot [off]                    start it at every boot: the setting net.boot,
 --                                    which startup goes by (setup's net and router
 --                                    apps turn it on)
---   ip link                          the modems there are, and which are set up
+--   ip link                          the modems there are, their MACs, and which
+--                                    are set up
 --   ip addr                          the interfaces' addresses and counts
+--                                    (-d: their MACs too)
 --   ip addr add <iface> <addr/len>   give an interface an address
 --   ip addr del <iface>
 --   ip route                         the routing table
@@ -41,6 +43,9 @@
 -- short each command may be.  One too short to tell apart (`ip d`: down or
 -- dns?) is refused, with what it could be.
 --
+-- Options go before the command: -d (-details, or any cut between) adds
+-- the details, as iproute2's does: the MACs in `ip -d addr` and plain `ip`.
+--
 -- An interface is a modem by its peripheral name ("back", "modem_0"), or a
 -- VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on
 -- the same wire.  What's set is kept in settings (net.if.<iface>,
@@ -53,6 +58,19 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("ip", nil)
 local net = require("net")
 local args = { ... }
+
+-- options, before the command: -d[etails] (one or two dashes, any cut)
+local details = false
+while type(args[1]) == "string" and args[1]:find("^%-%-?%a") do
+    local o = table.remove(args, 1)
+    local name = o:gsub("^%-%-?", ""):lower()
+    if ("details"):sub(1, #name) == name then details = true
+    else
+        cu.err('no option "' .. o .. '"')
+        printError("usage: ip [-d[etails]] [<command> ...]  (ip help lists the commands)")
+        return cu.exit(2)
+    end
+end
 
 local function out(...) io.write(...) io.write("\n") end
 local function save() settings.save() end
@@ -67,8 +85,9 @@ local COMMANDS = {
     { "up", 1, args = "", what = "start the network on this computer" },
     { "down", 2, args = "", what = "stop it" },
     { "boot", 1, args = "[off]", what = "start it at every boot (or not)" },
-    { "link", 1, args = "", what = "the modems, and which are set up" },
-    { "address", 1, args = "[show | add <iface> <addr/len> | del <iface>]", what = "the interfaces' addresses" },
+    { "link", 1, args = "", what = "the modems, their MACs, which are set up" },
+    { "address", 1, args = "[show | add <iface> <addr/len> | del <iface>]",
+      what = "the interfaces' addresses (-d: MACs)" },
     { "route", 1, args = "[show | add <net/len|default> via <gw> [dev <iface>] | del <net/len|default>]",
       what = "the routing table" },
     { "neighbour", 1, "neighbor", args = "[show]", what = "the ARP cache" },
@@ -147,7 +166,7 @@ local function badWords(cmd, why)
 end
 
 local function help(to)
-    to("usage: ip [<command> ...]; each word may be cut short, to its part")
+    to("usage: ip [-d[etails]] [<command> ...]; each word may be cut short, to its part")
     to("outside the brackets or longer (ip a, ip r a ... v ..., ip n):")
     for _, w in ipairs(COMMANDS) do
         local use = shortForm(w) .. (w.args ~= "" and (" " .. w.args) or "")
@@ -176,15 +195,19 @@ local function showAddr(S)
         table.sort(names)
         for _, name in ipairs(names) do
             local i = S.ifaces[name]
-            out(string.format("%-12s %-18s %-17s rx %d tx %d%s", name, net.cidrString(i.ip, i.len), i.mac, i.rx, i.tx,
-                i.vlan and (" (vlan " .. i.vlan .. ")") or ""))
+            out(string.format("%-12s %-18s %srx %d tx %d%s", name, net.cidrString(i.ip, i.len),
+                details and (i.mac .. " ") or "", i.rx, i.tx, i.vlan and (" (vlan " .. i.vlan .. ")") or ""))
         end
     else
         local cfg = net.config()
         local names = {}
         for k in pairs(cfg.ifaces) do names[#names + 1] = k end
         table.sort(names)
-        for _, name in ipairs(names) do out(string.format("%-12s %-18s (not up)", name, cfg.ifaces[name])) end
+        for _, name in ipairs(names) do
+            local modem = net.link(name)
+            out(string.format("%-12s %-18s %s(not up)", name, cfg.ifaces[name],
+                details and modem and (net.mac(os.getComputerID(), modem) .. " ") or ""))
+        end
         if #names == 0 then out("no interfaces: ip addr add <iface> <addr/len>  (ip link lists the modems)") end
     end
 end
@@ -271,7 +294,8 @@ elseif cmd == "link" then
         if peripheral.getType(name) == "modem" then
             any = true
             local wireless = peripheral.call(name, "isWireless")
-            out(string.format("%-12s %-9s %s", name, wireless and "wireless" or "wired", used[name] or "(not set up)"))
+            out(string.format("%-12s %-9s %s %s", name, wireless and "wireless" or "wired",
+                net.mac(os.getComputerID(), name), used[name] or "(not set up)"))
         end
     end
     if not any then out("no modems") end
