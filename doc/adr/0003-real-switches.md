@@ -289,10 +289,9 @@ bridge ID last heard.
 
 **Addressing.** A bridged VLAN's subnet must not overlap `gateway.networks`
 or the gateway's network, so real hosts can't go out through a player's CC
-router and the gateway: NAT mode already drops their sources (`Nat.java:155`);
-in TUN mode `ccnix-tun-setup` gains a FORWARD drop (item 25) for packets from
-the TUN device whose source is outside the gateway's network and
-`gateway.networks`. CC hosts on a bridged VLAN reach outside
+router and the gateway: since ccnix-mod 0.12.0 the gateway drops their
+sources in both modes (`gateway.sourceCheck`, BCP 38), and in TUN mode
+`ccnix-tun-setup`'s `ccnix0-src` chain drops them on the host too. CC hosts on a bridged VLAN reach outside
 through the lab's routing; CC routers can still route lab to CC networks.
 
 **Translation**, an allowlist both ways like `Ipv4`. Only ARP (sha and tha
@@ -391,10 +390,10 @@ Every commit: `python sim/run.py` and `--check` in ccnix, `./gradlew test`
 in ccnix-mod. Pointers bumped after every release in either repo, ccnix-mod's
 `ccnix/` first, then ccnix's `mod/`. Versions assume this phase order.
 
-### Phase 0: the safety net (no decision needed): ccnix-mod 0.11.2, ccnix 0.3.6
+### Phase 0: the safety net (no decision needed): the next patch of each
 
-1. [ ] ccnix-mod 0.11.2: `seen()` after the standby check; a test where the standby block hears the same payload object first.
-2. [ ] ccnix 0.3.6: lib/net's hook re-arms a tick whose timer was dropped (the clock re-checked on each event); a sim with a full queue checking ARP retries and TCP retransmission.
+1. [ ] ccnix-mod: `seen()` after the standby check; a test where the standby block hears the same payload object first.
+2. [ ] ccnix: lib/net's hook re-arms a tick whose timer was dropped (the clock re-checked on each event); a sim with a full queue checking ARP retries and TCP retransmission.
 3. [ ] `sim/lib/networld.lua` lifted from the copies in `sim/net_stack.lua`, `net_tools.lua` and `net_dns.lua`, with a modem model (`open()`, the 128 limit, a computer's modems hearing each other, own sends ignored, remote peripherals and `peripheral_detach`) and a 256-event queue that drops timers too. Existing sims unchanged.
 
 ### Phase 1: engine and Lua switch: ccnix 0.4.0, ccnix-mod 0.12.0
@@ -429,6 +428,6 @@ in ccnix-mod. Pointers bumped after every release in either repo, ccnix-mod's
 
 23. [ ] `ccnix-tun --tap` (usage check and hint updated) and a second `TunHelper` instance for `[l2].device`; `core/Eth.java` (frame, 802.1Q, ARP, padding, MTU, ethertype and multicast policy) and the MAC mapper (salted hash, collision refusal, reverse table, cap, dst policy); `EthTest`, both spoof refusals included.
 24. [ ] `TapPort`, `[l2]` (`mtu` included), rate limits and MAC cap, bridged VLANs op-only on blocks, `eth:` sources refused from blocks before learning, `/ccnix` status; `GatewayTest` with a fake TapPort (untagged at base+0, VLAN mapping, native none, learning, VLAN 1 refused, `02:cc` and multicast sources refused, cap and rate); a `CcWorld` scenario: a lib/net host pings a fake real host through the TAP.
-25. [ ] Ansible: `ccnix_l2_device` ("": off), `ccnix_l2_bridge`, `ccnix_l2_vlans` (refused empty when a device is set), `ccnix_l2_native` (0), `ccnix_l2_mtu` (1500, the TAP's and `[l2].mtu`), `ccnix_l2_ovs` (true, else a Linux bridge), the OVS service name. `ccnix-tap-setup`: `ip tuntap add dev <tap> mode tap user <server user>`, MTU, up; on OVS `ovs-vsctl --timeout=10 --may-exist add-port <bridge> <tap> -- set port <tap> vlan_mode=trunk trunks=<list> other_config:rstp-port-admin-edge=true` (native 0) or `... vlan_mode=native-untagged tag=<n> trunks=<list> ...` (native n, refused if 1), `<list>` with ranges expanded and the native kept in it (OVS passes it either way, and the list never ends up empty, which OVS reads as all VLANs); on a Linux bridge, refuse unless `/sys/class/net/<bridge>/bridge/vlan_filtering` is 1, `bridge vlan del dev <tap> vid 1`, `bridge vlan add dev <tap> vid <v>` per VLAN, `vid <n> pvid untagged` for the native. A `ccnix-tap.service` oneshot After= and Wants= the OVS service, before `minecraft.service`; `--remove` (`ovs-vsctl --if-exists del-port`, then `ip link del`) when unset. In TUN mode, the FORWARD drop from the TUN device for sources outside the gateway's network and `gateway.networks`. An `[l2]` section line (as `[nat]` is added) and `{ section: l2, ... }` entries in the settings loop; `[l2]` in the template for new installs.
+25. [ ] Ansible: `ccnix_l2_device` ("": off), `ccnix_l2_bridge`, `ccnix_l2_vlans` (refused empty when a device is set), `ccnix_l2_native` (0), `ccnix_l2_mtu` (1500, the TAP's and `[l2].mtu`), `ccnix_l2_ovs` (true, else a Linux bridge), the OVS service name. `ccnix-tap-setup`: `ip tuntap add dev <tap> mode tap user <server user>`, MTU, up; on OVS `ovs-vsctl --timeout=10 --may-exist add-port <bridge> <tap> -- set port <tap> vlan_mode=trunk trunks=<list> other_config:rstp-port-admin-edge=true` (native 0) or `... vlan_mode=native-untagged tag=<n> trunks=<list> ...` (native n, refused if 1), `<list>` with ranges expanded and the native kept in it (OVS passes it either way, and the list never ends up empty, which OVS reads as all VLANs); on a Linux bridge, refuse unless `/sys/class/net/<bridge>/bridge/vlan_filtering` is 1, `bridge vlan del dev <tap> vid 1`, `bridge vlan add dev <tap> vid <v>` per VLAN, `vid <n> pvid untagged` for the native. A `ccnix-tap.service` oneshot After= and Wants= the OVS service, before `minecraft.service`; `--remove` (`ovs-vsctl --if-exists del-port`, then `ip link del`) when unset. An `[l2]` section line (as `[nat]` is added) and `{ section: l2, ... }` entries in the settings loop; `[l2]` in the template for new installs.
 26. [ ] ccnix 0.4.3: `doc/network.txt` and `help network` on bridged VLANs, the addressing rule, the `eth:` MAC form and the MTU limit; `ip neigh` widths checked.
 27. [ ] On the VM: a netns on an OVS VLAN pings, telnets and nc's a CC computer through a gateway block, `[l2].native` set and unset; `ovs-appctl fdb/show` lists the `02:cc` MACs; a host broadcast storm is limited; the TAP's link-up delay with the bridge on RSTP and on 802.1D; the port's carrier across helper restarts.
