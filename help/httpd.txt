@@ -5,6 +5,11 @@ httpd: a web server: the files under a folder, over HTTP (lib/httpd.lua)
 
 Each request is answered with the file at its path under the document root.  A folder answers with its index.html or index.htm (the first there; httpd.index names others), else a listing of what's in it, with links; -L (or httpd.listing false) turns listings off, and a folder with no index is then refused (403).  GET and HEAD; nothing above the root is served (a path with .. is refused).  The Content-Type goes by the file's extension.  Each request is logged as it's answered: who, what, the status and the body's size.
 
+Lua pages: the scripts in the script root (httpd.cgi, the folder cgi in the document root) answer the URLs under it, /cgi/...: /cgi/hello.lua or /cgi/hello runs hello.lua, /cgi/ index.lua.  A script writes the page, reads the request (req.params: the query and a POSTed form; req.cookies) and may route by method and path; its source is never served.  A script root outside the document root answers at /<its name>/.  The first one:
+  write("<h1>Hello, ", html(req.params.name or "world"), "</h1>",
+        "<form method=post><input name=name><button>Hi</button></form>")
+`help httpd-pages` has the rest: templates (etlua's), routes, cookies, redirects, state kept between requests.
+
 Settings, which the options override:
   httpd.root
       the document root (/www)
@@ -14,9 +19,13 @@ Settings, which the options override:
       false: no folder listings (true)
   httpd.index
       the index files to look for, in order, spaces between ("index.html index.htm")
+  httpd.cgi
+      the script root: a folder in the document root, or a path (cgi); "" for no Lua pages
+  httpd.debug
+      true: a failed script's traceback on its error page
 
 It needs the network (`ip up`).  To keep it running in the background, with init:
   service add httpd httpd
   service enable httpd            (at boot)
   service start httpd
-deploy/setup httpd does all that.  Static files only, for now: lib/httpd takes handlers of your own ahead of the files (its top comment says how).  Try it with curl: `curl -i http://<this computer>/`.
+deploy/setup httpd does all that.  lib/httpd takes handlers of your own too (its top comment says how).  Try it with curl: `curl -i http://<this computer>/`.  A script runs to its end before the next request is read, so one that waits holds the others up.

@@ -2,3 +2,6 @@
 	path = mod
 	url = ../ccnix-mod.git
 	update = none
+[submodule "vendor/etlua"]
+	path = vendor/etlua
+	url = https://github.com/leafo/etlua.git

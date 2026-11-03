@@ -62,7 +62,10 @@ def check():
     import mkhelp
     stale = mkhelp.main(["--check"])
     print(("FAIL help/ out of date (python sim/mkhelp.py): " + " ".join(stale)) if stale else "ok   help/")
-    return 1 if bad or stale else 0
+    import vendor
+    copies = vendor.main(["--check"])
+    print(("FAIL vendored copies out of date (python sim/vendor.py): " + " ".join(copies)) if copies else "ok   vendor/")
+    return 1 if bad or stale or copies else 0
 
 
 def main(args):

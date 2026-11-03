@@ -1314,8 +1314,20 @@ without an index is then 403). GET and HEAD, nothing outside the root,
 each request logged. `setup httpd` makes it a service started at boot.
 Programs use `lib/httpd.lua`: a chain of handlers, `srv:use(fn)`, each
 taking a request and returning a status, headers and body (or nothing,
-to pass it on), with `httpd.static{root=...}` the files; that's where
-Lua pages or a framework would plug in later.
+to pass it on), with `httpd.static{root=...}` the files.
+
+**Lua pages**: the scripts in httpd's script root (`httpd.cgi`, the folder
+`cgi` in the document root) answer the URLs under `/cgi/`, run afresh on
+each request. A script reads `req` (`req.params` holds the query and a
+POSTed form, `req.cookies` the cookies), writes the page with `write()`
+(`html()` escapes), and has `redirect()`, `cookie()`, `status()`,
+`header()`, a `state` table kept between requests, `render()` for etlua
+templates, and `router()` for routes like `r:get("/:id", fn)`. Their
+source is never served. `help httpd-pages` walks through it. The
+templates are [etlua](https://github.com/leafo/etlua), by Leaf Corcoran
+(MIT): the submodule `vendor/etlua`, copied to `lib/etlua.lua` by
+`sim/vendor.py`, since neither git.lua's clone nor the mod's ROM carries
+a submodule.
 
 ## Telnet
 

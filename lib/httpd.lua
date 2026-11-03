@@ -17,14 +17,23 @@
 --
 -- A request: { method = "GET", target = "/a%20b?x=1" (as sent), path =
 -- "/a b" (decoded), rawPath = "/a%20b", query = "x=1", args = { x = "1" },
+-- form = { ... } (a POST's application/x-www-form-urlencoded body),
+-- params (args and form together, form's winning), cookies = { ... },
 -- version = "HTTP/1.1", headers = { host = ..., ... } (names in lower
 -- case; repeated ones joined with ", "), body = "" (as Content-Length
--- says), remote = "10.0.1.5" }.
+-- says), remote = "10.0.1.5" }.  A header's value may be a list: one
+-- line each (Set-Cookie).
+--
+-- httpd.lua(opts): Lua pages, scripts that answer URLs (see "Lua pages"
+-- below); httpd.router(): routes by method and path, for a page to
+-- return.  Templates are etlua's (lib/etlua.lua, by Leaf Corcoran).
 --
 -- One request a connection: every answer says Connection: close.  A
 -- request's head may be 8 KiB, its body 64 KiB; a request with a
 -- Transfer-Encoding is refused (501), as is HTTP/2 or 0.9.  A connection
--- that hasn't sent a whole request in 10 seconds is closed.
+-- that hasn't sent a whole request in 10 seconds is closed.  A handler
+-- runs to its end before the next request is read: one that waits
+-- (sleep, a network call) holds the others up.
 --
 -- httpd.static(opts): the files under opts.root.  GET and HEAD (else
 -- 405).  A folder answers with the first of opts.index that's there
@@ -118,7 +127,11 @@ function H.response(status, headers, body, head)
     for k in pairs(headers or {}) do names[#names + 1] = k end
     table.sort(names)
     for _, k in ipairs(names) do
-        if not ({ date = true, server = true, connection = true })[k:lower()] then add(k, headers[k]) end
+        if not ({ date = true, server = true, connection = true })[k:lower()] then
+            local v = headers[k]
+            if type(v) == "table" then for _, one in ipairs(v) do add(k, one) end    -- (Set-Cookie, one a line)
+            else add(k, v) end
+        end
     end
     local noBody = status == 204 or status == 304 or status < 200
     if not seen["content-length"] and not noBody then add("Content-Length", #body) end
@@ -166,9 +179,26 @@ function H.parse(raw)
     local rawPath, query = target:match("^([^?]*)%??(.*)$")
     local path = H.unescape(rawPath)
     if path:find("%z") then return false, 400 end
-    return { method = method, target = target, rawPath = rawPath, path = path, query = query,
-             args = H.parseQuery(query), version = "HTTP/" .. major .. "." .. minor, headers = headers,
-             body = raw:sub(e + 1, e + len) }
+    local body = raw:sub(e + 1, e + len)
+    local args = H.parseQuery(query)
+    local form = (headers["content-type"] or ""):lower():find("^%s*application/x%-www%-form%-urlencoded")
+        and H.parseQuery(body) or {}
+    local params = {}
+    for k, v in pairs(args) do params[k] = v end
+    for k, v in pairs(form) do params[k] = v end
+    return { method = method, target = target, rawPath = rawPath, path = path, query = query, args = args,
+             form = form, params = params, cookies = H.parseCookies(headers.cookie),
+             version = "HTTP/" .. major .. "." .. minor, headers = headers, body = body }
+end
+
+-- "a=1; b=two" -> { a = "1", b = "two" }
+function H.parseCookies(s)
+    local t = {}
+    for pair in (s or ""):gmatch("[^;]+") do
+        local k, v = pair:match("^%s*([^=]-)%s*=%s*(.-)%s*$")
+        if k and k ~= "" then t[k] = v:match('^"(.*)"$') or v end
+    end
+    return t
 end
 
 --------------------------------------------------------------------------
@@ -330,6 +360,201 @@ function H.static(opts)
         end
         if not listing then return H.page(403, "There's no index here, and listings are off.") end
         return list(p, req)
+    end
+end
+
+--------------------------------------------------------------------------
+-- Routes
+--------------------------------------------------------------------------
+local Router = {}
+Router.__index = Router
+
+function H.router() return setmetatable({ routes = {} }, Router) end
+
+-- A route: "/notes/:id" (a :name takes one segment), "/files/*" (* the
+-- rest, as params.splat); fn(req, params) answers as a page does.
+function Router:route(method, pattern, fn)
+    local names = {}
+    local pat = "^" .. pattern:gsub("[%^%$%(%)%%%.%[%]%+%-%?]", "%%%0")
+        :gsub(":([%w_]+)", function(n) names[#names + 1] = n return "([^/]+)" end)
+        :gsub("%*", function() names[#names + 1] = "splat" return "(.*)" end) .. "$"
+    self.routes[#self.routes + 1] = { method = method, pat = pat, names = names, fn = fn }
+    return self
+end
+for _, m in ipairs({ "get", "post", "put", "delete", "patch" }) do
+    Router[m] = function(self, pattern, fn) return self:route(m:upper(), pattern, fn) end
+end
+
+-- The route for path (a page's own part of the URL: "/" and on), called;
+-- 404 if none matches, 405 (with Allow) if one does for another method.
+-- HEAD takes a GET route.
+function Router:dispatch(req, path)
+    local allowed = {}
+    for _, r in ipairs(self.routes) do
+        local caps = { path:match(r.pat) }
+        if caps[1] ~= nil then
+            if r.method == req.method or (req.method == "HEAD" and r.method == "GET") then
+                local params = {}
+                for i, n in ipairs(r.names) do params[n] = caps[i] end
+                return r.fn(req, params)
+            end
+            allowed[#allowed + 1] = r.method
+        end
+    end
+    if #allowed > 0 then return H.page(405, nil, { Allow = table.concat(allowed, ", ") }) end
+    return H.page(404, "There's nothing at " .. req.path .. ".")
+end
+
+--------------------------------------------------------------------------
+-- Lua pages
+--------------------------------------------------------------------------
+-- httpd.lua(opts): the Lua scripts in opts.dir answer the URLs under
+-- opts.prefix ("/cgi"): /cgi/hello.lua and /cgi/hello run hello.lua, and
+-- /cgi/notes/12 notes.lua with "/12" its own part (req.pathInfo); /cgi/
+-- runs index.lua.  Nothing else there is served (404), so the scripts'
+-- source never is.  Each request runs the script afresh, as the file is
+-- now, in an environment of its own over _G:
+--   req                the request, and req.script (the script's URL),
+--                      req.pathInfo
+--   write(...)         add to the page (text/html unless header() says)
+--   status(n), header(name, value)
+--   redirect(url [, status])   303 unless said; `return redirect(...)`
+--   cookie(name, value [, { path, maxAge, httpOnly, sameSite } ])
+--   html(s)            s escaped for HTML
+--   render(file, vars) an etlua template in the script's folder, filled
+--                      in from vars, then the page's names (<%= x %>
+--                      escaped, <%- x %> as it is, <% code %>)
+--   router()           httpd.router(): `return r` and the routes answer
+--   state              a table kept for the script between requests
+-- A script answers with what it writes, or returns a string (the body),
+-- status, headers, body, or a router.  An error: 500, and with
+-- opts.debug the traceback on the page.  opts.fs: the filesystem API.
+function H.lua(opts)
+    local fs = opts.fs or fs
+    local dir = fs.combine(opts.dir, "")
+    local prefix = (opts.prefix or "/cgi"):gsub("/+$", "")
+    local states, templates = {}, {}
+
+    -- The script for the part of a path below prefix: its file, its own
+    -- part of the path and the part that named it; nil (and 403) if none.
+    local function find(rel)
+        local segs = {}
+        for seg in rel:gmatch("[^/]+") do
+            if seg == ".." then return nil, 403 end
+            if seg ~= "." then segs[#segs + 1] = seg end
+        end
+        local at = dir
+        for i, seg in ipairs(segs) do
+            local p = fs.combine(at, seg)
+            local file = seg:find("%.lua$") and p or (p .. ".lua")
+            if fs.exists(file) and not fs.isDir(file) then
+                return file, "/" .. table.concat(segs, "/", i + 1), table.concat(segs, "/", 1, i)
+            end
+            if not fs.isDir(p) then return nil end
+            at = p
+        end
+        local index = fs.combine(at, "index.lua")
+        if fs.exists(index) and not fs.isDir(index) then return index, "/", table.concat(segs, "/") end
+    end
+
+    local function read(p)
+        local h = fs.open(p, "r")
+        if not h then return nil end
+        local text = h.readAll() or ""
+        h.close()
+        return text
+    end
+
+    local function template(p)
+        local text = read(p)
+        if not text then error("no template " .. p, 0) end
+        local t = templates[p]
+        if not t or t.text ~= text then
+            local fn, err = require("etlua").compile(text)
+            if not fn then error(p .. ": " .. tostring(err), 0) end
+            t = { text = text, fn = fn }
+            templates[p] = t
+        end
+        return t.fn
+    end
+
+    return function(req)
+        if req.path ~= prefix and req.path:sub(1, #prefix + 1) ~= prefix .. "/" then return nil end
+        if req.path == prefix then
+            return H.page(301, nil, { Location = req.rawPath .. "/" .. (req.query ~= "" and ("?" .. req.query) or "") })
+        end
+        local script, info, named = find(req.path:sub(#prefix + 2))
+        if not script then
+            if info == 403 then return H.page(403, "No .. in a path here.") end
+            return H.page(404, "There's nothing at " .. req.path .. ".")
+        end
+        req.script = prefix .. (named ~= "" and ("/" .. named) or "")
+        req.pathInfo = info
+
+        local out, code = {}, 200
+        local headers = { ["Content-Type"] = "text/html; charset=utf-8" }
+        local cookies = {}
+        local env = setmetatable({}, { __index = _G })
+        states[script] = states[script] or {}
+        env.req, env.state, env.html, env.router = req, states[script], H.html, H.router
+        function env.write(...)
+            for i = 1, select("#", ...) do out[#out + 1] = tostring((select(i, ...))) end
+        end
+        function env.status(n) code = n end
+        function env.header(k, v) headers[k] = v end
+        function env.redirect(url, n)
+            code, headers.Location = n or 303, url
+            return true
+        end
+        function env.cookie(name, value, o)
+            o = o or {}
+            local c = name .. "=" .. tostring(value) .. "; Path=" .. (o.path or "/")
+            if o.maxAge then c = c .. "; Max-Age=" .. math.floor(o.maxAge) end
+            if o.httpOnly ~= false then c = c .. "; HttpOnly" end
+            c = c .. "; SameSite=" .. (o.sameSite or "Lax")
+            cookies[#cookies + 1] = c
+        end
+        function env.render(name, vars)
+            local fn = template(fs.combine(fs.getDir(script), name))
+            return fn(setmetatable({}, { __index = function(_, k)
+                local v = vars and vars[k]
+                if v == nil then v = env[k] end
+                return v
+            end }))
+        end
+
+        -- what the script (or its route) said: status, headers, body
+        local function finish(a, b, c)
+            if getmetatable(a) == Router then return finish(a:dispatch(req, info)) end
+            local body
+            if type(a) == "number" then
+                code, body = a, c
+                for k, v in pairs(b or {}) do headers[k] = v end
+            elseif type(a) == "string" then
+                body = a
+            else
+                body = table.concat(out)
+            end
+            if #cookies > 0 then headers["Set-Cookie"] = cookies end
+            return code, headers, body or ""
+        end
+
+        local text = read(script)
+        local fn, err = text and load(text, "@/" .. script, "t", env)
+        local ok, a, b, c
+        if fn then
+            ok, a, b, c = xpcall(fn, function(e) return debug.traceback(tostring(e), 2) end)
+            if ok then ok, a, b, c = xpcall(finish, function(e) return debug.traceback(tostring(e), 2) end, a, b, c) end
+        else
+            a = err or ("can't read " .. script)
+        end
+        if not ok then
+            if opts.log then opts.log("error: " .. req.method .. " " .. req.target .. ": " .. tostring(a):match("^[^\n]*")) end
+            local status, h, body = H.page(500, "The script " .. req.script .. " failed.")
+            if opts.debug then body = body:gsub("</body>", "<pre>" .. H.html(a):gsub("%%", "%%%%") .. "</pre></body>") end
+            return status, h, body
+        end
+        return a, b, c
     end
 end
 

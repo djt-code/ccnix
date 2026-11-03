@@ -187,7 +187,7 @@ def build():
             first = text.split("\n", 1)[0]
             out.append("  " + (first if first.startswith(name[:-4] + ":") else name[:-4] + ": " + first))
         out.append("")
-    out.append("Settings: `set` lists them, with what each means (mine.*, farm.*, mow.*, net.*, telnetd.*,"
+    out.append("Settings: `set` lists them, with what each means (mine.*, farm.*, mow.*, net.*, telnetd.*, httpd.*,"
                " service.*, ccnix.autostart, ccsh.login, init.boot).")
     files["ccnix.txt"] = files["ccnix.txt"] + "\n" + "\n".join(out) + "\n"     # the index, after the program's own
     return files

@@ -494,7 +494,8 @@ W:file("www/docs/sub/b.txt", "beta\n")
 W:file("www/old/index.htm", "old style\n")
 W:file("www/pic.png", "\137PNG\r\n\26\n\0\1")
 W:dir("www/empty")
-local web = httpd.new():use(httpd.static({ root = "www", fs = W.fs }))
+local web = httpd.new():use(httpd.lua({ dir = "www/cgi", prefix = "/cgi", fs = W.fs, debug = true }))
+    :use(httpd.static({ root = "www", fs = W.fs }))
 local shut = httpd.new():use(httpd.static({ root = "www", fs = W.fs, listing = false }))
 assert(B.tcpListen(8080))
 assert(B.tcpListen(8081))
@@ -577,6 +578,86 @@ local out3, st3 = app:dispatch("GET /else HTTP/1.1\r\n\r\n")
 check("httpd handlers: one answers (its query decoded), one throws (500, logged), none answers (404)",
     st == 200 and out:find("\r\n\r\nhi a b!$") and st2 == 500 and logged[1]:find("boom") and st3 == 404, show(out))
 
+-- Lua pages (httpd.lua), on B's 8080 again
+assert(B.tcpListen(8080))
+W:file("www/cgi/hello.lua", [[write("<h1>Hello, ", html(req.params.name or "world"), "</h1>")]])
+W:file("www/cgi/index.lua", [[return "the index of " .. req.script]])
+W:file("www/cgi/made.lua", [[return 201, { ["X-Made"] = "yes" }, "made"]])
+W:file("www/cgi/boom.lua", [[local x = nil; error("kaboom")]])
+W:file("www/cgi/counter.lua", [[
+state.n = (state.n or 0) + 1
+cookie("seen", state.n, { maxAge = 60 })
+cookie("other", "x")
+header("Content-Type", "text/plain")
+write(state.n, " ", req.cookies.x or "-")]])
+W:file("www/cgi/notes.lua", [[
+state.notes = state.notes or {}
+local r = router()
+r:get("/", function() return render("notes.etlua", { notes = state.notes }) end)
+r:get("/:id", function(req, p)
+    local n = state.notes[tonumber(p.id)]
+    if not n then return 404, {}, "no such note" end
+    write("<p>", html(n), "</p>")
+end)
+r:post("/", function(req)
+    table.insert(state.notes, req.params.text)
+    return redirect(req.script .. "/" .. #state.notes)
+end)
+r:get("/files/*", function(req, p) return "file " .. p.splat end)
+return r]])
+W:file("www/cgi/notes.etlua", [[<h1>Notes</h1><ul><% for i, n in ipairs(notes) do %><li><a href="<%= req.script %>/<%= i %>"><%= n %></a></li><% end %></ul>]])
+
+r = fetch("http://b:8080/cgi/hello?name=%3CAnn%3E")
+r2 = fetch("-d", "name=Bo+B%21", "http://b:8080/cgi/hello.lua")
+check("Lua pages: /cgi/hello runs hello.lua (with or without .lua); the query, a POSTed form; html() escapes",
+    r.status == 0 and r.out == "<h1>Hello, &lt;Ann&gt;</h1>" and r2.out == "<h1>Hello, Bo B!</h1>", show(r.out) .. show(r2.out) .. show(r.errText))
+r = fetch("-i", "http://b:8080/cgi")
+r2 = fetch("http://b:8080/cgi/")
+r3 = fetch("-i", "http://b:8080/cgi/made")
+check("Lua pages: /cgi redirected to /cgi/, which runs index.lua; a script returning status, headers, body",
+    r.out:find("^HTTP/1%.1 301 ") and r.out:find("\nLocation: /cgi/\n") and r2.out == "the index of /cgi"
+        and r3.out:find("^HTTP/1%.1 201 Created\n") and r3.out:find("\nX%-Made: yes\n") and r3.out:find("\n\nmade$"),
+    show(r.out) .. show(r2.out) .. show(r3.out))
+r = fetch("http://b:8080/cgi/notes/")
+r2 = fetch("-i", "-d", "text=first <one>", "http://b:8080/cgi/notes")
+r3 = fetch("-L", "-d", "text=second", "http://b:8080/cgi/notes")
+r4 = fetch("http://b:8080/cgi/notes")
+check("Lua pages: a router; a template; POST, then 303 to the new note (-L follows it as a GET)",
+    r.out == "<h1>Notes</h1><ul></ul>" and r2.out:find("^HTTP/1%.1 303 See Other\n") and r2.out:find("\nLocation: /cgi/notes/1\n")
+        and r3.out == "<p>second</p>"
+        and r4.out == '<h1>Notes</h1><ul><li><a href="/cgi/notes/1">first &lt;one&gt;</a></li><li><a href="/cgi/notes/2">second</a></li></ul>',
+    show(r.out) .. show(r2.out) .. show(r3.out) .. show(r4.out))
+r = fetch("http://b:8080/cgi/notes/9")
+r2 = fetch("-i", "-X", "DELETE", "http://b:8080/cgi/notes/1")
+r3 = fetch("http://b:8080/cgi/notes/files/a/b.txt")
+r4 = fetch("-I", "http://b:8080/cgi/notes/1")
+check("Lua pages: a route's own 404; no route for the method 405, with Allow; * the rest of the path; HEAD takes GET",
+    r.out == "no such note" and r2.out:find("^HTTP/1%.1 405 ") and r2.out:find("\nAllow: GET\n")
+        and r3.out == "file a/b.txt" and r4.out:find("^HTTP/1%.1 200 OK\n") and r4.out:find("\nContent%-Length: 24\n"),
+    show(r.out) .. show(r2.out) .. show(r3.out) .. show(r4.out))
+r = fetch("http://b:8080/cgi/counter")
+r2 = fetch("-i", "-H", "Cookie: x=7; y=8", "http://b:8080/cgi/counter")
+check("Lua pages: state kept between requests; cookies read, and set (one Set-Cookie line each)",
+    r.out == "1 -" and r2.out:find("\n\n2 7$") and r2.out:find("\nSet%-Cookie: seen=2; Path=/; Max%-Age=60; HttpOnly; SameSite=Lax\n")
+        and r2.out:find("\nSet%-Cookie: other=x; Path=/; HttpOnly; SameSite=Lax\n") and r2.out:find("\nContent%-Type: text/plain\n"),
+    show(r2.out))
+r = fetch("-i", "http://b:8080/cgi/boom")
+r2 = fetch("-i", "http://b:8080/cgi/notes.etlua")
+r3 = fetch("-i", "http://b:8080/cgi/%2e%2e/index.html")
+r4 = fetch("http://b:8080/cgi/nothing/here")
+check("Lua pages: a script that fails 500 (debug: its traceback); nothing but scripts served there (404); .. 403",
+    r.out:find("^HTTP/1%.1 500 ") and r.out:find("kaboom") and r.out:find("boom%.lua:1") and r2.out:find("^HTTP/1%.1 404 ")
+        and r3.out:find("^HTTP/1%.1 403 ") and r4.out:find("404 Not Found"), show(r.out) .. show(r2.out))
+B.tcpUnlisten(8080)
+check("httpd.parse: a form only from a form's Content-Type; params the query and form, the form's winning; cookies",
+    (function()
+        local q = httpd.parse("POST /x?a=1&b=2 HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded; charset=utf-8\r\n"
+            .. "Cookie: s=\"q r\"; t=1\r\nContent-Length: 7\r\n\r\nb=3&c=4")
+        local j = httpd.parse("POST /x HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 7\r\n\r\nb=3&c=4")
+        return q.form.c == "4" and q.params.a == "1" and q.params.b == "3" and q.args.b == "2" and q.cookies.s == "q r"
+            and q.cookies.t == "1" and next(j.form) == nil and j.body == "b=3&c=4"
+    end)())
+
 local cl, got, asked = nil, "", false
 r = W:run("httpd", "-p", "80", "www", { events = {}, onPull = function(w)
     if not cl then
@@ -590,7 +671,8 @@ r = W:run("httpd", "-p", "80", "www", { events = {}, onPull = function(w)
     end
 end })
 check("httpd -p 80 www: serves, logs each request, and stops at Ctrl+T, its port closed",
-    r.status == 0 and r.out:find("serving /www on port 80") and r.out:find('10%.0%.2%.5 "GET /docs/a%.txt" 200 6')
+    r.status == 0 and r.out:find("serving /www on port 80") and r.out:find("Lua pages: /cgi/ runs /www/cgi")
+        and r.out:find('10%.0%.2%.5 "GET /docs/a%.txt" 200 6')
         and got:find("^HTTP/1%.1 200 OK\r\n") and got:find("\r\n\r\nalpha\n$") and ME.listeners[80] == nil,
     show(r.out) .. show(r.errText) .. show(got))
 r = W:run("httpd", "nowhere", { events = {} })

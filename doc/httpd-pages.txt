@@ -1,0 +1,48 @@
+httpd-pages: Lua pages on the web server: forms, routes, templates, cookies
+
+httpd (`help httpd`) runs the Lua scripts in its script root, the folder cgi in its document root (httpd.cgi says another), for the URLs under it: /cgi/hello.lua, or just /cgi/hello, runs /www/cgi/hello.lua; /cgi/ runs index.lua there. Nothing else in the script root is served, so neither is a script's source; put pictures and CSS elsewhere in the document root. Each request runs the script afresh as the file is now: edit it and reload the page.
+
+A page, /www/cgi/hello.lua:
+    local name = req.params.name
+    write("<h1>Hello, ", html(name or "world"), "</h1>")
+    write("<form method=post><input name=name> <button>Hi</button></form>")
+
+What a script has, besides everything a program has:
+  req          the request: req.method, req.path, req.params (the query and a POSTed form together; req.args and req.form apart), req.cookies, req.headers (lower-case names), req.body, req.remote (the client's address), req.script (this script's URL), req.pathInfo (the rest of the path after it)
+  write(...)   add to the page; it's HTML (text/html) unless header("Content-Type", ...) says otherwise
+  html(s)      s with & < > " ' escaped: anything a visitor typed goes through it
+  status(n)    the status (200)
+  header(name, value)
+  redirect(url [, status])    303 unless said; `return redirect("hello")` after a POST, so a reload doesn't post again
+  cookie(name, value [, opts])    opts: path ("/"), maxAge (seconds), httpOnly (true), sameSite ("Lax")
+  render(file, vars)    an etlua template beside the script, filled in from vars (then the names above): <%= x %> escaped, <%- x %> as it is, <% lua code %>
+  router()     routes, below
+  state        a table kept for this script between requests, until httpd stops: counters, a guestbook, sessions
+
+A script can also return what to send: a string (the page), or status, headers, body: `return 404, {}, "no such note"`.
+
+Routes: a script that returns a router answers every URL under its name by method and path. /www/cgi/notes.lua:
+    state.notes = state.notes or {}
+    local r = router()
+    r:get("/", function()
+        return render("notes.etlua", { notes = state.notes })
+    end)
+    r:get("/:id", function(req, p)
+        local n = state.notes[tonumber(p.id)]
+        if not n then return 404, {}, "no such note" end
+        write("<p>", html(n), "</p>")
+    end)
+    r:post("/", function(req)
+        table.insert(state.notes, req.params.text)
+        return redirect(req.script .. "/" .. #state.notes)
+    end)
+    return r
+and /www/cgi/notes.etlua:
+    <h1>Notes</h1>
+    <ul><% for i, n in ipairs(notes) do %><li><a href="<%= req.script %>/<%= i %>"><%= n %></a></li><% end %></ul>
+    <form method="post" action="<%= req.script %>"><input name="text"> <button>Add</button></form>
+A route's path is the part after the script's URL ("/12" for /cgi/notes/12): :name takes one part of it (p.name), * the rest (p.splat). r:get, r:post, r:put, r:delete, r:patch; a HEAD takes the GET route; a path with no route is 404, one with a route for another method 405.
+
+Errors: a script that fails gives a 500 page, logged on httpd's screen; with httpd.debug true the traceback is on the page too. Forms come as application/x-www-form-urlencoded (a plain <form method=post>), at most 64 KiB; file uploads (multipart/form-data) aren't read yet. A script runs to its end before the next request is read: one that waits (sleep, curl) holds every other visitor up, for now.
+
+Templates are etlua's, by Leaf Corcoran (https://github.com/leafo/etlua, MIT), the ones Lapis uses; lib/etlua.lua is a copy of it.

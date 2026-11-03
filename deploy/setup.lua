@@ -20,7 +20,8 @@
 --                                      init and the network (then set
 --                                      telnetd.password)
 --   httpd                              the web server as a service, with
---                                      init and the network: serves /www
+--                                      init and the network: serves /www,
+--                                      Lua pages in /www/cgi
 -- git and deploy/ always come; so do the help files of what you pick.
 --
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
@@ -81,7 +82,7 @@ local APPS = {
     init = { INIT },
     telnet = { "bin/telnet.lua", "lib/telnet.lua", NET },
     telnetd = { "bin/telnetd.lua", "lib/telnet.lua", NET, INIT },
-    httpd = { "bin/httpd.lua", "lib/httpd.lua", NET, INIT },
+    httpd = { "bin/httpd.lua", "lib/httpd.lua", "lib/etlua.lua", "lib/etlua-LICENSE.txt", "help/httpd-pages.txt", NET, INIT },
 }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
@@ -178,9 +179,15 @@ local function telnetdService()
                 fs.makeDir(root)
                 local f = fs.open(fs.combine(root, "index.html"), "w")
                 f.write("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>" .. (os.getComputerLabel() or ("computer " .. os.getComputerID()))
-                    .. "</title></head>\n<body><h1>It works</h1><p>ccnix's httpd, serving " .. root .. ".</p></body></html>\n")
+                    .. "</title></head>\n<body><h1>It works</h1><p>ccnix's httpd, serving " .. root .. ".</p>"
+                    .. "<p>A Lua page: <a href=\"cgi/hello\">cgi/hello</a>.</p></body></html>\n")
                 f.close()
-                print("httpd serves " .. root .. " (a first index.html is there)")
+                f = fs.open(fs.combine(root, "cgi/hello.lua"), "w")
+                f.write("-- a Lua page (help httpd-pages): /cgi/hello\n"
+                    .. "write(\"<h1>Hello, \", html(req.params.name or \"world\"), \"</h1>\")\n"
+                    .. "write(\"<form method=post><input name=name> <button>Hi</button></form>\")\n")
+                f.close()
+                print("httpd serves " .. root .. " (a first index.html is there, and cgi/hello.lua)")
             end
         end
     end
