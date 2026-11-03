@@ -28,8 +28,13 @@ Forces:
   at most 128 channels. A computer's 256-event queue drops every kind beyond
   that, timers included. Two modems of one computer on one cable hear each
   other. Lua receivers get fresh tables (no dedup by identity); frames carry
-  no TTL. A switch port is one of the computer's own sides (remote modems
-  aren't ports, to verify). Sending is synchronous
+  no TTL. A switch port is a modem on one of the computer's own sides, or a
+  wireless or ender modem on a full-block wired modem cabled to it (shared
+  as `modem_N`: lib/net sends and hears through it by that name, the radio
+  at the far block; checked in game 2026-11-03). Wired modems are never
+  shared (the tag `peripheral_hub_ignore`, and an `instanceof
+  WiredModemPeripheral` check), so wired ports stay at six. Two of a
+  switch's radios in range of each other are one segment. Sending is synchronous
   (`WiredNetworkImpl.transmitPacket` queues the receivers' events at once):
   nothing queues on the wire; a frame sent across a broken cable is lost. A modem hears nothing
   of a cut, but a wired element hears peripherals leave its network
@@ -201,7 +206,8 @@ them on other channels and skip VLAN filtering for them (native "none"
 still hears 60000). Designated ports send a hello every 2 s; other ports send
 only agreements, TCs and one BPDU when they come up, whatever their role.
 
-**Numbers, costs, timers.** A Lua switch numbers sides top 1 to back 6; a
+**Numbers, costs, timers.** A Lua switch numbers sides top 1 to back 6 and
+remote radios from 7 in name order; a
 multiblock keeps the controller's number (port NBT); the exchange gives a
 joining block the lowest free number, not persisted (a restart may swap two
 co-cabled blocks' roles). A port costs 20000 (802.1t's 1 Gb/s), wireless or
