@@ -7,7 +7,7 @@
 ## Context
 
 A CC network cable is a hub: every modem on it hears every frame. lib/net
-gives VLANs on one cable (VLAN n rides channel 4040+n, untagged on 4040), and
+gives VLANs on one cable (VLAN n rides channel 60000+n, untagged on 60000), and
 the gateway exchange (ccnix-mod 0.11.0) joins cables through gateway blocks,
 each with an allowed VLAN list and a native VLAN. Nothing else splits a cable
 into segments, and two paths between cables are a loop nothing breaks.
@@ -148,8 +148,8 @@ into one segment, a switch on two of them blocks one even with no shared VLAN.
 
 ### D4. The BPDU channel
 
-**A: 4040 with dst "stp"**, over B, a channel no host opens (e.g. 4039). A
-costs hosts on 4040 an event per BPDU (~0.5/s per designated port on their
+**A: 60000 with dst "stp"**, over B, a channel no host opens (e.g. 59999). A
+costs hosts on 60000 an event per BPDU (~0.5/s per designated port on their
 segment; in Phase 1 the interim exchange repeats every gateway cable's to
 all of them), dropped at the destination check as ARP broadcasts already are; B costs every Lua switch one of a
 port's 128 channels and widens the mod's window (`receive` drops `channel <
@@ -192,13 +192,13 @@ down, `linkLost`) returning state, BPDUs out and port states, with per-port
 fdWhile, rrWhile, rbWhile, tcWhile, rcvdInfoWhile and flags proposing,
 proposed, sync, synced, agreed; roles are a pure function of stored vectors.
 
-**BPDUs** go on channel 4040 untagged, fields and IDs as in item 4; `src` is
+**BPDUs** go on channel 60000 untagged, fields and IDs as in item 4; `src` is
 for display ("12:back", "s7:3", "g:5"), identity is the bridge and port ID.
 STP bridges consume them; non-STP elements (the interim exchange, a Lua
 switch with STP off) pass them on like a hub; hosts drop them at the
 destination check (`lib/net.lua:428`). Bridges don't learn from BPDUs, drop
 them on other channels and skip VLAN filtering for them (native "none"
-still hears 4040). Designated ports send a hello every 2 s; other ports send
+still hears 60000). Designated ports send a hello every 2 s; other ports send
 only agreements, TCs and one BPDU when they come up, whatever their role.
 
 **Numbers, costs, timers.** A Lua switch numbers sides top 1 to back 6; a
@@ -309,7 +309,7 @@ before learning; the TapPort drops host frames from multicast or `02:cc` MACs.
 BPDUs (01:80:c2:00:00:00-0f dropped, counted), safe before Phase 2. No BPDU
 guard: a host bridge on (R)STP sends BPDUs out edge ports every hello, and
 one trunk has no second path to find. VLAN-merging loops (bridged VLANs
-joined on the host and again in CC, say by Lua re-sending 4050 on 4060) are
+joined on the host and again in CC, say by Lua re-sending 60050 on 60060) are
 seen by neither tree; rate limits and the MAC cap bound them, and `/ccnix`
 counts host frames whose src was learned on a CC port.
 
@@ -361,7 +361,7 @@ one edge the admin sets up: CC traffic stays lossless and off the host.
 5. **The neighbour-gone signal (Decision 9).** Recommended: yes, on switch
    ports and gateway blocks too, so a backup block takes over at once on a
    cable cut; no methods on the peripheral at first.
-6. **Interop (D4).** Recommended: 4040 with dst "stp"; no hop count in data
+6. **Interop (D4).** Recommended: 60000 with dst "stp"; no hop count in data
    frames; wireless ports at cost 200000.
 7. **Limits, recipes, look.** Recommended: only controllers count against
    `switch.maxPerPlayer` (5), ports and chassis capped per switch; any

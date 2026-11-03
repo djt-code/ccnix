@@ -1126,10 +1126,10 @@ computer hearing everything (as with rednet):
 
 - **Link (layer 2):** an interface is a modem by its peripheral name
   (`back`, `top`, `modem_0`), wired or wireless. It sends and listens on
-  channel 4040, which works like an Ethernet segment: every computer on
+  channel 60000, which works like an Ethernet segment: every computer on
   that wire (or in wireless range) hears a frame, and only the one it's
   addressed to takes it. A MAC address is `<computer id>:<interface>`.
-- **VLANs:** `back.20` is VLAN 20 on the back modem: channel 4040 + 20, a
+- **VLANs:** `back.20` is VLAN 20 on the back modem: channel 60000 + 20, a
   network of its own on the same wire, that the untagged one (and every
   other VLAN) doesn't hear. One modem can carry several networks: a router
   with `back.10` and `back.20` routes between two VLANs on one cable (a

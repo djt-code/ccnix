@@ -10,8 +10,8 @@
 --
 --  * Link (layer 2): an interface is a modem (wired or wireless, named as
 --    a peripheral: "back", "modem_0") and a channel, like an Ethernet
---    segment.  "back" sends and listens on net.CHANNEL (4040), untagged;
---    "back.20" is VLAN 20 on the same modem, channel 4040 + 20: each
+--    segment.  "back" sends and listens on net.CHANNEL (60000), untagged;
+--    "back.20" is VLAN 20 on the same modem, channel 60000 + 20: each
 --    channel is its own segment (and broadcast domain) on the shared wire,
 --    so one modem can carry several networks, a router's trunk.  VLANs
 --    1-4094.  A frame is { ccnet = 1, dst = MAC, src = MAC, type = "arp" |
@@ -82,7 +82,8 @@
 -- without waiting holds it up (CC queues up to 256 events meanwhile).
 
 local N = {}
-N.CHANNEL = 4040
+N.CHANNEL = 60000              -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
+                               -- rednet's, a computer's ID, but for IDs past 60000)
 N.BROADCAST = "*"
 N.TTL = 64
 N.ALL = 4294967295              -- 255.255.255.255
@@ -131,8 +132,8 @@ function N.parseCIDR(s)
     return ip, len
 end
 
--- An interface name's modem and channel: "back" -> "back", 4040;
--- "back.20" -> "back", 4060 (VLAN 20).  nil for a bad VLAN.
+-- An interface name's modem and channel: "back" -> "back", 60000;
+-- "back.20" -> "back", 60020 (VLAN 20).  nil for a bad VLAN.
 function N.link(name)
     local modem, vlan = name:match("^(.-)%.(%d+)$")
     if not modem then return name, N.CHANNEL, nil end
