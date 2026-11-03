@@ -481,6 +481,120 @@ check("curl -m 0 and no answer: (28), the deadline past (the sim has no time goi
 r = curl("-h")
 check("curl -h: the usage, and whose curl is", r.status == 0 and r.out:find("usage: curl") and r.out:find("Daniel Stenberg"), show(r.out))
 B.tcpUnlisten(80)
+
+--------------------------------------------------------------------------
+-- httpd (lib/httpd): B serves a folder of this computer's (static), and
+-- curl fetches from it; then httpd itself runs here and B asks it
+--------------------------------------------------------------------------
+local httpd = require("httpd")
+W:file("www/index.html", "<h1>home</h1>\n")
+W:file("www/docs/a.txt", "alpha\n")
+W:file("www/docs/my file.txt", "spaced\n")
+W:file("www/docs/sub/b.txt", "beta\n")
+W:file("www/old/index.htm", "old style\n")
+W:file("www/pic.png", "\137PNG\r\n\26\n\0\1")
+W:dir("www/empty")
+local web = httpd.new():use(httpd.static({ root = "www", fs = W.fs }))
+local shut = httpd.new():use(httpd.static({ root = "www", fs = W.fs, listing = false }))
+assert(B.tcpListen(8080))
+assert(B.tcpListen(8081))
+local webConns = {}
+local function webServer()
+    for port, srv in pairs({ [8080] = web, [8081] = shut }) do
+        local c = B.tcpAccept(port)
+        if c then webConns[#webConns + 1] = { c = c, buf = "", srv = srv } end
+    end
+    for _, k in ipairs(webConns) do
+        if not k.done then
+            k.buf = k.buf .. (B.tcpRead(k.c) or "")
+            local out = k.srv:dispatch(k.buf, "10.0.1.2")
+            if out then k.done = true; B.tcpSend(k.c, out); B.tcpClose(k.c) end
+        end
+    end
+end
+local function fetch(...)
+    local args = table.pack(...)
+    args[args.n + 1] = { events = {}, onPull = webServer }
+    return W:run("curl", table.unpack(args, 1, args.n + 1))
+end
+
+r = fetch("http://b:8080/")
+r2 = fetch("http://b:8080/old/")
+check("httpd: a folder's index.html, else its index.htm", r.status == 0 and r.out == "<h1>home</h1>\n" and r2.out == "old style\n",
+    show(r.out) .. show(r.errText) .. show(r2.out))
+r = fetch("-i", "http://b:8080/docs?v=1")
+r2 = fetch("-L", "http://b:8080/docs")
+check("httpd: a folder without its slash: 301 to it (the query kept); there, no index: a listing, folders first, names escaped",
+    r.out:find("^HTTP/1%.1 301 Moved Permanently\n") and r.out:find("\nLocation: /docs/%?v=1\n") and r2.status == 0
+        and r2.out:find("<title>Index of /docs/</title>") and r2.out:find('<li><a href="%.%./">%.%./</a></li>')
+        and r2.out:find('<a href="sub/">sub/</a>.*<a href="a%.txt">a%.txt</a> 6 bytes')
+        and r2.out:find('<a href="my%%20file%.txt">my file%.txt</a> 7 bytes'), show(r.out) .. show(r2.out))
+r = fetch("http://b:8080/docs/my%20file.txt?x=1")
+r2 = fetch("-I", "http://b:8080/docs/a.txt")
+check("httpd: a file (its name decoded, the query no matter); HEAD: its headers, length and type, no body",
+    r.out == "spaced\n" and r2.out:find("^HTTP/1%.1 200 OK\n") and r2.out:find("\nContent%-Length: 6\n")
+        and r2.out:find("\nContent%-Type: text/plain; charset=utf%-8\n") and r2.out:find("\nServer: ccnix%-httpd\n")
+        and r2.out:find("\nConnection: close\n\n$"), show(r2.out))
+r = fetch("-i", "http://b:8080/pic.png")
+r2 = fetch("-o", "pic", "http://b:8080/pic.png")
+check("httpd: a binary file, its type by its extension, byte for byte", r.out:find("\nContent%-Type: image/png\n")
+    and W:read("pic") == "\137PNG\r\n\26\n\0\1", show(r.out))
+r = fetch("-i", "http://b:8080/nope")
+r2 = fetch("-f", "http://b:8080/nope")
+local r3 = fetch("-i", "http://b:8080/%2e%2e/secret")
+local r4 = fetch("-i", "-X", "DELETE", "http://b:8080/")
+check("httpd: not there 404 (-f: 22); .. in a path 403; DELETE 405, with Allow",
+    r.out:find("^HTTP/1%.1 404 Not Found\n") and r.out:find("<h1>404 Not Found</h1>") and r2.status == 22
+        and r3.out:find("^HTTP/1%.1 403 Forbidden\n") and r4.out:find("^HTTP/1%.1 405 Method Not Allowed\n")
+        and r4.out:find("\nAllow: GET, HEAD\n"), show(r.out) .. show(r3.out) .. show(r4.out))
+r = fetch("http://b:8080/empty/")
+r2 = fetch("-i", "http://b:8081/empty/")
+r3 = fetch("http://b:8081/")
+check("httpd: an empty folder lists nothing; with listings off, a folder with no index is 403, an index still served",
+    r.out:find("<h1>Index of /empty/</h1>") and r2.out:find("^HTTP/1%.1 403 Forbidden\n") and r2.out:find("listings are off")
+        and r3.out == "<h1>home</h1>\n", show(r2.out))
+B.tcpUnlisten(8080)
+B.tcpUnlisten(8081)
+
+local function status(out) return tonumber(out and out:match("^HTTP/1%.1 (%d+)")) end
+check("httpd.parse: not all there yet nil; refused: 400, 413, 431, 501, 505",
+    web:dispatch("GET / HTTP/1.1\r\nHost: x\r\n") == nil and web:dispatch("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nabc") == nil
+        and status(web:dispatch("BLAH\r\n\r\n")) == 400 and status(web:dispatch("GET / HTTP/1.1\r\nbad line\r\n\r\n")) == 400
+        and status(web:dispatch("POST / HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n")) == 413
+        and status(web:dispatch("GET / HTTP/1.1\r\nX: " .. ("y"):rep(9000))) == 431
+        and status(web:dispatch("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n")) == 501
+        and status(web:dispatch("GET / HTTP/2.0\r\n\r\n")) == 505)
+local app = httpd.new()
+    :use(function(req)
+        if req.path == "/hello" then return 200, { ["Content-Type"] = "text/plain" }, "hi " .. (req.args.name or "") end
+    end)
+    :use(function(req) if req.path == "/boom" then error("boom") end end)
+local logged = {}
+app.log = function(s) logged[#logged + 1] = s end
+local out, st = app:dispatch("GET /hello?name=a+b%21 HTTP/1.1\r\nHost: x\r\n\r\n", "10.0.0.9")
+local out2, st2 = app:dispatch("GET /boom HTTP/1.1\r\n\r\n")
+local out3, st3 = app:dispatch("GET /else HTTP/1.1\r\n\r\n")
+check("httpd handlers: one answers (its query decoded), one throws (500, logged), none answers (404)",
+    st == 200 and out:find("\r\n\r\nhi a b!$") and st2 == 500 and logged[1]:find("boom") and st3 == 404, show(out))
+
+local cl, got, asked = nil, "", false
+r = W:run("httpd", "-p", "80", "www", { events = {}, onPull = function(w)
+    if not cl then
+        cl = B.tcpConnect("10.0.1.2", 80)
+        B.tcpSend(cl, "GET /docs/a.txt HTTP/1.1\r\nHost: me\r\n\r\n")
+    end
+    got = got .. (B.tcpRead(cl) or "")
+    if cl.peerFin and not asked then
+        asked = true
+        w.T.events[#w.T.events + 1] = { "terminate", n = 1 }
+    end
+end })
+check("httpd -p 80 www: serves, logs each request, and stops at Ctrl+T, its port closed",
+    r.status == 0 and r.out:find("serving /www on port 80") and r.out:find('10%.0%.2%.5 "GET /docs/a%.txt" 200 6')
+        and got:find("^HTTP/1%.1 200 OK\r\n") and got:find("\r\n\r\nalpha\n$") and ME.listeners[80] == nil,
+    show(r.out) .. show(r.errText) .. show(got))
+r = W:run("httpd", "nowhere", { events = {} })
+check("httpd with no such folder: says so, status 1", r.status == 1 and r.errText:find("no folder"), show(r.errText))
 W.yieldEvents = false
 parallel = parallelWas
 _G.ccnet = nil

@@ -1,0 +1,22 @@
+httpd: a web server: the files under a folder, over HTTP (lib/httpd.lua)
+
+  httpd [-L] [-p port] [root]
+      serve root (else httpd.root) until Ctrl+T
+
+Each request is answered with the file at its path under the document root.  A folder answers with its index.html or index.htm (the first there; httpd.index names others), else a listing of what's in it, with links; -L (or httpd.listing false) turns listings off, and a folder with no index is then refused (403).  GET and HEAD; nothing above the root is served (a path with .. is refused).  The Content-Type goes by the file's extension.  Each request is logged as it's answered: who, what, the status and the body's size.
+
+Settings, which the options override:
+  httpd.root
+      the document root (/www)
+  httpd.port
+      the TCP port (80)
+  httpd.listing
+      false: no folder listings (true)
+  httpd.index
+      the index files to look for, in order, spaces between ("index.html index.htm")
+
+It needs the network (`ip up`).  To keep it running in the background, with init:
+  service add httpd httpd
+  service enable httpd            (at boot)
+  service start httpd
+deploy/setup httpd does all that.  Static files only, for now: lib/httpd takes handlers of your own ahead of the files (its top comment says how).  Try it with curl: `curl -i http://<this computer>/`.

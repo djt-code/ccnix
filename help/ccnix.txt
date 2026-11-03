@@ -34,6 +34,7 @@ Anywhere (bin/):
   grep: print the lines that match a pattern (POSIX grep)
   head: copy the first part of files to standard output (POSIX head)
   host: ask DNS for a name's addresses, or an address's name
+  httpd: a web server: the files under a folder, over HTTP (lib/httpd.lua)
   init: processes and services: the first process
   ip: set up and look at the network (lib/net.lua)
   kill: signal processes

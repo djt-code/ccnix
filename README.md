@@ -1119,6 +1119,7 @@ ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host
 tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
 curl [-iILfsv] [-d data] url       HTTP: a page, headers, POSTs, redirects (-L); lib/httpc for programs
+httpd [-L] [-p port] [root]        a web server: a folder's files, index.html, listings (-L: none)
 router                             (on a router: forwarding on, and a status screen)
 ```
 
@@ -1304,6 +1305,17 @@ Programs use `lib/httpc.lua` (`httpc.get(url)`, `httpc.post(url, body)`,
 the curl project (https://curl.se) and its many contributors. This isn't
 that curl, only a small one for ccnix that borrows its name, some options
 and its exit codes, with thanks.
+
+**httpd** serves a folder over HTTP: `httpd` serves `httpd.root` (/www)
+on `httpd.port` (80). A folder answers with its `index.html` or
+`index.htm` (`httpd.index` names others), else a listing with links;
+`httpd -L` or `set httpd.listing false` turns listings off (a folder
+without an index is then 403). GET and HEAD, nothing outside the root,
+each request logged. `setup httpd` makes it a service started at boot.
+Programs use `lib/httpd.lua`: a chain of handlers, `srv:use(fn)`, each
+taking a request and returning a status, headers and body (or nothing,
+to pass it on), with `httpd.static{root=...}` the files; that's where
+Lua pages or a framework would plug in later.
 
 ## Telnet
 

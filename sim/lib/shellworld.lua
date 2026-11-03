@@ -696,6 +696,17 @@ function W_:install(name)
     end
 end
 
+-- A path in /ccnix: the repo's file there copied in, if the repo has one.
+function W_:installPath(p)
+    local rel = p:sub(1, #self.progDir + 1) == self.progDir .. "/" and p:sub(#self.progDir + 2)
+    if not rel or not rel:find("%.lua$") then return end
+    local f = hostOpen(self.proj .. "/" .. rel, "rb")
+    if not f then return end
+    local text = f:read("a")
+    f:close()
+    self:file(p, text)
+end
+
 -- read(): the next line typed (opts.stdin); none left, the user holds Ctrl+T.
 function W_.readFn(W)
     return function(replace, history)
@@ -718,6 +729,7 @@ function W_:makeRequire(env, dir)
         for pat in package.path:gmatch("[^;]+") do
             local p = pat:gsub("%?", rel)
             p = p:sub(1, 1) == "/" and clean(p) or W.fs.combine(dir, p)
+            if not W.files[p] then W:installPath(p) end      -- (the repo's files are all there, as on disk)
             if W.files[p] then return p end
         end
     end

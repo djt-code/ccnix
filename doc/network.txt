@@ -33,6 +33,7 @@ Test, from A:
   traceroute 10.0.2.20   1: 10.0.1.1, 2: 10.0.2.20
 TCP chat: `nc -l 7` on B, then `nc 10.0.2.20 7` on A and type: the lines show on B, and B's on A. Ctrl+T ends your side; the other's ends when it sees that.
 UDP: the same with `nc -u -l 7` and `nc -u 10.0.2.20 7`: the lines go one way, as datagrams.
+A web server: on B, `mkdir /www`, put an index.html there (any HTML) and run `httpd` (or `setup httpd`, a service at boot); `help httpd` says more.
 HTTP: `curl http://10.0.2.20/` fetches a page from a web server there (`curl -i` with the headers, `-L` following redirects, `-d` to POST; `help curl`). HTTP only, no HTTPS. curl is Daniel Stenberg's (curl.se); this small one borrows its name.
 
 One cable, with VLANs: chain A, R and B on one cable, and give each network its own VLAN. On R: `ip addr add left.10 10.0.1.1/24` and `ip addr add left.20 10.0.2.1/24`; on A `back.10`, on B `back.20`. Each VLAN is its own channel on the wire, so A and B still talk only through R.

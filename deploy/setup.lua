@@ -19,6 +19,8 @@
 --   telnetd                            the telnet server as a service, with
 --                                      init and the network (then set
 --                                      telnetd.password)
+--   httpd                              the web server as a service, with
+--                                      init and the network: serves /www
 -- git and deploy/ always come; so do the help files of what you pick.
 --
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
@@ -79,6 +81,7 @@ local APPS = {
     init = { INIT },
     telnet = { "bin/telnet.lua", "lib/telnet.lua", NET },
     telnetd = { "bin/telnetd.lua", "lib/telnet.lua", NET, INIT },
+    httpd = { "bin/httpd.lua", "lib/httpd.lua", NET, INIT },
 }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
@@ -142,9 +145,9 @@ local function paths()
     for _, a in ipairs(apps) do
         addAll(APPS[a])
         if a == "ccsh" then installArgs[#installArgs + 1] = "--ccsh" end
-        if a == "net" or a == "telnet" or a == "telnetd" then installArgs[#installArgs + 1] = "--net" end
+        if a == "net" or a == "telnet" or a == "telnetd" or a == "httpd" then installArgs[#installArgs + 1] = "--net" end
         if a == "router" then installArgs[#installArgs + 1] = "--router" end
-        if a == "init" or a == "telnetd" then installArgs[#installArgs + 1] = "--init" end
+        if a == "init" or a == "telnetd" or a == "httpd" then installArgs[#installArgs + 1] = "--init" end
     end
     return out
 end
@@ -157,15 +160,27 @@ local function die(msg)
     error("", 0)
 end
 
--- telnetd: a service init starts at every boot
+-- telnetd, httpd: services init starts at every boot (httpd's root made,
+-- with a first page, if it isn't there)
 local function telnetdService()
     for _, a in ipairs(apps) do
-        if a == "telnetd" then
-            settings.set("service.telnetd.cmd", "telnetd")
-            settings.set("service.telnetd.enabled", true)
+        if a == "telnetd" or a == "httpd" then
+            settings.set("service." .. a .. ".cmd", a)
+            settings.set("service." .. a .. ".enabled", true)
             settings.save()
-            if not settings.get("telnetd.password") then
-                print("telnetd needs a password: set telnetd.password <password> (then reboot, or service start telnetd)")
+        end
+        if a == "telnetd" and not settings.get("telnetd.password") then
+            print("telnetd needs a password: set telnetd.password <password> (then reboot, or service start telnetd)")
+        end
+        if a == "httpd" then
+            local root = settings.get("httpd.root") or "/www"
+            if not fs.exists(root) then
+                fs.makeDir(root)
+                local f = fs.open(fs.combine(root, "index.html"), "w")
+                f.write("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>" .. (os.getComputerLabel() or ("computer " .. os.getComputerID()))
+                    .. "</title></head>\n<body><h1>It works</h1><p>ccnix's httpd, serving " .. root .. ".</p></body></html>\n")
+                f.close()
+                print("httpd serves " .. root .. " (a first index.html is there)")
             end
         end
     end
