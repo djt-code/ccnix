@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Guestbook</title>
+<style>
+body { font-family: sans-serif; max-width: 40em; margin: 2em auto; padding: 0 1em; }
+.entry { border-top: 1px solid #ccc; padding: .5em 0; }
+.entry p { white-space: pre-wrap; margin: .3em 0; }
+.when { color: #777; font-size: .85em; }
+.problem { color: #b00; }
+</style></head>
+<body>
+<h1>Guestbook</h1>
+<% if problem then %><p class="problem"><%= problem %></p><% end %>
+<form method="post" action="<%= req.script %>">
+<p><input name="name" maxlength="40" placeholder="Your name" value="<%= name or "" %>"></p>
+<p><textarea name="message" rows="3" cols="50" maxlength="500" placeholder="Say something"><%= message or "" %></textarea></p>
+<p><button>Sign</button></p>
+</form>
+<% if #entries == 0 then %><p>No one has signed yet.</p><% end %>
+<% for _, e in ipairs(entries) do %>
+<div class="entry"><b><%= e.name %></b> <span class="when"><%= e.at %></span><p><%= e.text %></p></div>
+<% end %>
+<p class="when">ccnix httpd - <%= #entries %> <%= #entries == 1 and "entry" or "entries" %></p>
+</body></html>

@@ -2,6 +2,8 @@ httpd-pages: Lua pages on the web server: forms, routes, templates, cookies
 
 httpd (`help httpd`) runs the Lua scripts in its script root, the folder cgi in its document root (httpd.cgi says another), for the URLs under it: /cgi/hello.lua, or just /cgi/hello, runs /www/cgi/hello.lua; /cgi/ runs index.lua there. Nothing else in the script root is served, so neither is a script's source; put pictures and CSS elsewhere in the document root. Each request runs the script afresh as the file is now: edit it and reload the page.
 
+A whole example: `setup httpd --example` copies a guestbook into the script root, guestbook.lua and its template guestbook.etlua (from the repo's deploy/examples), at /cgi/guestbook: a form, its checks, the entries kept in a file beside it (here, below).
+
 A page, /www/cgi/hello.lua:
     local name = req.params.name
     write("<h1>Hello, ", html(name or "world"), "</h1>")
@@ -17,7 +19,9 @@ What a script has, besides everything a program has:
   cookie(name, value [, opts])    opts: path ("/"), maxAge (seconds), httpOnly (true), sameSite ("Lax")
   render(file, vars)    an etlua template beside the script, filled in from vars (then the names above): <%= x %> escaped, <%- x %> as it is, <% lua code %>
   router()     routes, below
-  state        a table kept for this script between requests, until httpd stops: counters, a guestbook, sessions
+  state        a table kept for this script between requests, until httpd stops: counters, sessions
+  here         this script's folder ("/www/cgi"): for files of its own (fs.combine(here, "notes.db")), which the script root never serves
+  fs           the filesystem, as everywhere
 
 A script can also return what to send: a string (the page), or status, headers, body: `return 404, {}, "no such note"`.
 

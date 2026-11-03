@@ -27,6 +27,7 @@
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
 -- job, or starts one from the settings; see turtle/autostart.lua; on a
 -- computer: router, its status screen at every boot),
+-- --example (httpd, and a guestbook in its script root: /cgi/guestbook),
 -- --ccsh (ccsh at boot without naming it), --no-reboot, --all
 -- (everything, sim/ too), --skip <dir> (leave out more).
 --
@@ -88,7 +89,7 @@ local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
 
 local cloneArgs, installArgs, apps = {}, {}, {}
-local autostart
+local autostart, example
 local args = { ... }
 local i = 1
 while i <= #args do
@@ -99,13 +100,15 @@ while i <= #args do
         cloneArgs[#cloneArgs + 1] = a
         cloneArgs[#cloneArgs + 1] = args[i + 1]
         i = i + 1
+    elseif a == "--example" then
+        example = true
     elseif a == "--autostart" and AUTOSTART[args[i + 1]] then
         autostart = args[i + 1]
         i = i + 1
     elseif APPS[a] then
         apps[#apps + 1] = a
     else
-        print("Usage: setup [app...] [--autostart app] [--ccsh] [--no-reboot] [--all] [--skip dir]...")
+        print("Usage: setup [app...] [--autostart app] [--example] [--ccsh] [--no-reboot] [--all] [--skip dir]...")
         local names = {}
         for name in pairs(APPS) do names[#names + 1] = name end
         table.sort(names)
@@ -114,6 +117,11 @@ while i <= #args do
         return
     end
     i = i + 1
+end
+if example then                    -- (the guestbook is httpd's)
+    local named = false
+    for _, a in ipairs(apps) do named = named or a == "httpd" end
+    if not named then apps[#apps + 1] = "httpd" end
 end
 if autostart and #apps > 0 then
     local named = false
@@ -162,8 +170,9 @@ local function die(msg)
 end
 
 -- telnetd, httpd: services init starts at every boot (httpd's root made,
--- with a first page, if it isn't there)
-local function telnetdService()
+-- with a first page, if it isn't there; --example: the guestbook in its
+-- script root).  from(path): a repo file's path on this computer.
+local function telnetdService(from)
     for _, a in ipairs(apps) do
         if a == "telnetd" or a == "httpd" then
             settings.set("service." .. a .. ".cmd", a)
@@ -188,6 +197,29 @@ local function telnetdService()
                     .. "write(\"<form method=post><input name=name> <button>Hi</button></form>\")\n")
                 f.close()
                 print("httpd serves " .. root .. " (a first index.html is there, and cgi/hello.lua)")
+            end
+            if example then
+                -- the script root, as httpd finds it
+                local cgi = settings.get("httpd.cgi")
+                if cgi == nil then cgi = "cgi" end
+                if cgi == "" or cgi == false then
+                    print("httpd.cgi is \"\" (no Lua pages): no guestbook")
+                else
+                    cgi = tostring(cgi)
+                    local dir = fs.combine(cgi:sub(1, 1) == "/" and cgi or fs.combine(root, cgi), "")
+                    for _, name in ipairs({ "guestbook.lua", "guestbook.etlua" }) do
+                        local src = fs.open(from("deploy/examples/" .. name), "r")
+                        local text = src.readAll()
+                        src.close()
+                        local dst = fs.open(fs.combine(dir, name), "w")
+                        dst.write(text)
+                        dst.close()
+                    end
+                    -- its URL: its path in the document root, or /<its name> outside it
+                    local top = fs.combine(root, "")
+                    local url = top == "" and dir or (dir:sub(1, #top + 1) == top .. "/" and dir:sub(#top + 2) or fs.getName(dir))
+                    print("A guestbook in /" .. dir .. ": http://<this computer>/" .. url .. "/guestbook")
+                end
             end
         end
     end
@@ -247,7 +279,7 @@ if fs.exists("/rom/ccnix/.manifest") then
         if #fs.list("/cc-turtles") == 0 then fs.delete("/cc-turtles") end
         print("Moved off /cc-turtles (an install from before ccnix): its startup lines and files are gone.")
     end
-    telnetdService()
+    telnetdService(find)
     if http then shell.run(find("bin/ccnix.lua"), "update")
     else print("HTTP is off here: no updates over the ROM's.") end
     shell.run(find("deploy/install.lua"), table.unpack(installArgs))
@@ -316,5 +348,5 @@ if fs.exists("/git.lua") and not fs.isDir("/git.lua") then
     end
 end
 
-telnetdService()
+telnetdService(function(p) return fs.combine(DIR, p) end)
 shell.run(fs.combine(DIR, "deploy/install"), table.unpack(installArgs))

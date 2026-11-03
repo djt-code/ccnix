@@ -426,6 +426,8 @@ end
 --                      escaped, <%- x %> as it is, <% code %>)
 --   router()           httpd.router(): `return r` and the routes answer
 --   state              a table kept for the script between requests
+--   here               the script's folder ("/www/cgi"): for its own files,
+--                      which the script root never serves
 -- A script answers with what it writes, or returns a string (the body),
 -- status, headers, body, or a router.  An error: 500, and with
 -- opts.debug the traceback on the page.  opts.fs: the filesystem API.
@@ -497,6 +499,7 @@ function H.lua(opts)
         local env = setmetatable({}, { __index = _G })
         states[script] = states[script] or {}
         env.req, env.state, env.html, env.router = req, states[script], H.html, H.router
+        env.here, env.fs = "/" .. fs.getDir(script), fs
         function env.write(...)
             for i = 1, select("#", ...) do out[#out + 1] = tostring((select(i, ...))) end
         end

@@ -1323,7 +1323,9 @@ POSTed form, `req.cookies` the cookies), writes the page with `write()`
 (`html()` escapes), and has `redirect()`, `cookie()`, `status()`,
 `header()`, a `state` table kept between requests, `render()` for etlua
 templates, and `router()` for routes like `r:get("/:id", fn)`. Their
-source is never served. `help httpd-pages` walks through it. The
+source is never served. `help httpd-pages` walks through it, and
+`setup httpd --example` copies in a guestbook to start from
+(`deploy/examples/`, at `/cgi/guestbook`). The
 templates are [etlua](https://github.com/leafo/etlua), by Leaf Corcoran
 (MIT): the submodule `vendor/etlua`, copied to `lib/etlua.lua` by
 `sim/vendor.py`, since neither git.lua's clone nor the mod's ROM carries

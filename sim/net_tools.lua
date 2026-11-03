@@ -658,6 +658,33 @@ check("httpd.parse: a form only from a form's Content-Type; params the query and
             and q.cookies.t == "1" and next(j.form) == nil and j.body == "b=3&c=4"
     end)())
 
+-- the guestbook (deploy/examples, which setup httpd --example copies in)
+for _, n in ipairs({ "guestbook.lua", "guestbook.etlua" }) do
+    local h = assert(io.open(PROJ .. "/deploy/examples/" .. n, "rb"))
+    W:file("www/cgi/" .. n, h:read("a"))
+    h:close()
+end
+local function book() return httpd.new():use(httpd.lua({ dir = "www/cgi", prefix = "/cgi", fs = W.fs })) end
+local function ask(srv, raw) local o, s = srv:dispatch(raw, "10.0.0.9") return s, o end
+local function sign(srv, body)
+    return ask(srv, "POST /cgi/guestbook HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: "
+        .. #body .. "\r\n\r\n" .. body)
+end
+local gb = book()
+local s1, o1 = ask(gb, "GET /cgi/guestbook HTTP/1.1\r\n\r\n")
+local s2, o2 = sign(gb, "name=+&message=hi")
+local s3, o3 = sign(gb, "name=Ann+%3Cb%3E&message=hello%0Athere")
+local s4, o4 = ask(gb, "GET /cgi/guestbook HTTP/1.1\r\n\r\n")
+local s5, o5 = ask(book(), "GET /cgi/guestbook HTTP/1.1\r\n\r\n")      -- (httpd started again: from guestbook.db)
+local s6 = ask(web, "GET /cgi/guestbook.db HTTP/1.1\r\n\r\n")
+check("the example guestbook: empty; a blank name refused (400, the message kept); signed (303 back); shown escaped;"
+    .. " kept in guestbook.db past a restart, which isn't served",
+    s1 == 200 and o1:find("No one has signed yet") and s2 == 400 and o2:find("A name and a message, please")
+        and o2:find(">hi</textarea>") and s3 == 303 and o3:find("\r\nLocation: /cgi/guestbook\r\n") and s4 == 200
+        and o4:find("<b>Ann &lt;b&gt;</b>") and o4:find("<p>hello\nthere</p>") and o4:find("1 entry")
+        and W:read("www/cgi/guestbook.db") and s5 == 200 and o5:find("Ann &lt;b&gt;") and s6 == 404,
+    show(o2) .. show(o4))
+
 local cl, got, asked = nil, "", false
 r = W:run("httpd", "-p", "80", "www", { events = {}, onPull = function(w)
     if not cl then
