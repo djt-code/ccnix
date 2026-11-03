@@ -169,6 +169,57 @@ check("nc -u -l -v: each datagram, with who sent it, a table serialised",
     r.out:find("from 10%.0%.2%.5:1234: hello") and r.out:find("from 10%.0%.2%.5:1234: {n=1,?}")
         and not r.out:find("nil"), show(r.out) .. show(r.errText))
 check("and the port is free again after", ME.sockets[7] == nil)
+
+-- tcpdump: what goes in and out of ME's interface, as it happens
+local function once(fn)
+    return function(w) if fn then local f = fn; fn = nil; f(w) end end
+end
+r = W:run("tcpdump", "-n", "-t", "-c", "2", { events = {}, onPull = once(function() ME.echo("10.0.2.5", 5, 1) end) })
+check("tcpdump -n -t -c 2: a ping out and its reply in, then how many",
+    r.out == "IP 10.0.1.2 > 10.0.2.5: ICMP echo request, id 5, seq 1\nIP 10.0.2.5 > 10.0.1.2: ICMP echo reply, id 5, seq 1\n"
+        and r.status == 0 and r.errText:find("listening on back") and r.errText:find("2 packets captured"),
+    show(r.out) .. show(r.errText))
+check("and its tap is gone after", next(ME.taps) == nil)
+W.now = 3723.25                     -- (01:02:03.250)
+r = W:run("tcpdump", "-c", "1", "udp", "port", "7", { events = {}, onPull = once(function()
+    ME.echo("10.0.2.5", 6, 1)
+    B.udpSend(pb, "10.0.1.2", 7, "hello")
+end) })
+check("tcpdump udp port 7: the ping left out, the datagram shown with `ip host`'s name, the time of day",
+    r.out == "01:02:03.250 IP b.1234 > 10.0.1.2.7: UDP, length 5\n" and r.errText:find("1 packet captured\n3 packets received"),
+    show(r.out) .. show(r.errText))
+assert(B.tcpListen(9))
+r = W:run("tcpdump", "-n", "-t", "-c", "3", "tcp", "and", "(", "port", "9", "or", "port", "10", ")", { events = {},
+    onPull = once(function() ME.tcpConnect("10.0.2.5", 9) end) })
+local tl = {}
+for l in r.out:gmatch("[^\n]+") do tl[#tl + 1] = l end
+check("tcpdump tcp: the handshake, the SYN's seq as it is, then counted from it (ack 1)",
+    #tl == 3 and tl[1]:find("^IP 10%.0%.1%.2%.%d+ > 10%.0%.2%.5%.9: Flags %[S%], seq %d+, win 4096, length 0$")
+        and tl[2]:find("^IP 10%.0%.2%.5%.9 > 10%.0%.1%.2%.%d+: Flags %[S%.%], seq %d+, ack 1, win 4096, length 0$")
+        and tl[3]:find("^IP 10%.0%.1%.2%.%d+ > 10%.0%.2%.5%.9: Flags %[%.%], ack 1, win 4096, length 0$"), show(r.out))
+for _, c in pairs(ME.tcbs or {}) do ME.tcpAbort(c) end
+B.tcpUnlisten(9)
+r = W:run("tcpdump", "-c", "2", "-w", "cap", "icmp", { events = {}, onPull = once(function() ME.echo("10.0.2.5", 7, 1) end) })
+check("tcpdump -w: written, not printed", r.out == "" and (W:read("cap") or ""):find("^%-%- ccnet frames"), show(r.out))
+r = W:run("tcpdump", "-r", "cap", "-n", "-t", "-e")
+check("tcpdump -r: read back, with the interface, the way, and (-e) the MACs",
+    r.out:find("^back Out 1:back > 10:left, ip: IP 10%.0%.1%.2 > 10%.0%.2%.5: ICMP echo request, id 7, seq 1\n")
+        and r.out:find("back In 10:left > 1:back, ip: IP 10%.0%.2%.5 > 10%.0%.1%.2: ICMP echo reply", 1, false), show(r.out))
+r = W:run("tcpdump", "-n", "-t", "-c", "1", "-i", "top", { events = { { "modem_message", "top", 4040, 4040,
+    { ccnet = 1, src = "7:back", dst = "*", type = "arp",
+      data = { op = "request", sha = "7:back", spa = N.parseIP("10.0.1.7"), tpa = N.parseIP("10.0.1.9") } }, 5 } } })
+check("tcpdump -i top (not one of the network's): its own channel, opened and closed again",
+    r.out == "ARP, Request who-has 10.0.1.9 tell 10.0.1.7\n" and not OPENED["top:4040"], show(r.out) .. show(r.errText))
+r = W:run("tcpdump", "-D")
+check("tcpdump -D: the network's interfaces, the other modems, any",
+    r.out == "1.back (10.0.1.2/24)\n2.top (not up: its untagged channel)\n3.any (all of them)\n", show(r.out))
+r = W:run("tcpdump", "tcp", "port")
+local r3 = W:run("tcpdump", "-i", "nowhere")
+local r4 = W:run("tcpdump", "frobnicate")
+check("tcpdump: a broken expression, an interface that isn't there, a word it doesn't know: status 1, and why",
+    r.status == 1 and r.errText:find("a port expected at the end") and r3.status == 1 and r3.errText:find("no interface nowhere")
+        and r4.status == 1 and r4.errText:find("unknown word frobnicate"), show(r.errText) .. show(r3.errText) .. show(r4.errText))
+
 -- nc over TCP.  parallel as CraftOS has it, over the world's os
 local parallelWas = parallel
 parallel = { waitForAny = function(...)

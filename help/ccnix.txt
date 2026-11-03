@@ -50,6 +50,7 @@ Anywhere (bin/):
   sort: sort, merge or check lines of text (POSIX sort)
   strings: find printable strings in files (POSIX strings)
   tail: copy the last part of a file to standard output (POSIX tail)
+  tcpdump: watch the frames on the network (lib/net.lua)
   tee: copy standard input to standard output and to files (POSIX tee)
   telnet: a telnet client: another computer's shell or screen, here
   telnetd: a telnet server: a shell, or the console, over the network

@@ -171,6 +171,7 @@ function N.new(opts)
         ifaces = {}, links = {}, routes = {}, arp = {}, pending = {}, sockets = {}, tcpPorts = {},
         counters = { forwarded = 0, dropped = 0, spoofed = 0 },
         log = {},
+        taps = {},          -- fn(dir, iface, frame): every frame in ("in") or out ("out"), as tcpdump wants
     }
     local clock = opts.clock or os.clock
     local transmit = opts.transmit
@@ -273,9 +274,18 @@ function N.new(opts)
     ----------------------------------------------------------------------
     -- Link
     ----------------------------------------------------------------------
+    -- Each tap sees the frame (one that fails is dropped from the taps).
+    local function tapped(dir, iface, f)
+        for k, fn in pairs(S.taps) do
+            if not pcall(fn, dir, iface, f) then S.taps[k] = nil end
+        end
+    end
+
     local function sendFrame(ifc, dst, kind, data)
         ifc.tx = ifc.tx + 1
-        transmit(ifc, { ccnet = 1, dst = dst, src = ifc.mac, type = kind, data = data })
+        local f = { ccnet = 1, dst = dst, src = ifc.mac, type = kind, data = data }
+        if next(S.taps) then tapped("out", ifc.name, f) end
+        transmit(ifc, f)
     end
 
     local function arpAsk(p)
@@ -478,10 +488,13 @@ function N.new(opts)
     end
 
     -- A modem_message: the interface that's modem `side` on `channel`
-    -- takes it (none: not the stack's).  True if it was the stack's.
+    -- takes it (none: not the stack's).  True if it was the stack's.  The
+    -- taps see it first, even a frame for another MAC (a modem hears every
+    -- frame on its channel, as a promiscuous NIC does).
     function S.receive(side, channel, f)
         local name = S.links[side .. "|" .. tostring(channel)]
         if not name then return false end
+        if next(S.taps) then tapped("in", name, f) end
         S.handleFrame(name, f)
         return true
     end

@@ -40,7 +40,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z, `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
 | `turtle/autocompost.lua` | A stationary turtle on top of a composter: composts everything compostable in its inventory, forever. |
-| Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
+| Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `bin/tcpdump.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `tcpdump` shows the frames on the wire, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
 | Telnet (`bin/telnet.lua`, `bin/telnetd.lua`, `lib/telnet.lua`) | Another computer's shell, or its console (the miner's screen), over the network, in real Telnet with ANSI, so any telnet client works too. See [Telnet](#telnet). |
 | Processes (`bin/init.lua`, `bin/ps.lua`, `bin/kill.lua`, `bin/service.lua`, `lib/proc.lua`) | `init` runs every program as a process (an ID, its own terminal and environment) and keeps services running in the background, on any computer or turtle. `ps` lists the processes, `kill` signals them, `service` starts, stops and sets up services. See [Processes and services](#processes-and-services). |
 | `pc/router.lua` | Runs on a computer with an interface on each of several networks (modems, or VLANs on one): forwards between them, and shows a live status screen. |
@@ -162,7 +162,7 @@ just those, with what they need and their help:
 | `ccsh` | [ccsh](#ccsh), started at every boot |
 | `diskclone` | for a computer with a disk drive |
 | `fileserver` | its disk drives as one folder, `/jbod` |
-| `net` | the network: `ip`, `ping`, `traceroute`, `nc`, `host`, up at every boot |
+| `net` | the network: `ip`, `ping`, `traceroute`, `nc`, `host`, `tcpdump`, up at every boot |
 | `router` | the network, and `router` to route between networks: forwarding on, up at every boot |
 | `init` | [processes and services](#processes-and-services): `init` at boot, `ps`, `kill`, `service` |
 | `telnet` | the [telnet](#telnet) client, and the network |
@@ -1114,6 +1114,7 @@ ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip h
 ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)
 ip dns <primary> [<secondary>]     host name | host address    (DNS)
 ping [-c n] [-t ttl] host          traceroute [-n] host
+tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
 router                             (on a router: forwarding on, and a status screen)
 ```
@@ -1206,6 +1207,16 @@ computer hearing everything (as with rednet):
   local conn = ai and net.connect(ai[1].addr, ai[1].port)
   local name = netdb.getnameinfo("1.1.1.1")   -- "one.one.one.one"
   ```
+- **Watching it:** `tcpdump` prints a line for each frame on the
+  interfaces, in and out (Ctrl+T stops): ARP, ICMP, UDP, and TCP with its
+  flags, sequence numbers counted from each side's first, ack and window.
+  A modem hears every frame on its channel, so it shows other computers'
+  frames on the wire too (`-p`: only this computer's). An expression picks
+  the frames as tcpdump's does (`tcpdump -n tcp port 23 and not host b`);
+  `-e` adds the MACs and VLAN, `-v` the TTL and ID, `-x` the frame as Lua;
+  `-w file` keeps the frames and `-r file` prints them again (a Lua table a
+  line, not pcap). With the network down, `tcpdump -i back` listens on the
+  modem's channel itself. In Lua, `S.taps[key] = fn(dir, iface, frame)`.
 
 **Bridging to a real network:** packets are Lua tables, but each field is
 the real header's (IP addresses as numbers, TCP's seq, ack, flags, window

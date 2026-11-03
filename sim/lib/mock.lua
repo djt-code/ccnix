@@ -566,6 +566,13 @@ function M.textutilsApi()
         unserialiseJSON = function(s) local ok, v = pcall(json.decode, s); if ok then return v end; return nil, v end,
         unserializeJSON = function(s) local ok, v = pcall(json.decode, s); if ok then return v end; return nil, v end,
         serialise = serialise, serialize = serialise,
+        unserialize = function(s) return M.textutilsApi().unserialise(s) end,
+        unserialise = function(s)
+            local f = load("return " .. s, "=unserialise", "t", {})
+            if not f then return nil end
+            local ok, v = pcall(f)
+            if ok then return v end
+        end,
         empty_json_array = M.EMPTY_ARRAY,
     }
 end

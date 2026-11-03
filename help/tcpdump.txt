@@ -1,0 +1,43 @@
+tcpdump: watch the frames on the network (lib/net.lua)
+
+  tcpdump [-DenpqSvx] [-t|-tt|-ttt|-tttt] [-c count] [-i iface]...
+          [-r file] [-w file] [expression]
+
+Prints a line for each frame on the interfaces, in and out, until Ctrl+T (or -c count frames), then how many it caught.  A modem hears every frame on its channel, so frames between other computers on the same wire show up too (-p: only this computer's own and broadcasts).
+
+  -i iface
+      listen on iface ("back", "back.20"; again for more; "any": all).  None: every interface the network has up, or (it isn't up) every modem's untagged channel.  An interface the network doesn't have is listened to on its own channel, so tcpdump works with the network down too
+  -D
+      list the interfaces it can listen on
+  -c count
+      stop after count frames
+  -e
+      show the link layer: MACs, the frame's type, the VLAN
+  -n
+      addresses as numbers (else `ip host`'s names for them)
+  -p
+      only frames to or from this computer, and broadcasts
+  -q
+      less about each protocol
+  -S
+      TCP sequence numbers as they are (else from each side's first, as tcpdump counts them)
+  -t
+      no time; -tt seconds since 1970; -ttt the time since the frame before; -tttt the date too
+  -v
+      the IP header too (TTL, ID, protocol)
+  -x
+      and the frame's data as a Lua table
+  -w file
+      write the frames to file instead of printing them (a Lua table a line, not pcap); -r file prints them again
+
+The expression picks which frames, as tcpdump's does (a part of it):
+  host <addr|name>, src <addr>, dst <addr>
+      (IP, or ARP's addresses)
+  net <net/len>, src net ..., dst net ...
+  port <n>, src port <n>, dst port <n>
+      (TCP and UDP)
+  arp, ip, icmp, udp, tcp
+  ether host <mac>, ether src|dst <mac>, ether broadcast
+  vlan [<n>]
+      (a VLAN interface's frames)
+joined with and (&&), or (||), not (!) and parentheses; two side by side mean and: `tcpdump -n icmp or udp port 53`, `tcpdump tcp and not port 23`. Exit status 0, 1 for trouble (a bad expression, an interface that isn't there).
