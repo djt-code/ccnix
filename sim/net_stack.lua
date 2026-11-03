@@ -150,6 +150,14 @@ run()
 local e = events(1, "net_icmp")[1]
 check("ping through the router: a reply, TTL one less", e and e[2] == "reply" and e[3] == "10.0.2.5"
     and e[4] == 77 and e[5] == 1 and e[6] == N.TTL - 1, e and table.concat({ tostring(e[2]), tostring(e[6]) }, " "))
+clear()
+A.echo("10.0.2.1", 78, 1)      -- R1's far address: R1 answers out of left (10.0.1.1)
+B.echo("10.0.1.1", 79, 1)      -- and its near one from B, out of right (10.0.2.1)
+run()
+local ea, eb = events(1, "net_icmp")[1], events(2, "net_icmp")[1]
+check("ping a router's other address: the reply comes from the address pinged",
+    ea and ea[2] == "reply" and ea[3] == "10.0.2.1" and eb and eb[2] == "reply" and eb[3] == "10.0.1.1",
+    (ea and tostring(ea[3]) or "-") .. " " .. (eb and tostring(eb[3]) or "-"))
 
 -- 4. nobody at 10.0.1.99: ARP asks three times, then host unreachable
 clear()
@@ -411,3 +419,14 @@ check("TCP to this computer's own address: open at once, each byte once",
 A.tcpClose(la); A.tcpClose(lb)
 check("and closed (one side waiting out TIME_WAIT)", lb.state == "CLOSED" and la.state == "TIME_WAIT", la.state .. " " .. lb.state)
 A.tcpUnlisten(9)
+
+-- TCP to a router's other address: B (10.0.2.5) to R1's left, 10.0.1.1
+assert(R1.tcpListen(24))
+local cr = B.tcpConnect("10.0.1.1", 24)
+run()
+local rr = R1.tcpAccept(24)
+R1.tcpSend(rr, "from 10.0.1.1")
+run()
+check("TCP to a router's other address: its segments come from that address, and it opens",
+    cr.state == "ESTABLISHED" and rr and rr.state == "ESTABLISHED" and B.tcpRead(cr) == "from 10.0.1.1", cr.state)
+B.tcpAbort(cr); run(); R1.tcpUnlisten(24)

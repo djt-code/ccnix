@@ -312,8 +312,10 @@ function N.new(opts)
 
     -- Send data to dst (an address, as a string or number).  True, or
     -- false and why (no route).  An ARP that gets no answer comes back
-    -- later as a net_unreachable event.
-    function S.sendIP(dst, proto, data, ttl)
+    -- later as a net_unreachable event.  The source is src if it's one of
+    -- this computer's addresses (an answer comes from the address it was
+    -- sent to, as RFC 1122 has it), else the outgoing interface's.
+    function S.sendIP(dst, proto, data, ttl, src)
         dst = N.parseIP(dst)
         if not dst then return false, "bad address" end
         nextId = nextId + 1
@@ -333,7 +335,8 @@ function N.new(opts)
         local r = S.route(dst)
         if not r then return false, "no route to " .. N.ipString(dst) end
         local ifc = S.ifaces[r.iface]
-        output({ src = ifc.ip, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId }, r, true)
+        if not (src and src ~= N.ALL and math.floor(src / 16777216) ~= 127 and isMine(src)) then src = ifc.ip end
+        output({ src = src, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId }, r, true)
         return true
     end
 
@@ -371,7 +374,9 @@ function N.new(opts)
         if pkt.proto == "icmp" and type(pkt.data) == "table" then
             local d = pkt.data
             if d.type == "echo" then
-                if pkt.dst ~= N.ALL then S.sendIP(pkt.src, "icmp", { type = "reply", id = d.id, seq = d.seq, data = d.data }) end
+                if pkt.dst ~= N.ALL then
+                    S.sendIP(pkt.src, "icmp", { type = "reply", id = d.id, seq = d.seq, data = d.data }, nil, pkt.dst)
+                end
             elseif d.type == "reply" then
                 queue("net_icmp", "reply", N.ipString(pkt.src), d.id, d.seq, pkt.ttl)
             elseif d.type == "unreachable" or d.type == "timeexceeded" then
@@ -534,7 +539,7 @@ function N.new(opts)
         seg.sport, seg.dport, seg.wnd, seg.data = c.lport, c.rport, window(c), seg.data or ""
         if seg.ack == nil then seg.ack = c.rcvNxt end   -- (nil before the SYN: no ACK flag)
         c.lastSent = clock()
-        return S.sendIP(c.rip, "tcp", seg)
+        return S.sendIP(c.rip, "tcp", seg, nil, c.lip)        -- (lip: the address a SYN came in on)
     end
 
     local function newTcb(lport, rip, rport, state)
@@ -606,7 +611,7 @@ function N.new(opts)
             seg.seq = 0
             seg.ack = add(d.seq, #(d.data or "") + (d.syn and 1 or 0) + (d.fin and 1 or 0))
         end
-        S.sendIP(pkt.src, "tcp", seg)
+        S.sendIP(pkt.src, "tcp", seg, nil, pkt.dst)
     end
 
     function S.tcpIn(pkt)
@@ -620,7 +625,7 @@ function N.new(opts)
             local l = S.listeners[d.dport]
             if l and d.syn and not d.ack and not d.rst then
                 c = newTcb(d.dport, pkt.src, d.sport, "SYN_RCVD")
-                c.listener, c.rcvNxt, c.sndWnd = d.dport, add(d.seq, 1), d.wnd or MSS
+                c.listener, c.rcvNxt, c.sndWnd, c.lip = d.dport, add(d.seq, 1), d.wnd or MSS, pkt.dst
                 emit(c, { seq = c.iss, syn = true })
             else
                 resetFor(pkt, d)
