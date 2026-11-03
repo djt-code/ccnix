@@ -19,8 +19,9 @@ COPIES = [("vendor/etlua/etlua.lua", "lib/etlua.lua")]
 
 
 def read(rel):
+    """The file's bytes, with LF line ends (Windows checkouts may have CRLF), or None."""
     path = os.path.join(ROOT, rel)
-    return open(path, "rb").read() if os.path.exists(path) else None
+    return open(path, "rb").read().replace(b"\r\n", b"\n") if os.path.exists(path) else None
 
 
 def main(args):
