@@ -82,7 +82,7 @@ local APPS = {
     init = { INIT },
     telnet = { "bin/telnet.lua", "lib/telnet.lua", NET },
     telnetd = { "bin/telnetd.lua", "lib/telnet.lua", NET, INIT },
-    httpd = { "bin/httpd.lua", "lib/httpd.lua", "lib/etlua.lua", "lib/etlua-LICENSE.txt", "help/httpd-pages.txt", NET, INIT },
+    httpd = { "bin/httpd.lua", "lib/httpd.lua", "lib/etlua.lua", "lib/etlua-license.txt", "help/httpd-pages.txt", NET, INIT },
 }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }

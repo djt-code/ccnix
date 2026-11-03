@@ -62,6 +62,17 @@ def check():
     import mkhelp
     stale = mkhelp.main(["--check"])
     print(("FAIL help/ out of date (python sim/mkhelp.py): " + " ".join(stale)) if stale else "ok   help/")
+    # the mod's ROM is a data pack: a path there is a ResourceLocation's, a-z 0-9 / . _ - (no capitals)
+    import re
+    unnamed = []
+    for d in ["bin", "lib", "turtle", "pc", "help", "deploy"]:
+        for dirpath, _, names in os.walk(os.path.join(ROOT, d)):
+            for n in names:
+                rel = os.path.relpath(os.path.join(dirpath, n), ROOT).replace("\\", "/")
+                if not re.fullmatch(r"[a-z0-9/._-]+", rel):
+                    unnamed.append(rel)
+    print(("FAIL names the mod's ROM can't carry (a-z 0-9 / . _ - only): " + " ".join(unnamed)) if unnamed else "ok   ROM names")
+    bad += len(unnamed)
     import vendor
     copies = vendor.main(["--check"])
     print(("FAIL vendored copies out of date (python sim/vendor.py): " + " ".join(copies)) if copies else "ok   vendor/")
