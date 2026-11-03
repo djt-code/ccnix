@@ -16,7 +16,8 @@
 -- route (net unreachable, from the router); a routing loop (time
 -- exceeded); a traceroute's TTLs; broadcast staying on its segment; VLANs
 -- apart on one wire, joined by the router; a
--- closed port; loopback; frames for others ignored; the event hook
+-- closed port; loopback; forged sources (BCP 38: rpfilter, martians);
+-- frames for others ignored; the event hook
 -- handling a frame once however many coroutines see it; the settings.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -235,6 +236,43 @@ check("a port in use can't be opened twice", A.udpOpen(6000) == nil and A.udpOpe
 check("a computer with no route there: sendIP says so",
     select(2, computer(99).sendIP("10.0.0.1", "udp", {})):find("no route") ~= nil)
 
+-- 10b. forged sources (BCP 38): a datagram for B with whatever source,
+-- as if A sent it to R1's left
+local function forge(src, ttl)
+    R1.receive("left", N.CHANNEL, { ccnet = 1, dst = R1.ifaces.left.mac, src = "1:back", type = "ip",
+        data = { src = N.parseIP(src), dst = N.parseIP("10.0.2.5"), ttl = ttl or N.TTL, id = 1, proto = "udp",
+                 data = { sport = 1000, dport = 53, data = src } } })
+    run()
+    local got = B.udpTake(pb)
+    while B.udpTake(pb) do end
+    return got ~= nil and got.data == src
+end
+check("rpfilter: loose unless set", R1.rpfilter == "loose" and N.rpfilter() == "loose" and N.rpfilter(true) == "loose"
+    and N.rpfilter(false) == "off" and N.rpfilter("strict") == "strict")
+local spoofed = R1.counters.spoofed
+check("loose: a source the router has a route back to is passed on, one it hasn't isn't",
+    forge("10.0.2.99") and not forge("8.8.8.8") and R1.counters.spoofed == spoofed + 1)
+R1.rpfilter = "strict"
+check("strict: only a source whose route back leaves by the interface it came in on",
+    forge("10.0.1.2") and forge("10.0.1.77") and not forge("10.0.2.99") and not forge("10.0.20.5"))
+clear()
+check("and no ICMP error goes to the forged source, even when its TTL runs out",
+    not forge("10.0.2.99", 1) and #events(2, "net_icmp") == 0 and #events(1, "net_icmp") == 0)
+R1.rpfilter = "off"
+check("off: any source is passed on", forge("10.0.2.99") and forge("8.8.8.8"))
+check("whatever rpfilter says, a source that can't be isn't: 0.x, 127.x, 224.x and up, the network's broadcast, the router's own",
+    not forge("0.0.0.1") and not forge("127.0.0.1") and not forge("224.0.0.5") and not forge("255.255.255.255")
+        and not forge("10.0.1.255") and not forge("10.0.2.1"))
+R1.rpfilter = "loose"
+local pa7 = A.udpOpen(7007)
+A.receive("back", N.CHANNEL, { ccnet = 1, dst = A.ifaces.back.mac, src = "3:top", type = "ip",
+    data = { src = N.parseIP("10.0.1.2"), dst = N.parseIP("10.0.1.2"), ttl = N.TTL, id = 1, proto = "udp",
+             data = { sport = 1, dport = 7007, data = "me?" } } })
+check("a host drops a packet that says it's from the host itself", A.udpTake(pa7) == nil)
+check("each one counted, and noted", R1.counters.spoofed == spoofed + 10
+    and R1.log[#R1.log]:find("dropped 10.0.2.1 > 10.0.2.5 in on left", 1, true) ~= nil,
+    R1.counters.spoofed - spoofed .. " " .. tostring(R1.log[#R1.log]))
+
 -- 11. the hook: a frame handled once, however many coroutines see it
 local H = computer(20)
 plug(H, "back", "10.0.1.20/24", "lanA")
@@ -282,6 +320,10 @@ check("settings: interfaces (VLANs too), routes (dev too), forwarding, hosts",
         and cfg.ifaces["back.30"] == "10.0.30.1/24"
         and #cfg.routes == 2 and cfg.routes[2].net == "default" and cfg.routes[2].iface == "modem_0"
         and cfg.hosts.router == "10.0.1.1" and cfg.hosts.b == "10.0.2.5")
+check("settings: rpfilter loose unless net.rpfilter says otherwise", cfg.rpfilter == "loose")
+store["net.rpfilter"] = "strict"
+check("settings: net.rpfilter strict", N.config({ get = function(k) return store[k] end,
+    getNames = function() return {} end }).rpfilter == "strict")
 
 -- 13. TCP, A (10.0.1.2) to B (10.0.2.5) through R1
 -- the TCP segment in frame f if it's arriving at A or B (each frame also

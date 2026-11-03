@@ -27,7 +27,13 @@
 --    10.0.1.1"; "default" is 0.0.0.0/0); the longest prefix wins.  A host
 --    takes packets for its addresses, 127.x.x.x, 255.255.255.255 and its
 --    networks' broadcast addresses; a router (forward = true) passes the
---    rest on, one less TTL.
+--    rest on, one less TTL.  A packet from a source that can't be real
+--    (0.x, 127.x, 224.x and up, the network's broadcast address, one of
+--    this computer's own) is dropped, and a router passes a packet on
+--    only if its source passes the reverse-path filter (BCP 38, RFC
+--    3704): rpfilter "loose" (the default) wants a route back to the
+--    source, "strict" one out of the interface the packet came in on,
+--    "off" nothing.
 --  * ICMP: echo and echo reply (ping), destination unreachable (no route:
 --    "net"; no ARP answer: "host"; no UDP socket: "port") and time exceeded
 --    (TTL ran out: traceroute uses it).  Never an error about an error.
@@ -144,17 +150,26 @@ local function broadcastOf(ip, len) return netOf(ip, len) + 2 ^ (32 - len) - 1 e
 
 function N.cidrString(ip, len) return N.ipString(ip) .. "/" .. len end
 
+-- A reverse-path filter mode: "strict", "loose" or "off" (on or true:
+-- loose, false: off); anything else, unset included, is "loose".
+function N.rpfilter(v)
+    if v == "strict" or v == "off" then return v end
+    if v == false then return "off" end
+    return "loose"
+end
+
 --------------------------------------------------------------------------
 -- The stack
 --------------------------------------------------------------------------
 -- opts: id (the computer's), transmit(ifc, frame) (ifc.modem, ifc.channel),
 -- queue(event, ...)
--- (os.queueEvent), clock() (seconds), forward (a router), log(msg).
+-- (os.queueEvent), clock() (seconds), forward (a router), rpfilter
+-- ("loose", "strict" or "off"; see N.rpfilter), log(msg).
 function N.new(opts)
     local S = {
-        id = opts.id, forward = opts.forward or false,
+        id = opts.id, forward = opts.forward or false, rpfilter = N.rpfilter(opts.rpfilter),
         ifaces = {}, links = {}, routes = {}, arp = {}, pending = {}, sockets = {}, tcpPorts = {},
-        counters = { forwarded = 0, dropped = 0 },
+        counters = { forwarded = 0, dropped = 0, spoofed = 0 },
         log = {},
     }
     local clock = opts.clock or os.clock
@@ -389,13 +404,39 @@ function N.new(opts)
         end
     end
 
+    -- A source no packet can honestly come from (RFC 1812, 5.3.7): 0.x,
+    -- 127.x, 224.x and up (255.255.255.255 too), the network's broadcast
+    -- address, or one of this computer's addresses.
+    local function martian(ifc, src)
+        local a = math.floor(src / 16777216)
+        return a == 0 or a == 127 or a >= 224 or isMine(src)
+            or (ifc.len < 31 and src == broadcastOf(ifc.ip, ifc.len))
+    end
+
+    -- BCP 38: may a packet from src, in on ifc, be passed on?  Loose: if
+    -- there's a route back to src; strict: if that route leaves by ifc.
+    local function sourceOk(ifc, src)
+        if S.rpfilter == "off" then return true end
+        local r = S.route(src)
+        return r ~= nil and (S.rpfilter ~= "strict" or r.iface == ifc.name)
+    end
+
+    -- Dropped, silently (an error would go to the forged source).
+    local function spoofed(ifc, pkt, why)
+        S.counters.dropped = S.counters.dropped + 1
+        S.counters.spoofed = S.counters.spoofed + 1
+        note(string.format("dropped %s > %s in on %s: %s", N.ipString(pkt.src), N.ipString(pkt.dst), ifc.name, why))
+    end
+
     local function ipIn(ifc, pkt)
         if type(pkt) ~= "table" or type(pkt.src) ~= "number" or type(pkt.dst) ~= "number"
             or type(pkt.ttl) ~= "number" then return end
+        if martian(ifc, pkt.src) then return spoofed(ifc, pkt, "a source that can't be") end
         if pkt.dst == N.ALL or isMine(pkt.dst) or pkt.dst == broadcastOf(ifc.ip, ifc.len) then
             return deliver(pkt, ifc.name)
         end
         if not S.forward then return end
+        if not sourceOk(ifc, pkt.src) then return spoofed(ifc, pkt, "the source fails rpfilter " .. S.rpfilter) end
         if pkt.ttl <= 1 then
             S.counters.dropped = S.counters.dropped + 1
             return icmpError(pkt, "timeexceeded", "ttl")
@@ -829,12 +870,14 @@ end
 -- Configuration, kept in CraftOS's settings
 --------------------------------------------------------------------------
 -- net.if.<iface> = "10.0.1.5/24"; net.routes = "10.0.2.0/24 via 10.0.1.1,
--- default via 10.0.1.1"; net.forward = true on a router; net.hosts =
+-- default via 10.0.1.1"; net.forward = true on a router; net.rpfilter =
+-- "strict" | "loose" | "off" (unset: loose); net.hosts =
 -- "router=10.0.1.1, b=10.0.2.5"; net.dns = "1.1.1.1, 9.9.9.9" (the DNS
 -- servers lib/netdb asks, primary first).
 function N.config(st)
     st = st or settings
-    local cfg = { ifaces = {}, routes = {}, forward = st.get("net.forward") == true, hosts = {}, dns = {} }
+    local cfg = { ifaces = {}, routes = {}, forward = st.get("net.forward") == true,
+                  rpfilter = N.rpfilter(st.get("net.rpfilter")), hosts = {}, dns = {} }
     for _, name in ipairs(st.getNames()) do
         local iface = name:match("^net%.if%.(.+)$")
         if iface and st.get(name) and st.get(name) ~= "" then cfg.ifaces[iface] = st.get(name) end
@@ -854,7 +897,7 @@ end
 -- A stack set up as cfg says, on this computer's modems.
 function N.fromConfig(cfg)
     local S = N.new({
-        id = os.getComputerID(), forward = cfg.forward,
+        id = os.getComputerID(), forward = cfg.forward, rpfilter = cfg.rpfilter,
         transmit = function(ifc, frame) peripheral.call(ifc.modem, "transmit", ifc.channel, ifc.channel, frame) end,
     })
     local problems = {}

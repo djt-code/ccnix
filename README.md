@@ -1111,6 +1111,7 @@ it has nothing left to compost it sleeps until you give it more.
 ip                                 what's set up, and whether it's up
 ip addr add <iface> <addr/len>     ip route add <net/len|default> via <gw>
 ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip host <name> <addr>
+ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)
 ip dns <primary> [<secondary>]     host name | host address    (DNS)
 ping [-c n] [-t ttl] host          traceroute [-n] host
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
@@ -1143,7 +1144,16 @@ computer hearing everything (as with rednet):
   a host takes only its own, `127.x.x.x`, and broadcasts
   (`255.255.255.255`, or its network's last address). `255.255.255.255`
   never crosses a router; a broadcast addressed to another network's last
-  address is routed there and broadcast on arrival.
+  address is routed there and broadcast on arrival. A packet from a source
+  that can't be real (`0.x`, `127.x`, `224.x` and up, the network's
+  broadcast address, the computer's own) is dropped, and a router passes a
+  packet on only if its source passes the reverse-path filter, as BCP 38
+  asks (`ip rpfilter`): *loose*, the default, wants a route back to the
+  source; *strict* wants that route to leave by the interface the packet
+  came in on, which stops a network's hosts forging another network's
+  addresses, but breaks asymmetric routing (where the way back isn't the
+  way in); *off* passes anything. Forged
+  packets are dropped silently, never answered with an ICMP error.
 - **ICMP:** echo and reply (`ping`), destination unreachable (no route:
   *net*, from the router that has none; no ARP answer: *host*; no program
   on that UDP port: *port*), and time exceeded when a TTL runs out (a
@@ -1259,7 +1269,7 @@ traceroute 10.0.2.7
 ```
 
 What's set is kept in settings (`net.if.<iface>`, `net.routes`,
-`net.forward`, `net.hosts`, `net.dns`), and changes apply at once while
+`net.forward`, `net.rpfilter`, `net.hosts`, `net.dns`), and changes apply at once while
 it's up. `ip host router 10.0.1.1` lets `ping router` work; with a way out
 (the gateway), `ip dns 1.1.1.1 9.9.9.9` lets real names work too. There's
 no DHCP: addresses are set by hand. `help network` on a computer walks through a lab

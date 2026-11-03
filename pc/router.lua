@@ -15,7 +15,8 @@
 -- `help network` walks through a lab: two networks and a router.
 --
 -- The screen shows each interface (address, frames in and out), the
--- routes, packets forwarded and dropped, and the latest messages (ARP
+-- routes, packets forwarded and dropped (spoofed: from a source that
+-- can't be, or one `ip rpfilter` refuses), and the latest messages (ARP
 -- with no answer...); it updates every second.  q leaves the screen: the
 -- routing carries on (it runs alongside whatever the computer does, see
 -- lib/net.lua), until `ip down` or a reboot.
@@ -56,7 +57,8 @@ local function draw()
     local _, h = term.getSize()
     term.clear()
     local c = S.counters
-    line(1, string.format("router %d: forwarded %d, dropped %d", os.getComputerID(), c.forwarded, c.dropped), colours.yellow)
+    line(1, string.format("router %d: forwarded %d, dropped %d (spoofed %d)", os.getComputerID(), c.forwarded,
+        c.dropped, c.spoofed or 0), colours.yellow)
     local y = 2
     local names = {}
     for k in pairs(S.ifaces) do names[#names + 1] = k end

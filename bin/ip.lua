@@ -14,6 +14,20 @@
 --   ip route del <net/len|default>
 --   ip neigh                         the ARP cache: addresses and their MACs
 --   ip forward [on|off]              route between interfaces (a router)
+--   ip rpfilter [strict|loose|off]   which sources a router passes on (BCP 38):
+--                                    loose (the default) any it has a route
+--                                    back to, strict only those whose route
+--                                    back leaves by the interface the packet
+--                                    came in on, off all.  A packet from a
+--                                    source that can't be (0.x, 127.x, 224.x
+--                                    and up, the network's broadcast
+--                                    address, this computer's own) is
+--                                    dropped whatever it's set to.  On a
+--                                    router whose default route covers
+--                                    everything, loose stops only those:
+--                                    strict is the one that keeps a
+--                                    network's hosts from forging another's
+--                                    addresses
 --   ip host [<name> <addr>]          names for addresses (ping router)
 --   ip dns [<primary> [<secondary>] | off]
 --                                    the DNS servers names are looked up at
@@ -23,13 +37,13 @@
 -- An interface is a modem by its peripheral name ("back", "modem_0"), or a
 -- VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on
 -- the same wire.  What's set is kept in settings (net.if.<iface>,
--- net.routes, net.forward, net.hosts, net.dns) and applies at once if the network
--- is up.  The network runs alongside everything else once `ip up` has
+-- net.routes, net.forward, net.rpfilter, net.hosts, net.dns) and applies at
+-- once if the network is up.  The network runs alongside everything else once `ip up` has
 -- started it: see lib/net.lua.  `help network` walks through setting up
 -- two networks and a router.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
-local cu = require("cu").init("ip", "ip [up|down|boot|link|addr|route|neigh|forward|host|dns] ...")
+local cu = require("cu").init("ip", "ip [up|down|boot|link|addr|route|neigh|forward|rpfilter|host|dns] ...")
 local net = require("net")
 local args = { ... }
 
@@ -85,7 +99,7 @@ local S = net.stack()
 local cmd, sub = args[1], args[2]
 
 if cmd == nil then
-    out(S and ("up" .. (S.forward and ", forwarding" or "")) or "down (ip up starts it)")
+    out(S and ("up" .. (S.forward and (", forwarding (rpfilter " .. S.rpfilter .. ")") or "")) or "down (ip up starts it)")
     showAddr(S)
     showRoutes(S)
     local dns = net.config().dns
@@ -185,6 +199,14 @@ elseif cmd == "forward" then
         if S then S.forward = sub == "on" end
     end
     out("forwarding " .. ((settings.get("net.forward") == true) and "on" or "off"))
+elseif cmd == "rpfilter" then
+    if sub then
+        if sub ~= "strict" and sub ~= "loose" and sub ~= "off" then cu.usageError("strict, loose or off") end
+        settings.set("net.rpfilter", sub)
+        save()
+        if S then S.rpfilter = sub end
+    end
+    out("rpfilter " .. net.rpfilter(settings.get("net.rpfilter")))
 elseif cmd == "host" then
     local hosts = net.config().hosts
     if sub and args[3] then
