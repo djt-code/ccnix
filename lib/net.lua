@@ -199,7 +199,9 @@ end
 -- opts: id (the computer's), transmit(ifc, frame) (ifc.modem, ifc.channel),
 -- queue(event, ...)
 -- (os.queueEvent), clock() (seconds), forward (a router), rpfilter
--- ("loose", "strict" or "off"; see N.rpfilter), log(msg).
+-- ("loose", "strict" or "off"; see N.rpfilter), log(msg, severity) (each
+-- note: a dropped packet, no ARP answer; severity 3 for the hook's own
+-- errors, else nil).
 function N.new(opts)
     local S = {
         id = opts.id, forward = opts.forward or false, rpfilter = N.rpfilter(opts.rpfilter),
@@ -214,10 +216,10 @@ function N.new(opts)
     local nextId, nextPort = 0, EPHEMERAL
     S.wantTick = function() end         -- the hook asks for a tick soon
 
-    local function note(msg)
+    local function note(msg, sev)
         S.log[#S.log + 1] = msg
         if #S.log > 50 then table.remove(S.log, 1) end
-        if opts.log then opts.log(msg) end
+        if opts.log then opts.log(msg, sev) end
     end
     S.note = note
 
@@ -911,7 +913,7 @@ function N.hook(S, osT)
         while true do
             local ev = table.pack(raw())
             local ok, err = pcall(handle, table.unpack(ev, 1, ev.n))
-            if not ok then S.note("net: " .. tostring(err)) end
+            if not ok then S.note("net: " .. tostring(err), 3) end
             if filter == nil or ev[1] == filter or ev[1] == "terminate" then return table.unpack(ev, 1, ev.n) end
         end
     end
@@ -948,11 +950,19 @@ function N.config(st)
     return cfg
 end
 
+-- The stack's notes to the system log under init (`help syslog`): kern,
+-- as "net", notice unless said.  Without init they're only kept in S.log.
+function N.syslog(msg, sev)
+    local proc = rawget(_G, "proc")
+    if proc and proc.log then proc.log({ fac = 0, sev = sev or 5, app = "net", msg = msg }) end
+end
+
 -- A stack set up as cfg says, on this computer's modems.
 function N.fromConfig(cfg)
     local S = N.new({
         id = os.getComputerID(), forward = cfg.forward, rpfilter = cfg.rpfilter,
         transmit = function(ifc, frame) peripheral.call(ifc.modem, "transmit", ifc.channel, ifc.channel, frame) end,
+        log = N.syslog,
     })
     local problems = {}
     for iface, cidr in pairs(cfg.ifaces) do

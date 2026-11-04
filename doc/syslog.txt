@@ -1,0 +1,50 @@
+syslog: the system log: syslogd, logger, lib/log, /etc/syslog.conf, forwarding
+
+ccnix keeps a system log as Unix does. Programs log through lib/log (C's syslog(3)), shell scripts with logger, and init logs what each service prints. syslogd, a service, files it all in /var/log, shows the worst on the console, and can forward it to another syslog server. `setup init` (and setup telnetd or httpd) sets syslogd up to start at boot; without it, `service add syslogd syslogd`, `service enable syslogd`, `service start syslogd`.
+
+Reading it: the logs are text, a line each:
+    2026-11-03T14:02:11Z base httpd[7]: 10.0.1.5 "GET /" 200 512
+the time (UTC), the computer (its label, else its ID), the program and its process, the message. `tail /var/log/messages`, `more /var/log/httpd.log`, `grep wrong /var/log/telnetd.log`.
+
+What goes where, by default:
+    /var/log/messages     everything at info or worse, but auth's, telnetd's and httpd's
+    /var/log/auth.log     auth and authpriv
+    /var/log/telnetd.log  telnetd (facility local6): who connects, logs in, gives a wrong password
+    /var/log/httpd.log    httpd (facility local7): each request, and what failed
+    the console           crit and worse
+A file past syslog.maxSize bytes (32768) is moved to <name>.1 (the old .1 dropped; syslog.keep says how many to keep) and started again.
+
+Severities, most severe first: emerg alert crit err warning notice info debug (0-7). Facilities: kern user mail daemon auth syslog lpr news uucp cron authpriv ftp, and local0-local7 for anything else. What's logged has both: telnetd's login is local6.notice; a service's print is daemon.info, its printError daemon.err.
+
+From the shell:
+    logger disk is nearly full                 user.notice, tagged logger
+    logger -p local3.err -t backup failed      as local3.err, tagged backup
+    backup | logger -t backup                  each line of a program's output
+-i adds logger's process ID, -s prints it too.
+
+What services print: init logs each line a service prints, under the service's name (`service status` still shows its screen). print, write and io.write are info, printError and io.stderr err; a line starting <N> (0-7) is logged at severity N: print("<4>disk nearly full") is a warning. Not logged: what's drawn with term.* (edit, menus), the console's programs, a service's children (telnetd's shells), and a service with service.<name>.log false. Init also logs each service starting, ending, failing and being started again. lib/net's notes (packets dropped, no ARP answer) are logged as kern, from "net".
+
+From a program:
+    local log = require("log").open("myapp", "local0")
+    log.info("started on port %d", 80)       printf-style, as string.format
+    log.err("can't open %s: %s", path, why)
+    log.log("warning", "...")                any severity by name or number
+    log.mask("info")                         leave out debug
+open's options (a third argument): { perror = true } shows each message on the program's screen too ("14:02 started on port 80"), pid = false leaves the process ID out. require("log").new(...) makes a logger apart (a library's own). Without init, lib/log files what's logged itself, by the same rules (no console, no forwarding).
+
+The rules: /etc/syslog.conf, if it's there, else the defaults above. A rule a line, selectors then an action:
+    *.info;auth,authpriv.none;local6,local7.none    /var/log/messages
+    auth,authpriv.*                                 /var/log/auth.log
+    local6.*                                        /var/log/telnetd.log
+    local7.*                                        /var/log/httpd.log
+    *.crit                                          /dev/console
+    *.notice                                        @loghost
+A selector is facility.severity: that severity and worse. facility.=severity is that one alone, facility.!severity not those, facility.none none of it; * is any; list facilities with commas, selectors with ";". Each selector that names a message's facility decides for it, in order, so "*.info;mail.none" is everything at info or worse but mail. A line "!prog" makes the rules after it for that program alone ("!a,b" for several); "!*" ends that. "#" starts a comment. A message goes to every rule that takes it. Actions: a file (/var/log/x.log; made, with its folder); /dev/console (or *); @host or @host:port, forwarding. syslogd reads the rules when it starts: `service restart syslogd` after a change; a line it can't read is logged and skipped. Changing telnetd.facility or httpd.facility needs the rules changed to match.
+
+Forwarding: @host sends each message it takes to that syslog server as RFC 5424 over UDP (port 514), so a real one (rsyslog's imudp, syslog-ng) can collect every computer's logs:
+    <181>1 2026-11-03T14:02:11.123Z base telnetd 9 - - 10.0.1.5:49152 logged in
+host is an address or a name (net.hosts, then DNS, looked up aside; messages wait for it). It needs the network (`ip up`); through the ccnix gateway it goes like any UDP. A ccnix computer can be the loghost too: syslog.listen true takes messages from others on UDP syslog.port (514), RFC 5424 or RFC 3164, and files them by the same rules, under the sender's name.
+
+Too much at once: at most syslog.burst messages (100) from one program in 10 seconds are taken; the rest are dropped and counted ("n messages from app suppressed"). While syslogd isn't running, init keeps the last 200 for it; a program logging hundreds of lines without a pause loses those past 500 waiting ("n messages dropped").
+
+Settings: syslog.maxSize, syslog.keep, syslog.burst, syslog.listen, syslog.port, service.<name>.log, telnetd.facility, httpd.facility.

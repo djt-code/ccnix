@@ -12,7 +12,8 @@
 -- settings: service.<name>.cmd, service.<name>.enabled and
 -- service.<name>.restart ("always", or "no": leave it ended).  What it
 -- prints goes to a screen of its own, not the console: status shows the
--- last of it.  add, remove, enable and disable work without init; the
+-- last of it; and to the system log, a line each under its name
+-- (/var/log/messages: `help syslog`), unless service.<name>.log is false.  add, remove, enable and disable work without init; the
 -- rest need it running (`help init`).
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/

@@ -702,8 +702,47 @@ check("httpd -p 80 www: serves, logs each request, and stops at Ctrl+T, its port
         and r.out:find('10%.0%.2%.5 "GET /docs/a%.txt" 200 6')
         and got:find("^HTTP/1%.1 200 OK\r\n") and got:find("\r\n\r\nalpha\n$") and ME.listeners[80] == nil,
     show(r.out) .. show(r.errText) .. show(got))
+check("... each request in the system log too: without init, lib/log files it, local7 into /var/log/httpd.log",
+    (W:read("var/log/httpd.log") or ""):find(' httpd: 10%.0%.2%.5 "GET /docs/a%.txt" 200 6\n'), show(W:read("var/log/httpd.log")))
 r = W:run("httpd", "nowhere", { events = {} })
 check("httpd with no such folder: says so, status 1", r.status == 1 and r.errText:find("no folder"), show(r.errText))
+
+-- syslogd (under a fake init) over the network: forwarding to B as RFC
+-- 5424 (to an address, and to a name looked up aside), and a loghost,
+-- filing what B sends (RFC 3164 with its host; bare, under B's address)
+W:file("etc/syslog.conf", "*.* /var/log/all.log\n*.notice @10.0.2.5\n*.err @b:5514\n")
+STORE["syslog.listen"] = true
+local b514, b5514 = B.udpOpen(514), B.udpOpen(5514)
+_G.proc = { self = function() return 5 end, console = function() return nil end, register = function() return true end,
+    log = function() end, spawn = function(spec) spec.fn() end,
+    inject = function(_, ...) W.T.events[#W.T.events + 1] = table.pack(...) end }
+local fromB = false
+local function rec(sev, msg) return { fac = 3, sev = sev, time = 1793188800000, host = "base", app = "web", pid = 3, msg = msg } end
+r = W:run("syslogd", { events = { { "syslog", rec(5, "noticed"), n = 2 }, { "syslog", rec(3, "broke"), n = 2 } },
+    onPull = function(w)
+        if not fromB then
+            fromB = true
+            B.udpSend(pb, "10.0.1.2", 514, "<34>Oct 11 22:14:15 bhost su: from b")
+            B.udpSend(pb, "10.0.1.2", 514, "<13>bare")
+        elseif #w.T.events == 0 then
+            w.T.events[1] = { "terminate", n = 1 }
+        end
+    end })
+_G.proc = nil
+STORE["syslog.listen"] = nil
+local f1, f2, f3 = B.udpTake(b514), B.udpTake(b514), B.udpTake(b5514)
+local all = W:read("var/log/all.log") or ""
+check("syslogd: @10.0.2.5 gets notice and worse, @b:5514 err (b looked up), as RFC 5424",
+    r.status == 0 and r.tty:find("listening on UDP 514") and f1 and f1.data == "<29>1 2026-10-28T12:00:00.000Z base web 3 - - noticed"
+        and f2 and f2.data:find("^<27>1 .* broke$") and f3 and f3.data:find("^<27>1 .* broke$"),
+    show(r.tty) .. show(r.errText) .. show(f1 and f1.data) .. " / " .. show(f2 and f2.data) .. " / " .. show(f3 and f3.data))
+local f4 = B.udpTake(b514)
+check("syslogd -- syslog.listen: B's messages filed, under the host they name, else B's address; relayed by the rules too",
+    all:find(" bhost su: from b\n") and all:find(" 10%.0%.2%.5 %-: bare\n") and f4 and f4.data:find("^<34>1 %S+ bhost su %- %- %- from b$"),
+    show(all) .. show(f4 and f4.data))
+B.udpClose(b514)
+B.udpClose(b5514)
+W.fs.delete("etc")
 W.yieldEvents = false
 parallel = parallelWas
 _G.ccnet = nil

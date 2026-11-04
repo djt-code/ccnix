@@ -1,7 +1,7 @@
 # ADR-0004: Logging: a syslogd under init, lib/log, captured service output, RFC 5424 forwarding
 
-**Status:** Proposed. D1-D3 decided by the user on 2026-11-03; the open
-decisions below wait for sign-off
+**Status:** Accepted (2026-11-03). Phase 1 built in ccnix 0.14.0; phase 2
+(in game) to verify
 **Date:** 2026-11-03
 **Deciders:** Dan Theisen
 
@@ -67,8 +67,9 @@ care.
 
 - **A: ccnix's own daemons log through lib/log**, with real severities and
   facilities: `httpd` (daemon, its access lines info, a page's error err),
-  `telnetd` (auth: logins notice, a wrong password warning), init itself,
-  and lib/net's stack (kern, tag `net`).
+  `telnetd` (its own facility: logins notice, a wrong password warning;
+  decision 5), init itself, and lib/net's stack (kern, tag `net`, only
+  under init: a router without init keeps its notes in memory as before).
 - **B: init captures every service's prints**, the way journald takes a
   unit's stdout. Init wraps `_G.write`, `_G.printError` and
   `io.stdout._handle.write` once, at start. Each wrapper draws as before
@@ -120,13 +121,15 @@ log.mask("info")                                              -- setlogmask(LOG_
 
 ### syslogd
 
-- Runs as a service (`setup init` defines it and enables it). It finds
-  itself by registering with init (`proc.register("syslog")`, which lib/log
-  reads back as `proc.lookup("syslog")`). Messages logged before it runs
-  (boot, init's first lines) wait in init, at most 200, and are handed over
-  when it registers.
-- Reads `/etc/syslog.conf` at start and again on `service restart syslogd`
-  (and a HUP: `kill -HUP`). Without the file it uses the defaults below.
+- Runs as a service (`setup init` defines it and enables it). It
+  registers with init (`proc.register("syslog")`); lib/log hands every
+  message to `proc.log`, and init passes it to whichever process
+  registered. Messages logged before it runs (boot, init's first lines)
+  wait in init, at most 200, and are handed over when it registers.
+- Reads `/etc/syslog.conf` when it starts: `service restart syslogd`
+  after a change. (`kill -HUP` is Ctrl+T under lib/proc, so it ends
+  syslogd, and init starts it again a second later, which rereads the
+  rules too.) Without the file it uses the defaults below.
 - **Selectors**, as BSD's and rsyslog's: `facility.severity` (that severity
   and worse), `facility.=severity` (that one alone), `facility.none`, `*`,
   lists with `,`, several selectors with `;`; `!prog` starts a block for
@@ -136,10 +139,15 @@ log.mask("info")                                              -- setlogmask(LOG_
 - **Defaults** (no syslog.conf):
 
 ```
-*.info;auth,authpriv.none     /var/log/messages
-auth,authpriv.*               /var/log/auth.log
-*.crit                        /dev/console
+*.info;auth,authpriv.none;local6,local7.none    /var/log/messages
+auth,authpriv.*                                 /var/log/auth.log
+local6.*                                        /var/log/telnetd.log
+local7.*                                        /var/log/httpd.log
+*.crit                                          /dev/console
 ```
+
+  telnetd logs as `local6` and httpd as `local7` (nginx's default), each
+  changeable (`telnetd.facility`, `httpd.facility`; the rules must follow).
 
 - **Files:** a line each, `2026-11-03T14:02:11Z host app[pid]: msg` (the
   RFC 3339 form rsyslog writes). A file past `syslog.maxSize` bytes
@@ -150,8 +158,9 @@ auth,authpriv.*               /var/log/auth.log
   when the window ends, as journald does. This also breaks the loop of a
   forward that fails (no ARP answer from the loghost) and logs its own
   failure, which is then forwarded.
-- **Backlog:** past 500 messages waiting in its inbox, lib/log drops new
-  ones and counts them; syslogd logs the count when it catches up.
+- **Backlog:** past 500 events waiting in init's inbox, init drops new
+  messages and counts them; the count goes to syslogd ahead of the next
+  one it takes.
 - **The wire** (RFC 5424): `<PRI>1 2026-11-03T14:02:11.123Z host app pid - - msg`,
   no structured data; a datagram at most 2048 bytes, the message cut to fit.
 
@@ -160,8 +169,8 @@ auth,authpriv.*               /var/log/auth.log
 `logger [-p facility.severity] [-t tag] [-s] [message...]`, as logger(1):
 the message from its words, or each line read from its input when it has
 none (`cmd | logger -t backup`); `-s` also prints it on stderr. Default
-`user.notice`, tag `logger` (logger(1) uses the login name; ccnix has
-none).
+`user.notice`, tag `$USER` when it's set, else `logger` (logger(1) uses
+the login name). `-i` adds logger's process ID (under init).
 
 ### Reading the logs
 
@@ -225,44 +234,44 @@ template or module system.
   `|program` actions, a `dmesg` for lib/net's ring, `service log <name>`
   (a `journalctl -u`), a mod-side way into the server's log.
 
-## Open decisions for the user
+## Decisions (the user, 2026-11-03)
 
-1. **syslogd on by default:** `setup init` defines and enables syslogd, so
-   every computer under init logs (recommended); or it's opt-in, `setup
-   syslogd`.
-2. **The default rules** above: messages, auth.log, crit to the console.
-   Printing err on the console (as many Unix defaults do) would draw over
-   the user's shell; crit is rarer.
-3. **Rotation size and count:** 32 KiB, one old file each.
-4. **Receiving off by default** (`syslog.listen = false`), so a computer
-   becomes a loghost only when asked (keep defaults tight).
-5. **httpd's access lines:** daemon.info into messages (recommended), or
-   local7 into their own `/var/log/httpd.log` by a default rule.
+1. **syslogd on by default:** `setup init` (and `setup telnetd` or
+   `httpd`) defines and enables it, unless it's set up already.
+2. **The default rules:** messages, auth.log, crit to the console.
+3. **Rotation:** 32 KiB by default, configurable (`syslog.maxSize`,
+   `syslog.keep`).
+4. **Receiving off by default** (`syslog.listen = false`).
+5. **httpd and telnetd get facilities of their own**, routed by the
+   default rules into their own files: `local7` to `/var/log/httpd.log`,
+   `local6` to `/var/log/telnetd.log`, and out of `messages`.
 
 ## Action Items
 
 ### Phase 1: ccnix 0.14.0
 
-1. [ ] lib/log: severities, facilities, open/log/mask, the message record,
-   the fallback file, perror.
-2. [ ] lib/proc: `register`/`lookup`, the early-boot hold (200), the inbox
-   backlog limit, init's service messages; the capture wrappers (write,
-   printError, io.stdout), line gathering, `<N>`, `service.<name>.log`.
-3. [ ] bin/syslogd: syslog.conf parsing, routing, files, rotation, console,
-   rate limit, `@host` RFC 5424 over UDP, `syslog.listen` (RFC 5424 and
-   3164 in).
-4. [ ] bin/logger.
-5. [ ] httpd, telnetd and lib/net (`N.up`'s `log`) through lib/log.
-6. [ ] setup: syslogd with init (as decision 1 says); a sample
-   `/etc/syslog.conf` in deploy/examples.
-7. [ ] Docs: `help syslog` (doc/syslog.txt), help for the new programs,
+1. [x] lib/log: severities, facilities, open/new/log/mask, the message
+   record, the line and RFC 5424/3164 forms, the fallback (files by the
+   same rules), perror.
+2. [x] lib/proc: `register`, `log`, `uncaptured`; the early-boot hold
+   (200), the inbox backlog limit (500), init's service messages; the
+   capture wrappers (write, printError, io.stdout, io.stderr), line
+   gathering, `<N>`, `service.<name>.log`.
+3. [x] lib/syslogd (the rules and the engine) and bin/syslogd: parsing,
+   routing, files, rotation, console, rate limit, `@host` RFC 5424 over
+   UDP (names looked up in a child process), `syslog.listen`.
+4. [x] bin/logger.
+5. [x] httpd, telnetd and lib/net (`N.syslog`) through the log.
+6. [x] setup: syslogd with init (decision 1). `help syslog` shows a
+   syslog.conf rather than a sample file in deploy/examples.
+7. [x] Docs: `help syslog` (doc/syslog.txt), help for the new programs,
    README, `help init` and `help service` on capture.
-8. [ ] Sims: syslog.conf selectors; routing and rotation; capture under the
-   fake lib/proc (print, printError, io.write, `<N>`, partial lines, a
-   console process not captured); rate limit and backlog; forwarding over
-   the sim network to a receiver that parses RFC 5424; a ccnix loghost.
-9. [ ] ccnix-mod: no code change; bump `ccnix/` and `mod_version` (patch)
-   for the ROM, then this repo's `mod/`.
+8. [x] Sims: sim/syslog.lua (lib/log, the rules, rotation, the engine,
+   logger, syslogd under a fake init); sim/proc.lua (register, hold,
+   capture, backlog); sim/net_tools.lua (httpd filing its requests;
+   syslogd forwarding to B and taking B's as a loghost).
+9. [x] ccnix-mod: no code change; `ccnix/` and `mod_version` (patch)
+   bumped for the ROM, then this repo's `mod/`.
 
 ### Phase 2: in game (the user validates)
 

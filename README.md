@@ -43,6 +43,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `bin/tcpdump.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `tcpdump` shows the frames on the wire, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
 | Telnet (`bin/telnet.lua`, `bin/telnetd.lua`, `lib/telnet.lua`) | Another computer's shell, or its console (the miner's screen), over the network, in real Telnet with ANSI, so any telnet client works too. See [Telnet](#telnet). |
 | Processes (`bin/init.lua`, `bin/ps.lua`, `bin/kill.lua`, `bin/service.lua`, `lib/proc.lua`) | `init` runs every program as a process (an ID, its own terminal and environment) and keeps services running in the background, on any computer or turtle. `ps` lists the processes, `kill` signals them, `service` starts, stops and sets up services. See [Processes and services](#processes-and-services). |
+| The system log (`bin/syslogd.lua`, `bin/logger.lua`, `lib/log.lua`, `lib/syslogd.lua`) | `syslogd` files what's logged in `/var/log` by `/etc/syslog.conf`'s rules, shows the worst on the console and forwards to a syslog server (RFC 5424 over UDP). Programs log through `lib/log` (C's `syslog(3)`), scripts with `logger`, and init logs what services print. See [The system log](#the-system-log). |
 | `pc/router.lua` | Runs on a computer with an interface on each of several networks (modems, or VLANs on one): forwards between them, and shows a live status screen. |
 | `pc/fileserver.lua` | Runs on a plain computer: every floppy in its disk drives (beside it or over wired modems) as one folder, `/jbod`, that grows as drives and disks are added; files too big for one floppy are split across several. The layer is `lib/jbod.lua`. |
 | `pc/diskclone.lua` | Runs on a plain computer: copies a directory onto every floppy a dispenser feeds into its disk drive, labels each one and ejects it. |
@@ -164,7 +165,7 @@ just those, with what they need and their help:
 | `fileserver` | its disk drives as one folder, `/jbod` |
 | `net` | the network: `ip`, `ping`, `traceroute`, `nc`, `host`, `tcpdump`, up at every boot |
 | `router` | the network, and `router` to route between networks: forwarding on, up at every boot |
-| `init` | [processes and services](#processes-and-services): `init` at boot, `ps`, `kill`, `service` |
+| `init` | [processes and services](#processes-and-services): `init` at boot, `ps`, `kill`, `service`; [the system log](#the-system-log): `syslogd` as a service, `logger` |
 | `telnet` | the [telnet](#telnet) client, and the network |
 | `telnetd` | the [telnet](#telnet) server as a service, with `init` and the network (then `set telnetd.password ...`) |
 
@@ -1311,7 +1312,8 @@ on `httpd.port` (80). A folder answers with its `index.html` or
 `index.htm` (`httpd.index` names others), else a listing with links;
 `httpd -L` or `set httpd.listing false` turns listings off (a folder
 without an index is then 403). GET and HEAD, nothing outside the root,
-each request logged. `setup httpd` makes it a service started at boot.
+each request logged (on its screen and in [the system log](#the-system-log),
+`/var/log/httpd.log`). `setup httpd` makes it a service started at boot.
 Programs use `lib/httpd.lua`: a chain of handlers, `srv:use(fn)`, each
 taking a request and returning a status, headers and body (or nothing,
 to pass it on), with `httpd.static{root=...}` the files.
@@ -1360,8 +1362,9 @@ network as typed, as with any telnet); `telnetd.open` (`true`: no
 password); `telnetd.attach` (`console`, or unset for a shell each);
 `telnetd.port` (23). telnetd needs [init](#processes-and-services), which
 runs the shells, and the network up. `setup telnetd` sets it all up as a
-service started at boot; then `set telnetd.password ...`. `service status
-telnetd` shows who has connected.
+service started at boot; then `set telnetd.password ...`. Who connects,
+logs in or gives a wrong password goes to [the system log](#the-system-log),
+`/var/log/telnetd.log`; `service status telnetd` shows the last of it.
 
 ## Processes and services
 
@@ -1397,16 +1400,64 @@ runs everything:
   (back to 1 s once it has run for 30 s). A service is three settings:
   `service.<name>.cmd`, `service.<name>.enabled` (start at boot) and
   `service.<name>.restart` (`always`, or `no`).
+- **The log:** what a service prints is logged too, a line each under its
+  name (`printError`'s at err), and so is each service starting, ending
+  and failing; `service.<name>.log false` leaves one out. See
+  [The system log](#the-system-log).
 - **Programs** reach it through `_G.proc`: `proc.spawn{cmd = "..."}`,
   `proc.kill(pid)`, `proc.list()`, `proc.self()`, `proc.wait(pid)`,
   `proc.inject(pid, event, ...)` (an event for one process alone),
-  `proc.term(pid)` (its terminal: `getLine` reads it back).
+  `proc.term(pid)` (its terminal: `getLine` reads it back), `proc.log(rec)`
+  (a message for syslogd).
 
 ccsh's `&` jobs belong to the shell: they end with it. A service is
 the way to keep something running. Under `init`, ccsh numbers its jobs
 with process IDs no process will get, and its `kill` passes any other
 number on to `init`. As in CraftOS, a program that computes for a long
 time without waiting for an event holds everything up meanwhile.
+
+## The system log
+
+```
+syslogd                                  the daemon (a service: setup init sets it up)
+logger [-is] [-p fac.sev] [-t tag] msg   log a message; with no message, each line of input
+tail /var/log/messages                   read it
+```
+
+ccnix keeps a system log the Unix way. Programs log through `lib/log`, C's
+`syslog(3)`: `require("log").open("myapp", "local0")`, then `log.info("on
+port %d", 80)`, `log.err(...)`, `log.mask("info")`. Shell scripts use
+`logger`, and [init](#processes-and-services) logs each line a service
+prints (daemon.info, or err from `printError`; a line starting `<N>` at
+severity N) and each service starting, ending and failing. lib/net's
+notes (dropped packets, no ARP answer) go in as kern. All of it is handed
+to `syslogd`, a service, in memory; while it isn't running init keeps the
+last 200, and without init `lib/log` files messages itself.
+
+`syslogd` routes each message by `/etc/syslog.conf`, with BSD's selector
+syntax (`facility.severity`, `.=`, `.!`, `.none`, `!prog` blocks). Without
+that file:
+
+| Rule | Where |
+|---|---|
+| `*.info;auth,authpriv.none;local6,local7.none` | `/var/log/messages` |
+| `auth,authpriv.*` | `/var/log/auth.log` |
+| `local6.*` | `/var/log/telnetd.log` (telnetd's facility, `telnetd.facility`) |
+| `local7.*` | `/var/log/httpd.log` (httpd's, `httpd.facility`) |
+| `*.crit` | the console |
+
+A line reads `2026-11-03T14:02:11Z base httpd[7]: 10.0.1.5 "GET /" 200
+512`: the time in UTC, the computer's label, the program and its process.
+A file past `syslog.maxSize` (32768 bytes) is moved to `<name>.1`
+(`syslog.keep` old ones) and started again. At most `syslog.burst` (100)
+messages from one program in 10 s are taken; the rest are counted.
+
+An `@host` or `@host:port` action forwards to a syslog server as RFC 5424
+over UDP 514, so a real one (rsyslog's `imudp`, syslog-ng) can collect
+every computer's log through the gateway. `syslog.listen true` makes a
+ccnix computer a loghost, taking RFC 5424 or RFC 3164 from others on UDP
+`syslog.port` (514). `help syslog` has the rest; the design is
+[ADR-0004](doc/adr/0004-syslog.md).
 
 ## fileserver
 

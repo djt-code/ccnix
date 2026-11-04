@@ -1,0 +1,5 @@
+logger: put messages in the system log (POSIX logger, with BSD's options)
+
+  logger [-is] [-p priority] [-t tag] [message...]
+
+Logs the message (its words, spaces between), or each line of standard input when there are none: `backup | logger -t backup`.  -p is facility.severity ("local3.err") or a severity alone (user's); the default is user.notice.  -t is the tag the message is logged under (logger, or $USER when it's set); -i adds this process's ID; -s also prints it on standard error.  syslogd (`help syslog`) files it as its rules say; without init it goes to the log files directly.

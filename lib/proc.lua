@@ -21,8 +21,22 @@
 -- is started again after 1 s, 2 s, 4 s... (up to a minute; back to 1 s
 -- once it has run 30 s).
 --
+-- The system log (`help syslog`): proc.log(rec) takes a message (lib/log's
+-- record) for syslogd, the process that has called proc.register("syslog").
+-- It's handed over in memory (the inbox, not CC's event queue) as a
+-- "syslog" event; while no syslogd runs, the last 200 wait here, and past
+-- 500 events waiting in the inbox new ones are dropped (and counted).
+-- K.capture(_G) (init does it) logs what each service prints, as journald
+-- takes a unit's output: print, write and io.write at info, printError
+-- and io.stderr at err, a line each, under the service's name (facility
+-- daemon); a line starting "<N>" (0-7) is logged at severity N.  Not the
+-- console's processes, a service's children, syslogd itself, or a
+-- service with service.<name>.log false.  Init logs services starting,
+-- ending and failing too.
+--
 -- Programs reach it through _G.proc (init sets it): proc.spawn, kill,
--- list, self, console, term, inject, wait, and the service functions.
+-- list, self, console, term, inject, wait, log, register, uncaptured
+-- (fn(...) with capture off), and the service functions.
 -- The module's P.serviceDef, serviceNames and serviceStatus read the
 -- settings' services without init (service.lua).
 
@@ -134,7 +148,15 @@ function P.new(o)
         inbox = {},             -- events for one process: { pid, ev }
         nextPid = 2, console = nil, current = nil, started = now(), cpu = 0,
         env = o.env and copy(o.env) or {},
+        syslog = nil,           -- syslogd's process ID
+        held = {},              -- messages waiting for it
+        logDropped = 0,         -- messages dropped since the last one handed over
     }
+    local hostname = o.hostname or function()
+        local label = osT.getComputerLabel and osT.getComputerLabel()
+        if label and label ~= "" then return label end
+        return tostring(osT.getComputerID and osT.getComputerID() or 0)
+    end
 
     --------------------------------------------------------------------
     -- Terminals
@@ -285,6 +307,7 @@ function P.new(o)
             cmd = spec.cmd or spec.name or "shell",
             term = spec.term or K.newTerm(), tty = spec.tty or "?", env = env, envApi = envApi(env),
             started = now(), cpu = 0, service = spec.service, onExit = spec.onExit,
+            capture = spec.capture,
         }
         if p.name:sub(-4) == ".lua" then p.name = p.name:sub(1, -5) end
         K.procs[pid] = p
@@ -300,6 +323,8 @@ function P.new(o)
         for i, q in ipairs(K.list) do
             if q == p then table.remove(K.list, i); break end
         end
+        if p.logbuf and p.logbuf ~= "" then K.logLine(p, p.logbuf); p.logbuf = "" end
+        if K.syslog == p.pid then K.syslog = nil end
         K.exited[p.pid] = { ok = ok, err = p.err, name = p.name, at = now() }
         local n = 0
         for pid in pairs(K.exited) do
@@ -337,6 +362,145 @@ function P.new(o)
         return true
     end
 
+    --------------------------------------------------------------------
+    -- The system log
+    --------------------------------------------------------------------
+    local HOLD, BACKLOG, LINE = 200, 500, 1024
+
+    -- Hand a message (lib/log's record; time and host filled in if not
+    -- there) to syslogd, or keep it until one runs.  false if dropped.
+    function K.log(rec)
+        rec.time = rec.time or now()
+        rec.host = rec.host or hostname()
+        local pid = K.syslog
+        if not (pid and K.procs[pid]) then
+            K.held[#K.held + 1] = rec
+            if #K.held > HOLD then table.remove(K.held, 1); K.logDropped = K.logDropped + 1 end
+            return true
+        end
+        if #K.inbox >= BACKLOG then K.logDropped = K.logDropped + 1; return false end
+        if K.logDropped > 0 then
+            local n = K.logDropped
+            K.logDropped = 0
+            K.inbox[#K.inbox + 1] = { pid = pid, ev = table.pack("syslog", { fac = 5, sev = 4, time = rec.time,
+                host = rec.host, app = "init", pid = 1, msg = n .. " message" .. (n == 1 and "" or "s") .. " dropped" }) }
+        end
+        K.inbox[#K.inbox + 1] = { pid = pid, ev = table.pack("syslog", rec) }
+        -- (handed on when the running process yields; from init's own
+        -- loop, say lib/net's hook, an event wakes it)
+        if not K.current then osT.queueEvent("syslog_wake") end
+        return true
+    end
+
+    -- init's own message about the services (facility daemon).
+    local function say(sev, msg)
+        K.log({ fac = 3, sev = sev, app = "init", pid = 1, msg = msg })
+    end
+    K.say = say
+
+    -- The calling process is syslogd, for name "syslog": what waited is
+    -- handed to it.  false and why if another one is running.
+    function K.register(name)
+        if name ~= "syslog" then return false, "nothing registers as " .. tostring(name) end
+        local p = K.current
+        if not p then return false, "not a process" end
+        if K.syslog and K.syslog ~= p.pid and K.procs[K.syslog] then
+            return false, "syslogd is running already (process " .. K.syslog .. ")"
+        end
+        K.syslog, p.capture = p.pid, false
+        local held = K.held
+        K.held = {}
+        for _, rec in ipairs(held) do K.log(rec) end
+        return true
+    end
+
+    -- A line process p printed, to the log.
+    function K.logLine(p, line)
+        local err = p.logerr
+        p.logerr = nil
+        line = line:gsub("%s+$", "")
+        if not line:find("%S") then return end
+        local sev = err and 3 or 6
+        local n, rest = line:match("^<([0-7])>(.*)$")
+        if n then sev, line = tonumber(n), rest end
+        K.log({ fac = 3, sev = sev, app = p.service or p.name, pid = p.pid, msg = line })
+    end
+
+    local function capturing()
+        local p = K.current
+        if p and p.capture and (p.quiet or 0) == 0 and p.pid ~= K.syslog then return p end
+    end
+
+    local function gather(p, s)
+        if (p.stderr or 0) > 0 then p.logerr = true end
+        local buf = (p.logbuf or "") .. tostring(s)
+        while true do
+            local line, rest = buf:match("^([^\n]*)\n(.*)$")
+            if not line then break end
+            buf = rest
+            K.logLine(p, line)
+            if (p.stderr or 0) > 0 and buf ~= "" then p.logerr = true end
+        end
+        if #buf >= LINE then K.logLine(p, buf); buf = "" end
+        p.logbuf = buf
+    end
+
+    -- fn(...) with the calling process's output not captured (lib/log's
+    -- own copy on the screen).
+    function K.uncaptured(fn, ...)
+        local p = K.current
+        if p then p.quiet = (p.quiet or 0) + 1 end
+        local r = table.pack(pcall(fn, ...))
+        if p then p.quiet = p.quiet - 1 end
+        if not r[1] then error(r[2], 0) end
+        return table.unpack(r, 2, r.n)
+    end
+
+    -- Capture what services print: G's write and printError, and its io's
+    -- stdout and stderr, wrapped.  Returns a function that undoes it.
+    function K.capture(G)
+        local rawWrite, rawPrintError = G.write, G.printError
+        local undo = {}
+        G.write = function(s)
+            local n = rawWrite(s)
+            local p = capturing()
+            if p then gather(p, s) end
+            return n
+        end
+        local function asError(fn)
+            return function(...)
+                local p = K.current
+                if p then p.stderr = (p.stderr or 0) + 1 end
+                local r = table.pack(pcall(fn, ...))
+                if p then p.stderr = p.stderr - 1 end
+                if not r[1] then error(r[2], 0) end
+                return table.unpack(r, 2, r.n)
+            end
+        end
+        G.printError = asError(rawPrintError)
+        undo[#undo + 1] = function() G.write, G.printError = rawWrite, rawPrintError end
+        -- CraftOS's io.stdout keeps the write it was made with, not
+        -- _G.write's later self; io.stderr calls _G.write each time
+        local io_ = G.io
+        local out = io_ and type(io_.stdout) == "table" and rawget(io_.stdout, "_handle")
+        if type(out) == "table" and out.write == rawWrite then
+            out.write = function(s)
+                local n = rawWrite(s)
+                local p = capturing()
+                if p then gather(p, s) end
+                return n
+            end
+            undo[#undo + 1] = function() out.write = rawWrite end
+        end
+        local errH = io_ and type(io_.stderr) == "table" and rawget(io_.stderr, "_handle")
+        if type(errH) == "table" and type(errH.write) == "function" then
+            local w = errH.write
+            errH.write = asError(w)
+            undo[#undo + 1] = function() errH.write = w end
+        end
+        return function() for i = #undo, 1, -1 do undo[i]() end end
+    end
+
     local function info(p)
         return { pid = p.pid, ppid = p.ppid, name = p.name, cmd = p.cmd, tty = p.tty, service = p.service,
                  state = p == K.current and "R" or p.state == "new" and "N" or "S",
@@ -363,14 +527,18 @@ function P.new(o)
     local function exited(svc, p)
         svc.pid, svc.last = nil, p.ok and "ended" or ("failed: " .. tostring(p.err))
         local d = def(svc.name)
+        local what = p.ok and svc.name .. " ended" or svc.name .. " failed: " .. tostring(p.err)
         if svc.stopping or not d or d.restart == "no" then
+            if svc.stopping then say(6, "stopped " .. svc.name) else say(p.ok and 5 or 3, what) end
             svc.state, svc.stopping = svc.stopping and "stopped" or "exited", nil
             return
         end
         if now() - svc.since >= 30000 then svc.fails = 0 end
         svc.fails, svc.restarts = svc.fails + 1, svc.restarts + 1
         svc.state = "restarting"
-        K.after(math.min(60, 2 ^ (svc.fails - 1)), function()
+        local wait = math.floor(math.min(60, 2 ^ (svc.fails - 1)))
+        say(p.ok and 5 or 3, what .. "; again in " .. wait .. " s")
+        K.after(wait, function()
             if svc.state == "restarting" then launch(svc) end
         end)
     end
@@ -380,7 +548,9 @@ function P.new(o)
         if not d then svc.state = "exited"; svc.last = "no service." .. svc.name .. ".cmd"; return end
         svc.term = K.newTerm()
         svc.state, svc.since = "running", now()
+        say(6, "started " .. svc.name .. " (process " .. K.nextPid .. ")")
         svc.pid = K.spawn({ cmd = d.cmd, service = svc.name, term = svc.term, env = K.env,
+            capture = settingsT.get("service." .. svc.name .. ".log") ~= false,
             onExit = function(p) exited(svc, p) end })
     end
 
@@ -403,7 +573,7 @@ function P.new(o)
         if not svc or (svc.state ~= "running" and svc.state ~= "restarting") then
             return false, name .. " isn't running"
         end
-        if svc.state == "restarting" then svc.state = "stopped"; return true end
+        if svc.state == "restarting" then svc.state = "stopped"; say(6, "stopped " .. name); return true end
         svc.stopping = true
         local pid = svc.pid
         K.kill(pid, "TERM")
@@ -439,6 +609,9 @@ function P.new(o)
             return p and p.term
         end,
         newTerm = K.newTerm,
+        log = K.log,
+        register = K.register,
+        uncaptured = K.uncaptured,
         -- Wait for process pid to end: true, or false and why it failed;
         -- nil after timeout seconds.
         wait = function(pid, timeout)

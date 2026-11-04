@@ -38,6 +38,7 @@ Anywhere (bin/):
   init: processes and services: the first process
   ip: set up and look at the network (lib/net.lua)
   kill: signal processes
+  logger: put messages in the system log (POSIX logger, with BSD's options)
   ls: list directory contents (POSIX ls, with the GNU options in everyday use)
   more: show files a screenful at a time (POSIX more, a subset)
   nc: netcat: TCP connections and UDP datagrams over the network stack
@@ -51,6 +52,7 @@ Anywhere (bin/):
   sleep: wait a while (POSIX sleep)
   sort: sort, merge or check lines of text (POSIX sort)
   strings: find printable strings in files (POSIX strings)
+  syslogd: the system log daemon: files, shows and forwards what's logged
   tail: copy the last part of a file to standard output (POSIX tail)
   tcpdump: watch the frames on the network (lib/net.lua)
   tee: copy standard input to standard output and to files (POSIX tee)
@@ -83,5 +85,6 @@ Computers (pc/):
 Topics:
   httpd-pages: Lua pages on the web server: forms, routes, templates, cookies
   network: setting up a network lab (3 computers, 2 networks, a router)
+  syslog: the system log: syslogd, logger, lib/log, /etc/syslog.conf, forwarding
 
-Settings: `set` lists them, with what each means (mine.*, farm.*, mow.*, net.*, telnetd.*, httpd.*, service.*, ccnix.autostart, ccsh.login, init.boot).
+Settings: `set` lists them, with what each means (mine.*, farm.*, mow.*, net.*, telnetd.*, httpd.*, syslog.*, service.*, ccnix.autostart, ccsh.login, init.boot).

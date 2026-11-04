@@ -9,7 +9,8 @@
 -- with no index is then refused (403).  GET and HEAD; nothing above the
 -- root is served (a path with .. is refused).  The Content-Type goes by
 -- the file's extension.  Each request is logged as it's answered: who,
--- what, the status and the body's size.
+-- what, the status and the body's size; on this screen and in the system
+-- log, /var/log/httpd.log (`help syslog`).
 --
 -- Lua pages: the scripts in the script root (httpd.cgi, the folder cgi in
 -- the document root) answer the URLs under it, /cgi/...: /cgi/hello.lua or
@@ -32,6 +33,8 @@
 --   httpd.cgi       the script root: a folder in the document root, or
 --                   a path (cgi); "" for no Lua pages
 --   httpd.debug     true: a failed script's traceback on its error page
+--   httpd.facility  the system log's facility it logs as (local7: the
+--                   rules file that in /var/log/httpd.log; `help syslog`)
 --
 -- It needs the network (`ip up`).  To keep it running in the background,
 -- with init:
@@ -60,7 +63,12 @@ for name in tostring(settings.get("httpd.index") or "index.html index.htm"):gmat
 if not net.stack() then cu.fail("the network isn't up (`ip up`)"); return cu.exit() end
 if not fs.isDir(root) then cu.fail("no folder " .. root .. ": make it, or set httpd.root"); return cu.exit() end
 
-local function log(s) print(os.date("%H:%M ") .. s) end
+-- each request, and what failed, to the system log (and this screen)
+local syslog = require("log").new("httpd", settings.get("httpd.facility") or "local7", { perror = true })
+local function log(s)
+    local e = s:match("^error: (.*)$")
+    if e then syslog.err(e) else syslog.info(s) end
+end
 local srv = httpd.new({ port = port, log = log })
 -- the script root: in the document root, it answers at its own path there;
 -- elsewhere, at /<its name>

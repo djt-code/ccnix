@@ -14,7 +14,8 @@
 --
 -- Settings: telnetd.password (what to type at "Password:"); telnetd.open
 -- (true: no password at all); telnetd.attach ("console", or "" for a
--- shell each); telnetd.port (23).  It won't start without a password
+-- shell each); telnetd.port (23); telnetd.facility (local6: the system
+-- log's facility; the rules file it in /var/log/telnetd.log).  It won't start without a password
 -- unless telnetd.open is on.  The password crosses the network as typed,
 -- as with any telnet.
 --
@@ -23,8 +24,9 @@
 --   service add telnetd telnetd
 --   service enable telnetd          (at boot)
 --   service start telnetd
--- deploy/setup telnetd does all that.  `service status telnetd` shows who
--- has connected.
+-- deploy/setup telnetd does all that.  Who connects, logs in or gives a
+-- wrong password is logged (`help syslog`): /var/log/telnetd.log, and
+-- `service status telnetd` shows the last of it.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
@@ -53,7 +55,9 @@ local sessions = {}             -- conn id -> session
 local kills = {}                -- timer -> a session's shell to KILL, if Ctrl+T didn't end it
 local ptys, timer = 0, nil
 
-local function log(s) print(os.date("%H:%M ") .. s) end
+-- who comes and goes, to the system log (and this screen)
+local syslog = require("log").new("telnetd", settings.get("telnetd.facility") or "local6", { perror = true })
+local function log(s, sev) syslog.log(sev or "info", s) end
 
 local function send(s, data) s.conn:send(data) end
 
@@ -117,11 +121,11 @@ local function typed(s, data)
         elseif ch == "\r" or ch == "\n" then
             if s.typed == password then
                 send(s, "\r\n")
-                log(s.who .. " logged in")
+                log(s.who .. " logged in", "notice")
                 startSession(s)
             else
                 s.tries = s.tries + 1
-                log(s.who .. " gave a wrong password")
+                log(s.who .. " gave a wrong password", "warning")
                 if s.tries >= 3 then send(s, "\r\nLogin incorrect\r\n"); return finish(s, "turned away") end
                 send(s, "\r\nLogin incorrect\r\nPassword: ")
                 s.typed = ""

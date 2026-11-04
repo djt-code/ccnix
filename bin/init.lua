@@ -18,6 +18,11 @@
 -- computer down, as leaving CraftOS's own does.  Run by hand, init skips
 -- the autostart.
 --
+-- What a service prints is logged too, a line each under its name
+-- (printError's at err), and so is each service starting, ending and
+-- failing: syslogd, a service of its own, files it (`help syslog`).
+-- service.<name>.log false leaves a service's output out.
+--
 -- The keyboard and mouse go to the console; every other event to every
 -- process.  A program that computes for a long time without waiting
 -- holds everything up, as it does in CraftOS.
@@ -51,6 +56,9 @@ end
 
 local K = require("proc").new({ native = term.current(), shell = shell, multishell = multishell })
 _G.proc = K.api
+-- what services print, to the system log (syslogd: `help syslog`)
+local uncapture = K.capture(_G)
+K.say(5, "init started")
 
 -- the console: each of these in turn
 local chain = {}
@@ -76,5 +84,6 @@ end
 K.startServices()
 nextConsole()
 local ok, err = pcall(K.run)
+uncapture()
 _G.proc = nil
 if not ok then error(err, 0) end

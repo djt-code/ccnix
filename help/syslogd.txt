@@ -1,0 +1,31 @@
+syslogd: the system log daemon: files, shows and forwards what's logged
+
+  syslogd
+      run (as a service: setup init does it)
+
+Programs log through lib/log (C's syslog(3)), shell scripts with `logger`, and init logs what each service prints; all of it comes here, and goes where /etc/syslog.conf says: a log file, the console, or another syslog server (forwarded as RFC 5424 over UDP).  `help syslog` has the whole of it.  Without /etc/syslog.conf the rules are:
+  *.info;auth,authpriv.none;local6,local7.none
+      /var/log/messages
+  auth,authpriv.*
+      /var/log/auth.log
+  local6.*
+      /var/log/telnetd.log
+  local7.*
+      /var/log/httpd.log
+  *.crit
+      /dev/console
+(telnetd logs as local6 and httpd as local7 unless telnetd.facility or httpd.facility say otherwise.)  The rules are read when it starts: `service restart syslogd` after changing them.  What's logged while it isn't running waits in init (the last 200).
+
+Settings:
+  syslog.maxSize
+      a log file past this many bytes is moved to <name>.1 and started again (32768)
+  syslog.keep
+      how many old files to keep: .1, .2... (1; 0: none)
+  syslog.burst
+      at most this many messages from one program in 10 s; past that they're dropped, and counted (100)
+  syslog.listen
+      true: take messages from other computers on UDP (RFC 5424 or RFC 3164), as a loghost (false)
+  syslog.port
+      the port it listens on (514)
+
+It needs init (`help init`).  Forwarding and listening need the network (`ip up`); a name in an @host rule is looked up (net.hosts, DNS) aside, and messages wait for it (the last 50).

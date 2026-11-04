@@ -234,3 +234,122 @@ fakeOs.queueEvent("go")
 drain()
 check("proc.wait: true once it has ended", result and result[1] == true)
 check("after: no environment left on os, the terminal as it was", rawget(fakeOs, "getenv") == nil and current.name == "native")
+
+-- 7. the system log: held until syslogd registers, then handed over in
+-- memory; what services print captured (print, write, printError,
+-- io.write, io.stderr, "<N>"), not the console's or syslogd's own
+local function msgs(list, app)
+    local t = {}
+    for _, r in ipairs(list) do
+        if not app or r.app == app then t[#t + 1] = r.sev .. ":" .. tostring(r.app) .. ":" .. r.msg end
+    end
+    return table.concat(t, " | ")
+end
+local early = #K.held
+check("before syslogd: init's messages about services wait in init", early > 0 and msgs(K.held, "init"):find("6:init:started web"),
+    msgs(K.held))
+local got, G = {}, nil
+local sysd = K.spawn({ fn = function()
+    local ok = K.api.register("syslog")
+    got.ok = ok
+    while true do
+        local ev = table.pack(fakeOs.pullEventRaw())
+        if ev[1] == "syslog" then got[#got + 1] = ev[2] end
+        if ev[1] == "say" then G.print("syslogd's own line") end
+    end
+end, name = "syslogd", service = "syslogd", capture = true })
+drain()
+check("register: what waited is handed over, as syslog events", got.ok and #got == early and #K.held == 0, #got .. " of " .. early)
+local again2, why3 = K.api.register("syslog")
+check("register from outside a process: refused", again2 == false and why3 == "not a process")
+
+-- a fake BIOS's printing globals, wrapped as init wraps _G's
+local screen = {}
+local function biosWrite(s) screen[#screen + 1] = tostring(s); return 1 end
+G = { io = {} }
+G.write = biosWrite
+G.print = function(...)
+    local parts = table.pack(...)
+    for i = 1, parts.n do G.write(tostring(parts[i])); if i < parts.n then G.write("\t") end end
+    G.write("\n")
+end
+G.printError = function(...) G.print(...) end
+G.io.stdout = { _handle = { write = biosWrite } }
+G.io.stderr = { _handle = { write = function(s) G.write(s) end } }
+G.io.write = function(...) for _, s in ipairs({ ... }) do G.io.stdout._handle.write(s) end end
+local undo = K.capture(G)
+got = {}
+COMMANDS.chatty = function()
+    G.print("hello", "there")
+    G.write("half a ")
+    G.write("line\n")
+    G.printError("it broke")
+    G.io.write("from io.write\n")
+    G.io.stderr._handle.write("to stderr\n")
+    G.print("<4>a warning")
+    G.print("   ")
+    K.api.uncaptured(G.print, "not this one")
+    G.write("no newline at the end")
+    fakeOs.pullEvent("go")
+end
+STORE["service.chatty.cmd"] = "chatty"
+K.serviceStart("chatty")
+drain()
+local cpid = K.services.chatty.pid
+check("a service's prints: a line each, under its name and process; err from printError and io.stderr; <N>; blanks and uncaptured left out",
+    msgs(got, "chatty") == "6:chatty:hello\tthere | 6:chatty:half a line | 3:chatty:it broke | 6:chatty:from io.write"
+        .. " | 3:chatty:to stderr | 4:chatty:a warning" and got[#got].pid == cpid and got[#got].fac == 3,
+    msgs(got))
+check("... still drawn on its screen as before", table.concat(screen):find("hello\tthere\nhalf a line\nit broke\n", 1, true)
+    and table.concat(screen):find("not this one", 1, true))
+got = {}
+fakeOs.queueEvent("go")
+drain()
+check("a partial line when it ends; init says it ended",
+    msgs(got) == "6:chatty:no newline at the end | 5:init:chatty ended; again in 1 s", msgs(got))
+K.serviceStop("chatty"); pass(1); drain()
+
+got = {}
+local conLog = K.spawn({ fn = function() G.print("typed at the console") end, name = "sh", tty = "con" })
+drain()
+fakeOs.queueEvent("say")
+drain()
+check("not captured: a process that isn't a service, nor syslogd's own prints", #got == 0, msgs(got))
+STORE["service.quiet.cmd"] = "quiet"
+STORE["service.quiet.log"] = false
+COMMANDS.quiet = function() G.print("shh"); fakeOs.pullEvent("never") end
+K.serviceStart("quiet")
+drain()
+check("service.<name>.log false: not captured", msgs(got, "quiet") == "" and msgs(got, "init"):find("started quiet"), msgs(got))
+local big = {}
+COMMANDS.long = function() G.write(("x"):rep(1500)); fakeOs.pullEvent("never") end
+STORE["service.long.cmd"] = "long"
+K.serviceStart("long")
+drain()
+check("a line past 1 KiB without a newline: logged then", msgs(got, "long") == "6:long:" .. ("x"):rep(1500), #msgs(got, "long"))
+
+-- the backlog: from inside one process, past 500 waiting, dropped and counted
+got = {}
+COMMANDS.flood = function()
+    for i = 1, 600 do K.api.log({ fac = 1, sev = 6, app = "flood", msg = "n" .. i }) end
+    fakeOs.pullEvent("go2")
+    K.api.log({ fac = 1, sev = 6, app = "flood", msg = "after" })
+    fakeOs.pullEvent("never")
+end
+STORE["service.flood.cmd"] = "flood"
+K.serviceStart("flood")
+drain()
+local n = #got
+fakeOs.queueEvent("go2")
+drain()
+check("past 500 in the inbox: dropped, then counted once it's handed on",
+    n <= 500 and n > 400 and got[#got - 1].msg:find("^%d+ messages dropped$") and got[#got].msg == "after",
+    n .. " " .. tostring(got[#got - 1] and got[#got - 1].msg))
+
+-- syslogd gone: held again (the last 200)
+K.kill(sysd, 9)
+for i = 1, 250 do K.log({ fac = 1, sev = 6, app = "x", msg = "h" .. i }) end
+check("syslogd gone: the last 200 held", #K.held == 200 and K.held[1].msg == "h51" and K.syslog == nil, #K.held)
+check("a held message has its time and host filled in", K.held[1].time == CLOCK and K.held[1].host == "0", tostring(K.held[1].host))
+undo()
+check("capture undone: the globals as they were", G.write == biosWrite and G.io.stdout._handle.write == biosWrite)

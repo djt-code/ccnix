@@ -14,7 +14,8 @@
 --   router                             the network, and routing between
 --                                      networks: forwarding on, up at boot
 --   init                               processes and services: init at
---                                      boot, ps, kill, service
+--                                      boot, ps, kill, service; the system
+--                                      log (syslogd as a service, logger)
 --   telnet                             the telnet client, and the network
 --   telnetd                            the telnet server as a service, with
 --                                      init and the network (then set
@@ -67,7 +68,8 @@ local DIR = "/ccnix"
 local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lua" }
 local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/tcpdump.lua", "bin/curl.lua", "lib/net.lua",
               "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
-local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/cu.lua" }
+local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/cu.lua",
+               "bin/syslogd.lua", "bin/logger.lua", "lib/log.lua", "lib/syslogd.lua", "help/syslog.txt" }
 local APPS = {
     mine = { "turtle/mine.lua", TURTLE },
     farm = { "turtle/farm.lua", TURTLE },
@@ -169,11 +171,18 @@ local function die(msg)
     error("", 0)
 end
 
--- telnetd, httpd: services init starts at every boot (httpd's root made,
--- with a first page, if it isn't there; --example: the guestbook in its
--- script root).  from(path): a repo file's path on this computer.
+-- syslogd, telnetd, httpd: services init starts at every boot (syslogd
+-- with init, unless it's set up already; httpd's root made, with a first
+-- page, if it isn't there; --example: the guestbook in its script root).
+-- from(path): a repo file's path on this computer.
 local function telnetdService(from)
     for _, a in ipairs(apps) do
+        if (a == "init" or a == "telnetd" or a == "httpd") and not settings.get("service.syslogd.cmd") then
+            settings.set("service.syslogd.cmd", "syslogd")
+            settings.set("service.syslogd.enabled", true)
+            settings.save()
+            print("syslogd keeps the system log (/var/log): `help syslog`")
+        end
         if a == "telnetd" or a == "httpd" then
             settings.set("service." .. a .. ".cmd", a)
             settings.set("service." .. a .. ".enabled", true)
