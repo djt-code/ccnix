@@ -399,7 +399,7 @@ in ccnix-mod. Pointers bumped after every release in either repo, ccnix-mod's
 
 ### Phase 0: the safety net (no decision needed): the next patch of each
 
-1. [ ] ccnix-mod: `seen()` after the standby check; a test where the standby block hears the same payload object first.
+1. [x] ccnix-mod: `seen()` after the standby check; a test where the standby block hears the same payload object first. (Done in ccnix-mod 0.15.11, 2026-11-05: found in game, spares on a block's cable broke its traffic.)
 2. [ ] ccnix: lib/net's hook re-arms a tick whose timer was dropped (the clock re-checked on each event); a sim with a full queue checking ARP retries and TCP retransmission.
 3. [ ] `sim/lib/networld.lua` lifted from the copies in `sim/net_stack.lua`, `net_tools.lua` and `net_dns.lua`, with a modem model (`open()`, the 128 limit, a computer's modems hearing each other, own sends ignored, remote peripherals and `peripheral_detach`) and a 256-event queue that drops timers too. Existing sims unchanged.
 
