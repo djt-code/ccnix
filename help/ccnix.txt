@@ -3,7 +3,7 @@ ccnix: this computer's ccnix: where it comes from, and updates
   ccnix
       what the ROM has (its version and commit), and this computer's updates over it, if any
   ccnix version
-      the version in use (semantic: major.minor.patch)
+      the version in use (semantic: major.minor.patch), and the one a reboot brings if an update or reset changed it
   ccnix update
       the latest from the ROM's repo into /ccnix with git, keeping only the files that differ from the ROM's; reboot to use them (all of them: until then, programs already found keep the ROM's)
   ccnix reset

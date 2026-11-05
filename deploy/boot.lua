@@ -81,7 +81,16 @@ local lib = {}
 for _, d in ipairs({ "lib", "turtle" }) do               -- (turtlelib is in turtle/)
     for _, r in ipairs(roots) do lib[#lib + 1] = r .. "/" .. d .. "/?.lua;" end
 end
-_G.ccnix = { find = find, lib = table.concat(lib) }
+-- the version this boot uses (`ccnix version` tells it from what the next would)
+local version
+local vf = find("deploy/version")
+if vf then
+    local h = fs.open(vf, "r")
+    version = h and (h.readAll() or ""):match("^%s*(%S+)")
+    if h then h.close() end
+end
+_G.ccnix = { find = find, lib = table.concat(lib), version = version or "unversioned",
+             updates = roots[1] == OVER and romMode }   -- (whether this boot took the updates)
 
 if settings.get("craftix.login") ~= nil then            -- (the setting from when ccsh was Craftix)
     if settings.get("ccsh.login") == nil then settings.set("ccsh.login", settings.get("craftix.login")) end

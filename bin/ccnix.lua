@@ -2,7 +2,8 @@
 --
 --   ccnix            what the ROM has (its version and commit), and this
 --                    computer's updates over it, if any
---   ccnix version    the version in use (semantic: major.minor.patch)
+--   ccnix version    the version in use (semantic: major.minor.patch), and
+--                    the one a reboot brings if an update or reset changed it
 --   ccnix update     the latest from the ROM's repo into /ccnix with git,
 --                    keeping only the files that differ from the ROM's;
 --                    reboot to use them (all of them: until then, programs
@@ -84,16 +85,31 @@ if cmd == nil or cmd == "status" then
             versionIn(OVER .. "/deploy/version") or "unversioned", (state.commit or "?"):sub(1, 7), count(state.files)))
     else
         local inUse = manifest and state.lowerCommit == manifest.commit
+        local booted = not (ccnix and ccnix.updates == false)   -- (made since this boot: not yet)
         -- (a version file the same as the ROM's isn't kept)
         print(string.format("Updates: ccnix %s, %d files at %s, %s", versionIn(OVER .. "/deploy/version") or romVersion,
-            count(state.files), (state.commit or "?"):sub(1, 7), inUse and "in use" or "made for another ROM: ccnix update"))
+            count(state.files), (state.commit or "?"):sub(1, 7),
+            not inUse and "made for another ROM: ccnix update" or booted and "in use" or "in use after a reboot"))
+    end
+    if manifest and not state and ccnix and ccnix.updates then
+        print("  (the updates dropped stay in use until a reboot)")
     end
     if fs.exists("/cc-turtles/.gitlite") then
         print("An install from before ccnix runs this computer (/cc-turtles); deploy/setup moves it over.")
     end
 
 elseif cmd == "version" then
-    print("ccnix " .. (versionIn(find("deploy/version")) or "unversioned"))
+    -- in use: what this boot read; next: the updates if they're for this
+    -- ROM (their version, or the ROM's if they kept none), else the ROM's
+    local now = (ccnix and ccnix.version) or versionIn(find("deploy/version")) or "unversioned"
+    local nextV
+    if manifest then
+        local current = state and (state.lower == nil or state.lowerCommit == manifest.commit)
+        nextV = current and versionIn(OVER .. "/deploy/version") or romVersion
+    else
+        nextV = versionIn(find("deploy/version")) or "unversioned"
+    end
+    print("ccnix " .. now .. (nextV ~= now and (" (" .. nextV .. " after a reboot)") or ""))
 
 elseif cmd == "update" then
     local git = find("bin/git.lua") or die("no git")

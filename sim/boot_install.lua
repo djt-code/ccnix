@@ -326,12 +326,26 @@ check("ccnix version: the ROM's", r.out == "ccnix " .. VERSION .. "\n", show(r.o
 overlay(W, COMMIT, { ["deploy/version"] = "blob-new", ["deploy/boot.lua"] = "blob-boot" })
 W:file("ccnix/deploy/version", "9.8.7\n")
 W:file("ccnix/deploy/boot.lua", repoFile("deploy/boot.lua"))
+r = ccnixSays(W, "version")
+local r2 = ccnixSays(W)
+check("just updated, not rebooted: the version in use, and what a reboot brings; the updates not yet in use",
+    r.out == "ccnix " .. VERSION .. " (9.8.7 after a reboot)\n" and r2.out:find("2222222, in use after a reboot"),
+    show(r.out) .. show(r2.out))
 boot(W)
 r = ccnixSays(W)
-check("updates with a newer version: theirs, in use", r.out:find("Updates: ccnix 9%.8%.7, 2 files at 2222222, in use"),
+check("updates with a newer version: theirs, in use", r.out:find("Updates: ccnix 9%.8%.7, 2 files at 2222222, in use\n"),
     show(r.out))
 r = ccnixSays(W, "version")
 check("ccnix version: the updates' once they're in use", r.out == "ccnix 9.8.7\n", show(r.out))
+local kept = { W:read("ccnix/.gitlite"), W:read("ccnix/deploy/version"), W:read("ccnix/deploy/boot.lua") }
+W.fs.delete("ccnix/.gitlite") W.fs.delete("ccnix/deploy")             -- (as ccnix reset leaves it)
+r = ccnixSays(W, "version")
+r2 = ccnixSays(W)
+check("just reset, not rebooted: still the updates' version, the ROM's after a reboot; said that they're still in use",
+    r.out == "ccnix 9.8.7 (" .. VERSION .. " after a reboot)\n" and r2.out:find("stay in use until a reboot", 1, true),
+    show(r.out) .. show(r2.out))
+W:file("ccnix/.gitlite", kept[1]) W:file("ccnix/deploy/version", kept[2]) W:file("ccnix/deploy/boot.lua", kept[3])
+boot(W)
 W:file("rom/ccnix/deploy/version", nil)
 overlay(W, "3333333333333333333333333333333333333333", {})
 boot(W)
