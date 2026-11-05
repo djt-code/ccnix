@@ -1,7 +1,7 @@
 # ADR-0004: Logging: a syslogd under init, lib/log, captured service output, RFC 5424 forwarding
 
-**Status:** Accepted (2026-11-03). Phase 1 built in ccnix 0.14.0; phase 2
-(in game) to verify
+**Status:** Accepted (2026-11-03). Built in ccnix 0.14.0; verified in game
+(2026-11-05), but for forwarding in NAT mode
 **Date:** 2026-11-03
 **Deciders:** Dan Theisen
 
@@ -275,11 +275,12 @@ template or module system.
 
 ### Phase 2: in game (the user validates)
 
-1. [ ] `logger hello` lands in `/var/log/messages`; a service's prints
-   and a failing service's error are captured; the console's aren't. All
-   but the failing service's error verified by the user (2026-11-05). That
-   test's `service add boom ccsh -c 'cat /nope'` lost its quotes (fixed in
-   0.16.0); to retest.
+1. [x] `logger hello` lands in `/var/log/messages`; a service's prints
+   and a failing service's error are captured; the console's aren't
+   (verified 2026-11-05; the failing service's test needed 0.16.0's fix to
+   `service add`'s quoting). Open: init says "ended", not "failed", for a
+   command whose program exits non-zero (the CraftOS shell it runs in
+   doesn't pass the status on).
 2. [x] Forwarding to rsyslog on the VM (`imudp` on 514, through the
    gateway in TUN mode; NAT mode not tried); a CC loghost receiving from
    another computer (2026-11-05). Found: syslogd's start and "listening"
