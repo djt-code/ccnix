@@ -37,7 +37,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `lib/pager.lua` | Library: a `less`-style viewer for `more`, `git log` and `claude`. Space/PgDn/`f` and `b`/PgUp page (11 lines on a turtle), the mouse wheel 3 lines, `j`/`k`/arrows/Enter go a line, `d`/`u` half a page, `g`/`G`/Home/End top and bottom, `h`/`l`/arrows 8 columns sideways (lines aren't wrapped), `0`/`$` left edge and far right, `q` back to the shell. The bottom line shows where you are. Text that fits is just printed. A program that colours its output can hand it lines as `{ text, fg }` (`fg` one blit digit per character, as `term.blit` takes them), and on a colour screen they're shown in those colours. |
 | `bin/echo.lua` | Prints its arguments, or writes them to a file with `>` (replace) or `>>` (append), which the CraftOS shell can't do itself. The shell strips double quotes, so use single quotes for Lua strings. |
 | POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`: the basic options of each, for the commands CraftOS lacks (and `ls`, which replaces CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
-| `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z, `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
+| `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z (under `init`, programs as processes and jobs as process groups), `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
 | `turtle/autocompost.lua` | A stationary turtle on top of a composter: composts everything compostable in its inventory, forever. |
 | Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `bin/tcpdump.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `tcpdump` shows the frames on the wire, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
@@ -425,7 +425,7 @@ A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 | Quoting | `'single'`, `"double $X"`, `\x`; `#` comments |
 | Variables | `X=value`, `$X`, `${X}`, `${X:-default}`, `$?`, `$#`, `$1`..`$9`, `$@`, `"$@"`, `$*`, `$$`, `$!`, `$0`; `$PATH` is the shell's path (setting it changes the path), `$PWD` its directory, `$HOSTNAME` the computer's label (or ID), `$!` the last background job's process ID |
 | Environment | `export X`, `export X=1`, `export -n X`, `export -p`, `unset X`; `X=1 cmd` for one command. Programs read it with `os.getenv("X")`, and change their own copy with `os.setenv(name, value)`; `os.environ()` lists it. It holds the exported variables (`PS1` is one), `PATH`, `PWD` and `HOSTNAME`. A ccsh started from ccsh takes it over, and `env` shows it |
-| Jobs | `a &` in the background (its own copy of the variables); `jobs [-l\|-p]`; `fg [%n]`, `bg [%n]`; `wait [%n\|pid]`; `kill [-9] %n\|pid`; Ctrl+Z at the prompt stops the job in front. `fg prog` and `bg prog` open a multishell tab as CraftOS's do, with the environment |
+| Jobs | `a &` in the background (its own copy of the variables); `jobs [-l\|-p]`; `fg [%n]`, `bg [%n]`; `wait [%n\|pid]`; `kill [-9\|-STOP\|-CONT] %n\|pid`; Ctrl+Z at the prompt stops the job in front. `fg prog` and `bg prog` open a multishell tab as CraftOS's do, with the environment. Under `init`, a program is a process and a job a process group: see [Processes and services](#processes-and-services) |
 | Startup | `/.profile` runs when ccsh starts at the prompt: set `PS1`, `export` variables |
 | History | Up and down go through the lines typed before, kept in `$HISTFILE` (`/.ccsh_history`; unset or empty, none) across sessions and tabs, the last `$HISTSIZE` of them (1000; `0` keeps none). Both are shell variables, set before `/.profile` runs so it can change them |
 | Prompt | `PS1`, an exported variable: it starts as `'\h:\w\$ '` (`label:/dir$ `) on a computer with a label, `'\w\$ '` (`/dir$ `) without, unless the environment brought one. Set it with `\h` (label, or ID), `\w` (directory), `\W` (its last part), `\i` (ID), `\$`, `\n`: `PS1='\h \W\$ '` |
@@ -467,8 +467,10 @@ should keep running, `bg prog` puts it in its own tab.
 
 How it works: ccsh runs inside the stock shell and has it find and run
 programs, so the path, aliases, `cd`, `alias`, `set` and the programs'
-`shell` API are the stock ones. A pipe runs each command to the end and
-then hands what it wrote to the next one. While a command runs, its
+`shell` API are the stock ones. Under `init` each program is a process of
+its own (see [Processes and services](#processes-and-services)). A pipe
+runs each command to the end and then hands what it wrote to the next
+one. While a command runs, its
 `io.input()`, `io.output()`, `print`, `write`, `term` and `printError` point
 at its pipe or file, and `os.getenv` at its environment. They are put back whenever it waits, so other
 multishell tabs don't see them. That lets stock programs be piped as
@@ -1369,8 +1371,8 @@ logs in or gives a wrong password goes to [the system log](#the-system-log),
 ## Processes and services
 
 ```
-ps [-l]                            the processes: ID, terminal, state, time, command
-kill [-s signal | -9] pid...       signal one: TERM (Ctrl+T for it), KILL, INT, HUP
+ps [-l]                            the processes: ID, terminal, state, time, command (-l: parent, group)
+kill [-s signal | -9] pid...       signal one: TERM (Ctrl+T for it), KILL, INT, HUP, STOP, CONT; -- -n a group
 service                            the services, and whether they're running
 service add <name> <command...>    service start|stop|restart|status <name>
 service enable|disable <name>      at boot, or not
@@ -1385,10 +1387,20 @@ runs everything:
 
 - **Processes:** each program is a coroutine with a process ID, its own
   terminal (the screen's, or a hidden one) and its own environment
-  (`os.getenv`), resumed with the events it waits for. The keyboard and
-  mouse go to the console's process; every other event (timers, modems,
-  redstone) to every process. A command runs in a CraftOS shell of its
-  own, with the usual path, aliases and directory.
+  (`os.getenv`), resumed with the events it waits for. Every event but
+  the keyboard's and the mouse's (timers, modems, redstone) goes to every
+  process. A command runs in a CraftOS shell of its own, with the usual
+  path, aliases and directory.
+- **Sessions, process groups and the terminal,** as in Unix. The console,
+  each telnet session and each service leads a session; its children
+  are in it, on its terminal (`con`, `pts/1`), and in its process group
+  unless put in one of their own. Each terminal has a foreground group:
+  the keyboard and mouse go to it (telnetd hands what's typed in a
+  session to its terminal the same way). Ctrl+Z stops it, unless it's
+  the session leader's own group. A stopped process keeps the events it
+  misses, up to 256, until it's continued. When a session's leader ends,
+  what's left of the session gets HUP; a process's children go to init
+  when it ends.
 - **The console:** the autostart first, if `ccnix.autostart` names one
   (the miner, the farmer, the router's screen), then ccsh if
   `ccsh.login` is on, then the CraftOS shell, each when the one before
@@ -1405,16 +1417,40 @@ runs everything:
   and failing; `service.<name>.log false` leaves one out. See
   [The system log](#the-system-log).
 - **Programs** reach it through `_G.proc`: `proc.spawn{cmd = "..."}`,
-  `proc.kill(pid)`, `proc.list()`, `proc.self()`, `proc.wait(pid)`,
-  `proc.inject(pid, event, ...)` (an event for one process alone),
+  `proc.kill(pid)` (`-pgid` for a group), `proc.list()`, `proc.self()`,
+  `proc.wait(pid)`, `proc.inject(pid, event, ...)` (an event for one
+  process alone), `proc.input(tty, event, ...)` (typed at a terminal),
+  `proc.getpgid()`, `proc.foreground()` and `proc.setForeground(pgid)`,
   `proc.term(pid)` (its terminal: `getLine` reads it back), `proc.log(rec)`
   (a message for syslogd).
 
-ccsh's `&` jobs belong to the shell: they end with it. A service is
-the way to keep something running. Under `init`, ccsh numbers its jobs
-with process IDs no process will get, and its `kill` passes any other
-number on to `init`. As in CraftOS, a program that computes for a long
-time without waiting for an event holds everything up meanwhile.
+ccsh under `init` splits the work as a Unix shell and kernel do. Each
+program from the path runs as a process of its own, ccsh's child, so `ps`
+shows it and `kill` and Ctrl+T reach it; builtins, functions and `if` or
+`while` run in ccsh itself, as they must (`cd`, `X=1`). At the prompt
+each job is a process group, whose ID is the job's (`$!`, `jobs -l`):
+ccsh puts it in front of the terminal while it's the job in front and
+takes the terminal back after, so Ctrl+Z stops the whole group and the
+job with it, and `fg` and `bg` continue both. A script or `ccsh -c` runs
+its programs in its own group, so Ctrl+T reaches it and them alike.
+
+```
+/$ telnet towel.blinkenlights.nl          (and in another session:)
+$ ps -l
+  PID  PPID  PGID TTY    STAT   TIME START CMD
+    1     0     1 ?      S       0.0 09:12 init
+    3     1     3 ?      S       0.4 09:12 telnetd
+    5     1     5 con    S       0.1 09:12 /rom/ccnix/bin/ccsh
+   12     5    11 con    S+      2.4 09:30 telnet towel.blinkenlights.nl
+   14     3    14 pts/1  S       0.0 09:31 /rom/ccnix/bin/ccsh
+   16    14    15 pts/1  R+      0.0 09:31 ps -l
+```
+
+ccsh's `&` jobs belong to the shell: they end with it (their processes
+get HUP). A service is the way to keep something running. ccsh's `kill`
+takes `%n` for a job, and passes any other number on to `init` (`-n` for
+a group). As in CraftOS, a program that computes for a long time
+without waiting for an event holds everything up meanwhile.
 
 ## The system log
 

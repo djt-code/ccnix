@@ -23,9 +23,10 @@
 -- failing: syslogd, a service of its own, files it (`help syslog`).
 -- service.<name>.log false leaves a service's output out.
 --
--- The keyboard and mouse go to the console; every other event to every
--- process.  A program that computes for a long time without waiting
--- holds everything up, as it does in CraftOS.
+-- The keyboard and mouse go to the console: to the process group in
+-- front of it (ccsh puts each job there in turn; Ctrl+Z stops it); every
+-- other event to every process.  A program that computes for a long time
+-- without waiting holds everything up, as it does in CraftOS.
 
 local args = { ... }
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
@@ -78,7 +79,7 @@ local function nextConsole()
         return
     end
     local cmd = table.remove(chain, 1)
-    K.console = K.spawn({ cmd = cmd or nil, term = console, tty = "con", onExit = nextConsole })
+    K.console = K.spawn({ cmd = cmd or nil, term = console, tty = "con", session = true, onExit = nextConsole })
 end
 
 K.startServices()

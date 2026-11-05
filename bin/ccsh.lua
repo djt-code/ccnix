@@ -63,7 +63,7 @@
 --                         and every event but the keyboard's and the
 --                         mouse's.  At the prompt, Ctrl+Z stops the job
 --                         in front (a stopped job keeps the events it
---                         misses for later).
+--                         misses for later).  Under init, see below.
 --   jobs [-l|-p]          the jobs: [1]+ Running  sleep 10 &
 --   fg [%n]  bg [%n]      a job to the front (waiting for it), or a
 --                         stopped one carried on in the background.  %n
@@ -73,9 +73,10 @@
 --                         tab (shown, for fg), with the environment.
 --   wait [%n|pid...]      wait for jobs (all, with none named); their
 --                         status.  Ctrl+T stops waiting.
---   kill [-9] %n|pid...   end a job as Ctrl+T would; -9 drops it at once.
---                         Under init, a pid that isn't a job's is a
---                         process's (see ps).
+--   kill [-9] %n|pid...   end a job as Ctrl+T would; -9 drops it at once,
+--                         -STOP stops it, -CONT carries it on.  Under
+--                         init, a pid that isn't a job's is a process's
+--                         (see ps), and -pid a process group's.
 --   builtins              also exit [n], :, true, false, read [-r] name...,
 --                         shift [n], unset name..., . file,
 --                         export [-n] name[=value]... and export -p,
@@ -93,6 +94,16 @@
 -- jobs end with the shell.  Ctrl+T while a command runs stops it, and the
 -- rest of the line, with status 130.  A script or -c waits for its
 -- background jobs before it ends: they can't outlive it.
+--
+-- Under init (`help init`), a program from the path runs as a process of
+-- its own, as Unix's shells fork one: a child of this shell's, which ps
+-- lists and kill and Ctrl+T reach.  At the prompt each job is a process
+-- group (its number is $! and what jobs -l shows), put in front of the
+-- terminal while it's the job in front, so the keyboard goes to it, and
+-- Ctrl+Z stops the whole group, and the job.  Builtins, functions and
+-- compound commands run in the shell itself (cd and X=1 have to).  A
+-- script or -c runs its programs in its own group, so Ctrl+T reaches it
+-- and them alike.
 --
 -- A script can start with #!/ccnix/bin/ccsh (the stock shell honours the
 -- #! line; under the ROM alone it's #!/rom/ccnix/bin/ccsh), or run as
@@ -961,12 +972,18 @@ local jobControl = false             -- Ctrl+Z: only at the prompt
 local REQ, INTR = {}, {}             -- a builtin's yield to run(); what wakes it on Ctrl+T or kill
 local nextPid, touches, ctrlDown = 1, 0, false
 local runAndOr
+-- Under init (an init with process groups), programs are processes:
+local kern = rawget(_G, "proc")
+local procs = kern ~= nil and kern.setForeground ~= nil
+local children = {}                  -- process ID -> the job it's a command of
+local myPgid                         -- this shell's own group, at the prompt
+local frontTop                       -- the job run() has in front
 
 local USER = { char = true, key = true, key_up = true, paste = true, terminate = true,
     mouse_click = true, mouse_up = true, mouse_scroll = true, mouse_drag = true }
 
 local function newJob(fn, state, text)
-    return { co = coroutine.create(fn), P = state, text = text, state = "running", queue = {} }
+    return { co = coroutine.create(fn), P = state, text = text, state = "running", queue = {}, procs = 0 }
 end
 
 -- Resume j with ...; it ends ("done", j.status), waits for an event
@@ -1012,15 +1029,23 @@ function subshell(fn)
     return sub.status
 end
 
+-- j's process ID: under init one of its own, so kill's numbers can't
+-- clash, and its processes' group.
+local function jobPid(j)
+    if not j.pid then
+        local proc = rawget(_G, "proc")
+        if proc and proc.reservePid then j.pid = proc.reservePid() else j.pid, nextPid = nextPid, nextPid + 1 end
+    end
+    return j.pid
+end
+
 -- Give j a number (and a process ID, for $! and kill).
 local function addJob(j)
     if j.id then return end
     local n = 0
     for _, o in ipairs(jobs) do n = math.max(n, o.id) end
     j.id = n + 1
-    -- under init, a process ID of its own, so kill's numbers can't clash
-    local proc = rawget(_G, "proc")
-    if proc and proc.reservePid then j.pid = proc.reservePid() else j.pid, nextPid = nextPid, nextPid + 1 end
+    jobPid(j)
     jobs[#jobs + 1] = j
 end
 
@@ -1066,6 +1091,30 @@ end
 
 local function isJobSpec(s) return s:sub(1, 1) == "%" or s:match("^%d+$") ~= nil end
 
+-- Signal sig to j's processes: its group, or (no job control) each one.
+local function signalProcs(j, sig)
+    if not procs or j.procs == 0 then return end
+    if jobControl and j.pid then kern.kill(-j.pid, sig); return end
+    for pid, owner in pairs(children) do
+        if owner == j then kern.kill(pid, sig) end
+    end
+end
+
+-- The job the keyboard is for: top, or the one it waits on with fg.
+local function fgOf(j)
+    while j.req and j.req.fg do j = j.req.fg end
+    return j
+end
+
+local function isFront(j) return frontTop ~= nil and fgOf(frontTop) == j end
+
+-- Put group pgid in front of the terminal, at the prompt under init.
+local function toFront(pgid)
+    if not (jobControl and procs and myPgid and pgid) then return end
+    local fg = kern.foreground()
+    if fg and fg ~= pgid then kern.setForeground(pgid) end
+end
+
 -- Ctrl+Z: stop j.  A line typed at the prompt gets its own state from
 -- here on, so the shell's carries on without it.
 local function stop(j)
@@ -1081,10 +1130,12 @@ local function stop(j)
     print(describe(j))
 end
 
--- fg, bg: start stopped j again, with the events it missed.
+-- fg, bg: start stopped j again (its processes too), with the events it
+-- missed.
 local function continue(j)
     if j.state ~= "stopped" then return end
     j.state = "running"
+    signalProcs(j, "CONT")
     local missed = j.queue
     j.queue = {}
     for _, ev in ipairs(missed) do
@@ -1110,13 +1161,24 @@ local function deliver(j, ev)
     end
 end
 
--- The job the keyboard is for: top, or the one it waits on with fg.
-local function fgOf(j)
-    while j.req and j.req.fg do j = j.req.fg end
-    return j
-end
-
 local function dispatch(top, ev)
+    -- a job's process stopped, carried on or ended: news for that job alone
+    local owner = (ev[1] == "proc_exit" or ev[1] == "proc_stop" or ev[1] == "proc_cont") and children[ev[2]]
+    if owner then
+        if owner.state == "done" then
+            children[ev[2]] = nil               -- (kill -9 ended the job already)
+        elseif ev[1] == "proc_stop" then
+            if jobControl and owner.state == "running" then
+                local front = isFront(owner)
+                stop(owner)
+                if front then toFront(myPgid) end
+            end
+        else
+            continue(owner)                     -- (it was carried on, or ended, while stopped: it runs)
+            if ev[1] == "proc_exit" then deliver(owner, ev) end
+        end
+        return
+    end
     if USER[ev[1]] then
         local j = fgOf(top)
         if ev[1] == "key" or ev[1] == "key_up" then
@@ -1169,12 +1231,15 @@ end
 -- Run job `top` in the foreground until it ends or stops; the others get
 -- their events meanwhile.
 local function run(top)
+    local outer = frontTop
+    frontTop = top
     if not top.begun then top.begun = true; step(top) end
     settle()
     while top.state == "running" do
         dispatch(top, table.pack(os.pullEventRaw()))
         settle()
     end
+    frontTop = outer
     return top
 end
 
@@ -1205,9 +1270,14 @@ local function liveJobs()
     return n
 end
 
--- Ctrl+T for every job, then forget them: they can't outlive the shell.
+-- Ctrl+T for every job (HUP for their processes), then forget them:
+-- they can't outlive the shell.
 local function endJobs()
-    for _, j in ipairs(copy(jobs)) do signal(j) end
+    for _, j in ipairs(copy(jobs)) do
+        signalProcs(j, "HUP")
+        signalProcs(j, "CONT")
+        signal(j)
+    end
     jobs = {}
 end
 
@@ -1302,6 +1372,7 @@ function builtins.fg(a, b)
     touch(j)
     if j.state == "done" then removeJob(j); return j.status end
     continue(j)
+    if j.procs > 0 then toFront(j.pid) end
     local st = coroutine.yield(REQ, { fg = j })
     if st == INTR then P.interrupted = true; return 130 end
     return st
@@ -1337,31 +1408,44 @@ function builtins.wait(a, b)
     if a[2] and st == 0 then st = r end
     return st
 end
+local SIGNUMS = { ["1"] = "HUP", ["2"] = "INT", ["9"] = "KILL", ["15"] = "TERM", ["18"] = "CONT",
+    ["19"] = "STOP", ["20"] = "TSTP" }
 function builtins.kill(a, b)
-    -- a job gets Ctrl+T, or with KILL (9) is dropped at once; a process
+    -- a job gets Ctrl+T (its processes the signal), or with KILL (9) is
+    -- dropped at once, with STOP stopped, with CONT carried on; a process
     -- (init's) gets the signal itself, and init says if it's unknown
     local k, sig = 2, "TERM"
     if a[2] == "-s" then sig, k = a[3], 4
     elseif a[2] and a[2]:match("^%-.") and a[2] ~= "--" then sig, k = a[2]:sub(2), 3 end
     if a[k] == "--" then k = k + 1 end
     if not sig or not a[k] then b.err("kill: usage: kill [-s signal | -signal] %job|pid..."); return 2 end
-    local hard = (sig:upper():gsub("^SIG", "")) == "KILL" or sig == "9"
+    local name = sig:upper():gsub("^SIG", "")
+    name = SIGNUMS[name] or name
     local st = 0
     for j = k, #a do
         local job = findJob(a[j], true)
         local proc = rawget(_G, "proc")
-        if not job and proc and a[j]:match("^%d+$") then
-            -- not a job of ours: a process (init's)
+        if not job and proc and a[j]:match("^%-?%d+$") then
+            -- not a job of ours: a process (init's), or -n a process group
             local ok, err = proc.kill(tonumber(a[j]), sig)
             if not ok then b.err("kill: " .. a[j] .. ": " .. err); st = 1 end
         elseif not job then
             b.err("kill: " .. a[j] .. ": no such job")
             st = 1
         elseif job.state ~= "done" then
-            if hard then
+            if name == "KILL" then
                 job.state, job.status, job.killed, job.req, waiters[job] = "done", 137, true, nil, nil
-            else
+                signalProcs(job, "KILL")
+            elseif name == "STOP" or name == "TSTP" then
+                signalProcs(job, name)
+                if jobControl then stop(job) end
+            elseif name == "CONT" then
+                continue(job)
+            elseif name ~= "0" then
                 job.signalled = true
+                local stopped = job.state == "stopped"
+                signalProcs(job, sig)
+                if stopped then signalProcs(job, "CONT") end
                 signal(job)
             end
         end
@@ -1642,6 +1726,41 @@ local function callFunction(body, argv, fd)
     return st
 end
 
+-- Under init: run argv as a process of its own (ctx its io, env its
+-- environment), a child of this shell's in its job's group (at the
+-- prompt), in front of the terminal while its job is.  Returns what
+-- shell.execute did, whether Ctrl+T reached it, and how it ended ("ok",
+-- "killed", an error), as drive's first two.
+local function spawnCommand(ctx, argv, env)
+    local j = currentJob
+    local res = {}
+    local pid = kern.spawn({
+        cmd = table.concat(argv, " "), term = ctx.term, env = env,
+        pgid = jobControl and jobPid(j) or nil,
+        enter = function() return enter(ctx) end,
+        leave = function(_, o) leave(ctx, o) end,
+        fn = function()
+            _G.POSIX_STATUS = nil
+            local ok, r = pcall(shell.execute, table.unpack(argv))
+            if not ok then printError(tostring(r)) end
+            res.ok, res.st = ok and r, _G.POSIX_STATUS
+        end,
+    })
+    children[pid] = j
+    j.procs = j.procs + 1
+    if isFront(j) then toFront(j.pid) end
+    local ended
+    repeat
+        local ev = table.pack(os.pullEventRaw())
+        if ev[1] == "proc_exit" and ev[2] == pid then ended = ev end
+    until ended
+    children[pid] = nil
+    j.procs = j.procs - 1
+    if isFront(j) then toFront(myPgid) end
+    _G.POSIX_STATUS = res.st
+    return res.ok, ended[5] == true, ended[3]
+end
+
 -- Run one command: inText is what the pipe before it wrote (nil: none),
 -- out the pipe after it (nil: the shell's output).  Returns its status.
 local function runCommand(cmd, inText, out)
@@ -1696,7 +1815,8 @@ local function runCommand(cmd, inText, out)
 
     local outS = fd[1] ~= TTY and fd[1].raw and fd[1] or nil
     local errS = fd[2] ~= TTY and fd[2].raw and fd[2] or nil
-    local ctx = { input = input, kb = real.kb, env = envApi(processEnv(assigns)) }
+    local envT = processEnv(assigns)
+    local ctx = { input = input, kb = real.kb, env = envApi(envT) }
     if outS then
         ctx.term, ctx.output, ctx.write = outS.term, outS.handle, outS.raw
         ctx.kb = function(...) return withReal(real.kb, ...) end
@@ -1717,9 +1837,13 @@ local function runCommand(cmd, inText, out)
     else ctx.read = real.read end
 
     _G.POSIX_STATUS = nil
-    local ok, terminated = drive(ctx, shell.execute, table.unpack(argv))
+    local ok, terminated, how
+    if procs then ok, terminated, how = spawnCommand(ctx, argv, envT)
+    else ok, terminated = drive(ctx, shell.execute, table.unpack(argv)) end
     local st = _G.POSIX_STATUS
-    if terminated and not ok and (st == nil or st == 0) then
+    if how == "killed" then
+        st = 137
+    elseif terminated and not ok and (st == nil or st == 0) then
         P.interrupted = true
         st = 130
     elseif st == nil or (st == 0 and not ok) then
@@ -1884,6 +2008,10 @@ local HISTFILE = "/.ccsh_history"
 
 local function interactive()
     jobControl = true
+    if procs then
+        myPgid = kern.getpgid()
+        kern.ignore("TSTP")             -- (Ctrl+Z is for the job in front, not this shell)
+    end
     local warned = false
     print("ccsh: exit, or hold Ctrl+T, to leave")
     if P.vars.HISTFILE == nil then P.vars.HISTFILE = HISTFILE end

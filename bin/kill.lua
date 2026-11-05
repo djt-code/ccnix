@@ -3,16 +3,18 @@
 --   kill [-s signal | -signal] pid...
 --   kill -l
 --
--- Sends each process (by ID: see ps) a signal: TERM (the default), INT
--- or HUP are Ctrl+T for it (a terminate event: most programs stop, and
--- one that catches it can tidy up first); KILL ends it at once; 0 only
--- checks it's there.  A signal is a name (TERM, SIGTERM) or its number
--- (15, 9, 2, 1, 0).  -l lists them.  Process 1 is init itself.  Needs
--- init (`help init`); ccsh's own kill also takes %job.
+-- Sends each process (by ID: see ps), or with -- -n every process in
+-- group n, a signal: TERM (the default), INT or HUP are Ctrl+T for it (a
+-- terminate event: most programs stop, and one that catches it can tidy
+-- up first); KILL ends it at once; STOP and TSTP stop it (it keeps the
+-- events it misses), CONT carries it on; 0 only checks it's there.  A
+-- signal is a name (TERM, SIGTERM) or its number (15, 9, 2, 1, 18, 19,
+-- 20, 0).  -l lists them.  Process 1 is init itself.  Needs init
+-- (`help init`); ccsh's own kill also takes %job.
 -- Exit status 1 if any process couldn't be signalled.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
-local cu = require("cu").init("kill", "kill [-s signal | -signal] pid... | kill -l")
+local cu = require("cu").init("kill", "kill [-s signal | -signal] [--] pid|-pgid... | kill -l")
 local P = require("proc")              -- the module, for the signal names; the running init is _G.proc
 local args = { ... }
 
@@ -44,7 +46,7 @@ if not proc then
 end
 for k = i, #args do
     local pid = cu.int(args[k])
-    if not pid then
+    if not pid or pid == 0 then
         cu.fail(args[k] .. ": not a process ID")
     else
         local ok, err = proc.kill(pid, sig)

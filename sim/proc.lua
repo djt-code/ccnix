@@ -72,8 +72,9 @@ local fakeSettings = {
     getNames = function() local t = {} for k in pairs(STORE) do t[#t + 1] = k end table.sort(t) return t end,
 }
 
+local KEYS = { leftCtrl = 29, rightCtrl = 157, z = 44 }
 local K = P.new({ native = native, osT = fakeOs, term = fakeTerm, window = fakeWindow, settings = fakeSettings,
-    env = { BASE = "yes" } })
+    env = { BASE = "yes" }, keys = KEYS })
 -- drain: hand every queued event on, as init's loop does
 local function drain()
     for _ = 1, 1000 do
@@ -353,3 +354,155 @@ check("syslogd gone: the last 200 held", #K.held == 200 and K.held[1].msg == "h5
 check("a held message has its time and host filled in", K.held[1].time == CLOCK and K.held[1].host == "0", tostring(K.held[1].host))
 undo()
 check("capture undone: the globals as they were", G.write == biosWrite and G.io.stdout._handle.write == biosWrite)
+
+-- 8. sessions, process groups and terminals: what's typed goes to the
+-- group in front; Ctrl+Z stops it (not the leader's own group, nor one
+-- that ignores TSTP); a stopped process keeps its events until CONT;
+-- kill -pgid; with no one in front, the leader; the leader gone, HUP;
+-- orphans to init; exit status; enter and leave; capture for a child on
+-- a service's terminal
+local seen = {}
+local function noter(name)
+    return function()
+        while true do
+            local ev = table.pack(fakeOs.pullEventRaw())
+            seen[#seen + 1] = name .. ":" .. ev[1] .. (ev[2] ~= nil and (":" .. tostring(ev[2])) or "")
+            if ev[1] == "terminate" then return end
+        end
+    end
+end
+local function saw(prefix)
+    local t = {}
+    for _, e in ipairs(seen) do if not prefix or e:sub(1, #prefix) == prefix then t[#t + 1] = e end end
+    return table.concat(t, " ")
+end
+local ids = {}
+local L = K.spawn({ name = "lead", tty = "pts/7", fn = function()
+    ids.a = K.spawn({ name = "a", pgid = true, fn = noter("a") })
+    ids.b = K.spawn({ name = "b", pgid = ids.a, fn = noter("b") })
+    ids.c = K.spawn({ name = "c", fn = noter("c") })
+    ids.q = K.spawn({ name = "q", pgid = true, fn = function() K.api.ignore("TSTP"); noter("q")() end })
+    ids.fg, ids.pg = K.api.foreground(), K.api.getpgid()
+    ids.set = K.api.setForeground(ids.a)
+    noter("lead")()
+end })
+drain()
+local a, b, c = K.procs[ids.a], K.procs[ids.b], K.procs[ids.c]
+check("a session: its leader in front of its terminal at first; children on it, in its session, in its group unless given one",
+    ids.fg == L and ids.pg == L and ids.set and a.sid == L and a.ppid == L and a.tty == "pts/7" and a.pgid == ids.a
+        and b.pgid == ids.a and c.pgid == L and K.ttys["pts/7"].fg == ids.a)
+local function noBefore() for i = #events, 1, -1 do if events[i][1] ~= "timer" then table.remove(events, i) end end end
+noBefore()
+seen = {}
+K.input("pts/7", "char", "x")
+check("typed there: the group in front alone gets it", saw() == "a:char:x b:char:x", saw())
+seen = {}
+K.input("pts/7", "key", KEYS.leftCtrl)
+K.input("pts/7", "key", KEYS.z)
+K.input("pts/7", "key_up", KEYS.leftCtrl)
+local stops = {}
+for _, e in ipairs(events) do if e[1] == "proc_stop" then stops[#stops + 1] = e[2] end end
+check("Ctrl+Z: the group in front stops (proc_stop each), the Z not passed on",
+    a.stopped and b.stopped and not c.stopped and saw() == "a:key:29 b:key:29" and #stops == 2 and stops[1] == ids.a,
+    saw())
+local row
+for _, r in ipairs(K.ps()) do if r.pid == ids.a then row = r end end
+check("ps: stopped (T), in front (fg)", row.state == "T" and row.fg == true and row.pgid == ids.a)
+seen = {}
+fakeOs.queueEvent("tick", 2)
+drain()
+check("stopped: it misses nothing, it's kept", saw("a:") == "" and saw("c:"):find("c:tick:2", 1, true) ~= nil
+    and #a.held > 0, saw())
+seen = {}
+check("kill -pgid CONT: carried on, what it missed first and in order",
+    K.kill(-ids.a, "CONT") and not a.stopped and not b.stopped
+        and saw("a:"):find("^a:key_up:29 a:proc_stop:" .. ids.a .. " a:proc_stop:" .. ids.b .. " a:tick:2") ~= nil,
+    saw("a:"))
+local conts = 0
+for _, e in ipairs(events) do if e[1] == "proc_cont" then conts = conts + 1 end end
+check("... and proc_cont each", conts == 2)
+drain()
+local ok9, why9 = K.kill(-4242, "TERM")
+check("a group with no one in it", not ok9 and why9 == "no such process group")
+
+K.ttys["pts/7"].fg = L
+seen = {}
+K.input("pts/7", "key", KEYS.leftCtrl)
+K.input("pts/7", "key", KEYS.z)
+K.input("pts/7", "key_up", KEYS.leftCtrl)
+check("Ctrl+Z with the leader's own group in front: nothing stops, the keys go on to it",
+    not K.procs[L].stopped and not c.stopped and saw("lead:") == "lead:key:29 lead:key:44 lead:key_up:29", saw())
+K.ttys["pts/7"].fg = ids.q
+seen = {}
+K.input("pts/7", "key", KEYS.leftCtrl)
+K.input("pts/7", "key", KEYS.z)
+K.input("pts/7", "key_up", KEYS.leftCtrl)
+check("... with a group that ignores TSTP in front, the same", not K.procs[ids.q].stopped and saw("q:"):find("q:key:44", 1, true),
+    saw())
+K.kill(ids.q, "STOP")
+check("STOP is never ignored", K.procs[ids.q].stopped)
+K.kill(ids.q, "CONT")
+seen = {}
+K.input("pts/7", "terminate")
+check("Ctrl+T: the group in front alone", saw() == "q:terminate" and K.procs[ids.q] == nil, saw())
+check("an end's status, and that Ctrl+T reached it", K.exited[ids.q].terminated == true and K.exited[ids.q].status == 0)
+local last = events[#events]
+check("proc_exit: the ID, ok, the status, whether Ctrl+T reached it",
+    last[1] == "proc_exit" and last[2] == ids.q and last[3] == "ok" and last[4] == 0 and last[5] == true)
+drain()
+seen = {}
+K.input("pts/7", "char", "y")
+check("no one left in the group in front: the leader gets what's typed", saw() == "lead:char:y", saw())
+
+local three = K.spawn({ name = "three", fn = function() return 3 end })
+check("a function's number is its status", K.exited[three].status == 3 and K.exited[three].ok)
+
+-- the leader gone: its terminal hangs up
+seen = {}
+K.kill(L, "KILL")
+drain()
+check("the leader gone: the terminal with it, and what's left of the session gets HUP (Ctrl+T)",
+    K.ttys["pts/7"] == nil and K.procs[ids.a] == nil and K.procs[ids.b] == nil and K.procs[ids.c] == nil
+        and saw():find("a:terminate", 1, true) and K.exited[ids.c].terminated, saw())
+
+-- orphans: a process with no terminal ends, its child carries on under init
+local orphan
+local mid = K.spawn({ name = "mid", fn = function()
+    orphan = K.spawn({ name = "orphan", fn = function() fakeOs.pullEvent("never") end })
+    fakeOs.pullEvent("never")
+end })
+drain()
+K.kill(mid, "KILL")
+drain()
+check("orphans go to init (no terminal: no hangup)", K.procs[orphan] and K.procs[orphan].ppid == 1)
+K.kill(orphan, "KILL")
+
+-- enter and leave, around each turn
+local inside, turns = {}, { enter = 0, leave = 0 }
+local FLAG = nil
+local hooked = K.spawn({ name = "hooked",
+    enter = function(p) turns.enter = turns.enter + 1; FLAG = "on"; return "saved" end,
+    leave = function(p, o) turns.leave = turns.leave + 1; FLAG = nil; inside.saved = o end,
+    fn = function()
+        inside[1] = FLAG
+        fakeOs.pullEvent("go3")
+        inside[2] = FLAG
+    end })
+fakeOs.queueEvent("go3")
+drain()
+check("enter and leave around each of its turns, what enter returned handed to leave",
+    turns.enter == 2 and turns.leave == 2 and inside[1] == "on" and inside[2] == "on" and inside.saved == "saved"
+        and FLAG == nil and K.procs[hooked] == nil)
+
+-- capture passed on to a child on the service's terminal only
+local kids = {}
+K.spawn({ name = "svc", service = "svc", capture = true, fn = function()
+    kids.same = K.spawn({ name = "same", fn = function() fakeOs.pullEvent("never") end })
+    kids.own = K.spawn({ name = "own", term = K.newTerm(), fn = function() fakeOs.pullEvent("never") end })
+    kids.tty = K.spawn({ name = "tty", tty = "pts/8", fn = function() fakeOs.pullEvent("never") end })
+    fakeOs.pullEvent("never")
+end })
+drain()
+check("capture: a service's child on its terminal is captured; one with a terminal or a session of its own isn't",
+    K.procs[kids.same].capture == true and K.procs[kids.own].capture == nil and K.procs[kids.tty].capture == nil
+        and K.procs[kids.tty].sid == kids.tty and K.ttys["pts/8"].fg == kids.tty)

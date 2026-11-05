@@ -9,7 +9,9 @@
 -- the console instead, whatever runs there (the miner's screen, the
 -- farmer's...): what's on the screen is shown, and what's typed goes to
 -- it as if typed here, but Ctrl+T doesn't (Telnet's "interrupt process",
--- Ctrl+] then t in our client, does).  The screen goes as ANSI escapes
+-- Ctrl+] then t in our client, does).  A session's shell leads a session
+-- of its own on terminal pts/n (ps shows it): what's typed goes to what's
+-- in front there, as on the console.  The screen goes as ANSI escapes
 -- with xterm's 256 colours.
 --
 -- Settings: telnetd.password (what to type at "Password:"); telnetd.open
@@ -61,11 +63,19 @@ local function log(s, sev) syslog.log(sev or "info", s) end
 
 local function send(s, data) s.conn:send(data) end
 
--- the terminal a session shows, and the process its keys go to
+-- the terminal a session shows, and the process it's for
 local function target(s)
     if s.term then return s.term, s.pid end
     local pid = proc.console()
     return pid and proc.term(pid), pid
+end
+
+-- an event typed in a session: for whatever is in front of its terminal
+-- (an init without terminals: the session's process)
+local function typedEvent(s, ...)
+    if proc.input then return proc.input(s.tty, ...) end
+    local _, pid = target(s)
+    if pid then proc.inject(pid, ...) end
 end
 
 local function finish(s, why)
@@ -90,7 +100,8 @@ local function startSession(s)
         s.term = proc.newTerm(s.w, s.h, true)
         local ccsh = ccnix and ccnix.find("bin/ccsh.lua") or (fs.exists(repo .. "/bin/ccsh.lua") and repo .. "/bin/ccsh.lua")
         local cmd = settings.get("ccsh.login") and ccsh and ccsh:gsub("%.lua$", "") or nil
-        s.pid = proc.spawn({ cmd = cmd, term = s.term, tty = "pts/" .. ptys })
+        s.tty = "pts/" .. ptys
+        s.pid = proc.spawn({ cmd = cmd, term = s.term, tty = s.tty, session = true })
     end
     send(s, T.MODES_ON)                         -- (the first frame clears the screen)
     if not timer then timer = os.startTimer(FRAME) end
@@ -99,12 +110,10 @@ end
 -- What a session typed, once logged in: events for its process.
 local function newDecoder(s)
     return T.decoder(function(name, ...)
-        local _, pid = target(s)
-        if not pid then return end
         if name == "ctrl-t" then
-            if s.term then proc.inject(pid, "terminate") end    -- (not for the console: see the header)
+            if s.term then typedEvent(s, "terminate") end      -- (not for the console: see the header)
         else
-            proc.inject(pid, name, ...)
+            typedEvent(s, name, ...)
         end
     end)
 end
@@ -145,7 +154,8 @@ end
 
 local function newSession(conn)
     local ip, p = conn:remote()
-    local s = { conn = conn, id = conn:id(), who = ip .. ":" .. p, state = "login", typed = "", tries = 0, w = 51, h = 19 }
+    local s = { conn = conn, id = conn:id(), who = ip .. ":" .. p, state = "login", typed = "", tries = 0, w = 51, h = 19,
+                tty = "con" }                   -- (a shell's own terminal, once it has one)
     s.decode = newDecoder(s)
     s.parse = T.parser({
         data = function(d) typed(s, d) end,
@@ -157,15 +167,12 @@ local function newSession(conn)
                 s.h = math.max(5, math.min(81, c * 256 + d))
                 if s.term then
                     s.term.reposition(1, 1, s.w, s.h)
-                    proc.inject(s.pid, "term_resize")
+                    typedEvent(s, "term_resize")
                 end
             end
         end,
         command = function(c)
-            if c == T.IP and s.state == "live" then
-                local _, pid = target(s)
-                if pid then proc.inject(pid, "terminate") end
-            end
+            if c == T.IP and s.state == "live" then typedEvent(s, "terminate") end
         end,
     })
     sessions[s.id] = s
