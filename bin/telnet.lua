@@ -16,6 +16,13 @@
 -- program even on the console), z stops telnet itself here (a job: fg
 -- brings it back), any other key goes back.  It ends when the other side
 -- closes.  A screen without colour shows the colours as greys.
+--
+-- What scrolls off the top is kept (the last 500 lines): Shift+Page Up and
+-- Shift+Page Down, or the mouse wheel, look back through it, as a
+-- terminal's scrollback; any other key goes back to the live screen (and
+-- on to the other side).  Plain Page Up and Down, and the wheel when the
+-- other side has asked for the mouse, still go there.  Only the view
+-- moves: nothing is sent or held up meanwhile.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("telnet", "telnet host [port]")
@@ -38,6 +45,8 @@ if not conn then cu.fail(host .. " " .. port .. ": " .. err); return cu.exit() e
 local proc = rawget(_G, "proc")
 if proc and not (proc.ignore and proc.getpgid) then proc = nil end
 if proc then proc.ignore("TSTP") end
+-- and Shift+Page Up/Down are this one's scrollback, not the console's
+if proc and proc.ownScrollback then proc.ownScrollback() end
 
 local native = term.current()
 local w, h = native.getSize()
@@ -104,6 +113,43 @@ local function rubout()
     screen.feed("\8 \8")
 end
 
+-- The scrollback: what scrolled off the top, back lines up from the live
+-- screen.  Only shown here: nothing is sent or held up, so the other
+-- side (towel's film, a router's own --More--) carries on as ever.
+local back, seen = 0, 0
+local function showBack()
+    local hist = screen.history
+    back = math.max(0, math.min(back, #hist))
+    if back == 0 then
+        win.setVisible(true)
+        win.redraw()
+        win.restoreCursor()
+        return
+    end
+    win.setVisible(false)
+    seen = #hist
+    for r = 1, h - 1 do
+        local i = #hist + r - back
+        local text, tf, tb
+        if i <= #hist then text, tf, tb = hist[i][1], hist[i][2], hist[i][3]
+        else text, tf, tb = win.getLine(i - #hist) end
+        if #text ~= w then                      -- (kept at another width)
+            text = (text .. (" "):rep(w)):sub(1, w)
+            tf, tb = (tf .. ("0"):rep(w)):sub(1, w), (tb .. ("f"):rep(w)):sub(1, w)
+        end
+        native.setCursorPos(1, r)
+        native.blit(text, tf, tb)
+    end
+    native.setCursorPos(1, h)
+    native.setBackgroundColour(colours.black)
+    native.setTextColour(colours.yellow)
+    native.clearLine()
+    native.write(("scrollback: " .. back .. " up; Shift+PgUp/PgDn, wheel; a key: back"):sub(1, w))
+    native.setCursorBlink(false)
+end
+local function scrollBy(n) back = back + n; showBack() end
+local function live() if back > 0 then back = 0; showBack() end end
+
 -- Ctrl+]: telnet's own keys, on the bottom line
 local function menu()
     native.setCursorPos(1, h)
@@ -136,16 +182,23 @@ local ok, e = pcall(parallel.waitForAny,
             local data, why = conn:read()
             if not data then closed = why; return end
             parse(data)
+            if back > 0 then back = back + (#screen.history - seen); showBack() end   -- (the view stays put)
         end
     end,
     function()
-        local ctrl = false
+        local ctrl, shift = false, false
         while true do
             local ev = table.pack(os.pullEventRaw())
             local name = ev[1]
             if name == "char" then
+                live()
                 typed(ev[2])
+            elseif name == "key" and (ev[2] == keys.leftShift or ev[2] == keys.rightShift) then
+                shift = true
+            elseif name == "key" and shift and (ev[2] == keys.pageUp or ev[2] == keys.pageDown) then
+                scrollBy(ev[2] == keys.pageUp and h - 2 or -(h - 2))   -- (plain PgUp/PgDn go there)
             elseif name == "key" then
+                live()
                 local code = ev[2]
                 if code == keys.leftCtrl or code == keys.rightCtrl then ctrl = true
                 elseif ctrl and code == keys.rightBracket then
@@ -159,6 +212,9 @@ local ok, e = pcall(parallel.waitForAny,
                 end
             elseif name == "key_up" then
                 if ev[2] == keys.leftCtrl or ev[2] == keys.rightCtrl then ctrl = false end
+                if ev[2] == keys.leftShift or ev[2] == keys.rightShift then shift = false end
+            elseif name == "mouse_scroll" and not screen.mouse then
+                scrollBy(-ev[2] * 3)                -- (the wheel is the other side's if it asked for the mouse)
             elseif name == "terminate" then
                 send("\20")                         -- Ctrl+T, for the other side
             elseif name == "paste" then
@@ -175,6 +231,7 @@ local ok, e = pcall(parallel.waitForAny,
                 win.redraw()                        -- (back from Ctrl+] z: the shell drew over it)
                 win.restoreCursor()
             elseif name == "term_resize" then
+                live()
                 w, h = native.getSize()
                 win.reposition(1, 1, w, h)
                 screen.resize(w, h)

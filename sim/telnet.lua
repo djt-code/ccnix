@@ -171,3 +171,25 @@ check("keyBytes: Up, Enter, Ctrl+B; a letter is left to its char event",
 check("mouseBytes round trip: a right click at 7,4 and a wheel up",
     decoded(T.mouseBytes("mouse_click", 2, 7, 4) .. T.mouseBytes("mouse_scroll", -1, 3, 3))
         == "mouse_click,2,7,4 mouse_scroll,-1,3,3")
+
+-- the scrollback: rows a line feed at the bottom (or CSI S) pushes off the
+-- top, oldest first, with their colours; a redraw in place adds nothing;
+-- only the last T.HISTORY kept
+local sb = window(6, 2)
+local tsb = T.terminal(sb, true)
+tsb.feed("one\r\ntwo\r\n\27[31mthree\27[0m\r\nfour")
+check("scrollback: the rows scrolled off the top, oldest first, colours and all",
+    #tsb.history == 2 and tsb.history[1][1] == "one   " and tsb.history[2][1] == "two   "
+        and sb.getLine(1) == "three " and sb.getLine(2) == "four  ", #tsb.history .. " " .. show(sb.getLine(1)))
+tsb.feed("\27[H\27[2Jredraw\27[2;1Hin pl")
+check("a redraw in place (towel's way) adds nothing to it", #tsb.history == 2, #tsb.history)
+tsb.feed("\27[1S")
+check("CSI S scrolls a row into it too", #tsb.history == 3 and tsb.history[3][1] == "redraw", show(tsb.history[3] and tsb.history[3][1]))
+local was = T.HISTORY
+T.HISTORY = 3
+local sm = window(4, 1)
+local tsm = T.terminal(sm, true)
+tsm.feed("a\r\nb\r\nc\r\nd\r\ne")
+T.HISTORY = was
+check("only the last T.HISTORY rows are kept", #tsm.history == 3 and tsm.history[1][1] == "b   " and tsm.history[3][1] == "d   ",
+    #tsm.history .. " " .. tostring(tsm.history[1] and tsm.history[1][1]))

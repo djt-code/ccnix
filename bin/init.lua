@@ -25,7 +25,9 @@
 --
 -- The keyboard and mouse go to the console: to the process group in
 -- front of it (ccsh puts each job there in turn; Ctrl+Z stops it); every
--- other event to every process.  A program that computes for a long time
+-- other event to every process.  The console keeps a scrollback, as a
+-- Linux console does: Shift+Page Up and Down look back through what
+-- scrolled off its top (the last 500 lines); any other key comes back.  A program that computes for a long time
 -- without waiting holds everything up, as it does in CraftOS.
 
 local args = { ... }
@@ -73,6 +75,7 @@ chain[#chain + 1] = false                       -- the CraftOS shell
 
 local w, h = term.getSize()
 local console = window.create(term.current(), 1, 1, w, h, true)
+K.scrollback(console, term.current())          -- (Shift+Page Up/Down on the console)
 local function nextConsole()
     if #chain == 0 then
         os.shutdown()

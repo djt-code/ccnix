@@ -72,7 +72,7 @@ local fakeSettings = {
     getNames = function() local t = {} for k in pairs(STORE) do t[#t + 1] = k end table.sort(t) return t end,
 }
 
-local KEYS = { leftCtrl = 29, rightCtrl = 157, z = 44 }
+local KEYS = { leftCtrl = 29, rightCtrl = 157, z = 44, leftShift = 42, rightShift = 54, pageUp = 201, pageDown = 209 }
 local K = P.new({ native = native, osT = fakeOs, term = fakeTerm, window = fakeWindow, settings = fakeSettings,
     env = { BASE = "yes" }, keys = KEYS })
 -- drain: hand every queued event on, as init's loop does
@@ -552,3 +552,56 @@ check("a service's program exiting non-zero: failed, with its status; another's 
         and table.concat(said, "|"):find("bad failed: exit status 3", 1, true),
     tostring(K.services.bad.last) .. " " .. tostring(K.services.good.last) .. " " .. table.concat(said, "|"))
 _G.POSIX_STATUS = nil
+
+-- 9. the console's scrollback (as a Linux console's): what scrolls off the
+-- top kept; Shift+Page Up/Down shows it over the console (the program
+-- there none the wiser), any other key back to the live screen and on;
+-- a program in front that keeps those keys (telnet) gets them instead
+local function sbWindow(w, h)
+    local win = { rows = {}, visible = true, redraws = 0 }
+    for r = 1, h do win.rows[r] = (" "):rep(w) end
+    function win.getSize() return w, h end
+    function win.getLine(r) return win.rows[r], ("0"):rep(w), ("f"):rep(w) end
+    function win.put(r, s) win.rows[r] = (s .. (" "):rep(w)):sub(1, w) end
+    function win.scroll(n) for _ = 1, n do table.remove(win.rows, 1); win.rows[h] = (" "):rep(w) end end
+    function win.setVisible(v) win.visible = v end
+    function win.redraw() win.redraws = win.redraws + 1 end
+    function win.restoreCursor() end
+    return win
+end
+local scr = { lines = {} }
+function scr.setCursorPos(_, y) scr.y = y end
+function scr.blit(t) scr.lines[scr.y] = t end
+function scr.write(s) scr.lines[scr.y] = s end
+function scr.setBackgroundColour() end
+function scr.setTextColour() end
+function scr.clearLine() end
+function scr.setCursorBlink() end
+local cwin = sbWindow(40, 3)
+K.scrollback(cwin, scr)
+cwin.put(1, "aa") cwin.scroll(1) cwin.put(1, "bb") cwin.scroll(1)
+check("the console keeps what scrolls off its top", #K.sb.hist == 2 and K.sb.hist[1][1]:find("^aa ") and K.sb.hist[2][1]:find("^bb "),
+    #K.sb.hist)
+seen = {}
+local conProc = K.spawn({ name = "conp", tty = "con", session = true, fn = noter("conp") })
+K.console = conProc
+K.input("con", "key", KEYS.leftShift)
+K.input("con", "key", KEYS.pageUp)
+check("Shift+Page Up: the scrollback over the console (the window hidden, the program not told of Page Up)",
+    not cwin.visible and scr.lines[1]:find("^bb ") and scr.lines[3]:find("^scrollback: 1 up") and not saw("conp:"):find("201"),
+    saw() .. " " .. tostring(scr.lines[1]) .. "|" .. tostring(scr.lines[3]))
+K.input("con", "key_up", KEYS.leftShift)
+K.input("con", "char", "x")
+check("any other key: back to the live screen, and the key on to the program",
+    cwin.visible and cwin.redraws == 1 and K.sb.back == 0 and saw("conp:"):find("conp:char:x", 1, true), saw())
+local telnetLike = K.spawn({ name = "tn", tty = "con", fn = function()
+    K.api.ownScrollback()
+    noter("tn")()
+end })
+K.ttys["con"].fg = K.procs[telnetLike].pgid
+seen = {}
+K.input("con", "key", KEYS.leftShift)
+K.input("con", "key", KEYS.pageUp)
+check("a program in front that keeps Shift+Page Up/Down (telnet): it gets them, the console's scrollback stays shut",
+    cwin.visible and K.sb.back == 0 and saw("tn:"):find("tn:key:201", 1, true), saw())
+K.input("con", "key_up", KEYS.leftShift)

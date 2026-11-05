@@ -34,6 +34,12 @@
 -- ends, its terminal hangs up: what's left of the session gets HUP.  A
 -- process's children go to init (process 1) when it ends.
 --
+-- The console keeps a scrollback, as a Linux virtual console does
+-- (K.scrollback, which init sets up): Shift+Page Up and Down look back
+-- through what scrolled off its top, under whatever runs there, unless
+-- what's in front keeps those keys for itself (proc.ownScrollback: the
+-- telnet client, whose scrollback is the other computer's).
+--
 -- Services are commands kept running: settings service.<name>.cmd (the
 -- command line), service.<name>.enabled (started at boot) and
 -- service.<name>.restart ("always", the default, or "no").  One that ends
@@ -58,9 +64,9 @@
 --
 -- Programs reach it through _G.proc (init sets it): proc.spawn, kill
 -- (a negative ID: that process group), list, self, console, term,
--- inject, input, getpgid, foreground, setForeground, ignore, signal,
--- wait, log, register, uncaptured (fn(...) with capture off), and the
--- service functions.
+-- inject, input, getpgid, foreground, setForeground, ignore,
+-- ownScrollback, signal, wait, log, register, uncaptured (fn(...) with
+-- capture off), and the service functions.
 -- The module's P.serviceDef, serviceNames and serviceStatus read the
 -- settings' services without init (service.lua).
 
@@ -69,6 +75,7 @@ local P = {}
 local USER = { char = true, key = true, key_up = true, paste = true, terminate = true,
     mouse_click = true, mouse_up = true, mouse_scroll = true, mouse_drag = true }
 P.USER = USER
+P.HISTORY = 500                 -- lines of the console's scrollback (K.scrollback)
 P.SIGNALS = { HUP = 1, INT = 2, KILL = 9, TERM = 15, CONT = 18, STOP = 19, TSTP = 20 }
 
 -- A signal as its name: "TERM", "SIGTERM", "term", "15" and 15 are all
@@ -214,6 +221,91 @@ function P.new(o)
     end
 
     --------------------------------------------------------------------
+    -- The console's scrollback
+    --------------------------------------------------------------------
+    -- As a Linux virtual console's: the rows that scroll off the top of
+    -- the console's window are kept (the last P.HISTORY), and Shift+Page
+    -- Up and Down show them over it; any other key goes back to the live
+    -- screen, and on to whoever it's for.  What runs there sees none of
+    -- it (it carries on drawing, out of sight).
+    local sb
+    local function showBack()
+        local win, out, hist = sb.win, sb.screen, sb.hist
+        sb.back = math.max(0, math.min(sb.back, #hist))
+        if sb.back == 0 then
+            win.setVisible(true)
+            win.redraw()
+            win.restoreCursor()
+            return
+        end
+        win.setVisible(false)
+        local w, h = win.getSize()
+        for r = 1, h - 1 do
+            local i = #hist + r - sb.back
+            local text, tf, tb
+            if i <= #hist then text, tf, tb = hist[i][1], hist[i][2], hist[i][3]
+            else text, tf, tb = win.getLine(i - #hist) end
+            if #text ~= w then
+                text = (text .. (" "):rep(w)):sub(1, w)
+                tf, tb = (tf .. ("0"):rep(w)):sub(1, w), (tb .. ("f"):rep(w)):sub(1, w)
+            end
+            out.setCursorPos(1, r)
+            out.blit(text, tf, tb)
+        end
+        out.setCursorPos(1, h)
+        out.setBackgroundColour(32768)          -- (black)
+        out.setTextColour(16)                   -- (yellow)
+        out.clearLine()
+        out.write(("scrollback: " .. sb.back .. " up; Shift+PgUp/PgDn; a key: back"):sub(1, w))
+        out.setCursorBlink(false)
+    end
+
+    -- Keep the scrollback of window win (the console's), drawn on screen.
+    function K.scrollback(win, screen)
+        sb = { win = win, screen = screen, hist = {}, back = 0, shift = false }
+        local scroll = win.scroll
+        win.scroll = function(n)
+            local _, h = win.getSize()
+            if type(n) == "number" and n > 0 then
+                for r = 1, math.min(n, h) do sb.hist[#sb.hist + 1] = { win.getLine(r) } end
+                local drop, m = #sb.hist - P.HISTORY, #sb.hist
+                if drop > 0 then
+                    for i = 1, m - drop do sb.hist[i] = sb.hist[i + drop] end
+                    for i = m - drop + 1, m do sb.hist[i] = nil end
+                end
+                if sb.back > 0 then sb.back = sb.back + math.min(n, h) end     -- (the view stays put)
+            end
+            local r = scroll(n)
+            if sb.back > 0 then showBack() end
+            return r
+        end
+        K.sb = sb
+    end
+
+    -- Shift+Page Up/Down at the console: true if it was the scrollback's.
+    local function scrollKey(t, ev)
+        if not (sb and keysT and t == "con") then return false end
+        local kind, k = ev[1], ev[2]
+        if (kind == "key" or kind == "key_up") and (k == keysT.leftShift or k == keysT.rightShift) then
+            sb.shift = kind == "key"
+        elseif kind == "key" and sb.shift and (k == keysT.pageUp or k == keysT.pageDown) then
+            local tt = K.ttys[t]
+            for _, p in ipairs(K.list) do                       -- (one in front keeps them: its own)
+                if tt and p.pgid == tt.fg and p.tty == t and p.ownScrollback and K.procs[p.pid] then return false end
+            end
+            local _, h = sb.win.getSize()
+            local page = math.max(1, h - 2)
+            sb.back = sb.back + (k == keysT.pageUp and page or -page)
+            showBack()
+            return true
+        elseif sb.back > 0 and (kind == "key" or kind == "char" or kind == "paste") then
+            sb.back = 0
+            showBack()
+        end
+        return false
+    end
+
+    --------------------------------------------------------------------
     -- Running a process
     --------------------------------------------------------------------
     local reap
@@ -270,6 +362,7 @@ function P.new(o)
     -- What's typed at terminal t: to its foreground group (Ctrl+Z stops
     -- that), or to the session leader if no one's left in the group.
     local function input(t, ev)
+        if scrollKey(t, ev) then return end
         local tt = K.ttys[t]
         if not tt then                          -- (no session there: the console's process, if any)
             local p = t == "con" and K.console and K.procs[K.console]
@@ -783,6 +876,15 @@ function P.new(o)
             local tt = p and K.ttys[p.tty]
             if not tt or tt.sid ~= p.sid then return false, "no terminal" end
             tt.fg = pgid
+            return true
+        end,
+        -- the caller keeps Shift+Page Up/Down for itself while it's in
+        -- front of the console (its own scrollback), or with on false no
+        -- longer does
+        ownScrollback = function(on)
+            local p = K.current
+            if not p then return false end
+            p.ownScrollback = on ~= false or nil
             return true
         end,
         -- the caller ignores signal sig (TSTP: the only one that can be),

@@ -299,6 +299,8 @@ end
 --------------------------------------------------------------------------
 -- feed(s) draws what a server sent on win (UTF-8 and escapes); the
 -- terminal's state is t (t.mouse, t.paste: what the server asked for).
+T.HISTORY = 500                 -- lines of scrollback a terminal keeps
+
 function T.terminal(win, colour)
     local t = { mouse = false, paste = false }
     local w, h = win.getSize()
@@ -310,8 +312,22 @@ function T.terminal(win, colour)
         local l = (math.floor(rgb / 65536) + math.floor(rgb / 256) % 256 + rgb % 256) / 3
         return l > 200 and 0 or l > 120 and 8 or l > 50 and 7 or 15
     end
+    -- the scrollback: rows that scroll off the top (a line feed at the
+    -- bottom, CSI S), oldest first, { text, fg, bg } as getLine gives them;
+    -- a redraw in place (towel's film, a full-screen program) adds nothing
+    local history = {}
+    local function keep(n)
+        if not win.getLine then return end
+        for r = 1, math.min(n, h) do history[#history + 1] = { win.getLine(r) } end
+        if #history > T.HISTORY then
+            local drop, n = #history - T.HISTORY, #history
+            for i = 1, n - drop do history[i] = history[i + drop] end
+            for i = n - drop + 1, n do history[i] = nil end
+        end
+    end
+    t.history = history
     local function scroll()
-        if y > h then win.scroll(y - h); y = h end
+        if y > h then keep(y - h); win.scroll(y - h); y = h end
     end
     local function put(ch, inverted)
         if x > w then x, y = 1, y + 1; scroll() end
@@ -390,7 +406,7 @@ function T.terminal(win, colour)
                 elseif v == "1000" or v == "1002" or v == "1006" then t.mouse = final == "h"
                 elseif v == "2004" then t.paste = final == "h" end
             end
-        elseif final == "S" then win.scroll(n1 or 1)
+        elseif final == "S" then keep(n1 or 1); win.scroll(n1 or 1)
         elseif final == "T" then win.scroll(-(n1 or 1))
         end
         x, y = math.max(1, math.min(w, x)), math.max(1, math.min(h, y))

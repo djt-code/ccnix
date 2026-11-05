@@ -1359,7 +1359,14 @@ standing at it. On the console Ctrl+T isn't passed on, so a stray one
 doesn't stop the miner. Our client's Ctrl+] then t (Telnet's "interrupt
 process") does stop it. Under `init` the client passes Ctrl+Z on too, so
 it stops the job in front over there, as a raw-mode terminal would;
-Ctrl+] then z stops the client itself here (`fg` brings it back).
+Ctrl+] then z stops the client itself here (`fg` brings it back). A
+server that doesn't echo (a MUD, `nc`) gets a line at a time, edited here
+with Backspace and sent at Enter, as BSD's telnet does. What scrolls off
+the top is kept: Shift+Page Up and Down (or the mouse wheel, unless the
+server asked for the mouse) look back through the last 500 lines, and
+any other key returns. Only the view moves, so towel's film or a
+router's own `--More--` carries on as ever; plain Page Up and Down still
+go to the server.
 
 The screen goes as ANSI escapes in xterm's 256 colours, a row at a time
 as it changes. CC's Latin-1 characters go as UTF-8, and its block
@@ -1410,6 +1417,11 @@ runs everything:
   misses, up to 256, until it's continued. When a session's leader ends,
   what's left of the session gets HUP; a process's children go to init
   when it ends.
+- **The console's scrollback,** as a Linux console's: Shift+Page Up and
+  Down look back through what scrolled off its top (the last 500 lines),
+  under whatever runs there; any other key returns. A program in front
+  can keep those keys (`proc.ownScrollback()`): the telnet client does,
+  for its own scrollback of the other computer.
 - **The console:** the autostart first, if `ccnix.autostart` names one
   (the miner, the farmer, the router's screen), then ccsh if
   `ccsh.login` is on, then the CraftOS shell, each when the one before
