@@ -353,7 +353,8 @@ function P.new(o)
         local pid = K.nextPid
         K.nextPid = pid + 1
         local parent = K.current
-        local tty = spec.tty or (parent and parent.tty) or "?"
+        -- (a new session starts with no terminal unless given one, as setsid does)
+        local tty = spec.tty or (not spec.session and parent and parent.tty) or "?"
         local session = spec.session or not parent or tty ~= parent.tty
         local capture = spec.capture
         if capture == nil and not session and (spec.term == nil or spec.term == parent.term) then
@@ -382,7 +383,10 @@ function P.new(o)
             pgid = (session or spec.pgid == true) and pid or tonumber(spec.pgid) or parent.pgid,
         }
         if p.name:sub(-4) == ".lua" then p.name = p.name:sub(1, -5) end
-        if session and tty ~= "?" then K.ttys[tty] = { sid = pid, fg = pid } end
+        local held = K.ttys[tty]
+        if session and tty ~= "?" and not (held and K.procs[held.sid]) then   -- (one a live session holds stays its)
+            K.ttys[tty] = { sid = pid, fg = pid }
+        end
         K.procs[pid] = p
         K.list[#K.list + 1] = p
         if not K.current then flush() end           -- (else after the one running now: see dispatch)

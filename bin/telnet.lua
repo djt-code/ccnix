@@ -7,10 +7,12 @@
 -- screen: telnetd on another computer (a shell, or its console), or any
 -- Telnet server that draws with ANSI escapes.  What you type goes there,
 -- arrows and all; the mouse and pasting too, if the server asks.  Ctrl+T
--- goes there as Ctrl+T.  Ctrl+] is telnet's own: then q leaves, t sends
--- an "interrupt process" (what stops a program even on the console),
--- any other key goes back.  It ends when the other side closes.  A screen
--- without colour shows the colours as greys.
+-- goes there as Ctrl+T, and under init Ctrl+Z goes there too (it stops
+-- what runs over there, as in a raw-mode terminal).  Ctrl+] is telnet's
+-- own: then q leaves, t sends an "interrupt process" (what stops a
+-- program even on the console), z stops telnet itself here (a job: fg
+-- brings it back), any other key goes back.  It ends when the other side
+-- closes.  A screen without colour shows the colours as greys.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("telnet", "telnet host [port]")
@@ -27,6 +29,12 @@ local addr, port = ai[1].addr, ai[1].port
 print("Connecting to " .. host .. (addr ~= host and (" (" .. addr .. ")") or "") .. " " .. port .. "...")
 local conn, err = net.connect(addr, port, 15)
 if not conn then cu.fail(host .. " " .. port .. ": " .. err); return cu.exit() end
+
+-- under init: Ctrl+Z is a key for the other side (proc.ignore, as a
+-- raw-mode terminal turns off ISIG), Ctrl+] z stops this one
+local proc = rawget(_G, "proc")
+if proc and not (proc.ignore and proc.getpgid) then proc = nil end
+if proc then proc.ignore("TSTP") end
 
 local native = term.current()
 local w, h = native.getSize()
@@ -75,13 +83,15 @@ local function menu()
     native.setBackgroundColour(colours.black)
     native.setTextColour(colours.yellow)
     native.clearLine()
-    native.write(("telnet: q quit, t interrupt, other: back"):sub(1, w))
+    native.write(((proc and "telnet: q quit, t interrupt, z stop, other: back")
+        or "telnet: q quit, t interrupt, other: back"):sub(1, w))
     local quit = false
     while true do
         local ev, a = os.pullEventRaw()
         if ev == "char" and a ~= "]" then               -- (the ] of Ctrl+] may come as a char too)
             if a == "q" then quit = true
-            elseif a == "t" then send(string.char(T.IAC, T.IP)) end
+            elseif a == "t" then send(string.char(T.IAC, T.IP))
+            elseif a == "z" and proc then proc.kill(-proc.getpgid(), "STOP") end   -- (stopped once this yields)
             break
         elseif ev == "terminate" or (ev == "key" and (a == keys.enter or a == keys.backspace)) then
             break
@@ -128,6 +138,9 @@ local ok, e = pcall(parallel.waitForAny,
                 if screen.paste then send("\27[200~" .. T.escape(ev[2]) .. "\27[201~") else typed(ev[2]) end
             elseif name:match("^mouse_") and name ~= "mouse_move" then
                 if screen.mouse then send(T.mouseBytes(name, ev[2], ev[3], ev[4])) end
+            elseif name == "proc_cont" and proc and ev[2] == proc.self() then
+                win.redraw()                        -- (back from Ctrl+] z: the shell drew over it)
+                win.restoreCursor()
             elseif name == "term_resize" then
                 w, h = native.getSize()
                 win.reposition(1, 1, w, h)

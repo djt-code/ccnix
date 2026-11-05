@@ -1350,7 +1350,9 @@ set to `console`, the computer's console, whatever runs there: the miner's
 or the farmer's screen, which you then see and type into as if you were
 standing at it. On the console Ctrl+T isn't passed on, so a stray one
 doesn't stop the miner. Our client's Ctrl+] then t (Telnet's "interrupt
-process") does stop it.
+process") does stop it. Under `init` the client passes Ctrl+Z on too, so
+it stops the job in front over there, as a raw-mode terminal would;
+Ctrl+] then z stops the client itself here (`fg` brings it back).
 
 The screen goes as ANSI escapes in xterm's 256 colours, a row at a time
 as it changes. CC's Latin-1 characters go as UTF-8, and its block

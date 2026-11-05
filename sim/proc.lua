@@ -506,3 +506,23 @@ drain()
 check("capture: a service's child on its terminal is captured; one with a terminal or a session of its own isn't",
     K.procs[kids.same].capture == true and K.procs[kids.own].capture == nil and K.procs[kids.tty].capture == nil
         and K.procs[kids.tty].sid == kids.tty and K.ttys["pts/8"].fg == kids.tty)
+
+-- a service started from a process on a terminal (`service start` typed
+-- at the console): a session of its own with no terminal, the console's
+-- keyboard still the console's
+STORE["service.det.cmd"] = "det"
+COMMANDS.det = function() fakeOs.pullEvent("never") end
+seen = {}
+local typer = K.spawn({ name = "typer", tty = "pts/9", fn = function()
+    K.serviceStart("det")
+    noter("typer")()
+end })
+drain()
+local det = K.procs[K.services.det.pid]
+K.input("pts/9", "char", "k")
+check("a service started from a terminal: no terminal of its own, and that terminal still its session's",
+    det.tty == "?" and det.sid == det.pid and K.ttys["pts/9"].sid == typer and K.ttys["pts/9"].fg == typer
+        and saw() == "typer:char:k", det.tty .. " " .. saw())
+local intruder = K.spawn({ name = "intruder", tty = "pts/9", session = true, fn = function() fakeOs.pullEvent("never") end })
+check("a new session on a terminal a live session holds doesn't take it", K.ttys["pts/9"].sid == typer
+    and K.procs[intruder].sid == intruder)
