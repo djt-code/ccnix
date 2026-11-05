@@ -49,7 +49,7 @@ local function underInit(args, opts)
         local res, when = {}, {}
         for name, evs in pairs(opts.when or {}) do when[name] = evs end
         local pid = K.spawn({ name = "ccsh", tty = "con", term = term.current(), session = true,
-            fn = function() res.ok, res.err = W:osRun(path, args) end })
+            fn = function() res.ok, res.err = W:osRun(path, args); res.st = rawget(_G, "POSIX_STATUS") end })
         K.console = pid
         local spare = 3
         for _ = 1, 5000 do
@@ -72,6 +72,7 @@ local function underInit(args, opts)
         end
         _G.proc = nil
         W.g.read = kbRead
+        _G.POSIX_STATUS = res.st            -- (the kernel keeps each process's own; the run's is ccsh's)
         return res.ok, res.err
     end)
 end

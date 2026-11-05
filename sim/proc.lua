@@ -526,3 +526,29 @@ check("a service started from a terminal: no terminal of its own, and that termi
 local intruder = K.spawn({ name = "intruder", tty = "pts/9", session = true, fn = function() fakeOs.pullEvent("never") end })
 check("a new session on a terminal a live session holds doesn't take it", K.ttys["pts/9"].sid == typer
     and K.procs[intruder].sid == intruder)
+
+-- a service whose program exits non-zero (a ccnix utility's cu.exit, a
+-- ccsh script's status): failed, with the status; each process's status
+-- its own
+got = nil
+local said = {}
+local sayWas = K.log
+K.log = function(rec) said[#said + 1] = rec.msg; return sayWas(rec) end
+STORE["service.bad.cmd"] = "bad"
+STORE["service.bad.restart"] = "no"
+COMMANDS.bad = function() _G.POSIX_STATUS = 2; fakeOs.pullEvent("go4"); _G.POSIX_STATUS = 3 end
+STORE["service.good.cmd"] = "good"
+STORE["service.good.restart"] = "no"
+COMMANDS.good = function() fakeOs.pullEvent("go4") end
+_G.POSIX_STATUS = 9
+K.serviceStart("bad")
+K.serviceStart("good")
+drain()
+fakeOs.queueEvent("go4")
+drain()
+K.log = sayWas
+check("a service's program exiting non-zero: failed, with its status; another's status not mixed in; the global as it was",
+    K.services.bad.last == "failed: exit status 3" and K.services.good.last == "ended" and _G.POSIX_STATUS == 9
+        and table.concat(said, "|"):find("bad failed: exit status 3", 1, true),
+    tostring(K.services.bad.last) .. " " .. tostring(K.services.good.last) .. " " .. table.concat(said, "|"))
+_G.POSIX_STATUS = nil

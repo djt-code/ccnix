@@ -37,8 +37,10 @@
 -- Services are commands kept running: settings service.<name>.cmd (the
 -- command line), service.<name>.enabled (started at boot) and
 -- service.<name>.restart ("always", the default, or "no").  One that ends
--- is started again after 1 s, 2 s, 4 s... (up to a minute; back to 1 s
--- once it has run 30 s).
+-- (or fails: an error, or its program exits non-zero, as a ccnix utility
+-- or ccsh script says through _G.POSIX_STATUS, each process's own) is
+-- started again after 1 s, 2 s, 4 s... (up to a minute; back to 1 s once
+-- it has run 30 s).
 --
 -- The system log (`help syslog`): proc.log(rec) takes a message (lib/log's
 -- record) for syslogd, the process that has called proc.register("syslog").
@@ -225,11 +227,15 @@ function P.new(o)
         local saved = { rawget(osT, "getenv"), rawget(osT, "setenv"), rawget(osT, "environ") }
         osT.getenv, osT.setenv, osT.environ = api.getenv, api.setenv, api.environ
         local prevTerm = termT.redirect(p.term)
+        local status = rawget(_G, "POSIX_STATUS")     -- (each process's own: what its last program said)
+        _G.POSIX_STATUS = p.posixStatus
         local ctx = p.enter and p.enter(p)
         local t0 = now()
         local r = table.pack(coroutine.resume(p.co, ...))
         p.cpu = p.cpu + (now() - t0)
         if p.leave then p.leave(p, ctx) end
+        p.posixStatus = rawget(_G, "POSIX_STATUS")
+        _G.POSIX_STATUS = status
         p.term = termT.current()
         termT.redirect(prevTerm)
         osT.getenv, osT.setenv, osT.environ = saved[1], saved[2], saved[3]
@@ -367,9 +373,11 @@ function P.new(o)
             co = coroutine.create(function() return spec.fn(table.unpack(args)) end)
         else
             local shellEnv = { shell = o.shell, multishell = o.multishell }
+            -- (its status: what its program said, as cu.exit and ccsh set
+            -- it; the CraftOS shell doesn't pass that on itself)
             co = coroutine.create(function()
-                if spec.cmd then return osT.run(shellEnv, SHELL, spec.cmd) end
-                return osT.run(shellEnv, SHELL)
+                if spec.cmd then osT.run(shellEnv, SHELL, spec.cmd) else osT.run(shellEnv, SHELL) end
+                return rawget(_G, "POSIX_STATUS")
             end)
         end
         local p = {
@@ -675,11 +683,14 @@ function P.new(o)
     local launch
 
     local function exited(svc, p)
-        svc.pid, svc.last = nil, p.ok and "ended" or ("failed: " .. tostring(p.err))
+        -- failed: an error, or its program exited non-zero
+        local failed = not p.ok or (p.status or 0) ~= 0
+        local why = not p.ok and tostring(p.err) or ("exit status " .. tostring(p.status))
+        svc.pid, svc.last = nil, failed and ("failed: " .. why) or "ended"
         local d = def(svc.name)
-        local what = p.ok and svc.name .. " ended" or svc.name .. " failed: " .. tostring(p.err)
+        local what = svc.name .. (failed and (" failed: " .. why) or " ended")
         if svc.stopping or not d or d.restart == "no" then
-            if svc.stopping then say(6, "stopped " .. svc.name) else say(p.ok and 5 or 3, what) end
+            if svc.stopping then say(6, "stopped " .. svc.name) else say(failed and 3 or 5, what) end
             svc.state, svc.stopping = svc.stopping and "stopped" or "exited", nil
             return
         end
@@ -687,7 +698,7 @@ function P.new(o)
         svc.fails, svc.restarts = svc.fails + 1, svc.restarts + 1
         svc.state = "restarting"
         local wait = math.floor(math.min(60, 2 ^ (svc.fails - 1)))
-        say(p.ok and 5 or 3, what .. "; again in " .. wait .. " s")
+        say(failed and 3 or 5, what .. "; again in " .. wait .. " s")
         K.after(wait, function()
             if svc.state == "restarting" then launch(svc) end
         end)
