@@ -228,9 +228,9 @@ r1 = W:run("syslogd", { events = {
 _G.proc = nil
 STORE["syslog.burst"] = nil
 local all = W:read("var/log/all.log") or ""
-check("syslogd: registers, says where its rules came from, files what init hands it, stops at Ctrl+T",
-    r1.status == 0 and registered == "syslog" and r1.tty:find("syslogd: 2 rules from /etc/syslog.conf")
-        and all:find("base web%[3%]: hello\n") and all:find("web%[3%]: two\n") and r1.tty:find("syslogd: stopped"),
+check("syslogd: registers, says (and logs) where its rules came from, files what init hands it, stops at Ctrl+T",
+    r1.status == 0 and registered == "syslog" and r1.tty:find("syslogd: started: 2 rules from /etc/syslog.conf")
+        and all:find("syslogd: started: 2 rules from /etc/syslog.conf\n") and all:find("base web%[3%]: hello\n") and all:find("web%[3%]: two\n") and r1.tty:find("syslogd: stopped"),
     show(r1.tty) .. show(all))
 check("... a line it couldn't read: on its screen and logged; syslog.burst's limit", r1.tty:find("syslogd: line 3: want")
     and all:find("syslogd: /etc/syslog.conf: line 3: want") and not all:find("three"), show(all))
@@ -240,3 +240,10 @@ _G.proc = nil
 r3 = W:run("syslogd", { events = {} })
 check("syslogd: one at a time; not without init", r2.status == 1 and r2.errText:find("running already")
     and r3.status == 1 and r3.errText:find("init isn't running"), show(r2.errText) .. show(r3.errText))
+W.fs.delete("etc")
+_G.proc = fakeProc()
+r1 = W:run("syslogd", { events = { { "terminate", n = 1 } } })
+_G.proc = nil
+check("syslogd with no /etc/syslog.conf: writes the defaults there, and uses them",
+    W:read("etc/syslog.conf") == D.DEFAULT and r1.tty:find("started: 5 rules from /etc/syslog.conf", 1, true),
+    show(r1.tty))

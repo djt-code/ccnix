@@ -323,3 +323,49 @@ check("-f without one float conversion, -f with -w, no operand: status 1",
         and r3.err[1] == "seq: missing operand", show(r.errText) .. " " .. show(r3.errText))
 r = seq("2500")
 check("a long run (yielding as it goes)", select(2, r.out:gsub("\n", "")) == 2500 and r.out:sub(-5) == "2500\n")
+
+--------------------------------------------------------------------------
+-- rm, rmdir
+--------------------------------------------------------------------------
+local function tree()
+    W:file("t/a.txt", "a") W:file("t/sub/b.txt", "b") W:dir("t/empty") W:file("t/c.txt", "c")
+end
+tree()
+r = W:run("rm", "t/a.txt", "t/sub", "t/nope")
+check("rm: a file goes; a directory without -r stays (is a directory); a missing one said; status 1",
+    W:read("t/a.txt") == nil and W.fs.exists("t/sub/b.txt") and r.status == 1
+        and r.err[1] == "rm: t/sub: is a directory" and r.err[2] == "rm: t/nope: No such file or directory",
+    show(r.errText))
+r = W:run("rm", "-d", "t/empty", "t/sub")
+check("rm -d: an empty directory goes, a full one stays", not W.fs.exists("t/empty") and W.fs.exists("t/sub")
+    and r.status == 1 and r.err[1] == "rm: t/sub: is a directory", show(r.errText))
+r = W:run("rm", "-f", "t/nope", "t/c.txt")
+check("rm -f: no word for a missing one, status 0", r.status == 0 and #r.err == 0 and W:read("t/c.txt") == nil)
+r = W:run("rm", "-r", "t/sub")
+check("rm -r: the directory and what's in it", r.status == 0 and not W.fs.exists("t/sub"))
+tree()
+r = W:run("rm", "-ri", "t", { stdin = "y\ny\nn\ny\ny\ny\ny\n" })
+check("rm -i: asks before each (y removes); a directory something was kept in stays, unasked",
+    W:read("t/a.txt") == nil and W:read("t/c.txt") == "c" and not W.fs.exists("t/sub") and not W.fs.exists("t/empty")
+        and not r.errText:find("remove directory 't'", 1, true), show(r.errText))
+r = W:run("rm", "-r", ".", "..", "/", "/rom/programs")
+check("rm never removes . .. or /, nor what's read-only", r.status == 1 and #r.err == 4 and W.fs.exists("rom/programs"),
+    show(r.errText))
+r = W:run("rm")
+local rf = W:run("rm", "-f")
+check("rm alone: usage (status 2); rm -f alone: nothing, 0", r.status == 2 and rf.status == 0)
+W.fs.delete("t")
+W:file("p/q/r/f.txt", "x")
+r = W:run("rmdir", "p/q/r")
+check("rmdir: not empty is said, status 1", r.status == 1 and r.err[1] == "rmdir: p/q/r: Directory not empty", show(r.errText))
+W.fs.delete("p/q/r/f.txt")
+r = W:run("rmdir", "-p", "p/q/r/")
+check("rmdir -p: the directory and the ones above it as they empty", r.status == 0 and not W.fs.exists("p"), show(r.errText))
+W:file("x.txt", "x")
+r = W:run("rmdir", "x.txt", "nope")
+check("rmdir: a file, a missing one", r.status == 1 and r.err[1] == "rmdir: x.txt: Not a directory"
+    and r.err[2] == "rmdir: nope: No such file or directory" and W:read("x.txt") == "x", show(r.errText))
+W:file("deep/a/b/c.txt", "c") W:file("deep/d.txt", "d")
+r = W:run("rm", "-rf", "/deep", "/not-there")
+check("rm -rf /dir: the directory and everything in it, no questions, nothing said of what's missing",
+    r.status == 0 and #r.err == 0 and not W.fs.exists("deep"), show(r.errText))

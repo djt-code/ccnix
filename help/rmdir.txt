@@ -1,0 +1,5 @@
+rmdir: remove empty directories (POSIX rmdir)
+
+  rmdir [-p] dir...
+
+Removes each directory, which must be empty (rm -r removes one that isn't).  -p also removes each directory named in the path above it, as far as they've become empty: rmdir -p a/b/c removes c, then b, then a. Status 1 if any couldn't be removed.

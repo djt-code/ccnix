@@ -211,6 +211,11 @@ function N.new(opts)
         taps = {},          -- fn(dir, iface, frame): every frame in ("in") or out ("out"), as tcpdump wants
     }
     local clock = opts.clock or os.clock
+    -- the process that opens a socket (under init), for netstat -p
+    local owner = opts.owner or function()
+        local proc = rawget(_G, "proc")
+        return proc and proc.self and proc.self() or nil
+    end
     local transmit = opts.transmit
     local queue = opts.queue or os.queueEvent
     local nextId, nextPort = 0, EPHEMERAL
@@ -583,7 +588,7 @@ function N.new(opts)
             port = freePort()
             if not port then return nil, "no free port" end
         end
-        S.sockets[port] = { queue = {} }
+        S.sockets[port] = { queue = {}, pid = owner() }
         return port
     end
     function S.udpClose(port) S.sockets[port] = nil end
@@ -723,6 +728,7 @@ function N.new(opts)
             if l and d.syn and not d.ack and not d.rst then
                 c = newTcb(d.dport, pkt.src, d.sport, "SYN_RCVD")
                 c.listener, c.rcvNxt, c.sndWnd, c.lip = d.dport, add(d.seq, 1), d.wnd or MSS, pkt.dst
+                c.pid = l.pid
                 emit(c, { seq = c.iss, syn = true })
             else
                 resetFor(pkt, d)
@@ -825,7 +831,7 @@ function N.new(opts)
 
     function S.tcpListen(port)
         if S.listeners[port] then return nil, "port " .. port .. " is in use" end
-        S.listeners[port] = {}
+        S.listeners[port] = { pid = owner() }           -- (and the connections made, waiting, in order)
         return true
     end
     function S.tcpUnlisten(port) S.listeners[port] = nil end
@@ -843,6 +849,7 @@ function N.new(opts)
         local lport = freePort()
         if not lport then return nil, "no free port" end
         local c = newTcb(lport, dst, dport, "SYN_SENT")
+        c.pid = owner()
         S.tcpPorts[lport] = c
         local ok, err = emit(c, { seq = c.iss, syn = true })
         if not ok then finish(c, err); return nil, err end

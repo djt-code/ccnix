@@ -1,0 +1,12 @@
+netstat: the network's sockets, routes and interfaces
+
+  netstat [-atulnpe]
+      sockets
+  netstat -r
+      the routing table
+  netstat -i
+      the interfaces, with their frame counts
+  netstat -s
+      the stack's counters
+
+As BSD's and Linux's netstat: one line a socket, its protocol, the bytes waiting to be read (Recv-Q: for UDP, datagrams; for a listener, connections not yet accepted) and to be sent and acknowledged (Send-Q), its local and foreign address, and TCP's state.  Without -a or -l only connections are listed; -l lists the listening sockets (TCP listeners, and UDP sockets, which wait for anyone), -a both.  -t and -u keep to TCP or UDP.  -p adds the process that opened it, as PID/name (under init; see ps).  Addresses are always numbers: -n is taken and changes nothing (looking names up would wait on DNS).  -e is taken too. Over this computer's network stack (`ip up`); exit status 1 if it isn't up.  `ip` sets the routes and interfaces -r and -i show.

@@ -342,6 +342,61 @@ check("nc to a port nobody listens on: connection refused, status 1",
     r.status == 1 and r.err[1] == "nc: 10.0.2.5 99: connection refused", show(r.errText))
 
 --------------------------------------------------------------------------
+-- netstat: this computer's sockets (with the process that opened each,
+-- under a fake init), routes, interfaces and counters
+--------------------------------------------------------------------------
+local fakeInit = { self = function() return 7 end, list = function() return { { pid = 7, name = "telnetd" } } end }
+_G.proc = fakeInit
+assert(ME.tcpListen(23))
+local u514 = assert(ME.udpOpen(514))
+assert(B.tcpListen(80))
+local out80 = assert(ME.tcpConnect("10.0.2.5", 80))
+_G.proc = nil
+local function rowWith(out, ...)
+    for line in out:gmatch("[^\n]+") do
+        local all = true
+        for _, w in ipairs({ ... }) do if not line:find(w, 1, true) then all = false end end
+        if all then return line end
+    end
+end
+r = W:run("netstat")
+check("netstat: connections only (w/o servers): the one to B, established, from this end's address",
+    r.status == 0 and r.out:find("^Active Internet connections %(w/o servers%)\nProto Recv%-Q Send%-Q Local Address")
+        and rowWith(r.out, "tcp", "10.0.1.2:" .. out80.lport, "10.0.2.5:80", "ESTABLISHED")
+        and not r.out:find("LISTEN"), show(r.out))
+r = W:run("netstat", "-l")
+check("netstat -l: the TCP listener and the UDP socket, not the connection",
+    rowWith(r.out, "tcp", "0.0.0.0:23", "0.0.0.0:*", "LISTEN") and rowWith(r.out, "udp", "0.0.0.0:514")
+        and not r.out:find("ESTABLISHED") and r.out:find("%(only servers%)"), show(r.out))
+_G.proc = fakeInit
+r = W:run("netstat", "-atp")
+_G.proc = nil
+check("netstat -atp: TCP only, all of it, with PID/Program name (- for one no process opened)",
+    rowWith(r.out, "tcp", "0.0.0.0:23", "LISTEN", "7/telnetd") and rowWith(r.out, "ESTABLISHED", "7/telnetd")
+        and rowWith(r.out, "TIME_WAIT", " -")
+        and not r.out:find("udp") and r.out:find("PID/Program name", 1, true), show(r.out))
+r = W:run("netstat", "-lun")
+check("netstat -lun: UDP only (-n taken)", rowWith(r.out, "udp", "0.0.0.0:514") and not r.out:find("tcp "), show(r.out))
+r = W:run("netstat", "-r")
+check("netstat -r: the routes, the default via the router (UG), the connected one (U)",
+    rowWith(r.out, "0.0.0.0", "10.0.1.1", "0.0.0.0", "UG", "back") and rowWith(r.out, "10.0.1.0", "255.255.255.0", "U", "back"),
+    show(r.out))
+r = W:run("netstat", "-i")
+check("netstat -i: each interface, its frames in and out", rowWith(r.out, "back", "10.0.1.2/24")
+    and r.out:find("Iface RX%-OK TX%-OK"), show(r.out))
+r = W:run("netstat", "-s")
+check("netstat -s: the counters", r.out:find("Ip:\n") and r.out:find("1 listening") and r.out:find("1 sockets"), show(r.out))
+ME.tcpAbort(out80)
+ME.tcpUnlisten(23)
+ME.udpClose(u514)
+B.tcpUnlisten(80)
+local was = _G.ccnet
+_G.ccnet = nil
+r = W:run("netstat")
+_G.ccnet = was
+check("netstat with the network down: says so, status 1", r.status == 1 and r.errText:find("isn't up"), show(r.errText))
+
+--------------------------------------------------------------------------
 -- curl (lib/httpc), against a small HTTP server on B
 --------------------------------------------------------------------------
 local httpc = require("httpc")

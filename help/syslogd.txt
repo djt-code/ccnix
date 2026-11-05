@@ -3,7 +3,7 @@ syslogd: the system log daemon: files, shows and forwards what's logged
   syslogd
       run (as a service: setup init does it)
 
-Programs log through lib/log (C's syslog(3)), shell scripts with `logger`, and init logs what each service prints; all of it comes here, and goes where /etc/syslog.conf says: a log file, the console, or another syslog server (forwarded as RFC 5424 over UDP).  `help syslog` has the whole of it.  Without /etc/syslog.conf the rules are:
+Programs log through lib/log (C's syslog(3)), shell scripts with `logger`, and init logs what each service prints; all of it comes here, and goes where /etc/syslog.conf says: a log file, the console, or another syslog server (forwarded as RFC 5424 over UDP).  `help syslog` has the whole of it.  The first time it runs it writes /etc/syslog.conf with the default rules, to edit; without it (deleted) they are:
   *.info;auth,authpriv.none;local6,local7.none
       /var/log/messages
   auth,authpriv.*

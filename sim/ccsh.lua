@@ -387,3 +387,25 @@ check("after: the screen, io, printing globals, POSIX_SH and os.getenv are as th
     and rawget(W.os, "setenv") == nil and rawget(W.os, "environ") == nil)
 r = W:run("echo", "a", ">", "z.txt")
 check("echo on its own still does > (no shell to)", W:read("z.txt") == "a\n")
+
+-- 18. Tab completion: a file or directory name for an argument the stock
+-- shell has none for, after a pipe or a redirect, in quotes; not the
+-- command's own name, a glob or a variable
+W:file("notes.txt", "") W:file("nodir/x", "") W:file(".nohide", "")
+W.completer = nil
+W:run("ccsh", { stdin = "echo hi\n" })
+local function comp(line)
+    local got = W.completer and W.completer(line)
+    if not got then return "nil" end
+    table.sort(got)
+    return table.concat(got, ",")
+end
+check("Tab: an argument's file and directory names (a directory with / and without; hidden only after a dot)",
+    comp("cat no") == "dir,dir/,tes.txt" and comp("cat .no") == "hide", comp("cat no") .. " " .. comp("cat .no"))
+check("Tab: after a pipe and a redirect, inside a quote, in a directory",
+    comp("echo a | grep x > not") == "es.txt" and comp("cat 'not") == "es.txt" and comp("ls nodir/") == "x",
+    comp("echo a | grep x > not") .. " " .. comp("cat 'not") .. " " .. comp("ls nodir/"))
+check("Tab: not the command's own name (that's the stock shell's), nor a glob or $X",
+    comp("no") == "nil" and comp("cat no*") == "nil" and comp("cat $no") == "nil")
+W.files["notes.txt"], W.files[".nohide"] = nil, nil
+W.fs.delete("nodir")

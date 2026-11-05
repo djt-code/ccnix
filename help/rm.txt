@@ -1,0 +1,5 @@
+rm: remove files (POSIX rm)
+
+  rm [-fiRrd] file...
+
+Removes each file.  A directory only with -r or -R (it and everything in it) or -d (if it's empty); without, rm says it's a directory and leaves it.  -f: no message for a file that isn't there, and no questions; -i: asks before each removal (y removes); the last of -f and -i given wins.  . and .. (and /) are never removed.  Status 1 if anything couldn't be.  CraftOS's own rm (an alias for delete) removes directories without asking; ccnix points rm here instead.

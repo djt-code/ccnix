@@ -6,7 +6,8 @@
 -- `logger`, and init logs what each service prints; all of it comes here,
 -- and goes where /etc/syslog.conf says: a log file, the console, or
 -- another syslog server (forwarded as RFC 5424 over UDP).  `help syslog`
--- has the whole of it.  Without /etc/syslog.conf the rules are:
+-- has the whole of it.  The first time it runs it writes /etc/syslog.conf
+-- with the default rules, to edit; without it (deleted) they are:
 --   *.info;auth,authpriv.none;local6,local7.none    /var/log/messages
 --   auth,authpriv.*                                 /var/log/auth.log
 --   local6.*                                        /var/log/telnetd.log
@@ -43,6 +44,11 @@ local proc = rawget(_G, "proc")
 if not (proc and proc.register) then cu.fail("init isn't running (`help init`): programs log through it"); return cu.exit() end
 
 local text, from = D.DEFAULT, "the defaults"
+if not fs.exists(D.CONF) then                       -- (the defaults, written out for editing)
+    fs.makeDir(fs.getDir(D.CONF))
+    local h = fs.open(D.CONF, "w")
+    if h then h.write(D.DEFAULT); h.close() end
+end
 if fs.exists(D.CONF) and not fs.isDir(D.CONF) then
     local h = fs.open(D.CONF, "r")
     if h then text, from = h.readAll() or "", D.CONF; h.close() end
@@ -114,8 +120,10 @@ end
 
 local ok, why = proc.register("syslog")
 if not ok then cu.fail(why); return cu.exit() end
-print("syslogd: " .. #rules .. " rule" .. (#rules == 1 and "" or "s") .. " from " .. from
-    .. (lsock and ", listening on UDP " .. port or ""))
+local started = "started: " .. #rules .. " rule" .. (#rules == 1 and "" or "s") .. " from " .. from
+    .. (lsock and ", listening on UDP " .. port or "")
+print("syslogd: " .. started)
+engine.note("info", started)                        -- (in the log, as rsyslogd's own start is)
 for _, p in ipairs(problems) do
     print("syslogd: " .. p)
     engine.note("err", (p:find("^line ") and D.CONF .. ": " or "") .. p)

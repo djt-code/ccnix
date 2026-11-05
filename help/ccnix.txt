@@ -42,11 +42,14 @@ Anywhere (bin/):
   ls: list directory contents (POSIX ls, with the GNU options in everyday use)
   more: show files a screenful at a time (POSIX more, a subset)
   nc: netcat: TCP connections and UDP datagrams over the network stack
+  netstat: the network's sockets, routes and interfaces
   od: dump files in octal and other formats (POSIX od)
   ping: send ICMP echo requests and time the replies
   printf: write formatted output (POSIX printf)
   ps: list the processes
   pwd: print the working directory (POSIX pwd)
+  rm: remove files (POSIX rm)
+  rmdir: remove empty directories (POSIX rmdir)
   seq: print a sequence of numbers (as GNU's seq; not in POSIX)
   service: background services, kept running by init
   sleep: wait a while (POSIX sleep)

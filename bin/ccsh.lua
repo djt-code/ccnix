@@ -85,7 +85,9 @@
 -- Not yet: here-documents, $(( arithmetic )) (expr does sums), ~.
 --
 -- At the prompt, ccsh first runs the commands in /.profile (PS1,
--- export...), as `. /.profile` would.  The up and down keys go through
+-- export...), as `. /.profile` would.  Tab completes a program's name,
+-- and an argument as the stock shell would, or else as a file or
+-- directory name.  The up and down keys go through
 -- the lines typed before, kept in $HISTFILE (/.ccsh_history; unset or
 -- empty, none) across sessions and tabs, the last $HISTSIZE of them
 -- (1000; 0 keeps none).  Both are shell variables, set before /.profile
@@ -1893,8 +1895,9 @@ end
 --------------------------------------------------------------------------
 -- The prompt
 --------------------------------------------------------------------------
--- Tab completion: the stock shell's, for the command after the last |, ;
--- or &.
+-- Tab completion, for the command after the last |, ; or &: the stock
+-- shell's (program names, and what a program registers for its
+-- arguments), else a file or directory name.
 local function complete(line)
     local start, q = 1, nil
     for k = 1, #line do
@@ -1905,8 +1908,16 @@ local function complete(line)
         elseif c == "|" or c == ";" or c == "&" then start = k + 1 end
     end
     local tail = line:sub(start):gsub("^%s+", "")
-    if tail == "" or not shell.complete then return nil end
-    return shell.complete(tail)
+    if tail == "" then return nil end
+    local got = shell.complete and shell.complete(tail)
+    if got and #got > 0 then return got end
+    -- an argument the program has no completion of its own for: a file
+    -- or directory name, as POSIX shells complete (not a glob or $X)
+    local word = tail:match("[^%s<>]*$")
+    if word == tail or not fs.complete then return got end
+    word = word:gsub("^['\"]", "")
+    if word:find("[%*%?%[%$`]") then return got end
+    return fs.complete(word, shell.dir(), true, true)
 end
 
 -- A line typed at the prompt `text`, or nil for Ctrl+T.

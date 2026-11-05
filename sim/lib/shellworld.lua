@@ -299,7 +299,33 @@ local function fsApi(W)
         W.mtime[p] = W:ms()
         return writer(W, p, b == "b")
     end
-    function fs.complete() return {} end
+    -- as CC:T's: the endings that complete path (from location); a
+    -- directory with "/" (and bare, with includeDirs); hidden names only
+    -- for a name that starts with a dot
+    function fs.complete(path, location, includeFiles, includeDirs)
+        if type(includeFiles) == "table" then
+            includeFiles, includeDirs = includeFiles.include_files ~= false, includeFiles.include_dirs ~= false
+        end
+        if includeFiles == nil then includeFiles = true end
+        if includeDirs == nil then includeDirs = true end
+        local dirPart, name = path:match("^(.*/)([^/]*)$")
+        if not dirPart then dirPart, name = "", path end
+        local dir = dirPart:sub(1, 1) == "/" and fs.combine(dirPart, "") or fs.combine(location or "", dirPart)
+        if not fs.isDir(dir) then return {} end
+        local out = {}
+        for _, n in ipairs(fs.list(dir)) do
+            if n:sub(1, #name) == name and (n:sub(1, 1) ~= "." or name:sub(1, 1) == ".") then
+                local rest = n:sub(#name + 1)
+                if fs.isDir(fs.combine(dir, n)) then
+                    out[#out + 1] = rest .. "/"
+                    if includeDirs and rest ~= "" then out[#out + 1] = rest end
+                elseif includeFiles and rest ~= "" then
+                    out[#out + 1] = rest
+                end
+            end
+        end
+        return out
+    end
     return fs
 end
 
@@ -709,11 +735,12 @@ end
 
 -- read(): the next line typed (opts.stdin); none left, the user holds Ctrl+T.
 function W_.readFn(W)
-    return function(replace, history)
+    return function(replace, history, completeFn)
         if replace ~= nil and type(replace) ~= "string" then
             error("bad argument #1 (string expected, got " .. type(replace) .. ")", 3)
         end
         if history then W.history = { table.unpack(history) } end
+        if completeFn then W.completer = completeFn end     -- (a sim can try it: W.completer("cat no"))
         if #W.typed == 0 then error("Terminated", 0) end
         return table.remove(W.typed, 1)
     end

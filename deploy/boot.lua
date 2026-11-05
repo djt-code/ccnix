@@ -106,8 +106,12 @@ if not ending then
     for _, r in ipairs(roots) do helpPath = addTo(helpPath, r .. "/help") end
     shell.setPath(path)
     help.setPath(helpPath)
-    local ls = find("bin/ls.lua")
-    if ls then shell.setAlias("ls", ls) end
+    -- CraftOS's ls and rm are aliases (for list and delete), and an alias
+    -- wins over the path: ours take their place
+    for _, name in ipairs({ "ls", "rm" }) do
+        local prog = find("bin/" .. name .. ".lua")
+        if prog then shell.setAlias(name, prog) end
+    end
     if stale then
         print("ccnix: this computer's updates were made for another ROM; `ccnix update` brings them back")
     end

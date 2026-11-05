@@ -72,7 +72,14 @@ if not name then cu.usageError("which service?") end
 if action == "add" then
     if not args[3] then cu.usageError("add needs a command") end
     if defined(name) then cu.fail(name .. ": already set up (remove it first)"); return cu.exit() end
-    settings.set(key(name, "cmd"), table.concat(args, " ", 3))
+    -- the words as the CraftOS shell will split them again: one with a
+    -- space (ccsh's 'cat /nope') goes in double quotes, so it stays one
+    local words = {}
+    for k = 3, #args do
+        local a = args[k]
+        words[#words + 1] = (a == "" or a:find("%s")) and ('"' .. a .. '"') or a
+    end
+    settings.set(key(name, "cmd"), table.concat(words, " "))
     settings.save()
     print(name .. " set up: service start " .. name .. " (now), service enable " .. name .. " (at boot)")
 elseif action == "remove" then

@@ -48,7 +48,7 @@ local BASE = ".:/rom/programs:/rom/programs/http"
 local COMMIT = "1111111111111111111111111111111111111111"
 -- what the ROM holds of the repo (the mod puts it all there; this is
 -- what boot, ls and the checks touch)
-local ROM_FILES = { "bin/ls.lua", "bin/ip.lua", "bin/ccsh.lua", "bin/init.lua", "bin/ccnix.lua", "lib/cu.lua",
+local ROM_FILES = { "bin/ls.lua", "bin/rm.lua", "bin/ip.lua", "bin/ccsh.lua", "bin/init.lua", "bin/ccnix.lua", "lib/cu.lua",
                     "turtle/autostart.lua", "pc/router.lua", "help/ls.txt", "deploy/boot.lua", "deploy/install.lua",
                     "deploy/version" }
 local STUB = { ["bin/ip.lua"] = true, ["bin/ccsh.lua"] = true, ["bin/init.lua"] = true,
@@ -57,7 +57,7 @@ local RAN = {}
 
 local function reset(W)
     W.shell.setPath(BASE)
-    W.aliases.ls = "list"
+    W.aliases.ls, W.aliases.rm = "list", "delete"
     HELP = "/rom/help"
     RAN = {}
     _G.ccnix = nil
@@ -158,6 +158,8 @@ W:file("ccnix/.gitlite", json.encode({ url = "https://github.com/djt-code/ccnix"
 r = boot(W)
 check("a whole checkout at /ccnix, made with no ROM under it: used whatever the ROM's commit",
     ccnix.find("bin/ls.lua") == "/ccnix/bin/ls.lua" and W.aliases.ls == "/ccnix/bin/ls.lua" and r.out == "", show(r.out))
+check("... and rm points at ccnix's rm, not CraftOS's delete", W.aliases.rm ~= "delete"
+    and tostring(W.aliases.rm):find("bin/rm.lua$") ~= nil, tostring(W.aliases.rm))
 
 --------------------------------------------------------------------------
 -- (b) the settings, and the end of startup

@@ -22,7 +22,7 @@ From the shell:
     backup | logger -t backup                  each line of a program's output
 -i adds logger's process ID, -s prints it too.
 
-What services print: init logs each line a service prints, under the service's name (`service status` still shows its screen). print, write and io.write are info, printError and io.stderr err; a line starting <N> (0-7) is logged at severity N: print("<4>disk nearly full") is a warning. Not logged: what's drawn with term.* (edit, menus), the console's programs, a service's children (telnetd's shells), and a service with service.<name>.log false. Init also logs each service starting, ending, failing and being started again. lib/net's notes (packets dropped, no ARP answer) are logged as kern, from "net".
+What services print: init logs each line a service prints, under the service's name (`service status` still shows its screen). print, write and io.write are info, printError and io.stderr err; a line starting <N> (0-7) is logged at severity N: print("<4>disk nearly full") is a warning. A service's children on its screen (the programs a ccsh script runs) are logged the same way, each under its own name. Not logged: what's drawn with term.* (edit, menus), the console's programs, a service's children with a terminal of their own (telnetd's shells), and a service with service.<name>.log false. Init also logs each service starting, ending, failing and being started again. lib/net's notes (packets dropped, no ARP answer) are logged as kern, from "net".
 
 From a program:
     local log = require("log").open("myapp", "local0")
@@ -32,7 +32,7 @@ From a program:
     log.mask("info")                         leave out debug
 open's options (a third argument): { perror = true } shows each message on the program's screen too ("14:02 started on port 80"), pid = false leaves the process ID out. require("log").new(...) makes a logger apart (a library's own). Without init, lib/log files what's logged itself, by the same rules (no console, no forwarding).
 
-The rules: /etc/syslog.conf, if it's there, else the defaults above. A rule a line, selectors then an action:
+The rules: /etc/syslog.conf, which syslogd writes with the defaults above the first time it runs (deleted: the defaults). syslogd logs its own start: how many rules, from where, and whether it's listening. A rule a line, selectors then an action:
     *.info;auth,authpriv.none;local6,local7.none    /var/log/messages
     auth,authpriv.*                                 /var/log/auth.log
     local6.*                                        /var/log/telnetd.log
