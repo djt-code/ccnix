@@ -6,7 +6,10 @@
 -- number or a service's name.  Connects over the network stack (`ip up`) and shows the other side's
 -- screen: telnetd on another computer (a shell, or its console), or any
 -- Telnet server that draws with ANSI escapes.  What you type goes there,
--- arrows and all; the mouse and pasting too, if the server asks.  Ctrl+T
+-- arrows and all; the mouse and pasting too, if the server asks.  A server
+-- that echoes (telnetd, most) gets each key as it's typed; one that
+-- doesn't (a MUD, nc) gets a line at a time, edited here (Backspace) and
+-- sent at Enter, as BSD's telnet does.  Enter is sent as CR LF.  Ctrl+T
 -- goes there as Ctrl+T, and under init Ctrl+Z goes there too (it stops
 -- what runs over there, as in a raw-mode terminal).  Ctrl+] is telnet's
 -- own: then q leaves, t sends an "interrupt process" (what stops a
@@ -45,6 +48,14 @@ local remoteEcho, naws = false, false
 local replied = {}
 
 local function send(s) conn:send(s) end
+
+-- what's typed while the other side doesn't echo: a line, edited here and
+-- sent whole at Enter (Telnet's old line-by-line mode, as BSD's client)
+local line = ""
+local function flush()
+    if line ~= "" then send(T.escape(line)); line = "" end
+end
+
 local function reply(c, opt)
     if replied[opt] == c then return end         -- (said it already: no loops)
     replied[opt] = c
@@ -62,7 +73,7 @@ local parse = T.parser({
             elseif opt == T.SGA then reply(T.WILL, T.SGA)
             else reply(T.WONT, opt) end
         elseif c == T.WILL then
-            if opt == T.ECHO then remoteEcho = true; reply(T.DO, T.ECHO)
+            if opt == T.ECHO then remoteEcho = true; flush(); reply(T.DO, T.ECHO)
             elseif opt == T.SGA then reply(T.DO, T.SGA)
             else reply(T.DONT, opt) end
         elseif c == T.WONT and opt == T.ECHO then
@@ -71,10 +82,26 @@ local parse = T.parser({
     end,
 })
 
--- what we type: sent, and shown here too if the other side doesn't echo
+-- what we type: sent as it's typed if the other side echoes; else added
+-- to the line and shown here
 local function typed(s)
-    send(T.escape(s))
-    if not remoteEcho then screen.feed((s:gsub("\r", "\r\n"))) end
+    if remoteEcho then send(T.escape(s)); return end
+    line = line .. s
+    screen.feed(s)
+end
+-- Enter: Telnet's end of line, CR LF (after the line, if one's held)
+local function enter()
+    if remoteEcho then send("\r\n"); return end
+    send(T.escape(line) .. "\r\n")
+    line = ""
+    screen.feed("\r\n")
+end
+-- Backspace: DEL for the other side, or (a line held here) the last character off it
+local function rubout()
+    if remoteEcho then send("\127"); return end
+    if line == "" then return end
+    line = line:sub(1, -2)
+    screen.feed("\8 \8")
 end
 
 -- Ctrl+]: telnet's own keys, on the bottom line
@@ -126,16 +153,22 @@ local ok, e = pcall(parallel.waitForAny,
                     if menu() then return end
                 else
                     local b = T.keyBytes(code, ctrl)
-                    if b then
-                        if b == "\r" then typed("\r") else send(b) end
-                    end
+                    if b == "\r" then enter()
+                    elseif b == "\127" then rubout()
+                    elseif b then flush(); send(b) end      -- (arrows, Ctrl+letters: as they are)
                 end
             elseif name == "key_up" then
                 if ev[2] == keys.leftCtrl or ev[2] == keys.rightCtrl then ctrl = false end
             elseif name == "terminate" then
                 send("\20")                         -- Ctrl+T, for the other side
             elseif name == "paste" then
-                if screen.paste then send("\27[200~" .. T.escape(ev[2]) .. "\27[201~") else typed(ev[2]) end
+                if screen.paste then send("\27[200~" .. T.escape(ev[2]) .. "\27[201~")
+                else
+                    for text, nl in ev[2]:gmatch("([^\n]*)(\n?)") do
+                        if text ~= "" then typed((text:gsub("\r$", ""))) end
+                        if nl ~= "" then enter() end
+                    end
+                end
             elseif name:match("^mouse_") and name ~= "mouse_move" then
                 if screen.mouse then send(T.mouseBytes(name, ev[2], ev[3], ev[4])) end
             elseif name == "proc_cont" and proc and ev[2] == proc.self() then
