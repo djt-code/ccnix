@@ -1,7 +1,7 @@
 # ADR-0005: Programs as processes, jobs as process groups: job control split between init and ccsh
 
-**Status:** Accepted (2026-11-05). Phase 1 built in ccnix 0.15.0; phase 2
-(in game) to verify
+**Status:** Accepted (2026-11-05). Built in ccnix 0.15.0, fixed in 0.15.1;
+verified in game (2026-11-05)
 **Date:** 2026-11-05
 **Deciders:** Dan Theisen
 
@@ -156,8 +156,14 @@ Phase 1 (built, ccnix 0.15.0):
 
 Phase 2 (in game, by the user):
 
-5. [ ] On the console: `ps -l` while `telnet towel.blinkenlights.nl` runs
+5. [x] On the console: `ps -l` while `telnet towel.blinkenlights.nl` runs
    (from a telnet session), Ctrl+Z, `jobs`, `fg`, `bg`, `kill %1`.
-6. [ ] In a telnet session: the same, and Ctrl+] t (interrupt) reaching
+6. [x] In a telnet session: the same, and Ctrl+] t (interrupt) reaching
    the program, not the shell; dropping the connection ending its jobs.
-7. [ ] A ccsh script as a service: its programs' output captured.
+   The first try found Ctrl+Z stopping the local telnet client: since
+   0.15.1 the client ignores TSTP (raw mode) and sends it on, and Ctrl+]
+   z stops the client itself.
+7. [x] A ccsh script as a service: its programs' output captured. The
+   first try found `service start` at the console handing the service the
+   console (a new session inherited its parent's terminal): since 0.15.1
+   a new session starts with none, as setsid does.
