@@ -1361,7 +1361,9 @@ process") does stop it. Under `init` the client passes Ctrl+Z on too, so
 it stops the job in front over there, as a raw-mode terminal would;
 Ctrl+] then z stops the client itself here (`fg` brings it back). A
 server that doesn't echo (a MUD, `nc`) gets a line at a time, edited here
-with Backspace and sent at Enter, as BSD's telnet does. What scrolls off
+with Backspace and sent at Enter, as BSD's telnet does: what the server
+sends meanwhile shows above the line you're typing, and a bare line feed
+from it starts a new line, as on a terminal. What scrolls off
 the top is kept: Shift+Page Up and Down (or the mouse wheel, unless the
 server asked for the mouse) look back through the last 500 lines, and
 any other key returns. Only the view moves, so towel's film or a

@@ -326,8 +326,9 @@ function T.terminal(win, colour)
         end
     end
     t.history = history
+    local scrolls = 0                           -- (rows scrolled up, ever: for T.heldLine)
     local function scroll()
-        if y > h then keep(y - h); win.scroll(y - h); y = h end
+        if y > h then keep(y - h); win.scroll(y - h); scrolls = scrolls + y - h; y = h end
     end
     local function put(ch, inverted)
         if x > w then x, y = 1, y + 1; scroll() end
@@ -406,7 +407,7 @@ function T.terminal(win, colour)
                 elseif v == "1000" or v == "1002" or v == "1006" then t.mouse = final == "h"
                 elseif v == "2004" then t.paste = final == "h" end
             end
-        elseif final == "S" then keep(n1 or 1); win.scroll(n1 or 1)
+        elseif final == "S" then keep(n1 or 1); win.scroll(n1 or 1); scrolls = scrolls + (n1 or 1)
         elseif final == "T" then win.scroll(-(n1 or 1))
         end
         x, y = math.max(1, math.min(w, x)), math.max(1, math.min(h, y))
@@ -464,7 +465,68 @@ function T.terminal(win, colour)
         win.setCursorBlink(t.cursor)
     end
     function t.resize(nw, nh) w, h = nw, nh end
+    -- where the cursor is (x may be w + 1: at the end of a full row), and
+    -- how many rows have scrolled up so far
+    function t.at() return x, y, scrolls end
+    -- true if not part way through an escape or a UTF-8 character
+    function t.ground() return state == "ground" end
+    -- clear from (sx, sy) to the end of the screen and put the cursor there
+    function t.unput(sx, sy)
+        if sy < 1 then sx, sy = 1, 1 end
+        x, y = sx, sy
+        clearLine(x, w)
+        for r = y + 1, h do win.setCursorPos(1, r); win.write((" "):rep(w)) end
+        win.setCursorPos(math.min(x, w), y)
+    end
     return t
+end
+
+-- The line typed while the other side doesn't echo (Telnet's old line by
+-- line mode, as BSD's client has it): held here and shown on screen (the
+-- terminal t's), edited with rubout, taken whole at Enter.  What comes
+-- over meanwhile (data) is drawn where the line was and the line drawn
+-- again after it, as a shell's line editor does.  And as BSD's client,
+-- echoing itself (ONLCR), a bare LF from the other side goes to the start
+-- of the next line.
+function T.heldLine(t)
+    local l = { text = "" }
+    local at, hidden                    -- (where its echo began: x, y, scrolls; taken off the screen)
+    local function show()
+        if hidden and t.ground() then
+            hidden = false
+            at = { t.at() }
+            t.feed(l.text)
+        end
+    end
+    function l.type(s)
+        if l.text == "" and not hidden then at = { t.at() } end
+        l.text = l.text .. s
+        if hidden then show() else t.feed(s) end
+    end
+    function l.rubout()
+        if l.text == "" then return end
+        l.text = l.text:sub(1, -2)
+        if not hidden then t.feed("\8 \8") end
+    end
+    -- the line, gone from here (left on the screen); Enter: with a new line
+    function l.take(enter)
+        local s = l.text
+        l.text, hidden = "", false
+        if enter then t.feed("\r\n") end
+        return s
+    end
+    function l.data(d)
+        d = d:gsub("\n", "\r\n")
+        if l.text ~= "" and not hidden then
+            local x, y, n = at[1], at[2], at[3]
+            local _, _, now = t.at()
+            t.unput(x, y - (now - n))
+            hidden = true
+        end
+        t.feed(d)
+        if l.text ~= "" then show() end
+    end
+    return l
 end
 
 --------------------------------------------------------------------------

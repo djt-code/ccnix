@@ -8,7 +8,10 @@
 -- 16-colour and true-colour SGR from other servers; the server's decoder
 -- (characters with their keys, Enter from CR, LF or CR LF once, arrows
 -- and the other keys, Ctrl+letter, Ctrl+T, bracketed paste, SGR mouse);
--- the client's keys and mouse decoded back to what was pressed.
+-- the client's keys and mouse decoded back to what was pressed; the
+-- scrollback; the line held while the other side doesn't echo (a bare LF,
+-- Backspace, what comes over meanwhile drawn above it, a scroll under it,
+-- an escape split across reads).
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -193,3 +196,57 @@ tsm.feed("a\r\nb\r\nc\r\nd\r\ne")
 T.HISTORY = was
 check("only the last T.HISTORY rows are kept", #tsm.history == 3 and tsm.history[1][1] == "b   " and tsm.history[3][1] == "d   ",
     #tsm.history .. " " .. tostring(tsm.history[1] and tsm.history[1][1]))
+
+-- the line held while the other side doesn't echo (T.heldLine): a bare LF
+-- from there starts a new line (as BSD's client, echoing itself); what
+-- comes over while a line is typed shows above it, the line after
+local hw = window(14, 4)
+local th = T.terminal(hw, true)
+local held = T.heldLine(th)
+held.data("hello\nback\n")
+local hx, hy = th.at()
+check("held line: a bare LF goes to the start of the next line",
+    hw.getLine(1) == "hello         " and hw.getLine(2) == "back          " and hx == 1 and hy == 3,
+    show(hw.getLine(2)) .. " " .. hx .. "," .. hy)
+held.type("typo"); held.rubout(); held.rubout(); held.type("ed")
+check("held line: Backspace takes characters off it and the screen",
+    held.text == "tyed" and hw.getLine(3) == "tyed          ", show(hw.getLine(3)))
+held.data("hello back\n")
+hx, hy = th.at()
+check("held line: what comes over meanwhile shows where it was, the line again after",
+    hw.getLine(3) == "hello back    " and hw.getLine(4) == "tyed          " and hx == 5 and hy == 4,
+    show(hw.getLine(3)) .. "|" .. show(hw.getLine(4)) .. " " .. hx .. "," .. hy)
+local sent = held.take(true)
+hx, hy = th.at()
+check("held line: Enter takes it whole and starts a new line",
+    sent == "tyed" and held.text == "" and hw.getLine(3) == "tyed          " and hx == 1 and hy == 4,
+    show(sent) .. " " .. hx .. "," .. hy)
+local pw = window(10, 3)
+local tp = T.terminal(pw, true)
+local hp = T.heldLine(tp)
+hp.data("Name: ")
+hp.type("bob")
+hp.data("\r\nhi\r\n")
+check("held line: a prompt before it stays; the line follows what came",
+    pw.getLine(1) == "Name:     " and pw.getLine(2) == "hi        " and pw.getLine(3) == "bob       ",
+    show(pw.getLine(1)) .. "|" .. show(pw.getLine(2)) .. "|" .. show(pw.getLine(3)))
+local sw = window(6, 2)
+local ts = T.terminal(sw, true)
+local hs = T.heldLine(ts)
+hs.data("a\n")
+hs.type("xy")
+hs.data("c\nd\n")
+hs.data("e\n")
+check("held line: still in the right place after the screen scrolls under it",
+    sw.getLine(1) == "e     " and sw.getLine(2) == "xy    " and hs.text == "xy",
+    show(sw.getLine(1)) .. "|" .. show(sw.getLine(2)))
+local ew = window(8, 2)
+local te = T.terminal(ew, true)
+local he = T.heldLine(te)
+he.type("ab")
+he.data("\27[3")
+local mid = ew.getLine(1)
+he.data("1mX\n")
+check("held line: an escape split across reads isn't broken by it",
+    mid == "        " and ew.getLine(1) == "X       " and ew.getLine(2) == "ab      ",
+    show(mid) .. "|" .. show(ew.getLine(1)) .. "|" .. show(ew.getLine(2)))

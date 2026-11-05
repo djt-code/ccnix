@@ -9,7 +9,9 @@
 -- arrows and all; the mouse and pasting too, if the server asks.  A server
 -- that echoes (telnetd, most) gets each key as it's typed; one that
 -- doesn't (a MUD, nc) gets a line at a time, edited here (Backspace) and
--- sent at Enter, as BSD's telnet does.  Enter is sent as CR LF.  Ctrl+T
+-- sent at Enter, as BSD's telnet does (what comes over meanwhile shows
+-- above the line, and a bare LF from there starts a new line, as on a
+-- terminal).  Enter is sent as CR LF.  Ctrl+T
 -- goes there as Ctrl+T, and under init Ctrl+Z goes there too (it stops
 -- what runs over there, as in a raw-mode terminal).  Ctrl+] is telnet's
 -- own: then q leaves, t sends an "interrupt process" (what stops a
@@ -60,9 +62,10 @@ local function send(s) conn:send(s) end
 
 -- what's typed while the other side doesn't echo: a line, edited here and
 -- sent whole at Enter (Telnet's old line-by-line mode, as BSD's client)
-local line = ""
+local held = T.heldLine(screen)
 local function flush()
-    if line ~= "" then send(T.escape(line)); line = "" end
+    local line = held.take()
+    if line ~= "" then send(T.escape(line)) end
 end
 
 local function reply(c, opt)
@@ -72,7 +75,7 @@ local function reply(c, opt)
 end
 
 local parse = T.parser({
-    data = function(d) screen.feed(d) end,
+    data = function(d) if remoteEcho then screen.feed(d) else held.data(d) end end,
     option = function(c, opt)
         if c == T.DO then
             if opt == T.NAWS then
@@ -94,23 +97,15 @@ local parse = T.parser({
 -- what we type: sent as it's typed if the other side echoes; else added
 -- to the line and shown here
 local function typed(s)
-    if remoteEcho then send(T.escape(s)); return end
-    line = line .. s
-    screen.feed(s)
+    if remoteEcho then send(T.escape(s)) else held.type(s) end
 end
 -- Enter: Telnet's end of line, CR LF (after the line, if one's held)
 local function enter()
-    if remoteEcho then send("\r\n"); return end
-    send(T.escape(line) .. "\r\n")
-    line = ""
-    screen.feed("\r\n")
+    if remoteEcho then send("\r\n") else send(T.escape(held.take(true)) .. "\r\n") end
 end
 -- Backspace: DEL for the other side, or (a line held here) the last character off it
 local function rubout()
-    if remoteEcho then send("\127"); return end
-    if line == "" then return end
-    line = line:sub(1, -2)
-    screen.feed("\8 \8")
+    if remoteEcho then send("\127") else held.rubout() end
 end
 
 -- The scrollback: what scrolled off the top, back lines up from the live
