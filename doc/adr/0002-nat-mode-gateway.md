@@ -1,6 +1,6 @@
 # ADR-0002: A NAT mode for the gateway, in userland, beside TUN
 
-**Status:** Accepted (2026-10-30); built in ccnix-mod 0.3.0, item 14 (the VM in both modes, a singleplayer world) still to verify
+**Status:** Accepted (2026-10-30); built in ccnix-mod 0.3.0, verified in game (item 14, 2026-11)
 **Date:** 2026-10-30
 **Deciders:** Dan Theisen
 
@@ -262,4 +262,4 @@ Phase 4, admin, docs, siblings
 11. [x] Ansible: `ccnix_gateway_mode` (default `tun`), `ccnix_cc_networks` (replaces `ccnix_tun_networks`), `ccnix_nat_op_forwards` (false), `ccnix_nat_op_forward_ports` ([]), `ccnix_nat_forwards` and `ccnix_ansible_forwards` (as routes), `ccnix_nat_dns_relay` ("system"), the limits and deny/allow lists; in NAT mode the TUN unit is disabled and `ccnix-tun-setup --remove` run.
 12. [x] Docs: the mod's README and runbook (the two modes side by side: what works in each), ccnix's `help network` and README (no ping beyond the gateway in NAT mode; `ip dns <gateway>` in NAT mode, a real resolver in TUN mode unless the host serves DNS on the gateway's address). ccnix itself: no code change expected.
 13. [x] ccnix-mod 0.3.0; pointers bumped (ccnix-mod's `ccnix/`, then ccnix's `mod/`).
-14. [ ] Verified on the dev VM in both modes, and in a singleplayer world (NAT); mark Accepted. So far (2026-10-31): the VM in TUN mode, and singleplayer on Windows (an op route, DNS A and PTR through the Windows answer, TCP out, the deny list, an op port forward, ping: the gateway answers, past it "administratively prohibited" and the note); the VM in NAT mode remains.
+14. [x] Verified on the dev VM in both modes, and in a singleplayer world (NAT); mark Accepted. 2026-10-31: the VM in TUN mode, and singleplayer on Windows (an op route, DNS A and PTR through the Windows answer, TCP out, the deny list, an op port forward, ping: the gateway answers, past it "administratively prohibited" and the note); then the VM in NAT mode (reported by the user 2026-11-05).

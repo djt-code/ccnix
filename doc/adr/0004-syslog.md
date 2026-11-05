@@ -275,8 +275,9 @@ template or module system.
 
 ### Phase 2: in game (the user validates)
 
-1. [ ] `logger hello` lands in `/var/log/messages`; a service's prints and
-   a failing service's error are captured; the console's aren't.
+1. [ ] `logger hello` lands in `/var/log/messages` (verified by the user,
+   2026-11); a service's prints and a failing service's error are
+   captured; the console's aren't.
 2. [ ] Forwarding to rsyslog on the VM (`imudp` on 514, through the
    gateway in TUN mode, then NAT); a CC loghost receiving from another
    computer.
