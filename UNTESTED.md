@@ -37,54 +37,39 @@ section.
 
 ## ccsh
 
-- **Ctrl+C left to programs that use it** (0.29.1). In ccsh, with and
-  without init: the same as `nano` (tested) in `lua`, `paint x`; in
-  `telnet <host>` Ctrl+C reaches the far
-  side's program (a `ping` there stops), not the local telnet. `sleep
-  30`, `ping <host>` and `tail -f` still stop on Ctrl+C.
-
-- **The line editor at the prompt** (0.28.0, lib/readline). On a real
-  computer try each key: Ctrl+A/E, Ctrl+B/F, Home/End and the arrows;
-  Alt+B/F/D and Alt+Backspace (first check that the game sends Alt key
-  events at all); Ctrl+K/U/W then Ctrl+Y; Ctrl+P/N and Up/Down; Ctrl+L;
-  Ctrl+D (deletes on a line with text, leaves ccsh on an empty one). No
-  stray letter gets typed after a Ctrl+letter. `read x` at the keyboard has
-  the same keys; Ctrl+C there stops the rest of the line.
-- **Ctrl+R** (0.28.0): tap it, type part of an old command, tap Ctrl+R again
-  for an older one, then Enter, Ctrl+G or an arrow. Holding Ctrl+R still
-  reboots, so tap only.
+- **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
+  keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
+  (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
+  stop on Ctrl+C; all of it again on a computer without init.
+- **The line editor, the rest** (0.28.0, lib/readline). Ctrl+B/F, Home/End
+  and the arrows; Alt+B/F/D and Alt+Backspace (first check that the game
+  sends Alt key events at all); Ctrl+K; Ctrl+P/N and Up/Down; Ctrl+D
+  deleting on a line with text. `read x` at the keyboard has the same
+  keys; Ctrl+C there stops the rest of the line.
+- **Ctrl+R, the rest** (0.28.0): tap it again for an older match; Ctrl+G
+  or an arrow to leave the search.
 - **Tab and long lines** (0.28.0): the completion shows in grey after the
-  cursor on a colour computer and on a basic one; Tab takes it; Up/Down
-  cycle the suggestions. A line longer than the screen scrolls sideways on
-  a turtle (39 wide) and a computer (51 wide). PS1 with `\n`, and a
-  coloured prompt, redraw correctly after Ctrl+L. AltGr (Ctrl+Alt)
-  characters on a non-US layout type normally and trigger no bindings.
-- **Ctrl+C** (0.28.0): at the prompt it shows ^C and gives a new prompt,
-  `echo $?` says 130; at a `>` continuation prompt it drops the whole
-  command; with `sleep 30` or `ping` running in front it stops the command
-  with status 130, without init and under init (INT to the job's group).
-  Under init it doesn't reach the shell itself, whether ccsh is the
-  console's session leader or started from ccsh. In vi, Ctrl+C still leaves
-  insert mode and vi isn't ended; after `:wq`, `echo $?` is 0. In telnet
-  under init, Ctrl+C goes to the remote side and the local telnet keeps
-  running.
+  cursor on a colour computer and on a basic one; Up/Down cycle the
+  suggestions. A line longer than the screen scrolls sideways on a turtle
+  (39 wide) and a computer (51 wide). PS1 with `\n`, and a coloured
+  prompt, redraw correctly after Ctrl+L. AltGr (Ctrl+Alt) characters on a
+  non-US layout type normally and trigger no bindings.
+- **Ctrl+C, the rest** (0.28.0): at a `>` continuation prompt it drops the
+  whole command; a computer without init; under init it doesn't reach
+  ccsh itself when ccsh was started from ccsh. In telnet under init,
+  Ctrl+C goes to the remote side and the local telnet keeps running.
 - **The editor over telnetd** (0.28.0): the same keys from a real terminal
   client (PuTTY, xterm); Alt+B/F arrive as Esc+letter; Ctrl+C at the remote
   prompt drops the line.
-
-- **`$$` and `$PPID`** (0.27.0). Under init, `echo $$ $PPID` and `ps -l`:
-  `$$` matches the ccsh row's PID and `$PPID` its PPID; `kill -0 $$`
-  succeeds; `(echo $$)` and `echo $$ &` print the same pid. Without init
-  (plain CraftOS), `$$` is the computer ID and `$PPID` empty.
-- **`&>` and `&>>`** (0.27.0). `cat nope &> f; cat f` shows the error in f
-  and no `[1] pid` job line; `echo x &>> f` appends; a stock program's
-  printError output lands in f with `&>`.
-- **`${X:-word}` and friends** (0.27.0). `echo ${U:-$HOME}` with HOME set,
+- **`$$`, the rest** (0.27.0). `kill -0 $$` succeeds; `(echo $$)` and `echo
+  $$ &` print the same pid. Without init (plain CraftOS), `$$` is the
+  computer ID and `$PPID` empty.
+- **`&>>` and the other `${...}` forms** (0.27.0). `echo x &>> f`
+  appends; a stock program's printError output lands in f with `&>`.
   `echo ${U:=x}; echo $U`, `echo ${PS1:+set}`, `echo ${U:?gone}`: at the
   prompt the last prints `ccsh: U: gone`, skips the rest of the line and
-  gives `$?` 1; in a script it ends the script with status 1.
-- **`unset -f`** (0.27.0). `f() { echo hi; }; unset -f f; f` says "ccsh: f:
-  not found"; plain `unset f` leaves the function.
+  gives `$?` 1; in a script it ends the script with status 1. Plain
+  `unset f` leaves a function.
 
 ## Processes and services
 
@@ -245,6 +230,13 @@ section.
 
 ## Tested
 
+- 2026-11-06 — ccsh on the dev server (ROM 0.29.1, under init): the line
+  editor's Ctrl+A/E, Ctrl+W, Ctrl+U then Ctrl+Y; Ctrl+R finding an old
+  command; Tab completing a file name; Ctrl+L; Ctrl+C at the prompt (^C,
+  `$?` 130), on `sleep 30` (stopped, 130) and left to `lua` (still open);
+  Ctrl+D leaving a nested ccsh; `$$` and `$PPID` matching `ps -l` (4 and
+  1); `cat nope &> /tmp/e` filing the error with no job started;
+  `${U:-$X}`; `unset -f`.
 - 2026-11-06 — On the dev server with ROM 0.29.1: `vi` (i, Ctrl+[, `yyp`,
   `u` and a tapped Ctrl+R, Ctrl+C leaving insert mode and in normal mode
   giving the ":wq / :q!" hint without quitting, `:wq`); `vim` on
