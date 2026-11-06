@@ -43,6 +43,7 @@
 local ROM, OVER = "/rom/ccnix", "/ccnix"
 local unjson = textutils.unserialiseJSON or textutils.unserializeJSON
 local ending = ... == "--end"
+local here = ... == "--here"            -- (setup's, in its shell: not a boot)
 local romMode = fs.exists(ROM .. "/.manifest")
 
 local function readJSON(path)
@@ -106,6 +107,21 @@ if settings.get("cc-turtles.autostart") ~= nil then     -- (from when the repo w
 end
 
 if not ending then
+    -- init draws the console in a window over the screen, and a new
+    -- window starts blank: it copies what was on the screen into it first.
+    -- An Advanced Computer's shell is in multishell's window already, which
+    -- can be read back; a Computer's draws straight on the screen, which
+    -- can't, so from here boot's output (and the rest of startup's: the
+    -- MOTD, the startup files) goes to a window too, with the shell's
+    -- header, written before it, written again.
+    if not here and settings.get("init.boot") and find("bin/init.lua") and not term.current().getLine then
+        local w, h = term.getSize()
+        term.redirect(window.create(term.current(), 1, 1, w, h, true))
+        term.setTextColour(term.isColour() and colours.yellow or colours.white)
+        print(os.version())
+        term.setTextColour(colours.white)
+    end
+
     local function addTo(path, dir)
         if (":" .. path .. ":"):find(":" .. dir .. ":", 1, true) then return path end
         return path .. ":" .. dir

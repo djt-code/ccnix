@@ -166,7 +166,11 @@ section.
   ROM, the computer's `/startup.lua` or `/startup/` folder still runs before
   ccsh; with `shell.allow_disk_startup` on and a disk holding `startup.lua`
   in a drive, the disk's startup runs instead of the computer's; the MOTD
-  shows with `motd.enable` on.
+  shows with `motd.enable` on.  Tried 2026-11-06 on 0.30.0 under init:
+  none of it showed, as init's console window started blank over it.
+  0.30.1 copies the screen into the console (and on a plain Computer
+  boot draws in a window first, so there's something to copy).  Try again
+  on Lab-A/B, and on a plain Computer with `init.boot`.
 
 - **`wget run …/deploy/setup.lua` on a bare old install** (0.20.0): a
   computer that still has only `/cc-turtles` (from before ccnix): moved to

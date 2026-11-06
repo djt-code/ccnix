@@ -102,7 +102,20 @@ if settings.get("ccsh.login") and program("bin/ccsh") then chain[#chain + 1] = p
 chain[#chain + 1] = false                       -- the CraftOS shell
 
 local w, h = term.getSize()
-local console = window.create(term.current(), 1, 1, w, h, true)
+local under = term.current()
+local console = window.create(under, 1, 1, w, h, true)
+-- (a new window starts blank: what boot left on the screen under it, the
+-- MOTD and the startup files' output, is copied over when it can be read
+-- back; boot sees that it can)
+if under.getLine then
+    for y = 1, h do
+        console.setCursorPos(1, y)
+        console.blit(under.getLine(y))
+    end
+    console.setCursorPos(under.getCursorPos())
+    console.setTextColour(under.getTextColour())
+    console.setBackgroundColour(under.getBackgroundColour())
+end
 K.scrollback(console, term.current())          -- (Shift+Page Up/Down on the console)
 local function nextConsole()
     if #chain == 0 then

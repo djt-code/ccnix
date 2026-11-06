@@ -357,7 +357,7 @@ local function configure(repo, romMode)
 
     if noReboot then
         -- this shell gets it now; others after a reboot
-        if not romMode then shell.run(boot) end
+        if not romMode then shell.run(boot, "--here") end
         print(romMode and "Not rebooting: the settings take effect at the next boot."
             or "Not rebooting: on the path in this shell now, everywhere after a reboot.")
         if login then print("Type ccsh to start it now.") end

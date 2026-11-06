@@ -33,8 +33,18 @@ settings = {
     get = function(k, d) local v = STORE[k]; if v == nil then return d end return v end,
     set = function(k, v) STORE[k] = v end, unset = function(k) STORE[k] = nil end, save = function() end,
 }
+-- window, as boot uses it under init on a Computer: each one made, over
+-- its parent
+WINDOWS = {}
+window = {
+    create = function(parent)
+        local win = setmetatable({ parent = parent, getLine = function() return "", "", "" end }, { __index = parent })
+        WINDOWS[#WINDOWS + 1] = win
+        return win
+    end,
+}
 local HELP
-help = { path = function() return HELP end, setPath = function(p) HELP = p end }
+help ={ path = function() return HELP end, setPath = function(p) HELP = p end }
 textutils = textutils or M.textutilsApi()
 turtle = nil
 
@@ -193,6 +203,17 @@ r = boot(W)
 check("init.boot (with ccsh.login and an autostart set too): a /startup folder's files in order, then init --boot alone; the autostart and ccsh are its",
     ran() == END .. "startup/00-a.lua, startup/zz-b.lua, rom/ccnix/bin/init.lua --boot" and r.errText == "os.shutdown called\n",
     ran() .. " " .. show(r.errText))
+check("... on a Computer (its screen can't be read back): the rest of startup drawn in a window over the screen, for init to copy, the shell's header written again first",
+    #WINDOWS == 1 and WINDOWS[1].parent == term.native() and term.current() == WINDOWS[1] and r.out:sub(1, 12) == "CraftOS 1.9\n",
+    #WINDOWS .. " " .. show(r.out))
+
+W = world(true)
+STORE["init.boot"], STORE["shell.allow_startup"] = true, true
+WINDOWS = {}
+term.native().getLine = function(y) return "", "", "" end     -- (multishell's window, an Advanced Computer's)
+r = boot(W)
+check("... on an Advanced Computer (the shell in multishell's window): no window of boot's, no header again",
+    #WINDOWS == 0 and term.current() == term.native() and r.out == "", #WINDOWS .. " " .. show(r.out))
 
 -- disks (shell.allow_disk_startup): drives as peripheral.getNames() lists
 -- them; the first disk with data and startup files on it is run in place
@@ -301,7 +322,7 @@ r = W:session({}, function() return W:osRun("ccnix/deploy/setup.lua", { "--ccsh"
 check("setup --ccsh --net --no-reboot on a checkout (no HTTP: as it is): boot.lua first and `--end` last in /startup.lua, an earlier install's lines gone and the computer's own kept; the settings set; boot ran in this shell (the path, ip up)",
     r.ok and W:read("startup.lua") == FIRST .. "\nprint('mine')\n" .. LAST .. "\n"
         and STORE["ccsh.login"] == true and STORE["net.boot"] == true and state(W) == want("/ccnix")
-        and ran() == "ccnix/deploy/setup.lua --ccsh --net --no-reboot, ccnix/deploy/boot.lua, ccnix/bin/ip.lua up",
+        and ran() == "ccnix/deploy/setup.lua --ccsh --net --no-reboot, ccnix/deploy/boot.lua --here, ccnix/bin/ip.lua up",
     show(W:read("startup.lua")) .. show(r.out) .. show(r.errText) .. " " .. ran())
 local startup = W:read("startup.lua")
 r = W:session({}, function() return W:osRun("ccnix/deploy/setup.lua", { "--no-reboot" }) end)
@@ -338,8 +359,8 @@ local function folder()
     end)
 end
 r = folder()
-check("run in turn: boot (the path, ip up), the computer's own, then `--end`: init --boot alone (the router and ccsh are its): boot's order",
-    state(W) == want("/ccnix") and r.out == "mine\n" and ran() == "startup/00-ccnix.lua, ccnix/deploy/boot.lua, ccnix/bin/ip.lua up, "
+check("run in turn: boot (the path, ip up; a window for init to copy, the header again), the computer's own, then `--end`: init --boot alone (the router and ccsh are its): boot's order",
+    state(W) == want("/ccnix") and r.out == "CraftOS 1.9\nmine\n" and ran() == "startup/00-ccnix.lua, ccnix/deploy/boot.lua, ccnix/bin/ip.lua up, "
         .. "startup/50-mine.lua, startup/zz-ccnix.lua, ccnix/deploy/boot.lua --end, ccnix/bin/init.lua --boot",
     state(W) .. " " .. ran())
 STORE["init.boot"] = nil
@@ -360,6 +381,8 @@ check("a turtle with init and --autostart mine: service mine runs `autostart --n
         and STORE["service.syslogd.cmd"] == "syslogd" and STORE["service.syslogd.enabled"] == true
         and STORE["service.mine.enabled"] == true and STORE["ccnix.autostart"] == "mine",
     show(STORE["service.mine.cmd"]) .. " " .. show(r.out) .. show(r.errText))
+check("... boot run in setup's shell (--no-reboot) is no boot: the screen left alone, no header again",
+    not r.out:find("CraftOS", 1, true) and term.current() == term.native(), show(r.out))
 STORE["service.mine.cmd"] = "mine --resume --custom"
 r = W:session({}, function()
     return W:osRun("ccnix/deploy/setup.lua", { "--no-reboot" })
