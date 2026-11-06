@@ -165,6 +165,25 @@ check("... and when the shell ends, it ends too", next(K.procs) == nil)
 r = typed("waitT\n", { events = { { "terminate" } } })
 check("at the prompt, Ctrl+T ends the program in front, not the shell: $? 130",
     r.out:find("/$ /$ ", 1, true) ~= nil and r.err[1] == "Terminated", show(r.out) .. " " .. show(r.errText))
+local ctrlC = { { "key", keys.leftCtrl }, { "key", keys.c }, { "key_up", keys.leftCtrl } }
+r = typed("waitT\necho \"st $?\"\n", { when = { waitT = ctrlC } })
+check("Ctrl+C: INT for the group in front, which ends as with Ctrl+T ($? 130); the shell stays",
+    r.out:find("st 130\n", 1, true) ~= nil and r.err[1] == "Terminated", show(r.out) .. " " .. show(r.errText))
+W:file("ccnix/bin/rawc.lua", [[proc.ignore("INT") local _, k repeat _, k = os.pullEvent("key") until k == keys.c print("got c")]])
+r = typed("rawc\necho \"st $?\"\n", { when = { rawc = ctrlC } })
+check("a program that ignores INT (vi, telnet) gets Ctrl+C as a key", r.out:find("got c\n/$ st 0\n", 1, true) ~= nil,
+    show(r.out) .. " " .. show(r.errText))
+-- at the prompt, with the real line editor: Ctrl+C is the shell's key
+W.modules.readline = nil
+local evs = { ctrlC[1], ctrlC[2], ctrlC[3] }
+for c in ("echo \"st $?\""):gmatch(".") do evs[#evs + 1] = { "char", c } end
+evs[#evs + 1] = { "key", keys.enter }
+evs[#evs + 1] = { "key", keys.leftCtrl }
+evs[#evs + 1] = { "key", keys.d }
+r = typed("", { events = evs })
+check("at the prompt Ctrl+C reaches the shell, not as INT: the line dropped, $? 130; Ctrl+D leaves",
+    r.ok and r.out:find("st 130\n", 1, true) ~= nil and r.errText == "", show(r.out) .. " " .. show(r.errText))
+W.modules.readline = SW.readlineStandIn()
 
 -- 4. nothing left behind
 check("after: the screen, io, printing globals, POSIX_SH, os.getenv and proc are as they were",

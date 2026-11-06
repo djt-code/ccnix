@@ -26,7 +26,8 @@
 -- service.<name>.log false leaves a service's output out.
 --
 -- The keyboard and mouse go to the console: to the process group in
--- front of it (ccsh puts each job there in turn; Ctrl+Z stops it); every
+-- front of it (ccsh puts each job there in turn; Ctrl+Z stops it, Ctrl+C
+-- ends it); every
 -- other event to every process.  The console keeps a scrollback, as a
 -- Linux console does: Shift+Page Up and Down look back through what
 -- scrolled off its top (the last 500 lines); any other key comes back.  A program that computes for a long time

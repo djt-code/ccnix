@@ -23,6 +23,11 @@
 -- length of a run, as the BIOS has them (print looks write up live), so a
 -- shell can swap them; term.redirect works.  W.yieldEvents = true makes
 -- os.pullEvent inside a coroutine yield for its event as the real one does.
+--
+-- W.modules: what require gives for a name instead of the repo's file.
+-- It starts with lib/readline's stand-in, which writes the prompt and
+-- calls read() (so a line of opts.stdin is a line typed, as before);
+-- W.modules.readline = nil for the real one, on key events.
 
 local M = require("mock")
 local SW = {}
@@ -727,6 +732,7 @@ function SW.new(proj, opts)
     }, W_)
     for k, v in pairs(ALIASES) do W.aliases[k] = v end
     W.kbRead = W:readFn()
+    W.modules = { readline = SW.readlineStandIn() }
     -- the printing globals, put in _G while a session runs (as the BIOS
     -- has them there, so a shell can swap them); print and printError
     -- look write up live, as the BIOS ones do
@@ -801,6 +807,21 @@ function W_:installPath(p)
     self:file(p, text)
 end
 
+-- lib/readline's stand-in: its read(opts) as read() (the next line of
+-- opts.stdin, the history and completion noted as read() notes them).
+function SW.readlineStandIn()
+    return {
+        read = function(opts)
+            opts = opts or {}
+            if opts.prompt then _G.write(opts.prompt) end
+            local ok, line = pcall(_G.read, nil, opts.history, opts.complete)
+            if ok then return line end
+            if line == "Terminated" then return nil, "terminate" end
+            error(line, 0)
+        end,
+    }
+end
+
 -- read(): the next line typed (opts.stdin); none left, the user holds Ctrl+T.
 function W_.readFn(W)
     return function(replace, history, completeFn)
@@ -830,6 +851,7 @@ function W_:makeRequire(env, dir)
     end
     local function require(name)
         if package.loaded[name] ~= nil then return package.loaded[name] end
+        if W.modules[name] ~= nil then return W.modules[name] end
         local rel = name:gsub("%.", "/")
         local p = find(rel)
         if not p and (dir .. "/"):sub(1, #W.progDir + 1) == W.progDir .. "/" and W:install(rel) then

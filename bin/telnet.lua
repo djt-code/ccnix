@@ -12,8 +12,8 @@
 -- sent at Enter, as BSD's telnet does (what comes over meanwhile shows
 -- above the line, and a bare LF from there starts a new line, as on a
 -- terminal).  Enter is sent as CR LF.  Ctrl+T
--- goes there as Ctrl+T, and under init Ctrl+Z goes there too (it stops
--- what runs over there, as in a raw-mode terminal).  Ctrl+] is telnet's
+-- goes there as Ctrl+T, and under init Ctrl+Z and Ctrl+C go there too
+-- (they stop what runs over there, as in a raw-mode terminal).  Ctrl+] is telnet's
 -- own: then q leaves, t sends an "interrupt process" (what stops a
 -- program even on the console), z stops telnet itself here (a job: fg
 -- brings it back), any other key goes back.  It ends when the other side
@@ -42,11 +42,12 @@ print("Connecting to " .. host .. (addr ~= host and (" (" .. addr .. ")") or "")
 local conn, err = net.connect(addr, port, 15)
 if not conn then cu.fail(host .. " " .. port .. ": " .. err); return cu.exit() end
 
--- under init: Ctrl+Z is a key for the other side (proc.ignore, as a
--- raw-mode terminal turns off ISIG), Ctrl+] z stops this one
+-- under init: Ctrl+Z and Ctrl+C are keys for the other side
+-- (proc.ignore, as a raw-mode terminal turns off ISIG), Ctrl+] z stops
+-- this one
 local proc = rawget(_G, "proc")
 if proc and not (proc.ignore and proc.getpgid) then proc = nil end
-if proc then proc.ignore("TSTP") end
+if proc then proc.ignore("TSTP"); proc.ignore("INT") end
 -- and Shift+Page Up/Down are this one's scrollback, not the console's
 if proc and proc.ownScrollback then proc.ownScrollback() end
 

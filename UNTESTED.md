@@ -38,6 +38,35 @@ section.
 
 ## ccsh
 
+- **The line editor at the prompt** (0.28.0, lib/readline). On a real
+  computer try each key: Ctrl+A/E, Ctrl+B/F, Home/End and the arrows;
+  Alt+B/F/D and Alt+Backspace (first check that the game sends Alt key
+  events at all); Ctrl+K/U/W then Ctrl+Y; Ctrl+P/N and Up/Down; Ctrl+L;
+  Ctrl+D (deletes on a line with text, leaves ccsh on an empty one). No
+  stray letter gets typed after a Ctrl+letter. `read x` at the keyboard has
+  the same keys; Ctrl+C there stops the rest of the line.
+- **Ctrl+R** (0.28.0): tap it, type part of an old command, tap Ctrl+R again
+  for an older one, then Enter, Ctrl+G or an arrow. Holding Ctrl+R still
+  reboots, so tap only.
+- **Tab and long lines** (0.28.0): the completion shows in grey after the
+  cursor on a colour computer and on a basic one; Tab takes it; Up/Down
+  cycle the suggestions. A line longer than the screen scrolls sideways on
+  a turtle (39 wide) and a computer (51 wide). PS1 with `\n`, and a
+  coloured prompt, redraw correctly after Ctrl+L. AltGr (Ctrl+Alt)
+  characters on a non-US layout type normally and trigger no bindings.
+- **Ctrl+C** (0.28.0): at the prompt it shows ^C and gives a new prompt,
+  `echo $?` says 130; at a `>` continuation prompt it drops the whole
+  command; with `sleep 30` or `ping` running in front it stops the command
+  with status 130, without init and under init (INT to the job's group).
+  Under init it doesn't reach the shell itself, whether ccsh is the
+  console's session leader or started from ccsh. In vi, Ctrl+C still leaves
+  insert mode and vi isn't ended; after `:wq`, `echo $?` is 0. In telnet
+  under init, Ctrl+C goes to the remote side and the local telnet keeps
+  running.
+- **The editor over telnetd** (0.28.0): the same keys from a real terminal
+  client (PuTTY, xterm); Alt+B/F arrive as Esc+letter; Ctrl+C at the remote
+  prompt drops the line.
+
 - **`$$` and `$PPID`** (0.27.0). Under init, `echo $$ $PPID` and `ps -l`:
   `$$` matches the ccsh row's PID and `$PPID` its PPID; `kill -0 $$`
   succeeds; `(echo $$)` and `echo $$ &` print the same pid. Without init

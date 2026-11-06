@@ -60,9 +60,38 @@ ccsh runs inside the stock CraftOS shell and has it find and run the programs (t
 
 Not yet: here-documents, $(( arithmetic )) (expr does sums), ~.
 
-At the prompt, ccsh first runs the commands in /.profile (PS1, export...), as `. /.profile` would.  Tab completes a program's name, and an argument as the stock shell would, or else as a file or directory name.  The up and down keys go through the lines typed before, kept in $HISTFILE (/.ccsh_history; unset or empty, none) across sessions and tabs, the last $HISTSIZE of them (1000; 0 keeps none).  Both are shell variables, set before /.profile runs so it can change them.  Leave with exit, or by holding Ctrl+T at the prompt; with jobs left, the first try only warns, and the jobs end with the shell.  Ctrl+T while a command runs stops it, and the rest of the line, with status 130.  A script or -c waits for its background jobs before it ends: they can't outlive it.
+At the prompt, ccsh first runs the commands in /.profile (PS1, export...), as `. /.profile` would.  Tab completes a program's name, and an argument as the stock shell would, or else as a file or directory name: what it would add shows in grey after the cursor.  The up and down keys go through the lines typed before, kept in $HISTFILE (/.ccsh_history; unset or empty, none) across sessions and tabs, the last $HISTSIZE of them (1000; 0 keeps none).  Both are shell variables, set before /.profile runs so it can change them.  The line is edited with a Unix shell's keys (lib/readline; the read builtin's too, at the keyboard):
 
-Under init (`help init`), a program from the path runs as a process of its own, as Unix's shells fork one: a child of this shell's, which ps lists and kill and Ctrl+T reach.  At the prompt each job is a process group (its number is $! and what jobs -l shows), put in front of the terminal while it's the job in front, so the keyboard goes to it, and Ctrl+Z stops the whole group, and the job.  Builtins, functions and compound commands run in the shell itself (cd and X=1 have to).  A script or -c runs its programs in its own group, so Ctrl+T reaches it and them alike.
+  Ctrl+A, Ctrl+E, Home, End
+      the start / the end of the line
+  Ctrl+B, Ctrl+F, Left, Right
+      a character back / forward
+  Alt+B, Alt+F
+      a word back / forward (or Esc then b/f)
+  Backspace, Delete, Ctrl+D
+      a character out (before / under it)
+  Ctrl+K, Ctrl+U
+      cut to the end / to the start
+  Ctrl+W, Alt+Backspace, Alt+D
+      cut the word before / before / after
+  Ctrl+Y
+      put back what was cut last
+  Up, Down, Ctrl+P, Ctrl+N
+      the history (Up and Down go through the completions while one shows)
+  Ctrl+R
+      search back through the history as you type: Ctrl+R again for an older match, Enter runs it, Ctrl+G gives up, another key edits it
+  Tab
+      the completion shown
+  Ctrl+L
+      clear the screen
+  Ctrl+C
+      drop the line (status 130)
+  Ctrl+D on an empty line
+      leave, as exit does
+
+A long line scrolls sideways.  Tap Ctrl+R: held, CraftOS reboots (and Ctrl+S held shuts down).  Leave with exit, Ctrl+D, or by holding Ctrl+T at the prompt; with jobs left, the first try only warns, and the jobs end with the shell.  Ctrl+C or Ctrl+T while a command runs stops it, and the rest of the line, with status 130 (a program that wants Ctrl+C as a key, as vi and telnet do, gets it under init, below).  A script or -c waits for its background jobs before it ends: they can't outlive it.
+
+Under init (`help init`), a program from the path runs as a process of its own, as Unix's shells fork one: a child of this shell's, which ps lists and kill and Ctrl+T reach.  At the prompt each job is a process group (its number is $! and what jobs -l shows), put in front of the terminal while it's the job in front, so the keyboard goes to it, and Ctrl+Z stops the whole group, and the job; Ctrl+C sends the group INT, which ends it as Ctrl+T would, but for a program that ignores INT (proc.ignore: vi, telnet), which gets the key.  Builtins, functions and compound commands run in the shell itself (cd and X=1 have to).  A script or -c runs its programs in its own group, so Ctrl+T reaches it and them alike.
 
 A script can start with #!/ccnix/bin/ccsh (the stock shell honours the #! line; under the ROM alone it's #!/rom/ccnix/bin/ccsh), or run as `ccsh script`.
 

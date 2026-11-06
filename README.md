@@ -439,7 +439,8 @@ output isn't the screen.
 ## ccsh
 
 A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
-(or hold Ctrl+T at its prompt) to get back to the stock shell.
+(or Ctrl+D on an empty line, or hold Ctrl+T at its prompt) to get back
+to the stock shell.
 `ccnix setup --ccsh` starts it at every boot, until you
 `set ccsh.login false`.
 
@@ -461,6 +462,7 @@ A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 | Environment | `export X`, `export X=1`, `export -n X`, `export -p`, `unset X`; `X=1 cmd` for one command. Programs read it with `os.getenv("X")`, and change their own copy with `os.setenv(name, value)`; `os.environ()` lists it. It holds the exported variables (`PS1` is one), `PATH`, `PWD` and `HOSTNAME`. A ccsh started from ccsh takes it over, and `env` shows it |
 | Jobs | `a &` in the background (its own copy of the variables); `jobs [-l\|-p]`; `fg [%n]`, `bg [%n]`; `wait [%n\|pid]`; `kill [-9\|-STOP\|-CONT] %n\|pid`; Ctrl+Z at the prompt stops the job in front. `fg prog` and `bg prog` open a multishell tab as CraftOS's do, with the environment. Under `init`, a program is a process and a job a process group: see [Processes and services](#processes-and-services) |
 | Startup | `/.profile` runs when ccsh starts at the prompt: set `PS1`, `export` variables |
+| Line editing | A Unix shell's keys (`lib/readline`): Ctrl+A/E (Home/End), Ctrl+B/F (arrows), Alt+B/F (or Esc then b/f) words; Ctrl+K, Ctrl+U, Ctrl+W, Alt+D, Alt+Backspace cut and Ctrl+Y puts back; Ctrl+P/N (Up/Down) and Ctrl+R (search as you type) the history; Ctrl+L clears the screen; Ctrl+C drops the line (status 130); Ctrl+D deletes, or on an empty line leaves. A long line scrolls sideways. The same keys work over telnet. Tap Ctrl+R: held, CraftOS reboots |
 | History | Up and down go through the lines typed before, kept in `$HISTFILE` (`/.ccsh_history`; unset or empty, none) across sessions and tabs, the last `$HISTSIZE` of them (1000; `0` keeps none). Both are shell variables, set before `/.profile` runs so it can change them |
 | Prompt | `PS1`, an exported variable: it starts as `'\h:\w\$ '` (`label:/dir$ `) on a computer with a label, `'\w\$ '` (`/dir$ `) without, unless the environment brought one. Set it with `\h` (label, or ID), `\w` (directory), `\W` (its last part), `\i` (ID), `\$`, `\n`: `PS1='\h \W\$ '` |
 | Globs | `*`, `?`, `[abc]`, `[!a-z]`; names starting with `.` only match an explicit dot |
@@ -474,8 +476,11 @@ A line ending in `\`, `|`, `&&` or `||`, or inside quotes, carries on at a
 `>` prompt. Tab completes as in the stock shell, for the command after
 the last `|`, `;` or `&`, and an argument the stock shell has nothing
 for (ccnix's programs, a redirect's file) as a file or directory name.
-Ctrl+T while a command runs stops it and the
-rest of the line, with status 130.
+Ctrl+C or Ctrl+T while a command runs stops it and the
+rest of the line, with status 130. Under `init`, Ctrl+C sends INT to the
+job's process group; a program that wants the key (`vi`, `telnet`) calls
+`proc.ignore("INT")` and gets it instead. Without `init` the shell takes
+Ctrl+C and Ctrl+Z for itself while a command runs.
 
 ```
 /$ cat /.profile

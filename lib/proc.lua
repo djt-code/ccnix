@@ -24,8 +24,10 @@
 -- session, on its terminal, unless spawned with pgid (true: a group of
 -- its own; a number: that group).  A shell puts a job's group in front
 -- with proc.setForeground, and takes the terminal back after.  Ctrl+Z on
--- a terminal stops its foreground group (TSTP), except a process that
--- ignores TSTP (proc.ignore) or one in the session leader's own group;
+-- a terminal stops its foreground group (TSTP), and Ctrl+C ends it as
+-- Ctrl+T would (INT), except a process that ignores the signal
+-- (proc.ignore: a shell at its prompt, a program that wants the key) or
+-- one in the session leader's own group: those get the key instead;
 -- with no live process in the foreground group, what's typed goes to the
 -- session leader.  A stopped process keeps its events (up to 256) for
 -- when it's continued (CONT).  Stopping, continuing and ending are
@@ -462,7 +464,11 @@ function P.new(o)
         end
         if keysT and (ev[1] == "key" or ev[1] == "key_up") and (ev[2] == keysT.leftCtrl or ev[2] == keysT.rightCtrl) then
             tt.ctrl = ev[1] == "key"
-        elseif keysT and tt.ctrl and ev[1] == "key" and ev[2] == keysT.z and signalGroup(tt.fg, "TSTP", true) > 0 then
+        elseif keysT and (ev[1] == "key" or ev[1] == "key_up") and (ev[2] == keysT.leftAlt or ev[2] == keysT.rightAlt) then
+            tt.alt = ev[1] == "key"             -- (Ctrl with Alt is AltGr, typing a character)
+        elseif keysT and tt.ctrl and not tt.alt and ev[1] == "key" and ev[2] == keysT.z and signalGroup(tt.fg, "TSTP", true) > 0 then
+            return
+        elseif keysT and tt.ctrl and not tt.alt and ev[1] == "key" and ev[2] == keysT.c and signalGroup(tt.fg, "INT", true) > 0 then
             return
         end
         local any = false
@@ -664,13 +670,15 @@ function P.new(o)
         osT.queueEvent("proc_cont", p.pid)
     end
 
-    -- Signal `name` to p.  fromTty: Ctrl+Z's TSTP, which doesn't stop a
-    -- process that ignores it, nor one in its session leader's group.
+    -- Signal `name` to p.  A process that ignores TSTP or INT isn't
+    -- reached by it; fromTty (Ctrl+Z's TSTP, Ctrl+C's INT) doesn't reach
+    -- one in its session leader's group either.
     -- false if it did nothing.
     signalOne = function(p, name, fromTty)
         if name == "KILL" then
             if p == K.current then p.killed = true else reap(p, false, "killed") end
         elseif name == "TERM" or name == "INT" or name == "HUP" then
+            if name == "INT" and ((p.ignore and p.ignore.INT) or (fromTty and p.pgid == p.sid)) then return false end
             K.inbox[#K.inbox + 1] = { pid = p.pid, ev = table.pack("terminate") }
         elseif name == "STOP" or name == "TSTP" then
             if name == "TSTP" and ((p.ignore and p.ignore.TSTP) or (fromTty and p.pgid == p.sid)) then return false end
@@ -1098,11 +1106,12 @@ function P.new(o)
             p.ownScrollback = on ~= false or nil
             return true
         end,
-        -- the caller ignores signal sig (TSTP: the only one that can be),
-        -- or with on false, no longer does
+        -- the caller ignores signal sig (TSTP or INT: the ones that can
+        -- be, so Ctrl+Z or Ctrl+C reaches it as a key), or with on false,
+        -- no longer does
         ignore = function(sig, on)
             local p, name = K.current, P.signal(sig)
-            if not p or name ~= "TSTP" then return false end
+            if not p or (name ~= "TSTP" and name ~= "INT") then return false end
             p.ignore = p.ignore or {}
             p.ignore[name] = on ~= false or nil
             return true

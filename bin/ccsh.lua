@@ -98,22 +98,49 @@
 -- At the prompt, ccsh first runs the commands in /.profile (PS1,
 -- export...), as `. /.profile` would.  Tab completes a program's name,
 -- and an argument as the stock shell would, or else as a file or
--- directory name.  The up and down keys go through
+-- directory name: what it would add shows in grey after the cursor.  The
+-- up and down keys go through
 -- the lines typed before, kept in $HISTFILE (/.ccsh_history; unset or
 -- empty, none) across sessions and tabs, the last $HISTSIZE of them
 -- (1000; 0 keeps none).  Both are shell variables, set before /.profile
--- runs so it can change them.  Leave with exit, or by holding
+-- runs so it can change them.  The line is edited with a Unix shell's
+-- keys (lib/readline; the read builtin's too, at the keyboard):
+--
+--   Ctrl+A, Ctrl+E, Home, End      the start / the end of the line
+--   Ctrl+B, Ctrl+F, Left, Right    a character back / forward
+--   Alt+B, Alt+F                   a word back / forward (or Esc then b/f)
+--   Backspace, Delete, Ctrl+D      a character out (before / under it)
+--   Ctrl+K, Ctrl+U                 cut to the end / to the start
+--   Ctrl+W, Alt+Backspace, Alt+D   cut the word before / before / after
+--   Ctrl+Y                         put back what was cut last
+--   Up, Down, Ctrl+P, Ctrl+N       the history (Up and Down go through
+--                                  the completions while one shows)
+--   Ctrl+R                         search back through the history as
+--                                  you type: Ctrl+R again for an older
+--                                  match, Enter runs it, Ctrl+G gives up,
+--                                  another key edits it
+--   Tab                            the completion shown
+--   Ctrl+L                         clear the screen
+--   Ctrl+C                         drop the line (status 130)
+--   Ctrl+D on an empty line        leave, as exit does
+--
+-- A long line scrolls sideways.  Tap Ctrl+R: held, CraftOS reboots (and
+-- Ctrl+S held shuts down).  Leave with exit, Ctrl+D, or by holding
 -- Ctrl+T at the prompt; with jobs left, the first try only warns, and the
--- jobs end with the shell.  Ctrl+T while a command runs stops it, and the
--- rest of the line, with status 130.  A script or -c waits for its
--- background jobs before it ends: they can't outlive it.
+-- jobs end with the shell.  Ctrl+C or Ctrl+T while a command runs stops
+-- it, and the rest of the line, with status 130 (a program that wants
+-- Ctrl+C as a key, as vi and telnet do, gets it under init, below).  A
+-- script or -c waits for its background jobs before it ends: they can't
+-- outlive it.
 --
 -- Under init (`help init`), a program from the path runs as a process of
 -- its own, as Unix's shells fork one: a child of this shell's, which ps
 -- lists and kill and Ctrl+T reach.  At the prompt each job is a process
 -- group (its number is $! and what jobs -l shows), put in front of the
 -- terminal while it's the job in front, so the keyboard goes to it, and
--- Ctrl+Z stops the whole group, and the job.  Builtins, functions and
+-- Ctrl+Z stops the whole group, and the job; Ctrl+C sends the group INT,
+-- which ends it as Ctrl+T would, but for a program that ignores INT
+-- (proc.ignore: vi, telnet), which gets the key.  Builtins, functions and
 -- compound commands run in the shell itself (cd and X=1 have to).  A
 -- script or -c runs its programs in its own group, so Ctrl+T reaches it
 -- and them alike.
@@ -1165,7 +1192,7 @@ local jobs = {}                      -- the numbered jobs: background, stopped, 
 local waiters = {}                   -- jobs blocked in fg or wait
 local jobControl = false             -- Ctrl+Z: only at the prompt
 local REQ, INTR = {}, {}             -- a builtin's yield to run(); what wakes it on Ctrl+T or kill
-local nextPid, touches, ctrlDown = 1, 0, false
+local nextPid, touches, ctrlDown, altDown, dropChar = 1, 0, false, false, nil
 local runAndOr
 -- Under init (an init with process groups), programs are processes:
 local kern = rawget(_G, "proc")
@@ -1376,9 +1403,22 @@ local function dispatch(top, ev)
     end
     if USER[ev[1]] then
         local j = fgOf(top)
+        local drop = dropChar
+        if ev[1] == "key" then dropChar = nil end
+        if ev[1] == "char" and drop then
+            dropChar = nil
+            if ev[2]:lower() == drop then return end          -- (Ctrl+Z's or Ctrl+C's, if one comes)
+        end
         if ev[1] == "key" or ev[1] == "key_up" then
-            if ev[2] == keys.leftCtrl or ev[2] == keys.rightCtrl then ctrlDown = ev[1] == "key" end
-            if jobControl and ctrlDown and ev[1] == "key" and ev[2] == keys.z and j.text then stop(j); return end
+            local down = ev[1] == "key"
+            if ev[2] == keys.leftCtrl or ev[2] == keys.rightCtrl then ctrlDown = down
+            elseif ev[2] == keys.leftAlt or ev[2] == keys.rightAlt then altDown = down end
+            -- a command line running in front: Ctrl+Z stops it, Ctrl+C
+            -- ends it as Ctrl+T does (Ctrl with Alt is AltGr, typing)
+            if jobControl and ctrlDown and not altDown and down and j.text then
+                if ev[2] == keys.z then dropChar = "z"; stop(j); return end
+                if ev[2] == keys.c then dropChar = "c"; ev = table.pack("terminate") end
+            end
         end
         if ev[1] == "terminate" and j.req then signal(j) else deliver(j, ev) end
         return
@@ -2046,8 +2086,9 @@ local function runCommand(cmd, inText, out)
             assigns = assigns,
             readLine = function()
                 if input ~= io.stdin then return input:read("l") end
-                local ok, l = pcall(real.read)
-                return ok and l or nil
+                local l, why = real.editLine({})
+                if why == "interrupt" or why == "terminate" then P.interrupted = true end   -- (Ctrl+C or Ctrl+T: the rest stops too)
+                return l
             end,
         }))
     end
@@ -2161,16 +2202,38 @@ local function complete(line)
     return fs.complete(word, shell.dir(), true, true)
 end
 
--- A line typed at the prompt `text`, or nil for Ctrl+T.
-local function prompt(text, hist)
-    if term.isColour() then term.setTextColour(colours.yellow) end
-    write(text)
-    term.setTextColour(colours.white)
-    local useComplete = not settings or settings.get("shell.autocomplete", true)
-    local ok, line = pcall(read, nil, hist, useComplete and complete or nil)
+-- The line editor: lib/readline (its keys are in the header above), or
+-- read() if it can't be loaded.  opts as readline.read's; the line, or
+-- nil and why ("eof", "interrupt", "terminate").
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
+local editor                         -- readline once loaded; false if it couldn't be
+local function editLine(opts)
+    if editor == nil then
+        local ok, m = pcall(require, "readline")
+        editor = ok and type(m) == "table" and m or false
+    end
+    if editor then return editor.read(opts) end
+    if opts.prompt then
+        if term.isColour() and opts.promptColour then term.setTextColour(opts.promptColour) end
+        write(opts.prompt)
+        term.setTextColour(colours.white)
+    end
+    local ok, line = pcall(read, nil, opts.history, opts.complete)
     if ok then return line end
-    if line == "Terminated" then return nil end
+    if line == "Terminated" then return nil, "terminate" end
     error(line, 0)
+end
+real.editLine = editLine             -- (the read builtin's, at the keyboard)
+
+-- A line typed at the prompt `text`: nil for Ctrl+T, or Ctrl+D on an
+-- empty line; false for Ctrl+C (the line dropped, status 130).
+local function prompt(text, hist)
+    local useComplete = not settings or settings.get("shell.autocomplete", true)
+    local line, why = editLine({ prompt = text, promptColour = colours.yellow, colour = colours.white,
+        history = hist, complete = useComplete and complete or nil })
+    if line then return line end
+    if why == "interrupt" then P.status = 130; return false end
+    return nil
 end
 
 -- The prompt's text: $PS1 with its escapes (\h the computer's label, or
@@ -2242,6 +2305,7 @@ end
 local function readLine(hist)
     local j = runTop(function()
         local line = prompt(promptText(), hist)
+        if line == false then return { line = "", list = {} } end      -- (Ctrl+C)
         if line then remember(hist, line) end
         while line do
             local ok, r = pcall(parse, line)
@@ -2249,6 +2313,7 @@ local function readLine(hist)
             if type(r) ~= "table" then error(r, 0) end
             if not r.more then return { line = line, err = r.msg } end
             local nxt = prompt("> ", {})
+            if nxt == false then return { line = "", list = {} } end
             line = nxt and line .. "\n" .. nxt
         end
     end)
@@ -2263,6 +2328,7 @@ local function interactive()
     if procs then
         myPgid = kern.getpgid()
         kern.ignore("TSTP")             -- (Ctrl+Z is for the job in front, not this shell)
+        kern.ignore("INT")              -- (and Ctrl+C at the prompt drops the line)
     end
     local warned = false
     print("ccsh: exit, or hold Ctrl+T, to leave")
