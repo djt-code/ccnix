@@ -781,7 +781,11 @@ function scoop(d)
     local it = turtle.getItemDetail()
     local burned = it and it.name == LAVA_BUCKET and turtle.refuel(1)
     turtle.select(1)
-    if burned then stats.lava = stats.lava + 1 end
+    if burned then
+        stats.lava = stats.lava + 1
+        print(string.format("Burned a lava source at (%s) for fuel (fuel %s).", key(neighbour(d)),
+            tostring(turtle.getFuelLevel())))
+    end
     return burned
 end
 
@@ -3112,7 +3116,9 @@ T.withTool(pickaxe, function()
         -- taken away): "lane N" means something else now, so the segment
         -- starts again from its first lane (what's dug is just walked through)
         if progress and progress.lanes ~= #planLanes() then
-            print("The lanes are planned differently from when it stopped: going over this segment from its first lane.")
+            if home.k == lastHome then
+                print("The lanes are planned differently from when it stopped: going over this segment from its first lane.")
+            end
             progress = nil
         end
         while home.z < LENGTH do
