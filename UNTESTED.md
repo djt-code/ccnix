@@ -38,8 +38,7 @@ section.
 ## ccsh
 
 - **Background output while typing, the rest** (0.30.0). A two-row PS1
-  (`PS1='\h
-\$ '`) comes back whole; a full-screen program in the
+  (`PS1='\h\n\$ '`) comes back whole; a full-screen program in the
   background isn't disturbed; the same over telnet.
 - **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
