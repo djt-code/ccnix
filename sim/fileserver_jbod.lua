@@ -8,7 +8,8 @@
 -- file; a fifth drive grows the pool; a disk with files waits for add();
 -- a disk taken out takes its files, and a split file with a part on it
 -- says so (its last part too, and its first); copy and move in and out;
--- fs.find; Tab completion in the pool; and the paths outside /jbod
+-- fs.find; Tab completion in the pool (jbod's own, and with a ROM,
+-- CraftOS's loaded over the patched table); and the paths outside /jbod
 -- untouched.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -165,12 +166,15 @@ local CLOCK = 0
 local function tick() CLOCK = CLOCK + 2 end      -- (the pool looks for drives at most once a second)
 
 local fs = fake
-local P = J.install(fs, {
+local unpatched = {}            -- (for a second install, at the end)
+for k, v in pairs(fake) do unpatched[k] = v end
+local OPTS = {
     mount = "jbod",
     drives = function() local t = {} for i, d in ipairs(DRIVES) do t[i] = d end return t end,
     clock = function() return CLOCK end,
     label = function(name) LABELS[name] = "FS " .. name end,
-})
+}
+local P = J.install(fs, OPTS)
 local function write(p, s)
     local h, err = fs.open(p, "w")
     if not h then error(err, 0) end
@@ -253,6 +257,14 @@ local c1, c2, c3, c4 = comp("/jb", "", true, true), comp("jbod/do", "", true, tr
     comp("docs/", "jbod", true, false), comp("", "jbod/docs", { include_dirs = false })
 check("Tab completion in the pool: /jbod, its folders, their files", c1 == "od/ od" and c2 == "cs/ cs"
     and c3 == "x2.txt y.txt" and c4 == "../ x2.txt y.txt", c1 .. " | " .. c2 .. " | " .. c3 .. " | " .. c4)
+local c5, c6, c7 = comp("/jbod/docs/x", ""), comp(".", "jbod"), comp("", "jbod/docs", { include_hidden = false })
+check("... from the root, \"..\" for a dot, the options form", c5 == "2.txt" and c6 == "./ ." and c7 == "x2.txt y.txt",
+    c5 .. " | " .. c6 .. " | " .. c7)
+write("/jbod/.hid", "h")
+local c8, c9 = comp("", "jbod", { include_hidden = false, include_files = false }), comp(".h", "jbod", { include_hidden = false })
+check("... hidden names only when the name typed starts with a dot; no files with include_files false",
+    c8 == "docs/ docs" and c9 == "id", c8 .. " | " .. c9)
+fs.delete("/jbod/.hid")
 check("paths outside /jbod as they were", fs.getDrive("/a-copy.txt") == "hdd" and fs.getDrive("/jbod/a.txt") == "jbod"
     and fs.getFreeSpace("/") < 1000000)
 
@@ -332,3 +344,23 @@ apnd.write("three\n")
 apnd.close()
 check("append", read("/jbod/a.txt") == "one\ntwo\nthree\n")
 check("installing twice gives the same pool", J.install(fs, {}) == P)
+
+-- With a ROM, completion is CraftOS's own fs.complete, loaded again with
+-- the patched table as its fs.  A stand-in for the ROM's fs API, laid out
+-- as os.loadAPI runs one: it copies the fs it's given into its
+-- environment, and its complete lists the folder named, marked "rom:"
+files["rom/apis/fs.lua"] = table.concat({
+    "local given = fs",
+    "for k, v in pairs(given) do _ENV[k] = v end",
+    "function complete(path, location)",
+    "    local out = {}",
+    "    for _, n in ipairs(list(combine(location, path))) do out[#out + 1] = 'rom:' .. n end",
+    "    return out",
+    "end",
+}, "\n")
+dirs["rom"], dirs["rom/apis"] = true, true
+local again = {}
+for k, v in pairs(unpatched) do again[k] = v end
+J.install(again, OPTS)
+local c10 = table.concat(again.complete("docs", "jbod"), " ")
+check("with a ROM: its fs.complete, seeing the pool through the patched table", c10 == "rom:x2.txt rom:y.txt", c10)

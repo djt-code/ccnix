@@ -66,6 +66,13 @@ section.
 
 ## Setup and boot
 
+- **The rest of CraftOS's startup after ccnix** (0.25.1, rewritten from the
+  documented behaviour). With `ccsh.login` (or `init.boot`) set from the
+  ROM, the computer's `/startup.lua` or `/startup/` folder still runs before
+  ccsh; with `shell.allow_disk_startup` on and a disk holding `startup.lua`
+  in a drive, the disk's startup runs instead of the computer's; the MOTD
+  shows with `motd.enable` on.
+
 - **`wget run …/deploy/setup.lua` on a bare old install** (0.20.0): a
   computer that still has only `/cc-turtles` (from before ccnix): moved to
   `/ccnix`, pointed at the ccnix repo, pulled, old startup lines swapped.
@@ -76,6 +83,13 @@ section.
   rotating at that size.
 
 ## Fileserver
+
+- **Tab completion in /jbod** (0.25.1). On a fileserver with the pool at
+  `/jbod`, Tab in the CraftOS shell and in ccsh completes `/jbod`, its
+  folders and the files in them (`cd /jb<Tab>`, `cat /jbod/docs/<Tab>`,
+  `cd <Tab>` inside `/jbod` offers `../`). This now goes through CraftOS's
+  own `fs.complete`, loaded again from `/rom/apis/fs.lua` over the patched
+  fs; the sims only cover a stand-in of that file and jbod's fallback.
 
 - **Disk labels** (0.18.1): each pooled disk labelled `<computer label>
   <drive>`; labels it didn't set left alone.

@@ -478,6 +478,83 @@ local function globMatch(pattern, name)
     return name:match(lua) ~= nil
 end
 
+--------------------------------------------------------------------------
+-- Tab completion through a patched fs table
+--------------------------------------------------------------------------
+
+-- CraftOS's fs.complete, loaded again from the ROM's fs API with fsTable
+-- as the `fs` it sees, or nil where there's no ROM (as in the sims).  The
+-- API copies the functions out of that fs when it runs, so this is
+-- called once they're patched.
+local ROM_FS_API = "rom/apis/fs.lua"
+local function romComplete(base, fsTable)
+    if not base.exists(ROM_FS_API) or base.isDir(ROM_FS_API) then return nil end
+    local h = base.open(ROM_FS_API, "r")
+    if not h then return nil end
+    local source = h.readAll()
+    h.close()
+    local env = setmetatable({ fs = fsTable }, { __index = _G })
+    local chunk = source and load(source, "@/" .. ROM_FS_API, "t", env)
+    if not chunk or not pcall(chunk) then return nil end
+    if type(env.complete) ~= "function" then return nil end
+    return env.complete
+end
+
+-- Ours, for where there's no ROM, written from fs.complete's documented
+-- behaviour.  The path is read from location (or from the root, if it
+-- starts with a slash); what comes after its last slash is a name partly
+-- typed, and the answers are the endings that finish it to a name in
+-- that folder.  A folder gives two: its ending with "/" (to go on into
+-- it) and, unless include_dirs is false, the ending alone.  Files are
+-- left out if include_files is false; hidden names (a leading dot), if
+-- include_hidden is false and the name typed doesn't start with a dot.
+-- A name typed on its own, below the root, can also finish to "..".
+local function isSlash(c) return c == "/" or c == "\\" end
+
+-- path -> the folder it's in, the name partly typed, and whether the
+-- path named a folder at all (rather than just the name)
+local function splitCompletion(combine, path, location)
+    local lastSlash = 0
+    for i = 1, #path do
+        if isSlash(path:sub(i, i)) then lastSlash = i end
+    end
+    local typed = path:sub(lastSlash + 1)
+    local folder = (path:sub(1, lastSlash):gsub("\\", "/"))
+    if isSlash(path:sub(1, 1)) then return combine(folder), typed, true end
+    return combine(location or "", folder), typed, lastSlash > 0
+end
+
+local function completeThrough(fsTable, path, location, files, dirs)
+    local hidden
+    if type(files) == "table" then      -- the options form
+        files, dirs, hidden = files.include_files, files.include_dirs, files.include_hidden
+    end
+    files, dirs, hidden = files ~= false, dirs ~= false, hidden ~= false     -- each on unless false
+    local combine = fsTable.combine
+    local folder, typed, namedFolder = splitCompletion(combine, path, location)
+    if not fsTable.isDir(folder) then return {} end
+
+    local names = {}
+    if folder ~= "" and not namedFolder then names[1] = ".." end
+    for _, name in ipairs(fsTable.list(folder)) do names[#names + 1] = name end
+    local showHidden = hidden or typed:sub(1, 1) == "."
+
+    local out = {}
+    for _, name in ipairs(names) do
+        local fits = name:sub(1, #typed) == typed
+        if fits and (showHidden or name:sub(1, 1) ~= ".") then
+            local ending = name:sub(#typed + 1)
+            if name == ".." or fsTable.isDir(combine(folder, name)) then
+                out[#out + 1] = ending .. "/"
+                if dirs and ending ~= "" then out[#out + 1] = ending end
+            elseif files and ending ~= "" then
+                out[#out + 1] = ending
+            end
+        end
+    end
+    return out
+end
+
 -- Install the pool into `fsTable` (CraftOS's fs) in place, at /<mount>.
 -- Returns the pool.  Installing twice does nothing more.
 function J.install(fsTable, opts)
@@ -554,36 +631,11 @@ function J.install(fsTable, opts)
 
     -- completion (the shell's Tab): CraftOS's fs.complete works through
     -- the fs it was loaded with, not this table, so it never sees the
-    -- pool; this is it again, through this table
-    function fsTable.complete(path, location, files, dirs)
-        local hidden
-        if type(files) == "table" then
-            files, dirs, hidden = files.include_files, files.include_dirs, files.include_hidden
-        end
-        files, dirs, hidden = files ~= false, dirs ~= false, hidden ~= false
-        local dir, rest = location, path
-        if path:match("^[/\\]") then dir, rest = "", path:sub(2) end
-        local head, name = rest:match("^(.*)[/\\]([^/\\]*)$")
-        if head then dir = base.combine(dir, (head:gsub("\\", "/"))) else name = rest end
-        if not fsTable.isDir(dir) then return {} end
-        local out = {}
-        if dirs and path == "" then out[#out + 1] = "." end
-        if base.combine(dir) ~= "" then
-            if path == "" then out[#out + 1] = dirs and ".." or "../"
-            elseif path == "." then out[#out + 1] = dirs and "." or "./" end
-        end
-        for _, f in ipairs(fsTable.list(dir)) do
-            if f:sub(1, #name) == name and (hidden or f:sub(1, 1) ~= "." or name:sub(1, 1) == ".") then
-                local r = f:sub(#name + 1)
-                if fsTable.isDir(base.combine(dir, f)) then
-                    out[#out + 1] = r .. "/"
-                    if dirs and #r > 0 then out[#out + 1] = r end
-                elseif files and #r > 0 then
-                    out[#out + 1] = r
-                end
-            end
-        end
-        return out
+    -- pool.  CraftOS's own, loaded again with this table as its fs (this
+    -- has to come after the patches above: see romComplete), or where
+    -- there's no ROM, ours
+    fsTable.complete = romComplete(base, fsTable) or function(path, location, files, dirs)
+        return completeThrough(fsTable, path, location, files, dirs)
     end
 
     -- find: the pool's matches as well as the disk's

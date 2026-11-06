@@ -6,7 +6,8 @@
 -- ROM (/ccnix wins, and its own boot.lua takes over), for another ROM
 -- (left out), and a whole checkout at /ccnix; what runs at the end of
 -- startup (ip up with net.boot; the autoruns after ccnix's, the motd and
--- the startup files, then init alone, or the autostart, ccsh and the
+-- the startup files, a disk's in place of the computer's, then init
+-- alone, or the autostart, ccsh and the
 -- stock shell, then shutdown), on a computer and a turtle; the
 -- craftix.login shim; an install from before ccnix (/cc-turtles) left
 -- alone; setup in ROM mode setting the settings only.  Then, with no
@@ -192,6 +193,44 @@ r = boot(W)
 check("init.boot (with ccsh.login and an autostart set too): a /startup folder's files in order, then init --boot alone; the autostart and ccsh are its",
     ran() == END .. "startup/00-a.lua, startup/zz-b.lua, rom/ccnix/bin/init.lua --boot" and r.errText == "os.shutdown called\n",
     ran() .. " " .. show(r.errText))
+
+-- disks (shell.allow_disk_startup): drives as peripheral.getNames() lists
+-- them; the first disk with data and startup files on it is run in place
+-- of the computer's; none with any, the computer's
+local DISKS = { top = false, left = "disk", right = "disk2", back = "disk3" }     -- (top: empty; left: data, no startup)
+peripheral = { getNames = function() return { "top", "left", "right", "back" } end }
+disk = {
+    isPresent = function(side) return DISKS[side] ~= nil and DISKS[side] ~= false end,
+    hasData = function(side) return type(DISKS[side]) == "string" end,
+    getMountPath = function(side) return DISKS[side] end,
+}
+W = world(true)
+W:dir("disk")
+W:file("disk/notes.txt", "")
+W:file("disk2/startup.lua", "")
+W:dir("disk2/startup")
+W:file("disk2/startup/a.lua", "")
+W:file("disk3/startup.lua", "")
+W:file("startup.lua", "")
+STORE["ccsh.login"], STORE["shell.allow_startup"], STORE["shell.allow_disk_startup"] = true, true, true
+r = boot(W)
+check("allow_disk_startup: the first disk with startup files, its program then its folder's, in place of the computer's",
+    ran() == END .. "disk2/startup.lua, disk2/startup/a.lua, rom/ccnix/bin/ccsh.lua, rom/programs/shell.lua", ran())
+W = world(true)
+W:dir("disk")
+W:file("startup.lua", "")
+STORE["ccsh.login"], STORE["shell.allow_startup"], STORE["shell.allow_disk_startup"] = true, true, true
+DISKS.right, DISKS.back = nil, nil
+r = boot(W)
+check("... no disk with any: the computer's", ran() == END .. "startup.lua, rom/ccnix/bin/ccsh.lua, rom/programs/shell.lua", ran())
+W = world(true)
+W:file("startup.lua", "")
+W:file("disk/startup.lua", "")
+STORE["ccsh.login"], STORE["shell.allow_startup"] = true, false
+r = boot(W)
+check("... and with allow_startup off, not even those; disks only with allow_disk_startup",
+    ran() == END .. "rom/ccnix/bin/ccsh.lua, rom/programs/shell.lua", ran())
+peripheral, disk = nil, nil
 
 W = world(true)
 STORE["ccsh.login"], STORE["ccnix.autostart"] = true, "router"

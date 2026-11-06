@@ -197,3 +197,33 @@ check("through the shell: double quotes make one word", r.out == "a  b c\n", sho
 r = W:sh("ls")
 check("shell: ls is the rom's list (stub), aliases and path work", r.ok and r.err[1] == nil
     and W.shell.resolveProgram("ls") == "rom/programs/list.lua" and W.shell.resolveProgram("echo") == "ccnix/bin/echo.lua")
+
+-- the fixtures themselves: shell.run's words, and io's read formats
+local function words(...) return table.concat(SW.tokenise(...), "|") end
+check("shell words: blanks split, quotes keep spaces, an empty pair is a word, an open quote runs to the end",
+    words("a  b\tc") == "a|b|c" and words('x "y  z" w') == "x|y  z|w" and words('p ""') == "p|"
+        and words('a"b c"d') == "a|b c|d" and words('q "open end') == "q|open end" and words("") == "",
+    words('x "y  z" w') .. " / " .. words('a"b c"d') .. " / " .. words('q "open end'))
+check("shell words: shell.run's arguments are joined with spaces first", words("cat", '"a', 'b"') == "cat|a b")
+W:file("lines.txt", "one\ntwo\nthree")
+r = W:call(function(env)
+    local f = env.io.open("lines.txt")
+    local a, b = f:read("l", "*L")
+    local c, d = f:read(2, "a")
+    local e, g = f:read("a", "l")
+    f:close()
+    local ok, msg = pcall(f.read, f)
+    local h = env.io.open("lines.txt")
+    local bad = { pcall(h.read, h, "x") }
+    local none = { h:read("n", "l") }
+    h:close()
+    local got = {}
+    for l in env.io.lines("lines.txt") do got[#got + 1] = l end
+    return { a, b, c, d, e, g, ok, msg, bad[2], none[1], none[2], table.concat(got, ",") }
+end)
+local v = r.value or {}
+check("io read: l, *L, a count, a; \"\" at the end and nil after; closed; a bad format; n is nil; io.lines",
+    v[1] == "one" and v[2] == "two\n" and v[3] == "th" and v[4] == "ree" and v[5] == "" and v[6] == nil
+        and v[7] == false and tostring(v[8]):find("closed file") and tostring(v[9]):find("invalid format")
+        and v[10] == nil and v[11] == nil and v[12] == "one,two,three",
+    show(v[3]) .. " " .. show(v[4]) .. " " .. tostring(v[8]) .. " " .. tostring(v[9]) .. " " .. tostring(v[12]))

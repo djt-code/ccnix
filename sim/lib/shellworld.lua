@@ -330,7 +330,7 @@ local function fsApi(W)
 end
 
 --------------------------------------------------------------------------
--- io, as rom/apis/io.lua builds it over fs handles
+-- io over fs handles, as CC:T's io library behaves (as documented)
 --------------------------------------------------------------------------
 local function ioApi(W)
     local mt = { __name = "FILE*" }
@@ -344,69 +344,111 @@ local function ioApi(W)
         if self._closed then error("attempt to use a closed file", 3) end
     end
     local function make(handle) return setmetatable({ _handle = handle }, mt) end
-    local function autoclose(self, ...)
-        if ... == nil and self._autoclose and not self._closed then self:close() end
-        return ...
-    end
 
+    -- The methods, written from the documented io library (Lua's, as
+    -- CC:T's io gives it over fs handles).  What a handle can do is what
+    -- its fs handle has: a write handle has no readLine, the keyboard no
+    -- readAll or read, the screen no close.
+
+    -- close: the fs handle's close; a standard stream has none and stays open
     function H.close(self)
         chk(self)
-        if self._handle.close then self._closed = true; self._handle.close(); return true end
-        return nil, "attempt to close standard stream"
+        local handle = self._handle
+        if not handle.close then return nil, "attempt to close standard stream" end
+        self._closed = true
+        handle.close()
+        return true
     end
-    function H.flush(self) chk(self); if self._handle.flush then self._handle.flush() end return true end
+    function H.flush(self)
+        chk(self)
+        if self._handle.flush then self._handle.flush() end
+        return true
+    end
+
+    -- read's formats, by letter: "l" a line, "L" a line with its "\n",
+    -- "a" the rest ("" at the end, never nil), "n" a number (CC reads none:
+    -- nil).  A number instead reads that many characters.  Each gives nil
+    -- where the fs handle can't do it (the keyboard has no readAll).
+    local FORMATS = {
+        l = function(handle) if handle.readLine then return handle.readLine() end end,
+        L = function(handle) if handle.readLine then return handle.readLine(true) end end,
+        a = function(handle) if handle.readAll then return handle.readAll() or "" end end,
+        n = function() return nil end,
+    }
+    -- the letter of a format: Lua 5.1 wrote them "*l", Lua 5.3 "l"; past
+    -- the letter is ignored ("line" is "l")
+    local function formatLetter(format)
+        local at = 1
+        if format:sub(at, at) == "*" then at = at + 1 end
+        return format:sub(at, at)
+    end
+    -- one of read's arguments, the i-th; errors blame read's caller
+    local function readOne(handle, format, i)
+        if type(format) == "number" then
+            if handle.read then return handle.read(format) end
+            return nil
+        end
+        if type(format) ~= "string" then
+            error("bad argument #" .. i .. " (string expected, got " .. type(format) .. ")", 3)
+        end
+        local reader = FORMATS[formatLetter(format)]
+        if not reader then error("bad argument #" .. i .. " (invalid format)", 3) end
+        return reader(handle)
+    end
+
+    -- read(...): a value for each format, "l" if none is given; at the
+    -- first that gets nothing, it and the rest are nil
+    function H.read(self, ...)
+        chk(self)
+        local handle = self._handle
+        if not (handle.read or handle.readLine) then return nil, "Not opened for reading" end
+        local formats = table.pack(...)
+        if formats.n == 0 then
+            if not handle.readLine then return end
+            return handle.readLine()
+        end
+        local values = {}
+        for i = 1, formats.n do
+            local value = readOne(handle, formats[i], i)
+            if not value then break end
+            values[i] = value
+        end
+        return table.unpack(values, 1, formats.n)
+    end
+
+    -- lines(...): an iterator calling read with the same formats; one from
+    -- io.lines(name) closes its file when it reaches the end
     function H.lines(self, ...)
         chk(self)
         if not self._handle.read then return nil, "file is not readable" end
-        local args = table.pack(...)
+        local formats = table.pack(...)
         return function()
             if self._closed then error("file is already closed", 2) end
-            return autoclose(self, self:read(table.unpack(args, 1, args.n)))
+            local got = table.pack(self:read(table.unpack(formats, 1, formats.n)))
+            if got[1] == nil and self._autoclose then self:close() end
+            return table.unpack(got, 1, got.n)
         end
     end
-    function H.read(self, ...)
-        chk(self)
-        local h = self._handle
-        if not h.read and not h.readLine then return nil, "Not opened for reading" end
-        local n = select("#", ...)
-        local out = {}
-        for i = 1, n do
-            local arg = select(i, ...)
-            local res
-            if type(arg) == "number" then
-                if h.read then res = h.read(arg) end
-            elseif type(arg) == "string" then
-                local f = arg:gsub("^%*", ""):sub(1, 1)
-                if f == "l" then if h.readLine then res = h.readLine() end
-                elseif f == "L" then if h.readLine then res = h.readLine(true) end
-                elseif f == "a" then if h.readAll then res = h.readAll() or "" end
-                elseif f == "n" then res = nil
-                else error("bad argument #" .. i .. " (invalid format)", 2) end
-            else
-                error("bad argument #" .. i .. " (string expected, got " .. type(arg) .. ")", 2)
-            end
-            out[i] = res
-            if not res then break end
-        end
-        if n == 0 and h.readLine then return h.readLine() end
-        return table.unpack(out, 1, n)
-    end
-    function H.seek(self, whence, off)
+
+    function H.seek(self, whence, offset)
         chk(self)
         if not self._handle.seek then return nil, "file is not seekable" end
-        return self._handle.seek(whence, off)
+        return self._handle.seek(whence, offset)
     end
     function H.setvbuf() end
+
+    -- write(...): strings and numbers, in order; the file, to chain
     function H.write(self, ...)
         chk(self)
-        local h = self._handle
-        if not h.write then return nil, "file is not writable" end
-        for i = 1, select("#", ...) do
-            local a = select(i, ...)
-            if type(a) ~= "string" and type(a) ~= "number" then
-                error("bad argument #" .. i .. " (string or number expected, got " .. type(a) .. ")", 2)
+        local handle = self._handle
+        if not handle.write then return nil, "file is not writable" end
+        local values = table.pack(...)
+        for i = 1, values.n do
+            local kind = type(values[i])
+            if kind ~= "string" and kind ~= "number" then
+                error("bad argument #" .. i .. " (string or number expected, got " .. kind .. ")", 2)
             end
-            h.write(a)
+            handle.write(values[i])
         end
         return self
     end
@@ -463,13 +505,39 @@ end
 --------------------------------------------------------------------------
 -- shell
 --------------------------------------------------------------------------
+-- shell.run's words, written from the shell's documented behaviour: its
+-- arguments joined with spaces, then cut into words at spaces and tabs.
+-- Text in double quotes is one word as it stands, spaces and all (a pair
+-- with nothing in it is an empty word; a quote left open runs to the
+-- end).  A quote also ends the word before it: a"b c" is two words, a
+-- and "b c".
+local function isBlank(c) return c == " " or c == "\t" end
 local function tokenise(...)
     local line = table.concat({ ... }, " ")
-    local words, quoted = {}, false
-    for match in (line .. "\""):gmatch("(.-)\"") do
-        if quoted then words[#words + 1] = match
-        else for m in match:gmatch("[^ \t]+") do words[#words + 1] = m end end
-        quoted = not quoted
+    local pos = 1
+    local function peek() return line:sub(pos, pos) end
+    -- the text from pos up to (not including) the first character `stops`
+    -- says yes to, or the end; pos is left on that character
+    local function readUntil(stops)
+        local start = pos
+        while pos <= #line and not stops(peek()) do pos = pos + 1 end
+        return line:sub(start, pos - 1)
+    end
+    local function isQuote(c) return c == "\"" end
+    local function endsBareWord(c) return isBlank(c) or isQuote(c) end
+
+    local words = {}
+    while pos <= #line do
+        local c = peek()
+        if isBlank(c) then
+            pos = pos + 1
+        elseif isQuote(c) then
+            pos = pos + 1                               -- past the opening quote
+            words[#words + 1] = readUntil(isQuote)
+            pos = pos + 1                               -- past the closing one (or the end)
+        else
+            words[#words + 1] = readUntil(endsBareWord)
+        end
     end
     return words
 end

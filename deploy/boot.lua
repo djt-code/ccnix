@@ -143,37 +143,55 @@ local login = settings.get("ccsh.login") and find("bin/ccsh.lua") or nil
 if not (init or autostart or login) then return end
 
 if not ending then
-    -- what /rom/startup.lua does after its autoruns, which it won't get to
+    -- Does what CraftOS's startup does after the autoruns, which it won't
+    -- get to now: the rest of the /rom/autorun files (those after ours),
+    -- the MOTD (motd.enable), then the startup files.  Written from that
+    -- documented behaviour.
     for _, name in ipairs(fs.list("/rom/autorun")) do
-        local p = "/rom/autorun/" .. name
-        if name > "ccnix.lua" and name:sub(1, 1) ~= "." and not fs.isDir(p) then shell.run(p) end
+        local autorun = "/rom/autorun/" .. name
+        local after = name > "ccnix.lua" and name:sub(1, 1) ~= "."
+        if after and not fs.isDir(autorun) then shell.run(autorun) end
     end
     if settings.get("motd.enable") then shell.run("/rom/programs/motd") end
-    local function findStartups(base)
-        local found
-        local node = "/" .. fs.combine(base, "startup")
-        local program = shell.resolveProgram(node)
-        if program then found = { program } end
-        if fs.isDir(node) then
-            found = found or {}
-            for _, name in ipairs(fs.list(node)) do
-                local p = "/" .. fs.combine(node, name)
-                if not fs.isDir(p) then found[#found + 1] = p end
-            end
-        end
-        return found
-    end
-    local startups
-    if settings.get("shell.allow_startup") then startups = findStartups("/") end
+
+    -- Where startup files can be, in the order they're looked at: each
+    -- disk with data on it (shell.allow_disk_startup), as
+    -- peripheral.getNames() lists their drives, then the computer's own
+    -- root (shell.allow_startup).  The first that has any is the one run,
+    -- so a disk's take the place of the computer's.
+    local places = {}
     if settings.get("shell.allow_disk_startup") then
         for _, side in ipairs(peripheral.getNames()) do
-            if disk.isPresent(side) and disk.hasData(side) then
-                local found = findStartups(disk.getMountPath(side))
-                if found then startups = found; break end
-            end
+            if disk.isPresent(side) and disk.hasData(side) then places[#places + 1] = disk.getMountPath(side) end
         end
     end
-    for _, p in ipairs(startups or {}) do shell.run(p) end
+    if settings.get("shell.allow_startup") then places[#places + 1] = "/" end
+
+    -- A place's startup files: its startup program (startup or
+    -- startup.lua), then the files in its startup/ folder, in the order
+    -- fs.list gives them.  nil if it has neither (an empty folder still
+    -- counts: it has them, none).
+    local function startupFilesIn(place)
+        local named = "/" .. fs.combine(place, "startup")
+        local program = shell.resolveProgram(named)
+        local folder = fs.isDir(named)
+        if not program and not folder then return nil end
+        local list = { program }
+        if folder then
+            for _, name in ipairs(fs.list(named)) do
+                local file = "/" .. fs.combine(named, name)
+                if not fs.isDir(file) then list[#list + 1] = file end
+            end
+        end
+        return list
+    end
+    for _, place in ipairs(places) do
+        local list = startupFilesIn(place)
+        if list then
+            for _, file in ipairs(list) do shell.run(file) end
+            break
+        end
+    end
 end
 
 if init then
