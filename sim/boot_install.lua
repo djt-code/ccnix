@@ -316,8 +316,9 @@ for k in pairs(STORE) do STORE[k] = nil end
 r = W:session({}, function()
     return W:osRun("ccnix/deploy/setup.lua", { "--init", "--autostart", "mine", "--no-reboot" })
 end)
-check("a turtle with init and --autostart mine: service mine runs `autostart --now`, at boot, not restarted when it ends",
+check("a turtle with init and --autostart mine: service mine runs `autostart --now`, at boot, not restarted when it ends; syslogd too",
     r.ok and STORE["service.mine.cmd"] == "autostart --now" and STORE["service.mine.restart"] == "no"
+        and STORE["service.syslogd.cmd"] == "syslogd" and STORE["service.syslogd.enabled"] == true
         and STORE["service.mine.enabled"] == true and STORE["ccnix.autostart"] == "mine",
     show(STORE["service.mine.cmd"]) .. " " .. show(r.out) .. show(r.errText))
 STORE["service.mine.cmd"] = "mine --resume --custom"

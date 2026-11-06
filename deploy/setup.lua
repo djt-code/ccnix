@@ -198,7 +198,9 @@ end
 -- page, if it isn't there; --example: the guestbook in its script root).
 -- from(path): a repo file's path on this computer.
 local function services(from)
-    for _, a in ipairs(apps) do
+    local list = { table.unpack(apps) }
+    if initBoot then list[#list + 1] = "init" end      -- (--init, the app unnamed: syslogd too)
+    for _, a in ipairs(list) do
         if (a == "init" or a == "telnetd" or a == "httpd") and not settings.get("service.syslogd.cmd") then
             settings.set("service.syslogd.cmd", "syslogd")
             settings.set("service.syslogd.enabled", true)
