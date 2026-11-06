@@ -81,10 +81,13 @@
 --    the way, the most valuable first when it can't carry them all, and
 --    leaves them in the top chest at the start.  Supplies stay in the last
 --    home, so `mine --resume` can carry on from there (bringing any new
---    chests and fuel from the start's top chest with it).  On that walk
---    out it takes bulk blocks from each home's bulk chest as it passes
---    (for sealing water and filling holes), and goes over each segment as
---    when resuming from an earlier home:
+--    chests and fuel from the start's top chest with it).  Resumed from an
+--    earlier home (after `mine reset --home N`), it walks out the same
+--    way.  On that walk out, in one go, it keeps the valuables it carries
+--    on board, takes what's useful from each home it passes (fuel,
+--    torches, chests, wood, the crafting table, as much as fits: the rest
+--    stays there; and bulk blocks, for sealing water and filling holes),
+--    and goes over each segment on the way:
 --    along the floor by the lit wall, putting back any torch that's
 --    missing (one that's there, a wall torch as the game calls it once
 --    hung, is left alone), and following any water it meets to where it
@@ -95,7 +98,8 @@
 --    patch (cobblestone: a hole filled before, a bridge), it goes along
 --    the other columns' floor there too and fills what's open;
 --    at each home it moves any bulk in the valuables chest down into the
---    bulk chest.
+--    bulk chest.  It stops to work only where water gets in (trips then
+--    for bulk blocks or fuel go to the home ahead).
 --  * Fuel: the tank always keeps enough to get back to the start; the
 --    turtle refuels from each home's chest, and coal it mines lands there.
 --    It only burns coal, charcoal and the like, never wood or chests.
@@ -1236,8 +1240,8 @@ function fillerFromBehind()
 end
 
 -- unload, or stop the job if a chest is missing or full.
-function unloadOrStop()
-    local ok, why = unload()
+function unloadOrStop(only)
+    local ok, why = unload(only)
     if not ok then
         stop(string.format("The %s at home %d (z=%d) is %s.",
             why == "missing" and "chests" or "chest", home.k, home.z, why))
@@ -3049,7 +3053,9 @@ saveJob("active")
 stopped = nil
 T.withTool(pickaxe, function()
     local ok, err = pcall(function()
-        unloadOrStop()
+        -- resuming behind the last home: out to it first (see below)
+        local walkOut = resume and job and job.homes > 0 and home.k < job.homes
+        unloadOrStop(walkOut and home.k > 0 and "bulk" or nil)   -- (valuables stay on board till then)
         refuel()
         if not fuelToGoOn() then stop("Not enough fuel to start: put fuel in the top chest.") end
         roomAboveChest(home)               -- a home built before chests got room above them
@@ -3071,28 +3077,48 @@ T.withTool(pickaxe, function()
         T.fuelTrip = function() trip("Low on fuel") end
         print(string.format("Mining a %dx%d tunnel, %s, homes every %d blocks.", math.abs(WIDTH),
             math.abs(HEIGHT), LENGTH == math.huge and "as long as it can" or (LENGTH .. " long"), SPACING))
-        -- resuming from the start: carry its new supplies out to the last home
-        if resume and job.homes > 0 and home.k == 0 then
-            local last = homeAt(job.homes)
-            -- the walk out and back is longer than a segment's work: fill
-            -- the tank for it from the start's chest first
-            T.refuelFrom(home.val, 2 * last.z + T.cfg.fuelMargin + FUEL_WORK)
-            if not fuelToGoOn(2 * last.z) then stop("Not enough fuel to get back out to home " .. last.k .. ".") end
-            -- on the way, each segment is gone over as when resuming from
-            -- an earlier home: water in it is followed to where it gets in
-            -- and sealed, and missing torches put back (room left for
-            -- what that digs)
+        -- resuming from the start or an earlier home: out to the last home
+        -- in one go, the valuables it carries kept on board, taking what's
+        -- useful (fuel, torches, chests, wood, the crafting table; bulk
+        -- blocks to patch with) from each home it passes, putting back
+        -- missing torches, and stopping to work only where water gets in
+        if walkOut then
+            local here, last = home, homeAt(job.homes)
+            -- the walk out (and back to the start, should it have to) is
+            -- longer than a segment's work: fill the tank for it first
+            T.refuelFrom(home.val, 2 * last.z - home.z + T.cfg.fuelMargin + FUEL_WORK)
+            if not fuelToGoOn(2 * (last.z - home.z)) then
+                stop("Not enough fuel to get back out to home " .. last.k .. "."
+                    .. (home.k > 0 and (" Put some in home " .. home.k .. ".") or ""))
+            end
+            -- on the way, each segment is gone over: water in it is
+            -- followed to where it gets in and sealed, and missing torches
+            -- put back (room left for what that digs)
             inTrip = true
             takeSupplies(ROOM + 2)
             print(string.format("Out to home %d, going over the tunnel for water getting in%s.", last.k,
                 lights and " and lights out" or ""))
-            for k = 0, last.k - 1 do
+            for k = here.k, last.k - 1 do
                 local from = homeAt(k)
-                -- bulk blocks for sealing water and filling holes on the
-                -- way, from each home's bulk chest as it passes
+                if k > here.k then
+                    -- a home it passes: bulk down into its bulk chest, and
+                    -- what's useful in it along
+                    home = from
+                    T.face(from.face)
+                    if containerOn("front") and containerOn(from.bulk) then
+                        unload("bulk")
+                        takeSupplies(ROOM + 2)
+                    end
+                end
+                -- bulk blocks for sealing water and filling holes on the way
                 restockSet(from.bulk, FILLER, fillerKeep)
                 home = homeAt(k + 1)               -- (repair ends at home)
+                -- going over it, trips for bulk blocks or fuel (water to
+                -- seal) go to this segment's far home, on the way: what
+                -- it leaves there it takes again passing it
+                inTrip = false
                 repair(from.z + 1, home.z, nil, k + 1 < last.k)
+                inTrip = true
                 bulkOutOfValuables(home)           -- (at each home anyway: bulk down where it belongs)
             end
             T.face(last.face)
@@ -3101,34 +3127,13 @@ T.withTool(pickaxe, function()
             end
             home = last
             lastHome = last.k
+            roomAboveChest(last)               -- (a home built before chests got room above them)
             leaveSupplies()
             refuel()
             restockKit()
             inTrip = false
             reportHoles()
             print(string.format("Back at home %d (z=%d).", home.k, home.z))
-        end
-        -- resuming from an earlier home: the supplies (fuel among them) are
-        -- in the last one, so fill up and take some fuel there first
-        if resume and home.k > 0 and home.k < job.homes and not T.hasFuel(fuelGoal + home.z) then
-            local here, last = home, homeAt(job.homes)
-            if not fuelToGoOn(2 * (last.z - here.z)) then
-                stop("Not enough fuel to fetch more from home " .. last.k .. ": put some in home " .. here.k .. ".")
-            end
-            print(string.format("Fetching fuel from home %d (z=%d) first.", last.k, last.z))
-            inTrip, repairing = true, true
-            alongAxis("z", last.z)
-            repairing = false
-            T.face(last.face)
-            if containerOn("front") then
-                home = last
-                refuel()
-                restockKit()
-                home = here
-            end
-            alongAxis("z", here.z)
-            T.face(here.face)
-            inTrip = false
         end
         if not resume then clearProgress() end
         local progress = resume and loadProgress()

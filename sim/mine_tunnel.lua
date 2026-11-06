@@ -635,9 +635,10 @@ Mine.files[".turtlepos"] = "0 1 20 0 flat"
 run("reset", "--to-start")
 check("--to-start went to the start", atStart())
 -- 13c. the last home (2, z=32) flooded: `mine reset --home 1` takes it
---      back a home, and `mine --resume` carries on from there, going over
---      the flooded segment again, drying it out and sealing it, on past
---      home 2 (there already: not built again) to the end
+--      back a home, and `mine --resume` carries on from there, out to home
+--      2 in one go (there already: not built again), going over the
+--      flooded segment on the way, drying it out and sealing it (a trip
+--      for bulk blocks to home 2, ahead), then on to the end
 dugTunnel()
 Mine.files["mine.job"] = "3 3 40 16 2 active"
 for x = -2, 4 do for y = -1, 4 do for z = 22, 36 do
@@ -658,8 +659,8 @@ check("there's no home 3: said so", logHas("no home 3"))
 WATERY, PLACED = true, 0
 run("--resume")
 WATERY = false
-check("resumed from home 1, and went on to home 2 without building it again",
-    logHas("On to home 2") and not logHas("Built home 2"))
+check("resumed from home 1, and went on out to home 2 without building it again",
+    logHas("Out to home 2") and logHas("Back at home 2") and not logHas("Built home 2"))
 local wetIn, wetOpen = 0, 0
 for x = -3, 5 do for y = -2, 6 do for z = 1, 41 do
     local b = get(x, y, z)
@@ -676,10 +677,32 @@ check("tunnel dug to the end", leftIn(0, 2, 0, 2, 1, 40) == 0, leftIn(0, 2, 0, 2
 check("home 2's chests still there", chestAt(-1, 0, 32) and chestAt(0, -1, 32))
 check("room above home 2's valuables chest (dug out of the flood, and dry)",
     not get(-1, 1, 32), tostring((get(-1, 1, 32) or {}).name))
-check("fetched fuel from home 2 first, and carried some: no trips home to refuel",
-    logHas("Fetching fuel from home 2") and not logHas("Low on fuel"))
+check("low on fuel, with the fuel out in home 2: out to it in one go, no trips home to refuel",
+    not logHas("Low on fuel") and not logHas("Fetching fuel"))
 check("finished", logHas("^Done"))
 check("back at the start", atStart())
+-- 13r. resumed from home 1 through dry tunnel, diamonds on board and
+--      more supplies in home 1 than it can carry (16 stacks): out to home
+--      2 in one go with what fits, the diamonds kept on board (not left in
+--      home 1), not shuttling the supplies forward trip after trip
+--      (stopped, as if by Ctrl+T, at its first dig past home 2)
+dugTunnel()
+Mine.files["mine.job"] = "3 3 48 16 2 active"                -- (dug to 40: rock from 41)
+for _, it in ipairs(stock(512, 320, 192)) do table.insert(chestAt(-1, 0, 16), it) end
+for _, z in ipairs({ 10, 29 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
+Mine.inv[5] = { name = "minecraft:diamond", count = 3 }
+P.x, P.y, P.z, P.d = 0, 0, 16, 3
+Mine.files[".turtlepos"] = "0 0 16 3 flat"
+FUEL, STOP_AT_DIG = 3000, 1
+run("--resume")
+STOP_AT_DIG = nil
+local _, h1 = contents(chestAt(-1, 0, 16))
+check("resumed from home 1: out to home 2 in one go", logHas("Out to home 2") and P.z >= 32, "at z=" .. P.z)
+check("... the diamonds kept on board, not left in home 1",
+    not h1["minecraft:diamond"] and require("mock").carried(Mine, "minecraft:diamond") == 3,
+    tostring(h1["minecraft:diamond"]) .. " in home 1, " .. require("mock").carried(Mine, "minecraft:diamond") .. " on board")
+check("... what fits taken along in one go, not shuttled trip after trip", Mine.moves < 40, Mine.moves .. " moves")
+
 -- 13d. resumed at home 1 with water standing in the tunnel behind it
 --      (flood water spreads back along the floor) and a scanner on board:
 --      scans show the water where it dug, which is no sign its heading's off
