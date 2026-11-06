@@ -161,6 +161,10 @@ section.
 
 ## Setup and boot
 
+- **`ccnix update` on many computers at once** (0.30.2): GitHub answered
+  some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
+  API's hourly limit for the server's address runs out, it says until when.
+
 - **The rest of CraftOS's startup after ccnix** (0.25.1, rewritten from the
   documented behaviour). With `ccsh.login` (or `init.boot`) set from the
   ROM, the computer's `/startup.lua` or `/startup/` folder still runs before

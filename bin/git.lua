@@ -41,6 +41,11 @@
 -- --token is only needed for private repos (Forgejo access token or
 -- GitHub PAT); it is saved in .gitlite so pull can reuse it.
 --
+-- A server error (5xx, as when many computers on one server update at
+-- once) is tried again after 2, 4 and 8 s.  GitHub allows each address
+-- so many API requests an hour without a token, and a server's computers
+-- share one; when they're used up it says until when.
+--
 -- Git is the Git project's (https://git-scm.com), and "Git" is a trademark
 -- of Software Freedom Conservancy.  This isn't Git, only a small client
 -- for ccnix that borrows its name and a few of its commands.
@@ -101,17 +106,46 @@ local function isoTime(s)
     return t
 end
 
-local function request(url, headers, binary)
-    local h, err, failed = http.get({ url = url, headers = headers, binary = binary })
-    if not h then
-        local code = failed and failed.getResponseCode and failed.getResponseCode()
-        if failed and failed.close then failed.close() end
-        die(string.format("GET %s failed: %s%s", url, tostring(err),
-            code and (" (HTTP " .. code .. ")") or ""))
+-- A response header, whatever its case (servers differ)
+local function header(headers, name)
+    for k, v in pairs(headers or {}) do
+        if k:lower() == name then return v end
     end
-    local body = h.readAll()
-    h.close()
-    return body
+end
+
+-- A server error (5xx: busy, or a gateway timing out, as when a server's
+-- worth of computers update at once) is tried again after 2, 4 and 8 s;
+-- anything else fails at once.  The REST API allows an address so many
+-- requests an hour without a token, and every computer on a server shares
+-- one: when they're used up, it says until when.
+local RETRIES = 3
+
+local function request(url, headers, binary)
+    local wait = 2
+    for try = 1, RETRIES + 1 do
+        local h, err, failed = http.get({ url = url, headers = headers, binary = binary })
+        if h then
+            local body = h.readAll()
+            h.close()
+            return body
+        end
+        local code = failed and failed.getResponseCode and failed.getResponseCode()
+        local got = failed and failed.getResponseHeaders and failed.getResponseHeaders()
+        if failed and failed.close then failed.close() end
+        local what = string.format("GET %s failed: %s%s", url, tostring(err), code and (" (HTTP " .. code .. ")") or "")
+        if not (code and code >= 500) or try > RETRIES then
+            if header(got, "x-ratelimit-remaining") == "0" then
+                local reset = tonumber(header(got, "x-ratelimit-reset"))
+                what = what .. "\nThe API's requests for this address are used up"
+                    .. (reset and (" until " .. os.date("!%H:%M UTC", reset)) or "")
+                    .. ": try again then."
+            end
+            die(what)
+        end
+        printError(what .. "; trying again in " .. wait .. " s")
+        sleep(wait)
+        wait = wait * 2
+    end
 end
 
 local function requestJSON(url, headers)

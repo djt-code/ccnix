@@ -29,9 +29,16 @@ local function sha(path, text) return (path .. ":" .. #text .. ":" .. text:sub(1
 local API = "https://api.github.com/repos/me/ccnix"
 local RAW = "https://raw.githubusercontent.com/me/ccnix/"
 local fetched
+-- failures to give first, in turn, whatever's asked: { code, headers }
+local FAILS = {}
 http = {
     get = function(req)
         local url = type(req) == "table" and req.url or req
+        local f = table.remove(FAILS, 1)
+        if f then
+            return nil, "HTTP " .. f[1], { getResponseCode = function() return f[1] end,
+                getResponseHeaders = function() return f[2] or {} end, close = function() end }
+        end
         local body
         if url == API then body = json.encode({ default_branch = "main" })
         elseif url == API .. "/branches/main" then
@@ -106,7 +113,9 @@ fs = {
     end,
 }
 shell = { resolve = function(p) return (p:gsub("^/+", "")) end, getRunningProgram = function() return "ccnix/bin/git.lua" end }
-printError = function(s) realPrint("   ! " .. s) end
+local errs, slept = {}, {}
+printError = function(s) errs[#errs + 1] = s; realPrint("   ! " .. s) end
+sleep = function(n) slept[#slept + 1] = n end
 
 local out
 local function git(...)
@@ -283,3 +292,23 @@ ok = git("clone", "https://github.com/me/ccnix", "/ccnix", "--lower", "/rom/ccni
 check("no manifest under it: a whole checkout of what's asked for", ok and inOver("bin/cat.lua") and inOver("bin/git.lua")
     and inOver("lib/new.lua") and not inOver("README.md"))
 DATES = nil
+
+realPrint("== a busy server: 5xx tried again, the rest not")
+COMMITS, HEAD, files, CAP, turtle = { c1 = REPO }, "c1", {}, 50000, nil
+FAILS, errs, slept = { { 504 }, { 502 } }, {}, {}
+ok, err = git("clone", "https://github.com/me/ccnix", "/ccnix")
+check("504 then 502: tried again after 2 s, then 4, and the clone finishes", ok and table.concat(slept, " ") == "2 4"
+    and #errs == 2 and errs[1]:find("(HTTP 504); trying again in 2 s", 1, true) ~= nil, table.concat(slept, " "))
+files, FAILS, errs, slept = {}, { { 503 }, { 503 }, { 503 }, { 503 } }, {}, {}
+ok = git("clone", "https://github.com/me/ccnix", "/ccnix")
+check("still failing after 2, 4 and 8 s: it gives up, saying why", not ok and table.concat(slept, " ") == "2 4 8"
+    and errs[#errs]:find("(HTTP 503)", 1, true) ~= nil and not errs[#errs]:find("again", 1, true), errs[#errs])
+files, FAILS, errs, slept = {}, { { 404 } }, {}, {}
+ok = git("clone", "https://github.com/me/ccnix", "/ccnix")
+check("a 404: no retry", not ok and #slept == 0 and #errs == 1, errs[1])
+files, errs, slept = {}, {}, {}
+FAILS = { { 403, { ["X-RateLimit-Remaining"] = "0", ["X-RateLimit-Reset"] = "1793192400" } } }
+ok = git("clone", "https://github.com/me/ccnix", "/ccnix")
+check("the API's limit used up (403): no retry; until when, in UTC", not ok and #slept == 0
+    and errs[1]:find("used up until " .. os.date("!%H:%M UTC", 1793192400) .. ": try again then.", 1, true) ~= nil, errs[1])
+FAILS = {}

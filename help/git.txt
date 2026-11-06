@@ -21,4 +21,6 @@ Bootstrap onto a turtle or computer: deploy/setup.lua does it all;
 
 --token is only needed for private repos (Forgejo access token or GitHub PAT); it is saved in .gitlite so pull can reuse it.
 
+A server error (5xx, as when many computers on one server update at once) is tried again after 2, 4 and 8 s.  GitHub allows each address so many API requests an hour without a token, and a server's computers share one; when they're used up it says until when.
+
 Git is the Git project's (https://git-scm.com), and "Git" is a trademark of Software Freedom Conservancy.  This isn't Git, only a small client for ccnix that borrows its name and a few of its commands.
