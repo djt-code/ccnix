@@ -984,8 +984,12 @@ recognise. Needs a pickaxe, equipped or in the inventory.
 
   A crevasse across the tunnel gets a bridge one block thick. The turtle tops
   its stack of bulk blocks up from each home's bulk chest, and goes back for
-  more if it runs out halfway across. Openings in the walls and ceiling (into
-  caves) are left open, apart from lava and water.
+  more if it runs out halfway across. A home's bulk chest only holds what
+  the segment after it dug, so a cavern there leaves it little: then the
+  turtle takes a load from the homes behind it, the nearest first. Any
+  solid bulk that doesn't fall does (stone, cobblestone, deepslate,
+  dripstone blocks, sandstone, terracotta...). Openings in the walls and
+  ceiling (into caves) are left open, apart from lava and water.
 - **Lighting:** given torches, the turtle lights the tunnel so mobs can't spawn
   on its floor (since 1.18 they need block light 0), using as few torches as
   that takes:

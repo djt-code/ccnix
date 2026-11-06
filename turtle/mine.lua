@@ -130,7 +130,9 @@
 --    floor ore was), a fluid, or something not to stand on (grass, snow,
 --    cobwebs, dripstone) is filled with a bulk block; a crevasse across the
 --    tunnel gets a bridge.  The turtle tops its stack of bulk up from each
---    home's bulk chest, and fetches more if it runs out mid-crevasse.
+--    home's bulk chest, and fetches more if it runs out mid-crevasse:
+--    from the homes behind, when a cavern has left its own home's chest
+--    without any.
 --  * Lighting: with torches, it keeps every floor block of the tunnel at
 --    block light 2 or more (mobs spawn at 0, since 1.18), using as few as
 --    that takes: one in a niche dug into the wall at floor level every
@@ -272,7 +274,8 @@ end
 FILLER = {}
 for _, n in ipairs({ "cobblestone", "cobbled_deepslate", "netherrack", "dirt", "andesite",
         "diorite", "granite", "tuff", "calcite", "blackstone", "basalt", "end_stone",
-        "stone", "deepslate" }) do
+        "stone", "deepslate", "dripstone_block", "smooth_basalt", "sandstone",
+        "red_sandstone", "terracotta", "clay", "moss_block", "coarse_dirt", "rooted_dirt" }) do
     FILLER["minecraft:" .. n] = true
 end
 
@@ -398,7 +401,7 @@ end
 function torchAt(z)
     local first = torchAlong + 1
     local function due(n) return n >= 1 and (n - first) % torchEvery == 0 end
-    if due(z) and z % SPACING ~= 0 then return true end
+    if due(z) and (z % SPACING ~= 0 or z == LENGTH) then return true end   -- (no home at the very end)
     if due(z - 1) and (z - 1) % SPACING == 0 then return true end
     if z == LENGTH then
         local last = z >= first and z - (z - first) % torchEvery or nil
@@ -567,6 +570,8 @@ opened = {}          -- key(p) = true: known to be air (dug or visited)
 trail = {}           -- directions moved out of the tunnel into a vein
 inTrip = false
 fuelGoal = 0
+filled = {}          -- blocks it has put back where it dug (floors, seals, chests, torches)
+fillerDry = false    -- no filler on board, at its home or behind: don't go looking again till it unloads
 fillerKeep = FILLER_KEEP  -- FILLER_KEEP_WET once water has used it up
 stats = { veins = 0, ore = 0, sealed = 0, filled = 0, torches = 0, relit = 0, homes = 0, fetched = 0, wet = 0,
           wood = 0 }
@@ -723,7 +728,16 @@ function putFiller(d)
     if not T.selectItem(function(n) return FILLER[n] end) then return false end
     local ok = placeDir(d)
     turtle.select(1)
+    if ok then filledIn(d) end
     return ok
+end
+
+-- A block put in direction d: where it was dug isn't open any more (a
+-- scan that shows a block there isn't turned, see scanNow).
+function filledIn(d)
+    local p = neighbour(d)
+    opened[key(p)] = nil
+    filled[key(p)] = true
 end
 
 -- Seal lava or water in direction d with a bulk block.
@@ -903,7 +917,9 @@ function fill(d)
     local ok, data = look(d)
     if ok and not leaky(data) then return true end
     if ok and not FLUID[data.name] then room(); digDir(d) end
-    if not T.selectItem(function(n) return FILLER[n] end) then trip("Out of blocks to fill the floor") end
+    if not fillerDry and not T.selectItem(function(n) return FILLER[n] end) then
+        trip("Out of blocks to fill the floor")
+    end
     if putFiller(d) then
         stats.filled = stats.filled + 1
         return true
@@ -1057,22 +1073,24 @@ function chestCounts(side) return T.containerCounts(side) or {} end
 -- filler from the bulk chest (floors and seals), torches from the
 -- valuables chest.
 function restockKit()
-    for _, want in ipairs({ { side = home.bulk, set = FILLER, keep = fillerKeep },
-                            { side = home.val, set = TORCHES, keep = TORCH_KEEP },
-                            { side = home.val, set = T.fuel, keep = FUEL_KEEP } }) do
-        local test = function(n) return want.set[n] end
-        local counts = chestCounts(want.side)
-        for _, name in ipairs(T.sortedKeys(counts)) do
-            local n = counts[name]
-            local have = T.countItem(test)
-            if have >= want.keep then break end
-            if want.set[name] then
-                T.restockFrom(want.side, name, T.countItem(name) + math.min(n, want.keep - have),
-                    { quiet = true, room = ROOM })
-            end
+    restockSet(home.bulk, FILLER, fillerKeep)
+    restockSet(home.val, TORCHES, TORCH_KEEP)
+    restockSet(home.val, T.fuel, FUEL_KEEP)
+    updateWoodNeed(true)
+end
+
+-- Up to `keep` of the items in `set` on board, from the chest on `side`.
+function restockSet(side, set, keep)
+    local test = function(n) return set[n] end
+    local counts = chestCounts(side)
+    for _, name in ipairs(T.sortedKeys(counts)) do
+        local n = counts[name]
+        local have = T.countItem(test)
+        if have >= keep then break end
+        if set[name] then
+            T.restockFrom(side, name, T.countItem(name) + math.min(n, keep - have), { quiet = true, room = ROOM })
         end
     end
-    updateWoodNeed(true)
 end
 
 -- Put what the turtle carries in the home's chests: bulk in the bulk
@@ -1082,6 +1100,7 @@ end
 -- everything fit.
 function unload(only)
     if not (containerOn(home.val) and containerOn(home.bulk)) then return false, "missing" end
+    fillerDry = false                    -- (what it brings may be filler, or the chest may have some now)
     local fits, kept, torches, fuel = true, 0, 0, 0
     for s = 1, 16 do
         local it = turtle.getItemDetail(s, true)
@@ -1111,6 +1130,30 @@ function unload(only)
     if home.val ~= "front" or home.face == T.dir then T.compactContainer(home.val) end
     if only == nil then restockKit() end
     return fits, "full"
+end
+
+-- Out of filler at a home whose bulk chest has none: a home's bulk chest
+-- holds what the segment after it dug, so a cavern there leaves little.
+-- Take a load from the homes behind, the nearest first, and come back.
+-- Found none anywhere: fillerDry, so filling the floor doesn't send it
+-- looking again for every hole (till it next unloads).
+function fillerFromBehind()
+    local function isFiller(n) return FILLER[n] end
+    if T.countItem(isFiller) > 0 then return end
+    local working = home
+    for k = working.k - 1, 0, -1 do
+        if not fuelToGoOn(2 * (working.z - homeAt(k).z)) then break end
+        home = homeAt(k)
+        if not tunnelHome() then break end
+        restockSet(home.bulk, FILLER, fillerKeep)
+        if T.countItem(isFiller) > 0 then
+            print(string.format("Took %d bulk blocks from home %d.", T.countItem(isFiller), k))
+            break
+        end
+    end
+    home = working
+    if not tunnelHome() then stop("Couldn't get back to home " .. home.k .. " from " .. T.posString()) end
+    fillerDry = T.countItem(isFiller) == 0
 end
 
 -- unload, or stop the job if a chest is missing or full.
@@ -1144,6 +1187,7 @@ function trip(why)
     local spot = here()
     if not tunnelHome() then stop("Couldn't get back to home " .. home.k .. " from " .. T.posString()) end
     unloadOrStop()
+    fillerFromBehind()
     refuel()
     if not fuelToGoOn() then stop("Not enough fuel left to go on and still get back.") end
     tunnelTo(spot)
@@ -1242,7 +1286,7 @@ function placeChest(d)
         if not T.selectItem(function(n) return CHEST_ITEMS[n] end) then return false end
         placeDir(d)
         turtle.select(1)
-        if containerOn(sideOf(d)) then return true end
+        if containerOn(sideOf(d)) then filledIn(d); return true end
     end
     return false
 end
@@ -1644,6 +1688,7 @@ function placeTorch(d)
     torchBy[key({ x = niche.x + v[1], y = niche.y, z = niche.z + v[3] })] = t
     torchBy[key({ x = niche.x, y = niche.y - 1, z = niche.z })] = t
     broken[t] = nil
+    filledIn(d)
     return true
 end
 
@@ -1884,6 +1929,7 @@ function toTunnel(f, e)
 end
 
 function knownAir(p)
+    if filled[key(p)] then return false end
     return opened[key(p)] or (inBox(p) and p.z <= home.z)
 end
 

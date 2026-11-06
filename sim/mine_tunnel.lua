@@ -13,7 +13,9 @@
 -- on); --no-lights; a Geo Scanner (lined up with the tunnel from the scan,
 -- fetching ore further out, far fewer turns, coal first when low on
 -- fuel); a crevasse across the tunnel, which it bridges so a player can
--- walk the floor; a tunnel with no length that runs out of chests, then
+-- walk the floor; a cavern filling the last segment, bridged with filler
+-- from the homes behind (and its scans still trusted); the far end of a
+-- tunnel whose length is a multiple of the spacing lit; a tunnel with no length that runs out of chests, then
 -- `mine --resume` once more chests are added (twice: the second time a
 -- home holds more valuables than fit, and the most valuable come back),
 -- `mine haul` bringing the rest back, `mine reset` to the last home and
@@ -244,6 +246,41 @@ run("3", "3", "36", "--spacing", "16")
 checkFloor(0, 2, -1, 1, 36)
 check("back at the start", atStart())
 check("never moved on an empty tank", DRY == 0, "tried " .. DRY)
+
+-- 6c. as in game: a cavern takes up the whole last segment (z=33..48, 20
+--     deep), with a Geo Scanner on board.  The rock its own segment gives
+--     home 2's bulk chest is dripstone, so bridging the 5-wide floor
+--     takes more filler than it carries and that chest has: it fetches
+--     more from the homes behind; dripstone blocks are filler too; the
+--     blocks it puts where it dug (floor fillings) don't make the scan
+--     look turned; and the tunnel's last block, at a multiple of the
+--     spacing with no home there, still gets its torch
+do
+    local st = stock(6, 64, 16)
+    st[#st + 1] = { name = SCANNER, count = 1 }
+    setup(st)
+end
+for x = -6, 10 do for y = -20, 10 do for z = 33, 48 do set(x, y, z, nil) end end end
+for x = -6, 10 do for z = 33, 48 do set(x, 11, z, { name = "minecraft:dripstone_block" }) end end
+for x = 0, 4 do set(x, -1, 34, { name = "minecraft:pointed_dripstone" }) end   -- stalagmites where it bridges
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, SCANS = 3000, 0, 0
+run("5", "3", "48", "--spacing", "16")
+checkFloor(0, 4, -1, 1, 48)
+check("never short of filler: took more from the homes behind", not logHas("no bulk blocks left"))
+check("the scan wasn't taken for turned by its own floor fillings", not logHas("heading looks off"))
+checkLight(0, 4, -1, 1, 48)
+check("back at the start", atStart())
+
+-- 6d. 3x3, 48 long, homes every 16 (as in game): the last torch is due
+--     at z=48, a multiple of the spacing, but no home is built at the
+--     tunnel's end, so it goes there; the far end isn't left dark
+setup(stock(6, 64, 16))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, DRY = 2000, 0
+run("3", "3", "48", "--spacing", "16")
+checkLight(0, 2, -1, 1, 48)
 
 -- 7. stopped inside a vein (a server restart): `mine reset` digs back to
 --    the tunnel and goes home
