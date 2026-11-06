@@ -266,7 +266,7 @@ A size given on the command line is saved: after `farm learn 9 12` or
 
 A turtle restarts whenever its chunk loads again (a player comes back, the
 server restarts), and a job then stops where it was. With
-`ccnix.autostart` set (`setup ... --autostart mine`, `install
+`ccnix.autostart` set (`setup ... --autostart mine`, `ccnix setup
 --autostart mine`, or `set ccnix.autostart mine`), startup runs
 `turtle/autostart`, which waits 5 seconds (any key cancels, for the
 prompt) and then:
@@ -283,7 +283,7 @@ prompt) and then:
 - `autocompost`: `autocompost`.
 
 On a computer the one choice is `router` (`setup router --autostart
-router`, `install --autostart router`): the network comes up with
+router`, `ccnix setup --autostart router`): the network comes up with
 forwarding on, then the router's status screen (`q` leaves it; routing
 goes on).
 

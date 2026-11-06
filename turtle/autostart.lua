@@ -1,11 +1,11 @@
 -- autostart.lua -- at boot, carry on with the turtle's job
 --
--- Usage:  autostart          what startup runs (deploy/install puts it there)
+-- Usage:  autostart          what startup runs (setup puts it there)
 --         autostart --now    the same, without the 5 second wait
 --
 -- Runs the program named by the setting ccnix.autostart (mine, farm,
 -- mow or autocompost; `set ccnix.autostart farm`, or
--- `deploy/install --autostart farm`).  A turtle reboots whenever its chunk
+-- `ccnix setup --autostart farm`).  A turtle reboots whenever its chunk
 -- loads again, so this is what keeps a job going.  It waits 5 seconds
 -- first: any key cancels, for the prompt.
 --

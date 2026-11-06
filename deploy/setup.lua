@@ -360,7 +360,7 @@ if fs.exists("/rom/ccnix/.manifest") then
     end
     print("ccnix is in this server's ROM: nothing to clone.")
     if fs.exists("/cc-turtles/.gitlite") then
-        -- its startup lines: install's (and ip's, the old Craftix's) go;
+        -- its startup lines: the ones setup wrote (and ip's, the old Craftix's) go;
         -- one that runs a program of its own, fileserver mount say, runs it
         -- by name now (ccnix puts it on the path), but not ip up (ccnix's
         -- boot starts the network)
