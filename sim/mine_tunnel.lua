@@ -812,6 +812,34 @@ check("... without going over the segment before again and again (a dry walk out
     Mine.moves < 200, Mine.moves .. " moves")
 check("finished", logHas("^Done"))
 
+-- 13o. the walk out, its torch at z=29 gone, with water getting in through
+--      the far wall beside that spot at two places (x=3, z=28 and 31),
+--      so sealing one leaves water flowing from the other: standing there
+--      the turtle keeps the water out of its own block, but it would flow
+--      in once it moves on, and into the niche: no torch is put there
+--      while water's beside it (none washed away), and once the water's
+--      seen to, the torch goes back
+dugTunnel()
+Mine.files["mine.job"] = "3 3 32 16 2 active"
+for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
+table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
+table.insert(chestAt(0, -1, 16), { name = "minecraft:cobblestone", count = 64 })
+set(-1, 0, 10, { name = "minecraft:wall_torch", on = "-2,0,10" })
+set(3, 0, 28, { name = "minecraft:water", level = 0 }); set(3, 0, 31, { name = "minecraft:water", level = 0 })
+WATERY, WASHED = true, 0
+flow(3, 0, 28); flow(3, 0, 31)
+settleWater()
+startAt()
+Mine.files[".turtlepos"] = "0 0 0 0 flat"
+FUEL = 3000
+run("--resume")
+WATERY = false
+check("water beside a torch spot: no torch put where the water washed it away", (WASHED or 0) == 0,
+    tostring(WASHED) .. " washed")
+check("... and the torch there once the water was seen to", Mine.isTorch(get(-1, 0, 29)),
+    tostring((get(-1, 0, 29) or {}).name))
+check("finished", logHas("^Done"))
+
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
 --      floor level near z=24, its water spread along the floor: `mine
 --      reset --home 1` and `mine --resume` go over the segment, follow

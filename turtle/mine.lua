@@ -158,7 +158,10 @@
 --    it to stand the torch on.  A scan's fetch or a vein can still go
 --    through a niche, or dig the block a torch rests on: it notes that and
 --    puts the torch back afterwards (after the fetch, and at the end of
---    the segment).  Torches are
+--    the segment).  With water beside it (above, along or across the
+--    tunnel), it leaves the torch out, since the water would flow in and
+--    wash it away once the turtle moved on, and puts it in at the end of
+--    the segment, or the next, once the water's seen to.  Torches are
 --    supplies: they move forward with the homes, and it keeps up to 64 on
 --    board.  Lighting is optional: with no torches it just keeps mining,
 --    and --no-lights turns it off (torches are then just valuables).
@@ -1797,11 +1800,29 @@ function lightHere()
         eachAround(OPP[d], cutOff)
         retreat(d)
     end
+    if wetBeside(d) then
+        print("Water next to " .. T.posString() .. "; no torch there for now.")
+        unlit[key(T.pos)] = here()
+        return
+    end
     if placeTorch(d) then
         stats.torches = stats.torches + 1
     else
         print("Couldn't place a torch at " .. T.posString() .. "; carrying on.")
     end
+end
+
+-- Water beside the turtle's block (above it, or along or across the
+-- tunnel; d is the niche): standing there it keeps the water out of its
+-- own block, but once it moves on the water flows in, and on into the
+-- niche, washing the torch away.  (Fewest turns first: up, the two
+-- along the tunnel, then across.)
+function wetBeside(d)
+    for _, e in ipairs({ "up", (d + 1) % 4, (d + 3) % 4, (d + 2) % 4 }) do
+        local ok, data = look(e)
+        if ok and (FLUID[data.name] or waterIn(data)) then return true end
+    end
+    return false
 end
 
 -- Put back the torches digging has knocked off or dug up since they were
@@ -1822,7 +1843,9 @@ function relight()
         local ok, data = look(t.d)
         if T.at(t.at) and not (ok and TORCH_BLOCKS[data.name]) then
             if ok and not FLUID[data.name] and not protected(data.name) then digDir(t.d) end
-            if placeTorch(t.d) then
+            if wetBeside(t.d) then
+                unlit[key(T.pos)] = here()     -- (back once the water's seen to)
+            elseif placeTorch(t.d) then
                 stats.relit = stats.relit + 1
             else
                 print("Couldn't put the torch back at " .. T.posString() .. "; carrying on.")
@@ -1830,7 +1853,9 @@ function relight()
         end
     end
     -- and the torches left out while water flowed there, now it's sealed
-    -- off (once more each: still flowing, it's left for next time)
+    -- off: tried here, and once more at the next relight (the water may
+    -- come from the next segment, seen to by then); still wet after that,
+    -- it's left for the next run rather than walked back to every time
     local spots = {}
     for _, p in pairs(unlit) do spots[#spots + 1] = p end
     table.sort(spots, function(a, b) return a.z ~= b.z and a.z < b.z or key(a) < key(b) end)
@@ -1838,6 +1863,10 @@ function relight()
     for _, p in ipairs(spots) do
         alongAxis("y", p.y); alongAxis("x", p.x); alongAxis("z", p.z)
         if T.at(p) then lightHere() end
+        local again = unlit[key(p)]
+        if again then
+            if (p.tries or 0) >= 1 then unlit[key(p)] = nil else again.tries = (p.tries or 0) + 1 end
+        end
     end
 end
 
