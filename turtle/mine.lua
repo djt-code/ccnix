@@ -86,7 +86,9 @@
 --    along the floor by the lit wall, putting back any torch that's
 --    missing (one that's there, a wall torch as the game calls it once
 --    hung, is left alone), and following any water it meets to where it
---    gets in and sealing that (then lighting what the water kept dark);
+--    gets in and sealing that (then lighting what the water kept dark;
+--    water coming from the segment after is left to that one, gone over
+--    next, rather than chased, or the segment walked again for it);
 --    at each home it moves any bulk in the valuables chest down into the
 --    bulk chest.
 --  * Fuel: the tank always keeps enough to get back to the start; the
@@ -673,7 +675,7 @@ function go(d)
         -- it, and follow it from there.  Where it's digging through wet
         -- ground, it dries each block (sources next to it are filled as
         -- it goes).
-        local wade = repairing or inTrip
+        local wade = repairing or inTrip or surveying
         local ok, data = look(d)
         if ok and inside and (isSource(data) or (FLUID[data.name] and not wade)) then
             dry(d)
@@ -832,7 +834,14 @@ end
 -- water beside it), as far as water spreads and falls, to where it comes
 -- in from outside, seal that, and come back.  A source in the tunnel is left
 -- for drying out when it's reached.  True if it sealed something.
+-- Going over part of the tunnel (repair), it follows water no further
+-- than that part's far end: water from the next part (dug) is that
+-- part's to see to, when it's gone over in turn (fromOutside notes it
+-- was met); water from past the end of what's dug is sealed for good,
+-- there.  (Behind it, gone over already, is followed as ever.)
 unfed = {}           -- key: true, flowing water found here with nothing beside it feeding it; "traced"
+repairRange = nil    -- while going over z1..z2: { z1, z2, aheadDug }
+fromOutside = false  -- water met there came from past its ends
 function stopFlow(level)
     local path, sealed = {}, false
     unfed[key(T.pos)] = "traced"
@@ -854,8 +863,12 @@ function stopFlow(level)
             local e = table.remove(todo, best)
             local m = neighbour(e)
             local ok, data = look(e)
+            local r = repairRange
+            local past = r and m.z > r.z2
             if ok and (FLUID[data.name] or waterIn(data)) then
-                if not inBox(m) then
+                if past and r.aheadDug then
+                    fromOutside = true
+                elseif not inBox(m) or past then
                     if seal(e) then sealed = true end
                 elseif isSource(data) then
                     -- going over tunnel dug before, it's water getting in: fill it
@@ -2228,10 +2241,12 @@ end
 -- tunnel lit from both) instead of that group's middle, and every torch
 -- missing there is put back (or put in, where there never was one).
 -- Nothing else is looked at again.  `done` picks the lanes dug before
--- (nil: all).  It ends at `home`.
-function repair(z1, z2, done)
+-- (nil: all); `aheadDug`: the tunnel past z2 is dug, and gone over after
+-- (water from there is left to that).  It ends at `home`.
+function repair(z1, z2, done, aheadDug)
     local lanes = planLanes()
     repairing = true
+    repairRange, fromOutside = { z1 = z1, z2 = z2, aheadDug = aheadDug }, false
     local function walk(pick)
         -- (starting from the end it's nearer)
         local n = math.abs(T.pos.z - z2) < math.abs(T.pos.z - z1) and 1 or 0
@@ -2267,27 +2282,33 @@ function repair(z1, z2, done)
         end
     end
     local function first(lane) return lane.y == Y0 and middle[lane.x] end
-    local before = stats.wet
+    local before, sealed = stats.wet, stats.sealed
     walk(first)
-    for _ = 1, 2 do                        -- found water: the floor again, till it's dry
-        if stats.wet == before then break end
-        before = stats.wet
+    -- found water: the floor again (the other way), till it's dry; not
+    -- when it came from past the far end and nothing here was sealed:
+    -- going over it again would find the same
+    for _ = 1, 2 do
+        if stats.wet == before or (fromOutside and stats.sealed == sealed) then break end
+        before, sealed = stats.wet, stats.sealed
         walk(first)
     end
     -- still wet: it couldn't follow the water up from the floor (a tunnel
-    -- full of it, its way in high up): the other lanes, which pass it
-    if stats.wet > before then walk(function(lane) return not first(lane) end) end
+    -- full of it, its way in high up): the other lanes, which pass it;
+    -- not for water from past the ends, which they can't reach either
+    if stats.wet > before and not fromOutside then
+        walk(function(lane) return not first(lane) end)
+    end
     unplug()
-    repairing = false
+    repairing, repairRange = false, nil
     relight()                              -- torches left out while water flowed
     tunnelHome()
 end
 
 -- Go over a segment dug already (resumed from an earlier home than the
 -- last), fixing where water gets in.
-function repairSegment(z1, z2)
+function repairSegment(z1, z2, aheadDug)
     print(string.format("Going over z=%d..%d (dug already) for water getting in.", z1, z2))
-    repair(z1, z2)
+    repair(z1, z2, nil, aheadDug)
 end
 
 -- Mine the segment from z1 to z2, starting and ending at the home.
@@ -2393,7 +2414,9 @@ end
 -- beside it; a wall block no scan covered (one that failed) is looked at
 -- by hand; ore they found is fetched after (fetchTargets).  The floor and
 -- ceiling were looked at while digging (from the bottom and top lanes).
+surveying = false    -- in survey: through the dug segment, wading water
 function survey(z1, z2)
+    surveying = true
     local R, last = SCAN_RADIUS, z2 == LENGTH
     local zEnd = last and z2 + 1 or z2
     local xs, ys = scanSpots(X0 - 1, X1 + 1, X0, X1, true), scanSpots(Y0 - 1, Y1 + 1, Y0, Y1, true)
@@ -2463,6 +2486,7 @@ function survey(z1, z2)
         end
         back = not back
     end
+    surveying = false
 end
 
 -- Low on fuel while digging: scan here (if no scan this segment reached
@@ -2887,7 +2911,7 @@ T.withTool(pickaxe, function()
             for k = 0, last.k - 1 do
                 local from = homeAt(k)
                 home = homeAt(k + 1)               -- (repair ends at home)
-                repair(from.z + 1, home.z)
+                repair(from.z + 1, home.z, nil, k + 1 < last.k)
                 bulkOutOfValuables(home)           -- (at each home anyway: bulk down where it belongs)
             end
             T.face(last.face)
@@ -2937,7 +2961,7 @@ T.withTool(pickaxe, function()
         while home.z < LENGTH do
             segEnd = math.min(home.z + SPACING, LENGTH)
             if home.k < lastHome then
-                repairSegment(home.z + 1, segEnd)
+                repairSegment(home.z + 1, segEnd, home.k + 1 < lastHome)
             else
                 mineSegment(home.z + 1, segEnd, progress)
                 progress = nil

@@ -17,7 +17,8 @@
 -- as few spots as cover the walls, floor and ceiling, all round a 6x6 and
 -- two across a 24-wide tunnel); a cavern filling the last segment, bridged with filler
 -- from the homes behind (and its scans still trusted); the far end of a
--- tunnel whose length is a multiple of the spacing lit; a tunnel with no length that runs out of chests, then
+-- tunnel whose length is a multiple of the spacing lit; the walk out past water standing in the next
+-- segment (left to that one's going-over, no walking the one before again); a tunnel with no length that runs out of chests, then
 -- `mine --resume` once more chests are added (twice: the second time a
 -- home holds more valuables than fit, and the most valuable come back),
 -- `mine haul` bringing the rest back, `mine reset` to the last home and
@@ -778,6 +779,38 @@ local _, h1bulk = contents(chestAt(0, -1, 16))
 check("home 1's cobblestone moved down into its bulk chest on the way out",
     not h1val["minecraft:cobblestone"] and (h1bulk["minecraft:cobblestone"] or 0) >= 20,
     (h1val["minecraft:cobblestone"] or 0) .. " in the valuables chest, " .. (h1bulk["minecraft:cobblestone"] or 0) .. " below")
+
+-- 13n. the walk out with a pool of water sources standing in home 2's
+--      segment, just past home 1 (z=17..19), its water flowing back into
+--      the segment before: going over that one it doesn't chase the water
+--      into the next or walk its own again and again (the next segment's
+--      going-over sees to it, straight after), and the tunnel ends up dry
+dugTunnel()
+Mine.files["mine.job"] = "3 3 32 16 2 active"
+for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
+table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
+table.insert(chestAt(0, -1, 16), { name = "minecraft:cobblestone", count = 64 })
+for _, z in ipairs({ 10, 29 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
+for x = 0, 2 do for z = 17, 19 do set(x, 0, z, { name = "minecraft:water", level = 0 }) end end
+WATERY = true
+flow(1, 0, 18)
+settleWater()
+local function wetIn()
+    local n = 0
+    for x = 0, 2 do for y = 0, 2 do for z = 1, 40 do if isWater(get(x, y, z)) then n = n + 1 end end end end
+    return n
+end
+local poolWet = wetIn()
+startAt()
+Mine.files[".turtlepos"] = "0 0 0 0 flat"
+FUEL = 3000
+run("--resume")
+WATERY = false
+check("water from the next segment: the tunnel dry after the walk out", poolWet > 20 and wetIn() == 0,
+    poolWet .. " wet before, " .. wetIn() .. " after")
+check("... without going over the segment before again and again (a dry walk out and back: 64 moves)",
+    Mine.moves < 200, Mine.moves .. " moves")
+check("finished", logHas("^Done"))
 
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
 --      floor level near z=24, its water spread along the floor: `mine
