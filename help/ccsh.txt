@@ -12,13 +12,15 @@ ccsh runs inside the stock CraftOS shell and has it find and run the programs (t
   a | b | c
       pipes.  Each command runs to its end, then the next reads what it wrote: nothing streams, so `a | head` still runs all of a.
   < f   > f   >> f
-      redirects; also 2> f, 2>> f, 2>&1, >&2, n>&-. /dev/null works for reading and writing.
+      redirects; also 2> f, 2>> f, 2>&1, >&2, n>&-, and &> f (output and errors to f), &>> f. /dev/null works for reading and writing.
   a ; b   a && b   a || b   ! a
       and a newline is a ;
   'single' "double" \x
       quoting; # starts a comment.  A line ending in \, |, &&, || or inside quotes goes on to the next.
-  X=value $X ${X} ${X:-default} $? $# $1..$9 $@ "$@" $* $$ $! $0
-      variables.  $PATH is the shell's path (setting it changes the path), $PWD its directory and $HOSTNAME the computer's label (its ID if it has none).  $! is the last & job's process ID.
+  X=value $X ${X} $? $#
+      $1..$9 ${10} $@ "$@" $* $$ $PPID $! $0 variables.  $PATH is the shell's path (setting it changes the path), $PWD its directory and $HOSTNAME the computer's label (its ID if it has none).  $! is the last & job's process ID. $$ is the shell's (under init; else the computer's ID), $PPID its parent's.
+  ${X:-word}
+      word if X is unset or empty; ${X:=word} that, and X set to it; ${X:+word} word if X is set and not empty, else nothing; ${X:?word} if X is unset or empty, an error (word the message) and a script ends.  Without the colon (${X-word}), only unset counts.  The word is expanded: ${X:-$HOME}.
   export X  X=1 cmd
       the environment.  Programs read it with os.getenv("X") (and change their own copy with os.setenv(name, value), list it with os.environ()): the exported variables (PS1 is one), PATH, PWD and HOSTNAME, and for one command its own X=1 words.  A ccsh run from ccsh starts with them as exported variables; `env` shows them.
   PS1
@@ -54,7 +56,7 @@ ccsh runs inside the stock CraftOS shell and has it find and run the programs (t
   kill [-9] %n|pid...
       end a job as Ctrl+T would; -9 drops it at once, -STOP stops it, -CONT carries it on.  Under init, a pid that isn't a job's is a process's (see ps), and -pid a process group's.
   builtins
-      also exit [n], :, true, false, read [-r] name..., shift [n], unset name..., . file, export [-n] name[=value]... and export -p, [ expression ] (test, with a last ])
+      also exit [n], :, true, false, read [-r] name..., shift [n], unset [-v] name... (variables), unset -f name... (functions), . file, export [-n] name[=value]... and export -p, [ expression ] (test, with a last ])
 
 Not yet: here-documents, $(( arithmetic )) (expr does sums), ~.
 

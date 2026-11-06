@@ -152,6 +152,50 @@ check("fi with no if", synErr("fi", "unexpected fi"))
 check("an open quote", synErr("echo 'x", "unterminated '"))
 check("> with no file", synErr("echo >", "missing file name after >"))
 check("$(( )) is refused", synErr("echo $((1+1))", "$(( )) arithmetic isn't supported"))
+check("${X:} is a bad substitution", synErr("echo ${X:}", "bad substitution ${X:}"))
+check("${#X} too (not yet)", synErr("echo ${#X}", "bad substitution ${#X}"))
+check("an unclosed ${X:-word", synErr("echo ${X:-abc", "unterminated ${"))
+
+-- 8b. ${X:-word} and the rest: the word expanded; &> and &>>; unset -f; $$
+r = sh([[D=/d; args ${U:-$D} "${U:-$D x}" ${U:-a b} "${U:-'q'}" ${U:-'a b'} ${U:-"$D y"} ${U:-$(echo sub)}]])
+check("${X:-word}: the word is expanded ($D, $(...)), quoted or not as a word is, split when unquoted",
+    r.out == "[/d][/d x][a][b]['q'][a b][/d y][sub]\n", show(r.out))
+r = sh([[D=/d; E=; args "${E:-d}" "${E-d}" "${U-d}" "${E:+p}" "${E+p}" "${U+p}" "${D:+p $D}" ${U:+x}]])
+check("with a colon, empty counts as unset; without, only unset; :+ and +",
+    r.out == "[d][][d][][p][][p /d]\n", show(r.out))
+r = sh([[args "${N:=new ${U:-n}}"; echo "$N"; E=; args ${E=kept} "[$E]" ${E:=now}; echo "$E"; args ${U:-${V:-in}} ${U:-{a}}]])
+check(":= sets the variable (= only an unset one); nested ${ }, a { } in the word",
+    r.out == "[new n]\nnew n\n[[]][now]\nnow\n[in][{a}]\n", show(r.out))
+r = sh([[D=/d; X=$(echo ${U:?}); echo "${D:?not this}" "s=$?"; echo ${U:?gone $D}; echo after]])
+check(":? : a word as the message, else 'parameter null or not set'; in $(...) only that ends; a script ends, status 1",
+    r.out == "/d s=1\n" and r.status == 1 and r.err[1] == "ccsh: U: parameter null or not set"
+        and r.err[2] == "ccsh: U: gone /d" and #r.err == 2, show(r.out) .. " " .. r.status .. " " .. show(r.errText))
+r = sh([[(echo ${U?x}); echo "s=$?"; for i in 1; do echo ${1:=x}; done; echo no]])
+check("? without a colon, in ( ); a positional parameter can't be assigned with :=",
+    r.out == "s=1\n" and r.status == 1 and r.err[1] == "ccsh: U: x" and r.err[2] == "ccsh: $1: can't be assigned this way",
+    show(r.out) .. " " .. show(r.errText))
+r = W:run("ccsh", { stdin = "echo ${U:?no}; echo skipped\nif true; then echo ${U:?}; fi; echo skipped\necho \"st $?\"\n" })
+check("at the prompt, a failed :? skips the rest of the line only; $? 1",
+    r.out:find("/$ st 1\n", 1, true) ~= nil and not r.out:find("skipped", 1, true)
+        and r.err[1] == "ccsh: U: no", show(r.out) .. " " .. show(r.errText))
+r = W:run("ccsh", "-c", [[args ${10} $10 ${2}x "${11:-none}"]], "name", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j")
+check("${10}: positional parameters past 9 (and $10 is ${1}0)", r.out == "[j][a0][bx][none]\n", show(r.out))
+r = sh([[args ${U:-*.txt} "${U:-*.txt}"]], { cwd = "g" })
+check("an unquoted default globs, a quoted one doesn't", r.out == "[a1.txt][a2.txt][b.txt][*.txt]\n", show(r.out))
+W.shell.setDir("")
+r = sh([[cat nope &> both.txt; echo x &>> both.txt; perr &>p.txt; echo "[$!]"; echo gone &> /dev/null; cat both.txt p.txt]])
+check("&> f: output and errors to f, &>> appends (not a background job and a > f)",
+    r.out == "[]\ncat: nope: No such file or directory\nx\nout\nbad\n" and #r.err == 0, show(r.out) .. " " .. show(r.errText))
+r = sh([[f() { echo f; }; f; unset f; f; unset -f f; f; echo $?; V=1; unset -v V; echo "[$V]"; unset -x V; echo $?
+unset 1x; echo $?; g() { :; }; unset -f -- g; g]])
+check("unset -f a function (not its variable), -v and plain a variable; bad options and names",
+    r.out == "f\nf\n127\n[]\n2\n1\n" and r.err[1] == "ccsh: f: not found"
+        and r.err[2] == "ccsh: unset: -x: bad option (unset [-f | -v] name...)"
+        and r.err[3] == "ccsh: unset: 1x: not a valid name" and r.err[4] == "ccsh: g: not found",
+    show(r.out) .. " " .. show(r.errText))
+r = sh([[echo $$ "[$PPID]"; (echo $$); PPID=5; echo "[$PPID]"]])
+check("without init: $$ is the computer's ID (in a subshell too), PPID unset and can't be set",
+    r.out == "1 []\n1\n[]\n", show(r.out))
 
 -- 9. a command that waits for events: its io only while it runs
 W.yieldEvents = true

@@ -23,6 +23,22 @@ section.
   keys work.
 - **`nano`** (0.25.0) opens CraftOS's `edit`.
 
+## ccsh
+
+- **`$$` and `$PPID`** (0.27.0). Under init, `echo $$ $PPID` and `ps -l`:
+  `$$` matches the ccsh row's PID and `$PPID` its PPID; `kill -0 $$`
+  succeeds; `(echo $$)` and `echo $$ &` print the same pid. Without init
+  (plain CraftOS), `$$` is the computer ID and `$PPID` empty.
+- **`&>` and `&>>`** (0.27.0). `cat nope &> f; cat f` shows the error in f
+  and no `[1] pid` job line; `echo x &>> f` appends; a stock program's
+  printError output lands in f with `&>`.
+- **`${X:-word}` and friends** (0.27.0). `echo ${U:-$HOME}` with HOME set,
+  `echo ${U:=x}; echo $U`, `echo ${PS1:+set}`, `echo ${U:?gone}`: at the
+  prompt the last prints `ccsh: U: gone`, skips the rest of the line and
+  gives `$?` 1; in a script it ends the script with status 1.
+- **`unset -f`** (0.27.0). `f() { echo hi; }; unset -f f; f` says "ccsh: f:
+  not found"; plain `unset f` leaves the function.
+
 ## Processes and services
 
 - **A crashing service fails with a traceback** (0.26.0). `service add boom

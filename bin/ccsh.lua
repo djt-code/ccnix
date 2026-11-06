@@ -11,16 +11,26 @@
 --   a | b | c             pipes.  Each command runs to its end, then the
 --                         next reads what it wrote: nothing streams, so
 --                         `a | head` still runs all of a.
---   < f   > f   >> f      redirects; also 2> f, 2>> f, 2>&1, >&2, n>&-.
+--   < f   > f   >> f      redirects; also 2> f, 2>> f, 2>&1, >&2, n>&-,
+--                         and &> f (output and errors to f), &>> f.
 --                         /dev/null works for reading and writing.
 --   a ; b   a && b   a || b   ! a      and a newline is a ;
 --   'single' "double" \x  quoting; # starts a comment.  A line ending in
 --                         \, |, &&, || or inside quotes goes on to the next.
---   X=value $X ${X} ${X:-default} $? $# $1..$9 $@ "$@" $* $$ $! $0
+--   X=value $X ${X} $? $# $1..$9 ${10} $@ "$@" $* $$ $PPID $! $0
 --                         variables.  $PATH is the shell's path (setting
 --                         it changes the path), $PWD its directory and
 --                         $HOSTNAME the computer's label (its ID if it
 --                         has none).  $! is the last & job's process ID.
+--                         $$ is the shell's (under init; else the
+--                         computer's ID), $PPID its parent's.
+--   ${X:-word}            word if X is unset or empty; ${X:=word} that,
+--                         and X set to it; ${X:+word} word if X is set
+--                         and not empty, else nothing; ${X:?word} if X is
+--                         unset or empty, an error (word the message) and
+--                         a script ends.  Without the colon (${X-word}),
+--                         only unset counts.  The word is expanded:
+--                         ${X:-$HOME}.
 --   export X  X=1 cmd     the environment.  Programs read it with
 --                         os.getenv("X") (and change their own copy with
 --                         os.setenv(name, value), list it with
@@ -78,7 +88,8 @@
 --                         init, a pid that isn't a job's is a process's
 --                         (see ps), and -pid a process group's.
 --   builtins              also exit [n], :, true, false, read [-r] name...,
---                         shift [n], unset name..., . file,
+--                         shift [n], unset [-v] name... (variables),
+--                         unset -f name... (functions), . file,
 --                         export [-n] name[=value]... and export -p,
 --                         [ expression ] (test, with a last ])
 --
@@ -142,6 +153,7 @@ local P = {
     subStatus = nil,                 -- the last $(...)'s status
     exiting = false,                 -- exit ran
     interrupted = false,             -- Ctrl+T stopped a command: skip the rest
+    aborting = nil,                  -- at the prompt, a ${X:?} failed: skip the rest
     defaultOut = nil,                -- where commands write, inside $(...) or a redirected { }
     defaultIn = nil,                 -- what they read ({ handle }), in a piped or redirected compound
     defaultErr = nil,                -- where their errors go
@@ -329,8 +341,9 @@ end
 --------------------------------------------------------------------------
 -- Parsing
 --------------------------------------------------------------------------
--- A word is a list of parts: { t = "lit", s, q } (q: quoted), { t = "var",
--- name, def, q } or { t = "cmd", src, q }.  A syntax error is raised as
+-- A word is a list of parts: { t = "lit", s, q } (q: quoted; split: text
+-- of a ${X:-word} to split), { t = "var", name, op, word, q } (op and word:
+-- ${name<op>word}) or { t = "cmd", src, q }.  A syntax error is raised as
 -- { msg, more }; more means the line could still be finished.
 local function bad(msg, more) error({ msg = msg, more = more }, 0) end
 
@@ -358,8 +371,21 @@ local function closer(src, i)
     bad("unterminated $(", true)
 end
 
-local OPS2 = { ["&&"] = true, ["||"] = true, [">>"] = true, [">&"] = true, ["<&"] = true, [">|"] = true, [";;"] = true }
+local OPS3 = { ["&>>"] = true }
+local OPS2 = { ["&&"] = true, ["||"] = true, [">>"] = true, [">&"] = true, ["<&"] = true, [">|"] = true, [";;"] = true,
+    ["&>"] = true }
 local OPS1 = { ["|"] = true, [";"] = true, ["&"] = true, ["<"] = true, [">"] = true, ["("] = true, [")"] = true }
+
+-- What a character c (one, or "" past the end) is.
+local function isDigit(c) return c ~= "" and c >= "0" and c <= "9" end
+local function isLetter(c) return c ~= "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) end
+local function isNameStart(c) return c == "_" or isLetter(c) end
+local function isNameChar(c) return isNameStart(c) or isDigit(c) end
+-- $? $# $@ $* $$ $!: the one-character special parameters
+local SPECIAL_PARAMS = { ["?"] = true, ["#"] = true, ["@"] = true, ["*"] = true, ["$"] = true, ["!"] = true }
+-- the operators of ${name<op>word}: with a colon, an empty value counts
+-- as unset too
+local PARAM_OPS = { ["-"] = true, ["="] = true, ["+"] = true, ["?"] = true }
 
 -- Tokens: { parts = word } or { op = "|", fd = n (2>), nl = true (a newline) }.
 local function lex(src)
@@ -368,13 +394,43 @@ local function lex(src)
     local function part(p)
         if not parts then parts, start = {}, i end
         local last = parts[#parts]
-        if p.t == "lit" and last and last.t == "lit" and last.q == p.q then last.s = last.s .. p.s
+        if p.t == "lit" and last and last.t == "lit" and last.q == p.q and last.split == p.split then last.s = last.s .. p.s
         else parts[#parts + 1] = p end
     end
-    local function lit(s, q) part({ t = "lit", s = s, q = q }) end
+    -- split: unquoted text in a ${name:-word}, split at blanks as an
+    -- expansion is
+    local function lit(s, q, split) part({ t = "lit", s = s, q = q, split = split }) end
     local function finish()
         if parts then toks[#toks + 1] = { parts = parts, s = start, e = i - 1 }; parts = nil end
     end
+    local doubleQuoted, braceWord
+
+    -- A parameter's name at j: a name (a letter or _, then letters,
+    -- digits and _), a positional number (one digit, or with braces all
+    -- the digits: ${10}) or one of ? # @ * $ !.  The name and the
+    -- position after it, or nil.
+    local function readParamName(j, braced)
+        local c = src:sub(j, j)
+        local e = j
+        if isNameStart(c) then
+            while isNameChar(src:sub(e + 1, e + 1)) do e = e + 1 end
+        elseif isDigit(c) then
+            while braced and isDigit(src:sub(e + 1, e + 1)) do e = e + 1 end
+        elseif not SPECIAL_PARAMS[c] then
+            return nil
+        end
+        return src:sub(j, e), e + 1
+    end
+    -- An operator of ${name<op>word} at j: an optional ":", then one of
+    -- - = + ?.  The operator and the position after it, or nil.
+    local function readParamOp(j)
+        local colon = src:sub(j, j) == ":"
+        local k = colon and j + 1 or j
+        local c = src:sub(k, k)
+        if not PARAM_OPS[c] then return nil end
+        return (colon and ":" or "") .. c, k + 1
+    end
+
     -- the $ at i; returns where it ends
     local function dollar(q)
         local c = src:sub(i + 1, i + 1)
@@ -384,18 +440,34 @@ local function lex(src)
             part({ t = "cmd", src = src:sub(i + 2, e - 1), q = q })
             return e + 1
         elseif c == "{" then
-            local e = src:find("}", i + 2, true) or bad("unterminated ${", true)
-            local inner = src:sub(i + 2, e - 1)
-            local name, def = inner:match("^([%a_][%w_]*)(.*)$")
-            if not name then name, def = inner:match("^([%d%?#@%*%$!])(.*)$") end
-            if not name or (def ~= "" and def:sub(1, 2) ~= ":-") then bad("bad substitution ${" .. inner .. "}") end
-            part({ t = "var", name = name, def = def ~= "" and def:sub(3) or nil, q = q })
-            return e + 1
+            -- ${name}, or ${name<op>word}: its word is read here, as a
+            -- word of its own, and expanded only if it's used
+            if not parts then parts, start = {}, i end      -- (the word this ${ is in starts here)
+            local at = i
+            local function bracedText() return src:sub(at, src:find("}", at, true) or n) end
+            local name, j = readParamName(i + 2, true)
+            if not name then
+                if i + 2 > n then bad("unterminated ${", true) end
+                bad("bad substitution " .. bracedText())
+            end
+            local p = { t = "var", name = name, q = q }
+            if src:sub(j, j) == "}" then
+                i = j + 1
+            else
+                if j > n then bad("unterminated ${", true) end
+                local op, k = readParamOp(j)
+                if not op then bad("bad substitution " .. bracedText()) end
+                p.op = op
+                i = k
+                p.word = braceWord(q)
+            end
+            part(p)
+            return i
         end
-        local name = src:match("^[%a_][%w_]*", i + 1) or src:match("^[%d%?#@%*%$!]", i + 1)
+        local name, e = readParamName(i + 1, false)
         if not name then lit("$", q); return i + 1 end
         part({ t = "var", name = name, q = q })
-        return i + 1 + #name
+        return e
     end
     local function backtick(q)
         local e = i + 1
@@ -406,6 +478,63 @@ local function lex(src)
         end
         part({ t = "cmd", src = (src:sub(i + 1, e - 1):gsub("\\([`\\$])", "%1")), q = q })
         return e + 1
+    end
+    -- the "..." whose opening quote is at i; returns where it ends
+    function doubleQuoted()
+        lit("", true)                                   -- "" is still a word
+        i = i + 1
+        while true do
+            local d = src:sub(i, i)
+            if d == "" then bad('unterminated "', true)
+            elseif d == '"' then return i + 1
+            elseif d == "\\" and src:sub(i + 1, i + 1):match('[%$`"\\\n]') then
+                if src:sub(i + 1, i + 1) ~= "\n" then lit(src:sub(i + 1, i + 1), true) end
+                i = i + 2
+            elseif d == "$" then i = dollar(true)
+            elseif d == "`" then i = backtick(true)
+            else lit(d, true); i = i + 1 end
+        end
+    end
+    -- The word of ${name<op>word}, from i to the } that closes the ${ (i
+    -- is left after it), as a list of parts.  It reads as a word does
+    -- (\x, '...', "...", $, `), but blanks and operators are part of it;
+    -- inside "..." (q) all of it is quoted, and a ' is just text.  A {
+    -- in it needs its own } first.
+    function braceWord(q)
+        local outer = parts
+        parts = {}
+        local depth = 0
+        while true do
+            local c = src:sub(i, i)
+            if c == "" then bad("unterminated ${", true)
+            elseif c == "}" and depth == 0 then i = i + 1; break
+            elseif c == "\\" then
+                local d = src:sub(i + 1, i + 1)
+                if d == "" then bad("unterminated ${", true) end
+                if q and not (d == "$" or d == "`" or d == '"' or d == "\\" or d == "}" or d == "\n") then
+                    lit("\\", true)                     -- (in "...", other \s stay)
+                    i = i + 1
+                else
+                    if d ~= "\n" then lit(d, true) end
+                    i = i + 2
+                end
+            elseif c == "'" and not q then
+                local e = src:find("'", i + 1, true) or bad("unterminated '", true)
+                lit(src:sub(i + 1, e - 1), true)
+                i = e + 1
+            elseif c == '"' then
+                if q then i = i + 1 else i = doubleQuoted() end   -- (in "...", "" quotes nothing more)
+            elseif c == "$" then i = dollar(q)
+            elseif c == "`" then i = backtick(q)
+            else
+                if c == "{" then depth = depth + 1 elseif c == "}" then depth = depth - 1 end
+                lit(c, q, not q or nil)
+                i = i + 1
+            end
+        end
+        local word = parts
+        parts = outer
+        return word
     end
 
     while i <= n do
@@ -421,24 +550,13 @@ local function lex(src)
             local e = src:find("'", i + 1, true) or bad("unterminated '", true)
             lit(src:sub(i + 1, e - 1), true)
             i = e + 1
-        elseif c == '"' then
-            lit("", true)                               -- "" is still a word
-            i = i + 1
-            while true do
-                local d = src:sub(i, i)
-                if d == "" then bad('unterminated "', true)
-                elseif d == '"' then i = i + 1; break
-                elseif d == "\\" and src:sub(i + 1, i + 1):match('[%$`"\\\n]') then
-                    if src:sub(i + 1, i + 1) ~= "\n" then lit(src:sub(i + 1, i + 1), true) end
-                    i = i + 2
-                elseif d == "$" then i = dollar(true)
-                elseif d == "`" then i = backtick(true)
-                else lit(d, true); i = i + 1 end
-            end
+        elseif c == '"' then i = doubleQuoted()
         elseif c == "$" then i = dollar(false)
         elseif c == "`" then i = backtick(false)
         else
-            local op = OPS2[src:sub(i, i + 1)] and src:sub(i, i + 1) or OPS1[c] and c
+            -- the longest operator here: &>> before &> before &
+            local op = OPS3[src:sub(i, i + 2)] and src:sub(i, i + 2)
+                or OPS2[src:sub(i, i + 1)] and src:sub(i, i + 1) or OPS1[c] and c
             if op then
                 local fd
                 if op:find("^[<>]") and parts and #parts == 1 and parts[1].t == "lit" and not parts[1].q
@@ -458,7 +576,8 @@ local function lex(src)
     return toks
 end
 
-local REDIR = { ["<"] = true, [">"] = true, [">>"] = true, [">|"] = true, [">&"] = true, ["<&"] = true }
+local REDIR = { ["<"] = true, [">"] = true, [">>"] = true, [">|"] = true, [">&"] = true, ["<&"] = true,
+    ["&>"] = true, ["&>>"] = true }
 
 -- A list is and-or lists: { { pipe = p }, { conn = "&&", pipe = p }, ...,
 -- bg = true (it ended in &), text = its source }.  A pipeline is { neg,
@@ -694,25 +813,53 @@ end
 --------------------------------------------------------------------------
 local runSource
 
+-- $$ and $PPID: under init (a process table), this shell's own process
+-- ID and its parent's, taken as it starts, so a subshell or a job says
+-- the shell's too; without one, $$ is the computer's ID and PPID unset.
+local ids = {}
+do
+    local kp = rawget(_G, "proc")
+    if kp and kp.self then
+        ids.pid = kp.self()
+        for _, p in ipairs(kp.list and kp.list() or {}) do
+            if p.pid == ids.pid then ids.ppid = p.ppid end
+        end
+    end
+end
+
 local function getVar(name)
     if name == "?" then return tostring(P.status)
     elseif name == "#" then return tostring(#P.pos)
-    elseif name == "$" then return tostring(os.getComputerID())
+    elseif name == "$" then return tostring(ids.pid or os.getComputerID())
     elseif name == "0" then return P.arg0
-    elseif name:match("^%d$") then return P.pos[tonumber(name)] or ""
+    elseif isDigit(name:sub(1, 1)) then return P.pos[tonumber(name)] or ""
     elseif name == "@" or name == "*" then return P.pos, true
     elseif name == "PATH" then return shell.path()
     elseif name == "PWD" then return "/" .. shell.dir()
     elseif name == "HOSTNAME" then
         return os.getComputerLabel and os.getComputerLabel() or tostring(os.getComputerID())
+    elseif name == "PPID" then return ids.ppid and tostring(ids.ppid) or ""
     elseif name == "!" then return P.lastBg and tostring(P.lastBg) or ""
     end
     return P.vars[name] or ""
 end
 
+-- Whether parameter name is set (for ${name-word} and the like): an
+-- empty variable is set, one never given a value (or unset) isn't.
+local function isSet(name)
+    if name == "@" or name == "*" then return #P.pos > 0
+    elseif name == "!" then return P.lastBg ~= nil
+    elseif name == "PPID" then return ids.ppid ~= nil
+    elseif name ~= "0" and isDigit(name:sub(1, 1)) then return tonumber(name) <= #P.pos
+    elseif SPECIAL_PARAMS[name] or name == "0" or name == "PATH" or name == "PWD" or name == "HOSTNAME" then
+        return true
+    end
+    return P.vars[name] ~= nil
+end
+
 local function setVar(name, v)
     if name == "PATH" then shell.setPath(v)
-    elseif name ~= "PWD" then P.vars[name] = v end
+    elseif name ~= "PWD" and name ~= "PPID" then P.vars[name] = v end
 end
 
 -- The environment a command gets: the exported variables (PS1 among
@@ -740,6 +887,15 @@ local function substitute(src)
     return (buf.text():gsub("\n+$", ""))
 end
 
+-- A message for fd 2 (a stream, or the screen).
+local function report(fd2, s)
+    if fd2 ~= TTY and fd2.raw then fd2.raw(s .. "\n") else printError(s) end
+end
+
+-- Raised when a ${name:?word} finds name unset (it said so); the command
+-- doesn't run (see expansionFailed).
+local EXPANSION = {}
+
 -- The fields a word expands to, each { chars, magic }: magic marks the
 -- unquoted characters, the ones a glob can use.  Unquoted expansions are
 -- split at blanks; "$@" is a field per argument.  whole: one string, no
@@ -760,42 +916,84 @@ local function fields(parts, whole)
         if cur.keep then out[#out + 1] = cur end
         new()
     end
-    new()
-    for _, p in ipairs(parts) do
-        if p.t == "lit" then
-            add(p.s, p.q)
+    -- v, what an expansion gave: quoted (q), all of it; else split at blanks
+    local function expanded(v, q)
+        if q or whole == true then
+            add(v, true)
+        elseif whole == "pattern" then
+            add(v, false)
         else
-            local v, list
-            if p.t == "cmd" then
-                v = substitute(p.src)
-            else
-                v, list = getVar(p.name)
-                if p.def and v == "" then v = p.def end
+            local k = 1
+            while true do
+                local a, b = v:find("[ \t\n]+", k)
+                add(v:sub(k, (a or 0) - 1), false)
+                if not a then break end
+                cut()
+                k = b + 1
             end
-            if list and p.q and p.name == "@" and not whole then
-                for k, a in ipairs(v) do
-                    add(a, true)
-                    if k < #v then cut() end
-                end
+        end
+    end
+    -- ${name<op>word}: the value (and true for $@ and $*'s list), or nil
+    -- and the word's parts, to expand in its place.  The word is expanded
+    -- only if it's used.
+    --   -  word if name is unset           :-  ... or empty
+    --   =  that, and name set to it        :=  ... or empty
+    --   +  word if name is set, else ""    :+  ... and not empty
+    --   ?  if unset, an error: word, or "parameter null or not set"
+    --                                       :?  ... or empty
+    local function param(p)
+        local v, list = getVar(p.name)
+        if not p.op then return v, list end
+        local colon = p.op:sub(1, 1) == ":"
+        local kind = p.op:sub(-1)
+        local empty = not isSet(p.name) or (colon and (list and #v == 0 or v == ""))
+        if kind == "+" then
+            if empty then return "" end
+            return nil, p.word
+        elseif not empty then
+            return v, list
+        elseif kind == "-" then
+            return nil, p.word
+        end
+        local w = fields(p.word, true)
+        local err = P.defaultErr or TTY
+        if kind == "=" then
+            if not isNameStart(p.name:sub(1, 1)) then
+                report(err, "ccsh: $" .. p.name .. ": can't be assigned this way")
+                error(EXPANSION, 0)
+            end
+            setVar(p.name, w)
+            return w
+        end
+        report(err, "ccsh: " .. p.name .. ": " .. (w ~= "" and w or "parameter null or not set"))
+        error(EXPANSION, 0)
+    end
+    local function expandParts(list)
+        for _, p in ipairs(list) do
+            if p.t == "lit" and p.split then
+                expanded(p.s, false)
+            elseif p.t == "lit" then
+                add(p.s, p.q)
+            elseif p.t == "cmd" then
+                expanded(substitute(p.src), p.q)
             else
-                if list then v = table.concat(v, " ") end
-                if p.q or whole == true then
-                    add(v, true)
-                elseif whole == "pattern" then
-                    add(v, false)
-                else
-                    local k = 1
-                    while true do
-                        local a, b = v:find("[ \t\n]+", k)
-                        add(v:sub(k, (a or 0) - 1), false)
-                        if not a then break end
-                        cut()
-                        k = b + 1
+                local v, isList = param(p)
+                if v == nil then
+                    expandParts(isList)                 -- (the word of a ${name:-word})
+                elseif isList and p.q and p.name == "@" and not whole then
+                    for k, a in ipairs(v) do
+                        add(a, true)
+                        if k < #v then cut() end
                     end
+                else
+                    if isList then v = table.concat(v, " ") end
+                    expanded(v, p.q)
                 end
             end
         end
     end
+    new()
+    expandParts(parts)
     cut()
     if whole == "pattern" then return out[1] or { chars = {}, magic = {} } end
     if whole then return out[1] and table.concat(out[1].chars) or "" end
@@ -952,11 +1150,6 @@ local function drive(ctx, fn, ...)
         repeat ev = table.pack(os.pullEventRaw()) until filter == nil or ev[1] == filter or ev[1] == "terminate"
         if ev[1] == "terminate" then terminated = true end
     end
-end
-
--- A message for fd 2 (a stream, or the screen).
-local function report(fd2, s)
-    if fd2 ~= TTY and fd2.raw then fd2.raw(s .. "\n") else printError(s) end
 end
 
 --------------------------------------------------------------------------
@@ -1324,11 +1517,30 @@ function builtins.exit(a, b)
     P.exiting = true
     return n or P.status
 end
-function builtins.unset(a)
-    for k = 2, #a do
-        if a[k] ~= "-v" then P.vars[a[k]], P.exported[a[k]] = nil, nil end
+-- unset [-v] name...: the variables; unset -f name...: the functions
+function builtins.unset(a, b)
+    local k, what = 2, "v"
+    while a[k] == "-v" or a[k] == "-f" do what, k = a[k]:sub(2), k + 1 end
+    if a[k] == "--" then k = k + 1
+    elseif a[k] and a[k]:sub(1, 1) == "-" and a[k] ~= "-" then
+        b.err("unset: " .. a[k] .. ": bad option (unset [-f | -v] name...)")
+        return 2
     end
-    return 0
+    local st = 0
+    for j = k, #a do
+        local name = a[j]
+        local ok = isNameStart(name:sub(1, 1))
+        for c = 2, #name do ok = ok and isNameChar(name:sub(c, c)) end
+        if not ok then
+            b.err("unset: " .. name .. ": not a valid name")
+            st = 1
+        elseif what == "f" then
+            P.funcs[name] = nil
+        else
+            P.vars[name], P.exported[name] = nil, nil
+        end
+    end
+    return st
 end
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 function builtins.export(a, b)
@@ -1529,7 +1741,18 @@ local SPECIAL = { [":"] = true, ["."] = true, ["break"] = true, ["continue"] = t
     exit = true, export = true, unset = true, shift = true, ["local"] = true }
 
 -- Something has to stop what's running: Ctrl+T, exit, break, continue or return.
-local function halted() return P.interrupted or P.exiting or P.breaking or P.continuing or P.returning end
+local function halted()
+    return P.interrupted or P.aborting or P.exiting or P.breaking or P.continuing or P.returning
+end
+
+-- A ${name:?word} failed (it said so): a script, a subshell or a job ends
+-- with status 1, as POSIX has a non-interactive shell exit; at the prompt
+-- the rest of the line is skipped.  The command's status.
+local function expansionFailed()
+    P.status = 1
+    if P == mainP and jobControl then P.aborting = true else P.exiting = true end
+    return 1
+end
 
 -- Apply redirects to fd; what they open goes in opened (to close after).
 -- False if one couldn't be done (said so).
@@ -1545,15 +1768,20 @@ local function redirect(redirs, fd, opened)
             local text = name == "/dev/null" and "" or readFile(name)
             if not text then report(fd[2], "ccsh: " .. name .. ": No such file or directory"); return false end
             fd[r.fd] = { data = text }
-        elseif name == "/dev/null" then
-            fd[r.fd] = stream(function() end)
         else
-            local path = shell.resolve(name)
-            local f = not fs.isDir(path) and fs.open(path, r.op == ">>" and "ab" or "wb")
-            if not f then report(fd[2], "ccsh: " .. name .. ": can't create"); return false end
-            local s = stream(function(x) f.write(x) end, function() f.close() end)
-            opened[#opened + 1] = s
+            -- > >> >|, and &> &>> (bash's): both stdout and stderr to the file
+            local s
+            if name == "/dev/null" then
+                s = stream(function() end)
+            else
+                local path = shell.resolve(name)
+                local f = not fs.isDir(path) and fs.open(path, (r.op == ">>" or r.op == "&>>") and "ab" or "wb")
+                if not f then report(fd[2], "ccsh: " .. name .. ": can't create"); return false end
+                s = stream(function(x) f.write(x) end, function() f.close() end)
+                opened[#opened + 1] = s
+            end
             fd[r.fd] = s
+            if r.op == "&>" or r.op == "&>>" then fd[2] = s end
         end
     end
     return true
@@ -1705,9 +1933,12 @@ function execCompound(cmd, inText, out)
         return 0
     end
     local fd, opened = startFds(inText, out), {}
-    if not redirect(cmd.redirs, fd, opened) then closeAll(opened); return 1 end
-    local ok, st = pcall(withFds, fd, function() return compound(cmd) end)
+    local ok, st = pcall(function()
+        if not redirect(cmd.redirs, fd, opened) then return 1 end
+        return withFds(fd, function() return compound(cmd) end)
+    end)
     closeAll(opened)
+    if not ok and st == EXPANSION then return expansionFailed() end
     if not ok then error(st, 0) end
     return st
 end
@@ -1773,12 +2004,22 @@ local function runCommand(cmd, inText, out)
         return st
     end
 
+    -- the words, the redirects and the X=value words, expanded (a
+    -- ${X:?} that fails stops it here)
     P.subStatus = nil
-    local argv = expandWords(cmd.words)
-    if not redirect(cmd.redirs, fd, opened) then return done(1) end
-
-    local assigns = {}
-    for k, a in ipairs(cmd.assigns) do assigns[k] = { name = a.name, value = fields(a.value, true) } end
+    local argv, assigns = nil, {}
+    local expandedOk, redirected = pcall(function()
+        argv = expandWords(cmd.words)
+        if not redirect(cmd.redirs, fd, opened) then return false end
+        for k, a in ipairs(cmd.assigns) do assigns[k] = { name = a.name, value = fields(a.value, true) } end
+        return true
+    end)
+    if not expandedOk then
+        if redirected == EXPANSION then return done(expansionFailed()) end
+        closeAll(opened)
+        error(redirected, 0)
+    end
+    if not redirected then return done(1) end
     if #argv == 0 then
         for _, a in ipairs(assigns) do setVar(a.name, a.value) end
         return done(P.subStatus or 0)
@@ -2045,7 +2286,7 @@ local function interactive()
             printError("ccsh: there are jobs (jobs lists them); Ctrl+T again to end them")
             warned = true
         else
-            P.interrupted = false
+            P.interrupted, P.aborting = false, nil
             if got.err then
                 printError("ccsh: syntax error: " .. got.err)
                 P.status = 2

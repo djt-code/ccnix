@@ -101,6 +101,12 @@ local me, shellRow = cols(rowOf(r.out, "ps -l")), cols(rowOf(r.out, "ccsh"))
 check("a program runs as a process: the shell's child, on its terminal, in front; in -c, in the shell's group",
     me.ppid == shellRow.pid and me.tty == "con" and me.stat == "R+" and me.pgid == shellRow.pgid
         and shellRow.stat == "S+", show(r.out))
+r = sh([[echo $$ $PPID; (echo $$); echo $(echo $$); { echo $$; } &
+wait; ps -l]])
+shellRow = cols(rowOf(r.out, "ccsh"))
+local ids = shellRow.pid and (shellRow.pid .. " " .. shellRow.ppid .. "\n" .. (shellRow.pid .. "\n"):rep(3))
+check("$$ is the shell's process ID (in ( ), $(...) and a job too), $PPID its parent's",
+    ids ~= nil and shellRow.pid ~= 1 and r.out:sub(1, #ids) == ids, show(r.out))
 r = typed("ps -l\n")
 me, shellRow = cols(rowOf(r.out, "ps -l")), cols(rowOf(r.out, "ccsh"))
 check("at the prompt, its job's own group, in front; the shell not", me.ppid == shellRow.pid and me.pgid ~= shellRow.pgid

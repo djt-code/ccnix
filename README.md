@@ -453,10 +453,11 @@ A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 | | |
 |---|---|
 | Pipes | `a \| b \| c` |
-| Redirects | `< f`, `> f`, `>> f`, `2> f`, `2>> f`, `2>&1`, `>&2`, `n>&-`; `/dev/null` |
+| Redirects | `< f`, `> f`, `>> f`, `2> f`, `2>> f`, `2>&1`, `>&2`, `n>&-`, `&> f` (output and errors), `&>> f`; `/dev/null` |
 | Lists | `a ; b`, `a && b`, `a \|\| b`, `! a`; a newline is a `;` |
 | Quoting | `'single'`, `"double $X"`, `\x`; `#` comments |
-| Variables | `X=value`, `$X`, `${X}`, `${X:-default}`, `$?`, `$#`, `$1`..`$9`, `$@`, `"$@"`, `$*`, `$$`, `$!`, `$0`; `$PATH` is the shell's path (setting it changes the path), `$PWD` its directory, `$HOSTNAME` the computer's label (or ID), `$!` the last background job's process ID |
+| Variables | `X=value`, `$X`, `${X}`, `$?`, `$#`, `$1`..`$9`, `${10}`, `$@`, `"$@"`, `$*`, `$$`, `$PPID`, `$!`, `$0`; `$PATH` is the shell's path (setting it changes the path), `$PWD` its directory, `$HOSTNAME` the computer's label (or ID), `$!` the last background job's process ID, `$$` the shell's own process ID under `init` (else the computer's ID) and `$PPID` its parent's |
+| Defaults | `${X:-word}` (word if `X` is unset or empty), `${X:=word}` (and `X` set to it), `${X:+word}` (word if `X` is set and not empty), `${X:?word}` (an error if unset or empty; a script ends); without the colon only unset counts. The word is expanded: `${X:-$HOME}` |
 | Environment | `export X`, `export X=1`, `export -n X`, `export -p`, `unset X`; `X=1 cmd` for one command. Programs read it with `os.getenv("X")`, and change their own copy with `os.setenv(name, value)`; `os.environ()` lists it. It holds the exported variables (`PS1` is one), `PATH`, `PWD` and `HOSTNAME`. A ccsh started from ccsh takes it over, and `env` shows it |
 | Jobs | `a &` in the background (its own copy of the variables); `jobs [-l\|-p]`; `fg [%n]`, `bg [%n]`; `wait [%n\|pid]`; `kill [-9\|-STOP\|-CONT] %n\|pid`; Ctrl+Z at the prompt stops the job in front. `fg prog` and `bg prog` open a multishell tab as CraftOS's do, with the environment. Under `init`, a program is a process and a job a process group: see [Processes and services](#processes-and-services) |
 | Startup | `/.profile` runs when ccsh starts at the prompt: set `PS1`, `export` variables |
@@ -466,7 +467,7 @@ A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 | Substitution | `$(cmd)`, `` `cmd` `` (a subshell) |
 | Compound commands | `if a; then b; elif c; then d; else e; fi`, `while`/`until a; do b; done`, `for x in words; do b; done` (without `in`: `"$@"`), `case w in a\|b*) x;; *) y;; esac`, `{ a; b; }`, `( a; b )` (a subshell: its variables, functions, `exit` and `cd` are its own), `break [n]`, `continue [n]`. Each can be piped and redirected whole: `for f in *.lua; do wc -l $f; done \| sort -n`, `while read l; do ...; done < file` |
 | Functions | `name() { body; }` (or `function name { body; }`): `$1`... are its arguments, `return [n]`, `local x=1` until it returns |
-| Builtins | `exit [n]`, `:`, `true`, `false`, `[ expression ]` (`test`), `read [-r] name...`, `shift [n]`, `unset`, `export`, `. file`, `jobs`, `fg`, `bg`, `wait`, `kill`, `break`, `continue`, `return`, `local` |
+| Builtins | `exit [n]`, `:`, `true`, `false`, `[ expression ]` (`test`), `read [-r] name...`, `shift [n]`, `unset [-v\|-f] name...`, `export`, `. file`, `jobs`, `fg`, `bg`, `wait`, `kill`, `break`, `continue`, `return`, `local` |
 | Scripts | `ccsh file [args]`, `ccsh -c 'commands' [name [args]]`, or a file starting `#!/ccnix/bin/ccsh` run by name |
 
 A line ending in `\`, `|`, `&&` or `||`, or inside quotes, carries on at a
