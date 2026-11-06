@@ -7,6 +7,19 @@ section.
 
 ## Editors
 
+- **vi and vim parse with lib/scan** (0.27.1, no change meant). `vim` on a
+  big Lua file (lib/vi.lua, about 2,000 lines): `G`, then scroll back up;
+  the colours look as before (keywords, strings, `--[[ ]]` comments, `0x1F`
+  and `1e-3` numbers, `string.format` with the field plain) and it doesn't
+  feel slower (the colourer now builds a small scanner per line). `vim` on
+  a ccsh script: `$x`, `${x}`, `$(`, `NAME=value`, comments after `;`,
+  quotes over several lines. Ex commands: `:2,4d`, `:.,+2>`, `:/pat/;+1d`,
+  `:'a,'bm$`, `:%s#a/b#X#g`, `:s/x/y/` then `:&&` and `&`, `:g!/keep/d`,
+  `:set ts=8 nu? noai invnu`, `:d a 3`, `:ka`, and an /.exrc with blank
+  lines and a CRLF ending. Normal mode: `*` and `#` on a word and from just
+  before one, Ctrl+A on `x = -7`, `~` over mixed case, `%` from before a
+  bracket.
+
 - **`vi` on a computer** (0.25.0). `vi notes`, type with `i`, leave insert
   mode with Ctrl+[ and with Ctrl+C (Esc closes the screen), `:wq`; the file
   has the text. Ctrl+R (a tap) redoes after `u` without rebooting; Ctrl+A

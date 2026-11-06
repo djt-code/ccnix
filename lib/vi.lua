@@ -18,6 +18,7 @@
 
 local _ENV = setmetatable({}, { __index = _ENV })
 local regex = require("regex")
+local scan = require("scan")
 local syntax = require("syntax")
 local V = {}
 
@@ -56,10 +57,84 @@ function say(text, isErr) msg, msgErr = text, isErr or false end
 
 function nextVer() verCounter = verCounter + 1; return verCounter end
 
+-- Characters, as vi sees them (lib/scan's tests).  A word (w b e, *,
+-- Ctrl+W) is letters, digits and _; a big word (W B E) anything but blanks.
+isDigit, isAlpha, isAlnum, isSpace = scan.isDigit, scan.isAlpha, scan.isAlnum, scan.isSpace
+isUpper, isLower = scan.isUpper, scan.isLower
+isWordChar = scan.isNameChar
+
+-- s is nothing but blanks (or nothing at all)
+function isBlank(s) return scan.all(s, isSpace) end
+
+-- the blanks at the start of s: its indent
+function indentOf(s) return scan.new(s):readWhile(isSpace) end
+
+-- s without the blanks at its start
+function trimLeft(s)
+    local sc = scan.new(s)
+    sc:skipSpaces()
+    return sc:rest()
+end
+
+-- the index of the first character of s that isn't blank (nil if none is)
+function firstNonSpace(s)
+    local sc = scan.new(s)
+    sc:skipSpaces()
+    if sc:atEnd() then return nil end
+    return sc:pos()
+end
+
+-- the word starting at index i of s ("" if no word character is there)
+function wordAt(s, i) return scan.new(s, i):readWhile(isWordChar) end
+
+-- s up to its first newline
+function firstLine(s)
+    local nl = s:find("\n", 1, true)
+    return nl and s:sub(1, nl - 1) or s
+end
+
+-- s has a capital letter in it (with smartcase, a search then minds case)
+function hasUpper(s)
+    for i = 1, #s do
+        if isUpper(s:sub(i, i)) then return true end
+    end
+    return false
+end
+
+-- s with its lower-case letters made upper case and its upper-case ones lower
+function swapCase(s)
+    local out = {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        if isLower(c) then c = c:upper() elseif isUpper(c) then c = c:lower() end
+        out[#out + 1] = c
+    end
+    return table.concat(out)
+end
+
 -- The text as lines (a final newline isn't a line of its own).
 function splitLines(text)
-    local out = {}
-    for l in (text .. "\n"):gmatch("([^\n]*)\n") do out[#out + 1] = l end
+    local out, from = {}, 1
+    while true do
+        local nl = text:find("\n", from, true)
+        if not nl then
+            out[#out + 1] = text:sub(from)
+            return out
+        end
+        out[#out + 1] = text:sub(from, nl - 1)
+        from = nl + 1
+    end
+end
+
+-- A file's lines (ended by \n, \r\n or \r), the empty ones left out.
+isLineEnd = scan.oneOf("\r\n")
+function nonEmptyLines(text)
+    local sc, out = scan.new(text), {}
+    while not sc:atEnd() do
+        local l = sc:readWhile(function(c) return not isLineEnd(c) end)
+        if l ~= "" then out[#out + 1] = l end
+        sc:advance()
+    end
     return out
 end
 
@@ -70,7 +145,7 @@ end
 
 function firstNonBlank(y)
     local s = lines[y]
-    return s:find("%S") or math.max(#s, 1)
+    return firstNonSpace(s) or math.max(#s, 1)
 end
 
 function clampCursor()
@@ -260,7 +335,7 @@ end
 function setReg(name, text, linewise, yank)
     if name == "_" then return end
     local r = { text = text, linewise = linewise }
-    if name and name:match("^%u$") then
+    if name and isUpper(name) then
         local lower = name:lower()
         local old = regs[lower]
         if old then
@@ -348,7 +423,7 @@ end
 
 function readCount(k)
     local n
-    while k:match("^%d$") and (n or k ~= "0") do
+    while isDigit(k) and (n or k ~= "0") do
         n = math.min((n or 0) * 10 + tonumber(k), 99999)
         k = getKey()
     end
@@ -512,8 +587,8 @@ end
 -- big-word motions (W B E) anything not blank is 1.
 function cls(s, x, big)
     local c = s:sub(x, x)
-    if c == "" or c:match("%s") then return 0 end
-    if big or not c:match("[%w_]") then return 1 end
+    if c == "" or isSpace(c) then return 0 end
+    if big or not isWordChar(c) then return 1 end
     return 2
 end
 
@@ -581,8 +656,10 @@ end
 
 function matchPair()
     local s = lines[cy]
-    local x = s:find("[%(%)%[%]{}]", cx)
-    if not x then return nil end
+    -- the first bracket from the cursor on
+    local x = cx
+    while x <= #s and not PAIR[s:sub(x, x)] do x = x + 1 end
+    if x > #s then return nil end
     local c = s:sub(x, x)
     local other, dir = PAIR[c][1], PAIR[c][2]
     local depth, y = 0, cy
@@ -604,7 +681,7 @@ function matchPair()
 end
 
 function compile(pat)
-    local ic = opt.ignorecase and not (opt.smartcase and pat:find("%u"))
+    local ic = opt.ignorecase and not (opt.smartcase and hasUpper(pat))
     local ok, re, e = pcall(regex.compile, pat, { icase = ic })
     if not ok or not re then fail("E383: Invalid search string: " .. pat) end
     return re
@@ -655,7 +732,19 @@ function search(pat, dir, y, x, n)
     return y, x
 end
 
-function escapePattern(s) return (s:gsub("[%.%[%]%*%^%$\\/]", "\\%0")) end
+-- The characters with a meaning in a search pattern, and its delimiter /.
+REGEX_SPECIAL = scan.oneOf(".[]*^$\\/")
+
+-- s as a pattern that finds it as it is: a backslash before each of those.
+function escapePattern(s)
+    local out = {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        if REGEX_SPECIAL(c) then out[#out + 1] = "\\" end
+        out[#out + 1] = c
+    end
+    return table.concat(out)
+end
 
 -- Where motion k (count n) goes from the cursor: y, x, the kind
 -- ("excl", "incl" or "line") and how the cursor lands ("want": the
@@ -764,10 +853,16 @@ function motion(k, n, op)
         local y, x = search(lastSearch.pat, k == "n" and lastSearch.dir or -lastSearch.dir, cy, cx, cnt)
         return y, x, "excl"
     elseif k == "*" or k == "#" then
+        -- the word under the cursor (from its start), else the next one on the line
         local a = cx
-        while a > 1 and s:sub(a - 1, a - 1):match("[%w_]") do a = a - 1 end
-        local word = s:match("^[%w_]+", a) or s:match("[%w_]+", cx)
-        if not word then fail("E348: No string under cursor") end
+        while a > 1 and isWordChar(s:sub(a - 1, a - 1)) do a = a - 1 end
+        local word = wordAt(s, a)
+        if word == "" then
+            local b = cx
+            while b <= #s and not isWordChar(s:sub(b, b)) do b = b + 1 end
+            word = wordAt(s, b)
+        end
+        if word == "" then fail("E348: No string under cursor") end
         lastSearch, hlHidden = { pat = escapePattern(word), dir = k == "*" and 1 or -1 }, false
         jumpFrom = { cy, cx }
         local y, x = search(lastSearch.pat, lastSearch.dir, cy, a, cnt)
@@ -805,7 +900,7 @@ function shiftLines(y1, y2, dir, times)
     for y = y1, y2 do
         local s = lines[y]
         if s ~= "" then
-            local ws = s:match("^%s*")
+            local ws = indentOf(s)
             local width = dispCol(ws .. "x", #ws + 1)
             local new = math.max(0, width + dir * sw * (times or 1))
             local indent = opt.expandtab and string.rep(" ", new)
@@ -843,7 +938,7 @@ function apply(op, reg, y1, x1, y2, x2, kind)
             linesReport(k, "fewer lines")
         elseif op == "c" then
             setReg(reg, text, true)
-            local indent = opt.autoindent and lines[y1]:match("^%s*") or ""
+            local indent = opt.autoindent and indentOf(lines[y1]) or ""
             if y2 > y1 then removeLines(y1 + 1, y2) end
             setLine(y1, indent)
             cy, cx = y1, #indent + 1
@@ -910,7 +1005,7 @@ function operate(op, n, reg)
     if jumpFrom then marks["'"], jumpFrom = jumpFrom, nil end
     if not y then return beep() end
     -- dw at a line's last word stops at the end of the line
-    if (k == "w" or k == "W") and y > cy and lines[y]:sub(1, x - 1):match("^%s*$") then
+    if (k == "w" or k == "W") and y > cy and isBlank(lines[y]:sub(1, x - 1)) then
         y, x = y - 1, #lines[y - 1] + 1
         if y < cy then y, x = cy, #lines[cy] + 1 end
     end
@@ -922,7 +1017,7 @@ function operate(op, n, reg)
             y2 = y2 - 1
             x2 = #lines[y2]
             kind = "incl"
-            if lines[y1]:sub(1, x1 - 1):match("^%s*$") then kind = "line" end
+            if isBlank(lines[y1]:sub(1, x1 - 1)) then kind = "line" end
         else
             x2 = x2 - 1
         end
@@ -937,7 +1032,7 @@ end
 
 -- Open a new line below (or above) the cursor, indented like this one.
 function openLine(below)
-    local indent = opt.autoindent and lines[cy]:match("^%s*") or ""
+    local indent = opt.autoindent and indentOf(lines[cy]) or ""
     local at = below and cy + 1 or cy
     insertLines(at, { indent })
     cy, cx = at, #indent + 1
@@ -957,10 +1052,10 @@ function insertMode(kind, cnt, again)
         local s = lines[cy]
         if k == "<Esc>" or k == "<C-c>" then break
         elseif k == "<CR>" then
-            local indent = opt.autoindent and s:match("^%s*") or ""
+            local indent = opt.autoindent and indentOf(s) or ""
             local before, after = s:sub(1, cx - 1), s:sub(cx)
-            if aiLine == cy and before:match("^%s*$") then before = "" end
-            if indent ~= "" then after = after:gsub("^%s+", "") end
+            if aiLine == cy and isBlank(before) then before = "" end
+            if indent ~= "" then after = trimLeft(after) end
             setLine(cy, before)
             insertLines(cy + 1, { indent .. after })
             cy, cx = cy + 1, #indent + 1
@@ -979,7 +1074,9 @@ function insertMode(kind, cnt, again)
             elseif cx > 1 then
                 local before = s:sub(1, cx - 1)
                 local del = 1
-                if opt.expandtab and before:match("^ +$") then del = (#before - 1) % opt.shiftwidth + 1 end
+                -- in an indent of spaces, back to the last shiftwidth stop
+                local spaces = before ~= "" and before == string.rep(" ", #before)
+                if opt.expandtab and spaces then del = (#before - 1) % opt.shiftwidth + 1 end
                 setLine(cy, before:sub(1, #before - del) .. s:sub(cx))
                 cx = cx - del
             elseif cy > 1 then
@@ -1009,7 +1106,7 @@ function insertMode(kind, cnt, again)
             aiLine = nil
         elseif k == "<C-w>" then
             local a = cx
-            while a > 1 and s:sub(a - 1, a - 1):match("%s") do a = a - 1 end
+            while a > 1 and isSpace(s:sub(a - 1, a - 1)) do a = a - 1 end
             if a > 1 then
                 local c = cls(s, a - 1)
                 while a > 1 and cls(s, a - 1) == c do a = a - 1 end
@@ -1018,7 +1115,7 @@ function insertMode(kind, cnt, again)
             cx = a
             moved = true
         elseif k == "<C-u>" then
-            local keep = s:match("^%s*")
+            local keep = indentOf(s)
             if cx - 1 <= #keep then keep = "" end
             setLine(cy, keep .. s:sub(cx))
             cx = #keep + 1
@@ -1049,7 +1146,7 @@ function insertMode(kind, cnt, again)
             aiLine = nil
         end
     end
-    if aiLine == cy and lines[cy]:match("^%s+$") then setLine(cy, ""); cx = 1 end
+    if aiLine == cy and lines[cy] ~= "" and isBlank(lines[cy]) then setLine(cy, ""); cx = 1 end
     aiLine = nil
     if cnt and cnt > 1 and not moved then
         local t = table.concat(typed)
@@ -1093,8 +1190,8 @@ function join(y, count, spaces)
         local a, b = lines[y], lines[y + 1]
         local sep = ""
         if spaces then
-            b = b:gsub("^%s+", "")
-            if a ~= "" and b ~= "" and not a:match("%s$") and b:sub(1, 1) ~= ")" then sep = " " end
+            b = trimLeft(b)
+            if a ~= "" and b ~= "" and not isSpace(a:sub(-1)) and b:sub(1, 1) ~= ")" then sep = " " end
         end
         removeLines(y + 1, y + 1)
         setLine(y, a .. sep .. b)
@@ -1107,12 +1204,15 @@ end
 
 function increment(delta)
     local s = lines[cy]
+    -- the number under the cursor (from its first digit), else the next one on the line
     local i = cx
-    if s:sub(i, i):match("%d") then
-        while i > 1 and s:sub(i - 1, i - 1):match("%d") do i = i - 1 end
+    if isDigit(s:sub(i, i)) then
+        while i > 1 and isDigit(s:sub(i - 1, i - 1)) do i = i - 1 end
     end
-    local a, b = s:find("%d+", i)
-    if not a then return beep() end
+    while i <= #s and not isDigit(s:sub(i, i)) do i = i + 1 end
+    if i > #s then return beep() end
+    local a = i
+    local b = a + #scan.new(s, a):readWhile(isDigit) - 1
     if a > 1 and s:sub(a - 1, a - 1) == "-" then a = a - 1 end
     local str = string.format("%d", tonumber(s:sub(a, b)) + delta)
     setLine(cy, s:sub(1, a - 1) .. str .. s:sub(b + 1))
@@ -1133,7 +1233,10 @@ function repeatChange(n)
     local t = {}
     if c.reg then t[#t + 1] = '"'; t[#t + 1] = c.reg end
     local cnt = n or c.n
-    if cnt then for d in tostring(cnt):gmatch(".") do t[#t + 1] = d end end
+    if cnt then
+        local digits = tostring(cnt)
+        for i = 1, #digits do t[#t + 1] = digits:sub(i, i) end
+    end
     for _, k in ipairs(c.keys) do t[#t + 1] = k end
     for i = #t, 1, -1 do table.insert(queue, 1, t[i]) end
 end
@@ -1148,7 +1251,7 @@ function doCommand(k, n, reg)
         mode = "insert"
         insertMode("insert", cnt)
     elseif k == "I" then
-        cx = s:find("%S") or #s + 1
+        cx = firstNonSpace(s) or #s + 1
         mode = "insert"
         insertMode("insert", cnt)
     elseif k == "A" then
@@ -1207,9 +1310,7 @@ function doCommand(k, n, reg)
     elseif k == "~" then
         if #s == 0 then return beep() end
         local x2 = math.min(cx + cnt - 1, #s)
-        local part = s:sub(cx, x2):gsub("%a", function(c)
-            return c:match("%l") and c:upper() or c:lower()
-        end)
+        local part = swapCase(s:sub(cx, x2))
         setLine(cy, s:sub(1, cx - 1) .. part .. s:sub(x2 + 1))
         cx = math.min(x2 + 1, #s)
         setWant()
@@ -1229,7 +1330,7 @@ function doCommand(k, n, reg)
         if k2 == "Z" then ex("x") elseif k2 == "Q" then ex("q!") else beep() end
     elseif k == "m" then
         local c = getKey()
-        if c:match("^%a$") then marks[c] = { cy, cx } else beep() end
+        if isAlpha(c) then marks[c] = { cy, cx } else beep() end
     elseif k == "z" then
         local k2 = getKey()
         local v = viewHeight()
@@ -1288,7 +1389,7 @@ function normalCommand()
     local reg
     if k == '"' then
         reg = getKey()
-        if not reg:match('^[%w_"]$') then return beep() end
+        if not (isWordChar(reg) or reg == '"') then return beep() end
         k = getKey()
     end
     local n
@@ -1338,19 +1439,22 @@ function readCmdline(prefix, init, hist)
         elseif k == "<C-u>" then c.text, c.pos = t:sub(p + 1), 0
         elseif k == "<C-w>" then
             local a = p
-            while a > 0 and t:sub(a, a):match("%s") do a = a - 1 end
-            while a > 0 and not t:sub(a, a):match("%s") do a = a - 1 end
+            while a > 0 and isSpace(t:sub(a, a)) do a = a - 1 end
+            while a > 0 and not isSpace(t:sub(a, a)) do a = a - 1 end
             c.text, c.pos = t:sub(1, a) .. t:sub(p + 1), a
         elseif k == "<Tab>" then
-            local word = t:sub(1, p):match("(%S*)$")
+            -- the word before the cursor: back to a blank
+            local a = p
+            while a > 0 and not isSpace(t:sub(a, a)) do a = a - 1 end
+            local word = t:sub(a + 1, p)
             local got = fs.complete and fs.complete(word, shell and shell.dir() or "", true, true) or {}
             if got[1] then c.text, c.pos = t:sub(1, p) .. got[1] .. t:sub(p + 1), p + #got[1] end
         elseif k == "<C-r>" then
             local r = regs[getKey()]
-            local add = r and r.text:match("^[^\n]*") or ""
+            local add = r and firstLine(r.text) or ""
             c.text, c.pos = t:sub(1, p) .. add .. t:sub(p + 1), p + #add
         elseif k == "<Paste>" then
-            local add = (pasted or ""):match("^[^\n]*")
+            local add = firstLine(pasted or "")
             c.text, c.pos = t:sub(1, p) .. add .. t:sub(p + 1), p + #add
         elseif #k == 1 then
             c.text, c.pos = t:sub(1, p) .. k .. t:sub(p + 1), p + 1
@@ -1450,36 +1554,31 @@ end
 -- Ex commands
 --------------------------------------------------------------------------
 
--- Text up to an unescaped delimiter d, from i: the text (\d made d) and
--- the index after the delimiter (nil if it never came).
-function upTo(s, d, i)
-    local out = {}
-    while i <= #s do
-        local c = s:sub(i, i)
-        if c == "\\" and s:sub(i + 1, i + 1) == d then out[#out + 1] = d; i = i + 2
-        elseif c == "\\" then out[#out + 1] = s:sub(i, i + 1); i = i + 2
-        elseif c == d then return table.concat(out), i + 1
-        else out[#out + 1] = c; i = i + 1 end
-    end
-    return table.concat(out), nil
-end
-
--- A line address at i: the line (nil if there's none) and where it ends.
-function address(s, i)
+-- A line address at the scanner sc: the line (nil if there's none).  sc
+-- is left after it.  An address is a base and then any offsets:
+--   base:    .  this line       $  the last      a number
+--            'x  mark x ('' where the last jump was from)
+--            /pat/  ?pat?  the next line that matches, forward or back
+--                          (the closing delimiter may be left off)
+--   offset:  + or -, then a number (1 if there's none)
+-- Offsets with no base count from this line.
+function address(sc)
     local y
-    local c = s:sub(i, i)
-    if c == "." then y, i = cy, i + 1
-    elseif c == "$" then y, i = #lines, i + 1
-    elseif c:match("%d") then
-        local d = s:match("^%d+", i)
-        y, i = tonumber(d), i + #d
-    elseif c == "'" then
-        local m = s:sub(i + 1, i + 1)
+    local c = sc:peek()
+    if sc:accept(".") then
+        y = cy
+    elseif sc:accept("$") then
+        y = #lines
+    elseif isDigit(c) then
+        y = sc:readNumber()
+    elseif sc:accept("'") then
+        local m = sc:advance()
         local mk = m == "'" and marks["'"] or marks[m]
         if not mk then fail("E20: Mark not set") end
-        y, i = mk[1], i + 2
+        y = mk[1]
     elseif c == "/" or c == "?" then
-        local pat, j = upTo(s, c, i + 1)
+        sc:advance()
+        local pat = sc:readUntil(c)
         if pat == "" then
             if not lastSearch then fail("E35: No previous regular expression") end
             pat = lastSearch.pat
@@ -1487,15 +1586,13 @@ function address(s, i)
         lastSearch, hlHidden = { pat = pat, dir = c == "/" and 1 or -1 }, false
         y = search(pat, lastSearch.dir, cy, c == "/" and #lines[cy] or 1, 1)
         msg = nil
-        i = j or #s + 1
     end
-    while true do
-        local sign, num = s:match("^([%+%-])(%d*)", i)
-        if not sign then break end
-        y = (y or cy) + (sign == "+" and 1 or -1) * (num ~= "" and tonumber(num) or 1)
-        i = i + 1 + #num
+    while sc:peek() == "+" or sc:peek() == "-" do
+        local sign = sc:advance()
+        local num = sc:readNumber() or 1
+        y = (y or cy) + (sign == "+" and num or -num)
     end
-    return y, i
+    return y
 end
 
 function expandRep(rep, whole, caps)
@@ -1504,7 +1601,7 @@ function expandRep(rep, whole, caps)
         local c = rep:sub(i, i)
         if c == "\\" then
             local d = rep:sub(i + 1, i + 1)
-            if d:match("%d") then out[#out + 1] = d == "0" and whole or (caps[tonumber(d)] or "")
+            if isDigit(d) then out[#out + 1] = d == "0" and whole or (caps[tonumber(d)] or "")
             elseif d == "n" or d == "r" then out[#out + 1] = "\n"
             elseif d == "t" then out[#out + 1] = "\t"
             else out[#out + 1] = d end
@@ -1520,19 +1617,29 @@ function expandRep(rep, whole, caps)
     return table.concat(out)
 end
 
+-- What can be the delimiter of :s and :g: one character, not a letter,
+-- digit or blank, and not " or | (and for :s not &: that's :s&, below).
+function isPatternDelimiter(c)
+    return c ~= "" and not isAlnum(c) and not isSpace(c) and c ~= '"' and c ~= "|"
+end
+
+-- :s/pat/rep/flags (any delimiter for the /; \/ is one in the text), or
+-- :s [flags] and :& [&][flags] to do the last one again: a "&" first keeps
+-- its flags.
 function substitute(a1, a2, arg)
     local pat, rep, flags
     local d = arg:sub(1, 1)
-    if arg == "" or d:match("[%w%s\"|&]") then
+    if d == "&" or not isPatternDelimiter(d) then
         if not lastSub then fail("E35: No previous regular expression") end
         pat, rep = lastSub.pat, lastSub.rep
-        flags = arg:gsub("^&", lastSub.flags)
+        if d == "&" then flags = lastSub.flags .. arg:sub(2) else flags = arg end
     else
-        local i
-        pat, i = upTo(arg, d, 2)
-        if i then
-            rep, i = upTo(arg, d, i)
-            flags = i and arg:sub(i) or ""
+        local sc = scan.new(arg, 2)
+        local closed
+        pat, closed = sc:readUntil(d)
+        if closed then
+            rep, closed = sc:readUntil(d)
+            flags = closed and sc:readRest() or ""
         else
             rep, flags = "", ""
         end
@@ -1594,12 +1701,15 @@ function substitute(a1, a2, arg)
     if nl > 1 then say(subs .. " substitution" .. (subs == 1 and "" or "s") .. " on " .. nl .. " lines") end
 end
 
+-- :g/pat/cmd (any delimiter, as for :s): cmd, p if none, on each line that
+-- matches (invert: that doesn't).
 function global(a1, a2, arg, invert)
     local d = arg:sub(1, 1)
-    if d == "" or d:match("[%w%s\"|]") then fail("E476: Invalid command") end
-    local pat, i = upTo(arg, d, 2)
-    local cmd = i and arg:sub(i) or ""
-    if cmd:match("^%s*$") then cmd = "p" end
+    if not isPatternDelimiter(d) then fail("E476: Invalid command") end
+    local sc = scan.new(arg, 2)
+    local pat, closed = sc:readUntil(d)
+    local cmd = closed and sc:readRest() or ""
+    if isBlank(cmd) then cmd = "p" end
     if pat == "" then
         if not lastSearch then fail("E35: No previous regular expression") end
         pat = lastSearch.pat
@@ -1637,9 +1747,18 @@ function setOption(word)
         say(table.concat(t, " "))
         return
     end
-    local key, val = word:match("^([%w]+)[=:](.*)$")
-    local query = word:match("^(%w+)%?$")
-    local bang = word:match("^(%w+)!$")
+    -- word: name, name=value, name:value, name? (show it) or name! (flip
+    -- it); a name is letters and digits.  Anything else is a name too, to
+    -- be refused below.
+    local key, val, query, bang
+    local sc = scan.new(word)
+    local name = sc:readWhile(isAlnum)
+    if name ~= "" then
+        local after = sc:rest()
+        if sc:accept("=") or sc:accept(":") then key, val = name, sc:readRest()
+        elseif after == "?" then query = name
+        elseif after == "!" then bang = name end
+    end
     key = key or query or bang or word
     local no = false
     local function lookup(k)
@@ -1676,6 +1795,38 @@ end
 
 function is(name, full, min) return #name >= min and full:sub(1, #name) == name end
 
+isExSymbol = scan.oneOf("!&<>=#")
+isOneLetterName = scan.oneOf("sgv")
+isSpaceOrColon = function(c) return isSpace(c) or c == ":" end
+isShiftChar = scan.oneOf("<>")
+
+-- The name at the start of an ex command (after its range) and the text
+-- after it.  A name is a run of letters, or one of ! & < > = #.  s, g or v
+-- with a delimiter straight after is the whole name: :s/a/b/, :g!x!d.
+function commandName(rest)
+    local first, second = rest:sub(1, 1), rest:sub(2, 2)
+    if isOneLetterName(first) and second ~= "" and not isAlnum(second) and not isSpace(second) then
+        return first, rest:sub(2)
+    end
+    local sc = scan.new(rest)
+    local name = sc:readWhile(isAlpha)
+    if name == "" and isExSymbol(sc:peek()) then name = sc:advance() end
+    return name, sc:rest()
+end
+
+-- The number at the end of s (blanks may follow it), or nil.
+function trailingNumber(s)
+    local stop = #s
+    while stop >= 1 and isSpace(s:sub(stop, stop)) do stop = stop - 1 end
+    local start = stop
+    while start >= 1 and isDigit(s:sub(start, start)) do start = start - 1 end
+    if start == stop then return nil end
+    return tonumber(s:sub(start + 1, stop))
+end
+
+-- :kx, the mark command with its letter run on
+function isMarkK(name) return #name == 2 and name:sub(1, 1) == "k" and isAlpha(name:sub(2)) end
+
 function shellCommand(cmd)
     term.setCursorBlink(false)
     term.setBackgroundColour(colours.black)
@@ -1691,19 +1842,27 @@ function shellCommand(cmd)
     needRender = true
 end
 
+-- An ex command line:  [range] name[!] [argument]
+--   range:  %  every line;  address  one line;  address,address  from one
+--           to the other;  address;address  the same, but the cursor goes
+--           to the first before the second is read.  An address left out
+--           of a pair is this line.
+-- Blanks and colons before it are skipped; " starts a comment.
 function exRun(line)
-    local s = line:gsub("^[%s:]+", "")
-    if s == "" or s:sub(1, 1) == '"' then return end
-    local a1, a2, i, ranged
-    if s:sub(1, 1) == "%" then
-        a1, a2, i, ranged = 1, #lines, 2, true
+    local sc = scan.new(line)
+    sc:readWhile(isSpaceOrColon)
+    if sc:atEnd() or sc:peek() == '"' then return end
+    local a1, a2, ranged
+    if sc:accept("%") then
+        a1, a2, ranged = 1, #lines, true
     else
-        local first
-        first, i = address(s, 1)
+        local first = address(sc)
         local second
-        if s:sub(i, i) == "," or s:sub(i, i) == ";" then
-            if s:sub(i, i) == ";" and first then cy = clamp(first, 1, #lines) end
-            second, i = address(s, i + 1)
+        local sep = sc:peek()
+        if sep == "," or sep == ";" then
+            if sep == ";" and first then cy = clamp(first, 1, #lines) end
+            sc:advance()
+            second = address(sc)
             second = second or cy
             first = first or cy
         end
@@ -1711,7 +1870,8 @@ function exRun(line)
         a1, a2 = first or cy, second or first or cy
     end
     if a1 > a2 then a1, a2 = a2, a1 end
-    local rest = s:sub(i):gsub("^%s+", "")
+    sc:skipSpaces()
+    local rest = sc:rest()
     if rest == "" then
         if ranged then
             if a2 < 1 or a2 > #lines then a2 = clamp(a2, 1, #lines) end
@@ -1723,14 +1883,10 @@ function exRun(line)
         return
     end
     if ranged and (a1 < 1 or a2 > #lines) then fail("E16: Invalid range") end
-    local name = rest:match("^%a+") or rest:match("^[!&<>=#]") or ""
-    local after = rest:sub(#name + 1)
-    -- one letter then a delimiter: :s/a/b/ and :g/x/d (their names take no more letters)
-    local sub = rest:match("^([sgv])[^%w%s]")
-    if sub then name, after = sub, rest:sub(2) end
+    local name, after = commandName(rest)
     local bang = false
     if name ~= "!" and after:sub(1, 1) == "!" then bang, after = true, after:sub(2) end
-    local arg = after:gsub("^%s+", "")
+    local arg = trimLeft(after)
     if name == "!" then
         shellCommand(after)
     elseif name == "wq" or name == "x" or is(name, "xit", 2) or name == "wqa" or name == "xa" or is(name, "exit", 3) then
@@ -1765,7 +1921,7 @@ function exRun(line)
         cx = firstNonBlank(cy)
     elseif is(name, "set", 2) then
         if arg == "" then setOption("") end
-        for word in arg:gmatch("%S+") do setOption(word) end
+        for _, word in ipairs(scan.words(arg)) do setOption(word) end
     elseif is(name, "syntax", 2) and vimMode then
         if arg == "on" or arg == "enable" then opt.syntax = true
         elseif arg == "off" then opt.syntax = false
@@ -1779,20 +1935,23 @@ function exRun(line)
         if not ranged then a1, a2 = 1, #lines end
         global(a1, a2, arg, name:sub(1, 1) == "v" or bang)
     elseif is(name, "delete", 1) or is(name, "yank", 1) then
-        local reg = arg:match("^[%a\"_]")
-        local num = tonumber(arg:match("(%d+)%s*$") or "")
+        -- :d [x] [count]: a register (a letter, " or _), a count at the end
+        local c = arg:sub(1, 1)
+        local reg = (isAlpha(c) or c == '"' or c == "_") and c or nil
+        local num = trailingNumber(arg)
         if num then a1 = a2; a2 = math.min(#lines, a1 + num - 1) end
         apply(name:sub(1, 1) == "d" and "d" or "y", reg, a1, 1, a2, 0, "line")
     elseif is(name, "put", 2) then
         cy = a2
-        put(arg:match("^%S"), not bang, 1)
+        local c = arg:sub(1, 1)
+        put((c ~= "" and not isSpace(c)) and c or nil, not bang, 1)
     elseif is(name, "join", 1) then
         join(a1, math.max(2, a2 - a1 + 1), not bang)
     elseif name == ">" or name == "<" then
-        local times = 1 + #(after:match("^[<>]*"))
+        local times = 1 + #scan.new(after):readWhile(isShiftChar)
         shiftLines(a1, a2, name == ">" and 1 or -1, times)
     elseif is(name, "move", 1) or is(name, "copy", 2) or name == "t" then
-        local dest = address(arg, 1)
+        local dest = address(scan.new(arg))
         if not dest then fail("E14: Invalid address") end
         local chunk = {}
         for y = a1, a2 do chunk[#chunk + 1] = lines[y] end
@@ -1817,8 +1976,8 @@ function exRun(line)
     elseif is(name, "print", 1) or name == "#" or is(name, "number", 2) then
         cy = a2
         say(((name == "#" or name:sub(1, 1) == "n") and (a2 .. " ") or "") .. lines[a2])
-    elseif name:match("^k%a$") or is(name, "mark", 2) then
-        local m = name:match("^k(%a)$") or arg:match("^%a")
+    elseif isMarkK(name) or is(name, "mark", 2) then
+        local m = isMarkK(name) and name:sub(2) or (isAlpha(arg:sub(1, 1)) and arg:sub(1, 1)) or nil
         if not m then fail("E471: Argument required") end
         marks[m] = { a2, 1 }
     elseif is(name, "undo", 1) then
@@ -1896,7 +2055,7 @@ function V.main(args, o)
         local f = fs.open(rc, "r")
         local text = f and f.readAll() or ""
         if f then f.close() end
-        for l in text:gmatch("[^\r\n]+") do
+        for _, l in ipairs(nonEmptyLines(text)) do
             local ok, e = pcall(exRun, l)
             if not ok then opening = rc .. ": " .. tostring(e) end
         end

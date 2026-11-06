@@ -17,8 +17,8 @@ is their help, `sim/` tests them):
 - `turtle/`: the turtle programs and `turtlelib`, the library they share;
 - `pc/`: programs for a plain computer;
 - `bin/`: the shell's utilities, `git` and ccsh, for any computer;
-- `lib/`: the modules the programs require (`cu`, `regex`, `pager`, `net`,
-  `proc`, `telnet`, `jbod`).
+- `lib/`: the modules the programs require (`cu`, `regex`, `scan`, `pager`,
+  `net`, `proc`, `telnet`, `jbod`).
 
 `deploy/setup` installs it, and `deploy/boot` puts `bin/` and `turtle/`
 (or `pc/`) on the path at every boot; see [Install](#install). On a server with the ccnix mod, they're in every
@@ -1765,6 +1765,19 @@ ROM's), else the one beside `bin/`:
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path
 local cu = require("cu").init("cat", "cat [-u] [file...]")
 ```
+
+### Parsing: lib/scan, not patterns
+
+The small languages in ccnix (vi's ex command lines, the colours `vim`
+gives Lua and ccsh) are read by hand-written scanners on `lib/scan.lua`,
+not by Lua patterns: a scanner is a place in a string with `peek`,
+`advance`, `accept` and `expect`, and readers for the usual pieces
+(`readName`, `readNumber`, `readQuoted`, `readUntil` a delimiter, with
+backslash escapes), plus named character tests (`isDigit`, `isNameChar`,
+`isSpace` ...). Each step of a parser then has a name and a comment
+saying what grammar it reads, and errors give the column. Plain-text
+finds are still fine; `lib/regex` is for the regexes users type (`grep`,
+vi's `/` and `:s`). The header of `lib/scan.lua` lists the API.
 
 ## Simulators
 
