@@ -843,24 +843,40 @@ check("finished", logHas("^Done"))
 -- 13p. the walk out over a crevasse an older run bridged one block wide
 --      (a cobblestone floor under the wall column, z=20..25, open under
 --      the other two), carrying no bulk blocks from the start (its bottom
---      chest empty) but with some in home 1's bulk chest: it takes them
---      as it passes, sees the patch under its lane and fills the floor
---      under the other columns there
-dugTunnel()
-Mine.files["mine.job"] = "3 3 32 16 2 active"
-for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
-table.insert(chestAt(0, -1, 16), { name = "minecraft:cobblestone", count = 64 })
-for _, z in ipairs({ 10, 29 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
-for z = 20, 25 do
-    set(0, -1, z, { name = "minecraft:cobblestone" })
-    for x = 1, 2 do for y = -4, -1 do set(x, y, z, nil) end end
+--      chest empty) but with some in home 1's bulk chest.  Dry, the patch
+--      is left be (an older run's patches are everywhere: going across
+--      for each costs more than it's worth); with water getting in beside
+--      it (through the far wall at z=22), it takes bulk blocks from home
+--      1 as it passes, and fills the floor under the other columns there
+local function bridged(water)
+    dugTunnel()
+    Mine.files["mine.job"] = "3 3 32 16 2 active"
+    for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
+    table.insert(chestAt(0, -1, 16), { name = "minecraft:cobblestone", count = 64 })
+    for _, z in ipairs({ 10, 29 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
+    for z = 20, 25 do
+        set(0, -1, z, { name = "minecraft:cobblestone" })
+        for x = 1, 2 do for y = -4, -1 do set(x, y, z, nil) end end
+    end
+    WATERY = water
+    if water then
+        set(3, 1, 22, { name = "minecraft:water", level = 0 })
+        flow(3, 1, 22)
+        settleWater()
+    end
+    startAt()
+    Mine.files[".turtlepos"] = "0 0 0 0 flat"
+    FUEL = 3000
+    run("--resume")
+    WATERY = false
 end
-startAt()
-Mine.files[".turtlepos"] = "0 0 0 0 flat"
-FUEL = 3000
-run("--resume")
+bridged(false)
+check("a dry patch under the floor lane: left be, no going across (a dry walk out and back: 64 moves)",
+    Mine.moves <= 70, Mine.moves .. " moves")
+bridged(true)
 checkFloor(0, 2, -1, 1, 32)
-check("... the bulk blocks taken from home 1 on the way", logHas("Back at home 2") and not logHas("Left %d+ floor holes"))
+check("... with water beside it: the floor beside it filled, from bulk blocks taken at home 1 on the way",
+    logHas("Back at home 2") and not logHas("Left %d+ floor holes"))
 check("finished", logHas("^Done"))
 
 -- 13q. the walk out along 64-block segments, water getting in through the

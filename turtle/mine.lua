@@ -91,9 +91,9 @@
 --    gets in and sealing that (then lighting what the water kept dark;
 --    water coming from the segment after is left to that one, gone over
 --    next, rather than chased, or the segment walked again for it);
---    where the floor under that lane has a hole, or a patch (cobblestone:
---    a hole filled before, a bridge), it goes along the other columns'
---    floor there too and fills what's open;
+--    where it met water and the floor under that lane has a hole, or a
+--    patch (cobblestone: a hole filled before, a bridge), it goes along
+--    the other columns' floor there too and fills what's open;
 --    at each home it moves any bulk in the valuables chest down into the
 --    bulk chest.
 --  * Fuel: the tank always keeps enough to get back to the start; the
@@ -2293,9 +2293,9 @@ end
 -- dry (twice at most), rather than the whole length again.  Only if it's
 -- still wet there (it couldn't follow the water to where it gets in:
 -- coming in high up, or by many ways) does it look at every side of the
--- tunnel there (sweep).  Where the
--- floor lane's floor had a hole or a patch (a hole filled before, a
--- bridge), it goes along the other columns' floor there too.  With
+-- tunnel there (sweep).  Where it met water and the floor lane's floor
+-- had a hole or a patch (a hole filled before, a bridge), it goes along
+-- the other columns' floor there too.  With
 -- lights, the first walk goes along the floor by the lit wall (both, in a
 -- tunnel lit from both) instead of that group's middle, and every torch
 -- missing there is put back (or put in, where there never was one).
@@ -2309,6 +2309,7 @@ function repair(z1, z2, done, aheadDug)
     repairRange, fromOutside = { z1 = z1, z2 = z2, aheadDug = aheadDug }, false
     local marks = {}                       -- z where the floor lane found a hole, or a patch
     local wetZ = {}                        -- z where it waded into water
+    local wetAll = {}                      -- (all of them, every walk)
     -- the stretches round the given z (pad either side; near ones joined)
     local function spansOf(zs, pad)
         table.sort(zs)
@@ -2345,7 +2346,10 @@ function repair(z1, z2, done, aheadDug)
                         if z ~= to then
                             local wet0 = stats.wet
                             go(dz > 0 and 0 or 2)
-                            if stats.wet > wet0 then wetZ[#wetZ + 1] = T.pos.z end
+                            if stats.wet > wet0 then
+                                wetZ[#wetZ + 1] = T.pos.z
+                                wetAll[#wetAll + 1] = T.pos.z
+                            end
                         end
                     end
                 end
@@ -2396,10 +2400,19 @@ function repair(z1, z2, done, aheadDug)
         for _, sp in ipairs(spansOf(wetZ, WET_REACH)) do sweep(sp.lo, sp.hi) end
     end
     -- a hole under the floor lane, or a patch (a hole filled before, a
-    -- bridge): the floor under the other columns may be open there too
-    -- (a crevasse, a cave), so along their bottom lanes there
-    if #marks > 0 then
-        walk(function(lane) return lane.y == Y0 and not first(lane) end, spansOf(marks, 1))
+    -- bridge), where it met water: the floor under the other columns may
+    -- be open there too (a crevasse, a cave, water getting in from under
+    -- it), so along their bottom lanes there.  Patches where it's dry are
+    -- left be: an older run filled where ore was dug out of the floor all
+    -- along, and going across for each would cost more than it's worth.
+    local near = {}
+    for _, z in ipairs(marks) do
+        for _, w in ipairs(wetAll) do
+            if math.abs(z - w) <= WET_REACH then near[#near + 1] = z; break end
+        end
+    end
+    if #near > 0 then
+        walk(function(lane) return lane.y == Y0 and not first(lane) end, spansOf(near, 1))
     end
     unplug()
     repairing, repairRange = false, nil
