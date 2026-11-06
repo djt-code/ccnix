@@ -863,6 +863,37 @@ checkFloor(0, 2, -1, 1, 32)
 check("... the bulk blocks taken from home 1 on the way", logHas("Back at home 2") and not logHas("Left %d+ floor holes"))
 check("finished", logHas("^Done"))
 
+-- 13q. the walk out along 64-block segments, water getting in through the
+--      far wall (x=3) in three blocks at z=96..97: it dries it, going back
+--      over just where it found water rather than the whole segment again
+setup(stock(4, 64))
+for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do set(x, y, z, nil) end end end
+for _, z in ipairs({ 64, 128 }) do set(-1, 0, z, chest()); set(0, -1, z, chest()) end
+Mine.files = { ["mine.job"] = "3 3 128 64 2 active" }
+Mine.inv = {}
+EQ = { right = "minecraft:diamond_pickaxe" }
+for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
+table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
+table.insert(chestAt(0, -1, 64), { name = "minecraft:cobblestone", count = 64 })
+for _, z in ipairs({ 19, 38, 57, 83, 102, 121 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
+WATERY = true
+for _, p in ipairs({ { 3, 0, 96 }, { 3, 1, 96 }, { 3, 0, 97 } }) do set(p[1], p[2], p[3], { name = "minecraft:water", level = 0 }) end
+for _, p in ipairs({ { 3, 0, 96 }, { 3, 1, 96 }, { 3, 0, 97 } }) do flow(p[1], p[2], p[3]) end
+settleWater()
+local farWet = 0
+for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farWet = farWet + 1 end end end end
+startAt()
+Mine.files[".turtlepos"] = "0 0 0 0 flat"
+FUEL = 8000
+run("--resume")
+WATERY = false
+local farAfter = 0
+for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farAfter = farAfter + 1 end end end end
+check("water through the far wall of a 64-block segment: dried", farWet > 50 and farAfter == 0,
+    farWet .. " wet before, " .. farAfter .. " after")
+check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.moves < 1260,
+    Mine.moves .. " moves")
+
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
 --      floor level near z=24, its water spread along the floor: `mine
 --      reset --home 1` and `mine --resume` go over the segment, follow

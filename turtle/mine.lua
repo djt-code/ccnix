@@ -2284,42 +2284,65 @@ end
 -- flat and on down any slope, so it reaches one of them (if the middle
 -- one's floor isn't dug yet, another of the three that is).  Water it
 -- finds is getting in, so it follows it to where it comes in and seals
--- that (see dry).  If it found any, it walks the floor once more, back the
--- other way, to see it's dry (twice at most).  Only if the floor is still
--- wet after that (it couldn't follow the water up from it: a tunnel full
--- of water coming in high up) does it walk the other lanes.  With
+-- that (see dry).  Then it goes back over just where it found water (and
+-- as far as water spreads either side), tracing it afresh, till that's
+-- dry (twice at most), rather than the whole length again.  Only if it's
+-- still wet there (it couldn't follow the water up from the floor: water
+-- coming in high up) does it walk the other lanes, there.  Where the
+-- floor lane's floor had a hole or a patch (a hole filled before, a
+-- bridge), it goes along the other columns' floor there too.  With
 -- lights, the first walk goes along the floor by the lit wall (both, in a
 -- tunnel lit from both) instead of that group's middle, and every torch
 -- missing there is put back (or put in, where there never was one).
 -- Nothing else is looked at again.  `done` picks the lanes dug before
 -- (nil: all); `aheadDug`: the tunnel past z2 is dug, and gone over after
 -- (water from there is left to that).  It ends at `home`.
+WET_REACH = 8        -- how far either side of where it found water it looks again
 function repair(z1, z2, done, aheadDug)
     local lanes = planLanes()
     repairing = true
     repairRange, fromOutside = { z1 = z1, z2 = z2, aheadDug = aheadDug }, false
     local marks = {}                       -- z where the floor lane found a hole, or a patch
-    local function walk(pick)
-        -- (starting from the end it's nearer)
-        local n = math.abs(T.pos.z - z2) < math.abs(T.pos.z - z1) and 1 or 0
-        for i, lane in ipairs(lanes) do
-            if (not done or done(i)) and pick(lane) then
-                local from, to = z1, z2
-                if n % 2 == 1 then from, to = z2, z1 end
-                n = n + 1
-                alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
-                local dz = to >= from and 1 or -1
-                for z = from, to, dz do
-                    if isFloor(neighbour("down")) then         -- the floor too (no turning)
-                        local filled0 = stats.filled
-                        local ok, b = look("down")
-                        fill("down")
-                        -- (a patch it put there itself this time isn't one from before)
-                        local patch = ok and PATCH[b.name] and not filled[key(neighbour("down"))]
-                        if stats.filled > filled0 or patch then marks[#marks + 1] = z end
+    local wetZ = {}                        -- z where it waded into water
+    -- the stretches round the given z (pad either side; near ones joined)
+    local function spansOf(zs, pad)
+        table.sort(zs)
+        local spans = {}
+        for _, z in ipairs(zs) do
+            local lo, hi = math.max(z1, z - pad), math.min(z2, z + pad)
+            local sp = spans[#spans]
+            if sp and lo <= sp.hi + 1 then sp.hi = math.max(sp.hi, hi) else spans[#spans + 1] = { lo = lo, hi = hi } end
+        end
+        return spans
+    end
+    -- along the picked lanes, over the given stretches (nil: z1..z2)
+    local function walk(pick, spans)
+        for _, sp in ipairs(spans or { { lo = z1, hi = z2 } }) do
+            -- (starting from the end it's nearer)
+            local n = math.abs(T.pos.z - sp.hi) < math.abs(T.pos.z - sp.lo) and 1 or 0
+            for i, lane in ipairs(lanes) do
+                if (not done or done(i)) and pick(lane) then
+                    local from, to = sp.lo, sp.hi
+                    if n % 2 == 1 then from, to = sp.hi, sp.lo end
+                    n = n + 1
+                    alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
+                    local dz = to >= from and 1 or -1
+                    for z = from, to, dz do
+                        if isFloor(neighbour("down")) then         -- the floor too (no turning)
+                            local filled0 = stats.filled
+                            local ok, b = look("down")
+                            fill("down")
+                            -- (a patch it put there itself this time isn't one from before)
+                            local patch = ok and PATCH[b.name] and not filled[key(neighbour("down"))]
+                            if stats.filled > filled0 or patch then marks[#marks + 1] = z end
+                        end
+                        lightHere()
+                        if z ~= to then
+                            local wet0 = stats.wet
+                            go(dz > 0 and 0 or 2)
+                            if stats.wet > wet0 then wetZ[#wetZ + 1] = T.pos.z end
+                        end
                     end
-                    lightHere()
-                    if z ~= to then go(dz > 0 and 0 or 2) end
                 end
             end
         end
@@ -2343,44 +2366,35 @@ function repair(z1, z2, done, aheadDug)
     local function first(lane) return lane.y == Y0 and middle[lane.x] end
     local before, sealed = stats.wet, stats.sealed
     walk(first)
-    -- found water: the floor again (the other way), till it's dry; not
-    -- when it came from past the far end and nothing here was sealed:
-    -- going over it again would find the same
+    -- found water and sealed where some got in: back over just where it
+    -- was, till it's dry, tracing it afresh (what it sealed changes where
+    -- the rest comes from).  Sealed nothing: going over it again would
+    -- find the same.
     for _ = 1, 2 do
-        if stats.wet == before or (fromOutside and stats.sealed == sealed) then break end
+        if stats.wet == before or stats.sealed == sealed then break end
         before, sealed = stats.wet, stats.sealed
-        walk(first)
+        local where = spansOf(wetZ, WET_REACH)
+        -- traced afresh from each end of each wet stretch (every block
+        -- again would follow the same water to the same place)
+        local ends = {}
+        for _, sp in ipairs(spansOf(wetZ, 0)) do ends[sp.lo], ends[sp.hi] = true, true end
+        for k in pairs(unfed) do
+            if ends[tonumber(k:match("([^,]+)$"))] then unfed[k] = nil end
+        end
+        wetZ = {}
+        walk(first, where)
     end
-    -- still wet: it couldn't follow the water up from the floor (a tunnel
-    -- full of it, its way in high up): the other lanes, which pass it;
+    -- still wet there: it couldn't follow all the water up from the
+    -- floor (its way in high up): the other lanes, which pass it, there;
     -- not for water from past the ends, which they can't reach either
     if stats.wet > before and not fromOutside then
-        walk(function(lane) return not first(lane) end)
-    elseif #marks > 0 then
-        -- a hole under the floor lane, or a patch (a hole filled before,
-        -- a bridge): the floor under the other columns may be open there
-        -- too (a crevasse, a cave), so along their bottom lanes there
-        table.sort(marks)
-        local spans = {}
-        for _, z in ipairs(marks) do
-            local sp = spans[#spans]
-            if sp and z - sp.hi <= 4 then sp.hi = z else spans[#spans + 1] = { lo = z, hi = z } end
-        end
-        for _, sp in ipairs(spans) do
-            local lo, hi = math.max(z1, sp.lo - 1), math.min(z2, sp.hi + 1)
-            for i, lane in ipairs(lanes) do
-                if lane.y == Y0 and not first(lane) and (not done or done(i)) then
-                    local from, to = lo, hi
-                    if math.abs(T.pos.z - hi) < math.abs(T.pos.z - lo) then from, to = hi, lo end
-                    alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
-                    local dz = to >= from and 1 or -1
-                    for z = from, to, dz do
-                        if isFloor(neighbour("down")) then fill("down") end
-                        if z ~= to then go(dz > 0 and 0 or 2) end
-                    end
-                end
-            end
-        end
+        walk(function(lane) return not first(lane) end, spansOf(wetZ, WET_REACH))
+    end
+    -- a hole under the floor lane, or a patch (a hole filled before, a
+    -- bridge): the floor under the other columns may be open there too
+    -- (a crevasse, a cave), so along their bottom lanes there
+    if #marks > 0 then
+        walk(function(lane) return lane.y == Y0 and not first(lane) end, spansOf(marks, 1))
     end
     unplug()
     repairing, repairRange = false, nil
