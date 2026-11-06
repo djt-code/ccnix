@@ -840,6 +840,29 @@ check("... and the torch there once the water was seen to", Mine.isTorch(get(-1,
     tostring((get(-1, 0, 29) or {}).name))
 check("finished", logHas("^Done"))
 
+-- 13p. the walk out over a crevasse an older run bridged one block wide
+--      (a cobblestone floor under the wall column, z=20..25, open under
+--      the other two), carrying no bulk blocks from the start (its bottom
+--      chest empty) but with some in home 1's bulk chest: it takes them
+--      as it passes, sees the patch under its lane and fills the floor
+--      under the other columns there
+dugTunnel()
+Mine.files["mine.job"] = "3 3 32 16 2 active"
+for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
+table.insert(chestAt(0, -1, 16), { name = "minecraft:cobblestone", count = 64 })
+for _, z in ipairs({ 10, 29 }) do set(-1, 0, z, { name = "minecraft:wall_torch", on = "-2,0," .. z }) end
+for z = 20, 25 do
+    set(0, -1, z, { name = "minecraft:cobblestone" })
+    for x = 1, 2 do for y = -4, -1 do set(x, y, z, nil) end end
+end
+startAt()
+Mine.files[".turtlepos"] = "0 0 0 0 flat"
+FUEL = 3000
+run("--resume")
+checkFloor(0, 2, -1, 1, 32)
+check("... the bulk blocks taken from home 1 on the way", logHas("Back at home 2") and not logHas("Left %d+ floor holes"))
+check("finished", logHas("^Done"))
+
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
 --      floor level near z=24, its water spread along the floor: `mine
 --      reset --home 1` and `mine --resume` go over the segment, follow

@@ -82,13 +82,18 @@
 --    leaves them in the top chest at the start.  Supplies stay in the last
 --    home, so `mine --resume` can carry on from there (bringing any new
 --    chests and fuel from the start's top chest with it).  On that walk
---    out it goes over each segment as when resuming from an earlier home:
+--    out it takes bulk blocks from each home's bulk chest as it passes
+--    (for sealing water and filling holes), and goes over each segment as
+--    when resuming from an earlier home:
 --    along the floor by the lit wall, putting back any torch that's
 --    missing (one that's there, a wall torch as the game calls it once
 --    hung, is left alone), and following any water it meets to where it
 --    gets in and sealing that (then lighting what the water kept dark;
 --    water coming from the segment after is left to that one, gone over
 --    next, rather than chased, or the segment walked again for it);
+--    where the floor under that lane has a hole, or a patch (cobblestone:
+--    a hole filled before, a bridge), it goes along the other columns'
+--    floor there too and fills what's open;
 --    at each home it moves any bulk in the valuables chest down into the
 --    bulk chest.
 --  * Fuel: the tank always keeps enough to get back to the start; the
@@ -289,6 +294,9 @@ function isBulk(it)
 end
 
 -- Bulk blocks that can seal lava and water (solid, and they don't fall).
+-- What a hole in the floor is filled with that doesn't come out of the
+-- ground as it is: a floor block of one of these is a hole filled before.
+PATCH = { ["minecraft:cobblestone"] = true, ["minecraft:cobbled_deepslate"] = true }
 FILLER = {}
 for _, n in ipairs({ "cobblestone", "cobbled_deepslate", "netherrack", "dirt", "andesite",
         "diorite", "granite", "tuff", "calcite", "blackstone", "basalt", "end_stone",
@@ -975,11 +983,25 @@ function fill(d)
         stats.filled = stats.filled + 1
         return true
     end
+    local n = neighbour(d)
     if not warnedFloor then
         warnedFloor = true
-        print("Couldn't fill a hole in the floor at (" .. key(neighbour(d)) .. "); no bulk blocks left.")
+        print("Couldn't fill a hole in the floor at (" .. key(n) .. "); no bulk blocks left.")
     end
+    holesLeft[#holesLeft + 1] = n.z
     return false
+end
+
+-- Floor holes left open for want of bulk blocks since the last report:
+-- said at the end of each segment (the next time it goes over the
+-- tunnel, it fills them).
+holesLeft = {}
+function reportHoles()
+    if #holesLeft == 0 then return end
+    table.sort(holesLeft)
+    print(string.format("Left %d floor holes open at z=%d..%d (no bulk blocks to fill them): going over the tunnel again fills them.",
+        #holesLeft, holesLeft[1], holesLeft[#holesLeft]))
+    holesLeft = {}
 end
 
 
@@ -2276,6 +2298,7 @@ function repair(z1, z2, done, aheadDug)
     local lanes = planLanes()
     repairing = true
     repairRange, fromOutside = { z1 = z1, z2 = z2, aheadDug = aheadDug }, false
+    local marks = {}                       -- z where the floor lane found a hole, or a patch
     local function walk(pick)
         -- (starting from the end it's nearer)
         local n = math.abs(T.pos.z - z2) < math.abs(T.pos.z - z1) and 1 or 0
@@ -2287,7 +2310,14 @@ function repair(z1, z2, done, aheadDug)
                 alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
                 local dz = to >= from and 1 or -1
                 for z = from, to, dz do
-                    if isFloor(neighbour("down")) then fill("down") end   -- the floor too (no turning)
+                    if isFloor(neighbour("down")) then         -- the floor too (no turning)
+                        local filled0 = stats.filled
+                        local ok, b = look("down")
+                        fill("down")
+                        -- (a patch it put there itself this time isn't one from before)
+                        local patch = ok and PATCH[b.name] and not filled[key(neighbour("down"))]
+                        if stats.filled > filled0 or patch then marks[#marks + 1] = z end
+                    end
                     lightHere()
                     if z ~= to then go(dz > 0 and 0 or 2) end
                 end
@@ -2326,6 +2356,31 @@ function repair(z1, z2, done, aheadDug)
     -- not for water from past the ends, which they can't reach either
     if stats.wet > before and not fromOutside then
         walk(function(lane) return not first(lane) end)
+    elseif #marks > 0 then
+        -- a hole under the floor lane, or a patch (a hole filled before,
+        -- a bridge): the floor under the other columns may be open there
+        -- too (a crevasse, a cave), so along their bottom lanes there
+        table.sort(marks)
+        local spans = {}
+        for _, z in ipairs(marks) do
+            local sp = spans[#spans]
+            if sp and z - sp.hi <= 4 then sp.hi = z else spans[#spans + 1] = { lo = z, hi = z } end
+        end
+        for _, sp in ipairs(spans) do
+            local lo, hi = math.max(z1, sp.lo - 1), math.min(z2, sp.hi + 1)
+            for i, lane in ipairs(lanes) do
+                if lane.y == Y0 and not first(lane) and (not done or done(i)) then
+                    local from, to = lo, hi
+                    if math.abs(T.pos.z - hi) < math.abs(T.pos.z - lo) then from, to = hi, lo end
+                    alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
+                    local dz = to >= from and 1 or -1
+                    for z = from, to, dz do
+                        if isFloor(neighbour("down")) then fill("down") end
+                        if z ~= to then go(dz > 0 and 0 or 2) end
+                    end
+                end
+            end
+        end
     end
     unplug()
     repairing, repairRange = false, nil
@@ -2338,6 +2393,7 @@ end
 function repairSegment(z1, z2, aheadDug)
     print(string.format("Going over z=%d..%d (dug already) for water getting in.", z1, z2))
     repair(z1, z2, nil, aheadDug)
+    reportHoles()
 end
 
 -- Mine the segment from z1 to z2, starting and ending at the home.
@@ -2406,6 +2462,7 @@ function mineSegment(z1, z2, from)
     -- water got in while it dug (walls aren't looked at till the survey):
     -- go over the floor for any still getting in
     if hasScanner and stats.wet > wet0 then repair(z1, z2) end
+    reportHoles()
     tunnelHome()
 end
 
@@ -2939,6 +2996,9 @@ T.withTool(pickaxe, function()
                 lights and " and lights out" or ""))
             for k = 0, last.k - 1 do
                 local from = homeAt(k)
+                -- bulk blocks for sealing water and filling holes on the
+                -- way, from each home's bulk chest as it passes
+                restockSet(from.bulk, FILLER, fillerKeep)
                 home = homeAt(k + 1)               -- (repair ends at home)
                 repair(from.z + 1, home.z, nil, k + 1 < last.k)
                 bulkOutOfValuables(home)           -- (at each home anyway: bulk down where it belongs)
@@ -2953,6 +3013,7 @@ T.withTool(pickaxe, function()
             refuel()
             restockKit()
             inTrip = false
+            reportHoles()
             print(string.format("Back at home %d (z=%d).", home.k, home.z))
         end
         -- resuming from an earlier home: the supplies (fuel among them) are
