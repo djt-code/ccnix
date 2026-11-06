@@ -37,11 +37,6 @@ section.
 
 ## ccsh
 
-- **Backspace at the start of the line** (0.29.2). At the prompt: type
-  `ab`, Home, Backspace twice, type `x`: the line reads `xab`; on an empty
-  line, Backspace a few times then type: the letters come in order.
-  Delete at the end of a line does nothing.
-
 - **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
   (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
@@ -106,29 +101,21 @@ section.
 
 ## Network
 
-- **ping until Ctrl+T, and its options** (0.29.0). `ping <host>` with no
-  `-c` runs until Ctrl+T, under ccsh and inside a job too, and Ctrl+T still
-  prints the summary with rtt min/avg/max/mdev (times in multiples of 50
-  ms). `ping -c 0 -q`, and `ping -w 5 <host>` stopping on time. `ping -s
-  1000` and `ping -s 65507` through the gateway, in NAT mode (the gateway's
-  own address) and in TUN mode (a real host): replies show bytes=N with no
-  "(sent ...)" or "changed" note.
-- **`ip route get` and `ip neigh`** (0.29.0). `ip route get <addr>` for a
-  host through the router, one on the local network, this computer and a
-  name; the neigh line shows the router's MAC and seconds left. `ip neigh`
-  shows INCOMPLETE with "n queued" for an address that never answers (the
-  native-VLAN case), and the entry goes after about 3 s.
-- **`netstat -s`** (0.29.0) on a router after some forwarding and a forged
+- **ping, the rest** (0.29.0). Ctrl+T on a `ping` running inside a
+  background job brought to the front (`fg`); `ping -c 0 -q`; `ping -s
+  65507` through the gateway, in NAT mode (the gateway's own address) and
+  in TUN mode (a real host): replies show bytes=N with no "(sent ...)" or
+  "changed" note.
+- **`ip route get` and `ip neigh`, the rest** (0.29.0). `ip route get` for
+  a name; the INCOMPLETE entry gone about 3 s after the last try.
+- **`netstat -s` on a router** (0.29.0) after some forwarding and a forged
   source: drops by reason, and the router screen's forwarded/dropped/spoofed
   agreeing with it.
-- **`host -v` and the DNS cache** (0.29.0). `host -v example.com` twice: the
-  first says "Received from <server>#53", the second "from the cache"; `ip
-  dns cache` lists it (an NXDOMAIN too); `ip dns flush` makes the next
-  lookup ask again.
-- **`nc -z`** (0.29.0). `nc -z -v <host> 20-25` against telnetd: open,
-  refused, and timed out (with `-w`) for a host that's down; the far side's
-  telnetd shows no error for the empty connection. `nc -w 3 <host> 23`
-  (no `-z`) to a host that's down gives up after 3 s.
+- **The DNS cache, the rest** (0.29.0). An NXDOMAIN listed in `ip dns
+  cache`; after `ip dns flush`, the next `host -v` says "Received from".
+- **`nc`, the rest** (0.29.0). The far side's telnetd shows no error for
+  the empty connection `nc -z` makes; `nc -w 3 <host> 23` (no `-z`) to a
+  host that's down gives up after 3 s.
 
 - **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,
   `ip neigh add <addr> lladdr <mac>` for a host on its network, with the
@@ -225,6 +212,17 @@ section.
 
 ## Tested
 
+- 2026-11-06 — Network diagnostics on Lab-A (ROM 0.29.1): `ping` running
+  until Ctrl+T then its summary with rtt min/avg/max/mdev, `-c 3 -q`, `-w
+  2` stopping on time, `-s 1000` through R and the TUN gateway
+  (bytes=1000); `ip route get` through the router (via, dev, src, the
+  router's MAC and seconds left) and for its own address (local, dev lo);
+  `ip neigh` showing an unanswered address as INCOMPLETE, 1 queued, asked
+  2 times; `netstat -s` grouped by protocol; `host -v` twice (from
+  4.2.2.1#53, then from the cache with the TTL counting down), `ip dns
+  cache` and `ip dns flush`; `nc -z -v` refused, open and timed out.
+- 2026-11-06 — Backspace at the start of the line and on an empty one
+  (0.29.2, by `ccnix update`): no more doubled or jumbled lines.
 - 2026-11-06 — Services under init (ROM 0.29.1): a crashing service
   (`error('boom')`) shown as failed with its error, status 1 and a
   traceback in `service status` and `/var/log/messages`, restarting with a
