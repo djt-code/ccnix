@@ -22,7 +22,7 @@
 --   -t  newest first;  -S  largest first;  -r  reverse the order
 --   -F  mark directories with "/" (-p: the same)
 --   -1  one entry per line
--- deploy/install makes `ls` an alias for this, ahead of CraftOS's own `ls`
+-- deploy/boot makes `ls` an alias for this, ahead of CraftOS's own `ls`
 -- (an alias for `list`, which shows hidden files only with the setting
 -- list.show_hidden).  A missing operand is reported and ls exits 2.
 

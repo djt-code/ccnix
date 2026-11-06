@@ -99,7 +99,7 @@ elseif cmd == "startup" then
         print(target .. " mounts it already.")
     else
         -- first, before anything that doesn't return (ccsh at boot, the
-        -- autostart), which deploy/install puts at the end
+        -- autostart), which deploy/setup puts at the end
         local f = fs.open(target, "w")
         f.write(line .. "\n" .. text)
         f.close()

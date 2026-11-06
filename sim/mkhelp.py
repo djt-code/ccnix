@@ -151,6 +151,7 @@ def programs():
             name = os.path.basename(path)[:-4]
             if name not in LEAVE_OUT:
                 yield d, name, path
+    yield "deploy", "setup", os.path.join(ROOT, "deploy", "setup.lua")   # (ccnix setup runs it)
 
 
 def build():
@@ -169,8 +170,9 @@ def build():
         files[name + ".txt"] = "\n".join(text).rstrip() + "\n"
         index.setdefault(d, []).append((name, first))
     out = ["The commands ccnix adds; `help <command>` for one.", ""]
-    titles = {"bin": "Anywhere (bin/)", "turtle": "Turtles (turtle/)", "pc": "Computers (pc/)"}
-    for d in DIRS:
+    titles = {"bin": "Anywhere (bin/)", "turtle": "Turtles (turtle/)", "pc": "Computers (pc/)",
+              "deploy": "Setting up (deploy/setup.lua, or ccnix setup)"}
+    for d in DIRS + ["deploy"]:
         if d not in index:
             continue
         out.append(titles[d] + ":")

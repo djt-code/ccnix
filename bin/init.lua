@@ -10,7 +10,7 @@
 -- in the background.  `ps` lists the processes, `kill` signals them and
 -- `service` starts, stops and sets up services.
 --
--- At boot (init.boot on: `deploy/install --init`) startup runs init last.
+-- At boot (init.boot on: `ccnix setup init`) startup runs init last.
 -- It starts the services that are enabled, then the console: the
 -- autostart (ccnix.autostart: the miner, farmer, router...) if one
 -- is set, then ccsh if ccsh.login is on, then the CraftOS shell;
@@ -46,7 +46,7 @@ if args[1] == "boot" then
     settings.save()
     if not on then print("init doesn't start at boot now.")
     elseif not (fs.exists("/startup.lua") or fs.exists("/startup/zz-ccnix.lua") or fs.exists("/rom/ccnix/.manifest")) then
-        print("init.boot is on, but startup doesn't run init: run deploy/install.")
+        print("init.boot is on, but startup doesn't run init: run ccnix setup init.")
     else
         print("init starts at boot.")
     end

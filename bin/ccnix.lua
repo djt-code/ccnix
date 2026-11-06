@@ -10,13 +10,17 @@
 --                    already found keep the ROM's)
 --   ccnix reset      drop the updates: back to the ROM (files of your own
 --                    in /ccnix, a turtle's job files, stay)
+--   ccnix setup [app...] [options]
+--                    choose what this computer runs (deploy/setup: the
+--                    apps, --autostart, ccsh at boot...; `help setup`)
 --
 -- The ccnix mod puts this repo in every computer's ROM, at /rom/ccnix;
 -- deploy/boot.lua says how the two layers go together.  When the ROM is
 -- newer than the repo's branch, an update keeps nothing: the ROM is it.
 -- The server's ops update the ROM itself: /ccnix rom update (the mod's
 -- README).  On a server without the mod, ccnix is a whole checkout at
--- /ccnix (deploy/setup clones it there), and update is a git pull of that.
+-- /ccnix (deploy/setup clones it there), and update is a git pull of that;
+-- ccnix setup there pulls too.
 -- The version is deploy/version's: a ROM from before there was one shows
 -- as "unversioned".
 -- `help ccnix` goes on with every command ccnix adds.
@@ -143,6 +147,10 @@ elseif cmd == "reset" then
     fs.delete(OVER .. "/.gitlite")
     print("Back to the ROM's: reboot to use it.")
 
+elseif cmd == "setup" then
+    local setup = find("deploy/setup.lua") or die("no deploy/setup.lua")
+    shell.run(setup, table.unpack(args, 2))
+
 else
-    print("Usage: ccnix [status | version | update | reset]")
+    print("Usage: ccnix [status | version | update | reset | setup [app...]]")
 end

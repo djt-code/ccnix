@@ -8,8 +8,10 @@ ccnix: this computer's ccnix: where it comes from, and updates
       the latest from the ROM's repo into /ccnix with git, keeping only the files that differ from the ROM's; reboot to use them (all of them: until then, programs already found keep the ROM's)
   ccnix reset
       drop the updates: back to the ROM (files of your own in /ccnix, a turtle's job files, stay)
+  ccnix setup [app...] [options]
+      choose what this computer runs (deploy/setup: the apps, --autostart, ccsh at boot...; `help setup`)
 
-The ccnix mod puts this repo in every computer's ROM, at /rom/ccnix; deploy/boot.lua says how the two layers go together.  When the ROM is newer than the repo's branch, an update keeps nothing: the ROM is it. The server's ops update the ROM itself: /ccnix rom update (the mod's README).  On a server without the mod, ccnix is a whole checkout at /ccnix (deploy/setup clones it there), and update is a git pull of that. The version is deploy/version's: a ROM from before there was one shows as "unversioned". `help ccnix` goes on with every command ccnix adds.
+The ccnix mod puts this repo in every computer's ROM, at /rom/ccnix; deploy/boot.lua says how the two layers go together.  When the ROM is newer than the repo's branch, an update keeps nothing: the ROM is it. The server's ops update the ROM itself: /ccnix rom update (the mod's README).  On a server without the mod, ccnix is a whole checkout at /ccnix (deploy/setup clones it there), and update is a git pull of that; ccnix setup there pulls too. The version is deploy/version's: a ROM from before there was one shows as "unversioned". `help ccnix` goes on with every command ccnix adds.
 
 The commands ccnix adds; `help <command>` for one.
 
@@ -85,6 +87,9 @@ Computers (pc/):
   diskclone: copy a directory onto as many floppy disks as a dispenser can feed
   fileserver: the disks in every attached disk drive as one folder
   router: a computer that routes between its networks
+
+Setting up (deploy/setup.lua, or ccnix setup):
+  setup: ccnix on a turtle or computer: put it there, choose what it runs, update it
 
 Topics:
   httpd-pages: Lua pages on the web server: forms, routes, templates, cookies

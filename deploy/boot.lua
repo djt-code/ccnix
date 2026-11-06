@@ -3,9 +3,10 @@
 -- Two ways in.  On a server with the ccnix mod, this repo is in every
 -- computer's ROM, at /rom/ccnix, and /rom/autorun runs this at each
 -- boot: no install.  On a server without it, deploy/setup clones the
--- repo and deploy/install writes two lines into the computer's startup
--- that run this from the checkout: `boot.lua` first, `boot.lua --end`
--- last.  Either way it's the one place startup's work is written down.
+-- repo and writes two lines into the computer's startup that run this
+-- from the checkout: `boot.lua` first, `boot.lua --end` last.  Either way
+-- it's the one place startup's work is written down (setup only puts
+-- things in place, once).
 --
 -- Under the ROM, two layers.  /rom/ccnix is the server's copy (what the
 -- mod shipped, or the server's own git checkout).  /ccnix is this

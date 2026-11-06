@@ -3,7 +3,7 @@ router: a computer that routes between its networks
   router
       turn forwarding on, bring the network up, and watch it
   router boot
-      route from every boot (the network starts at boot, forwarding on); `setup router --autostart router` (or `deploy/install --autostart router`) brings this screen up at boot too
+      route from every boot (the network starts at boot, forwarding on); `setup router --autostart router` (or `ccnix setup --autostart router`) brings this screen up at boot too
 
 A router is a computer with an interface on each network it joins: a modem each (wired or wireless), or VLANs on one modem ("back.10", "back.20": a trunk).  Set them up with `ip addr add`, then `router`. Hosts on each network point their default route at the router's address there (`ip route add default via 10.0.1.1`); for networks behind another router, `ip route add 10.0.3.0/24 via <that router>` here. `help network` walks through a lab: two networks and a router.
 

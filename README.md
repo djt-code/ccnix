@@ -20,8 +20,8 @@ is their help, `sim/` tests them):
 - `lib/`: the modules the programs require (`cu`, `regex`, `pager`, `net`,
   `proc`, `telnet`, `jbod`).
 
-`deploy/install` puts `bin/` and `turtle/` (or `pc/`) on the path; see
-[Install](#install). On a server with the ccnix mod, they're in every
+`deploy/setup` installs it, and `deploy/boot` puts `bin/` and `turtle/`
+(or `pc/`) on the path at every boot; see [Install](#install). On a server with the ccnix mod, they're in every
 computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 
 | Program | What it does |
@@ -134,7 +134,8 @@ The server's ops update the ROM itself while the server runs, with
 `/ccnix rom update` (a git pull of the server's checkout, then a reload):
 the mod's README says more.
 
-`setup` on such a server clones nothing:
+`ccnix setup [app...]` (it runs `deploy/setup`) on such a server clones
+nothing:
 - it sets what the apps named want;
 - it moves an install from before ccnix (`/cc-turtles`) over: its startup
   lines and files go, and a turtle's job files move to `/ccnix/turtle`
@@ -149,8 +150,8 @@ On the turtle or computer, with HTTP enabled on the server:
 wget run https://raw.githubusercontent.com/djt-code/ccnix/main/deploy/setup.lua
 ```
 
-That fetches `git`, clones the repo into `/ccnix` and runs
-`deploy/install` (below), then reboots. With nothing named it takes
+That fetches `git`, clones the repo into `/ccnix`, sets it to run at
+every boot (below), and reboots. With nothing named it takes
 everything the device runs: a computer's disk holds 1 MB and the whole
 repo nearly fills it, so it leaves out `sim/` always, `pc/` on a turtle
 and `turtle/` on a computer (`--all` for everything). Name apps to take
@@ -181,10 +182,16 @@ wget run .../deploy/setup.lua mine --autostart mine     a miner that carries on 
 wget run .../deploy/setup.lua farm coreutils ccsh    a farmer you can also work in
 ```
 
-Run it again to update: naming apps again changes what's there, naming
-none keeps the choice. It also finishes a clone that filled the disk: it
-pulls an existing checkout, and clears what a half-done clone left in
-the folders it leaves out.
+Once it's there, `ccnix update` updates it (a `git pull` of `/ccnix`),
+and `ccnix setup [app...]` changes what it runs: naming apps again
+changes what's there, naming none keeps the choice. setup also finishes
+a clone that filled the disk: it pulls an existing checkout, and clears
+what a half-done clone left in the folders it leaves out.
+
+**From an install before ccnix** (the Craftix days, in `/cc-turtles`):
+run the `wget run` line above. It moves `/cc-turtles` to `/ccnix`, points
+it at the repo's new name, pulls, and swaps the old startup lines for
+the new ones; a turtle's job files come along.
 
 By hand, the same is:
 
@@ -192,7 +199,7 @@ By hand, the same is:
 wget https://raw.githubusercontent.com/djt-code/ccnix/main/bin/git.lua /git-boot.lua
 git-boot clone https://github.com/djt-code/ccnix /ccnix
 rm git-boot.lua
-ccnix/deploy/install
+ccnix/deploy/setup
 ```
 
 Later, `git pull` inside the directory fetches only the files that changed.
@@ -200,31 +207,35 @@ Later, `git pull` inside the directory fetches only the files that changed.
 `git log` lists recent commits on the branch, marking the one checked out,
 in the pager (see `pager.lua` above; `q` quits).
 If HTTP is disabled on the server, drop the files into
-`<world>/computercraft/computer/<id>/ccnix/` by hand.
+`<world>/computercraft/computer/<id>/ccnix/` by hand and run
+`ccnix/deploy/setup`: with no HTTP it sets up the checkout as it is.
 
-To run the programs from any directory, put them on the shell's search
-path:
-
-```
-ccnix/deploy/install
-```
-
-It writes two lines into `/startup.lua` (or, if `/startup` is a
-directory, into `/startup/00-ccnix.lua` and `/startup/zz-ccnix.lua`) that
-run `deploy/boot.lua`: one at the top, where it does from the checkout
+To run the programs from any directory, setup writes two lines into
+`/startup.lua` (or, if `/startup` is a directory, into
+`/startup/00-ccnix.lua` and `/startup/zz-ccnix.lua`) that run
+`deploy/boot.lua`: one at the top, where it does from the checkout
 what the ROM's boot does ([above](#ccnix-in-every-computers-rom): the
 path, the help path (`help mine`, `help grep`; `help ccnix` lists them
 all), `ls`, the [network](#network) while `net.boot` is on), and
-`--end` at the bottom, where it runs what doesn't return: with `--init`
+`--end` at the bottom, where it runs what doesn't return: with `init`
 (the setting `init.boot`), [init](#processes-and-services), which starts
 the services and then runs the two below itself; else the
 [autostart](#autostart) (`--autostart <app>`: a turtle's job, or a
-computer's router screen), then ccsh with `--ccsh`. `--net` turns
-`net.boot` on (`--router` forwarding too; `ip boot` and `ip boot off`
-later). Then it reboots; `--no-reboot` runs boot in the current shell
-instead. Lines an earlier install wrote go (every line naming the repo's
-folder), yours stay, and running it again changes nothing. `deploy/` and
-`lib/` aren't on the path, so `install` and `cu` don't become commands.
+computer's router screen), then ccsh with `ccsh`. `net` turns `net.boot`
+on (`router` forwarding too; `ip boot` and `ip boot off` later); `--ccsh`,
+`--net`, `--router` and `--init` set the same without naming the app.
+Then it reboots; `--no-reboot` runs boot in the current shell instead.
+Lines an earlier install wrote go (every line naming the repo's folder,
+or `/cc-turtles`), yours stay, and running it again changes nothing.
+`deploy/` and `lib/` aren't on the path, so `setup`, `boot` and `cu`
+don't become commands of their own (`ccnix setup` runs setup).
+
+**Why two files:** `deploy/setup.lua` puts ccnix in place, once (and
+again to change or update it); `deploy/boot.lua` runs at every boot, from
+the ROM's autorun or from setup's two startup lines, and is the one
+place that says what startup does. setup can be fetched on its own with
+`wget run`, before anything else is there; boot needs the rest of the
+repo beside it.
 
 The shell looks a program name up in each directory on the path in turn,
 `.lua` optional. Run from anywhere, a program still finds its modules
@@ -415,7 +426,7 @@ output isn't the screen.
 
 A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 (or hold Ctrl+T at its prompt) to get back to the stock shell.
-`deploy/install --ccsh` starts it at every boot, until you
+`ccnix setup --ccsh` starts it at every boot, until you
 `set ccsh.login false`.
 
 ```
@@ -1134,7 +1145,7 @@ it has nothing left to compost it sleeps until you give it more.
   turtle.
 - If the composter stays full for 10 seconds it asks whether the hopper below is
   full or missing, and keeps waiting.
-- To start it at boot: `deploy/install --autostart autocompost` (or `set
+- To start it at boot: `ccnix setup --autostart autocompost` (or `set
   ccnix.autostart autocompost`; see [Autostart](#autostart)).
 
 ## Network
@@ -1417,7 +1428,7 @@ kill [-s signal | -9] pid...       signal one: TERM (Ctrl+T for it), KILL, INT, 
 service                            the services, and whether they're running
 service add <name> <command...>    service start|stop|restart|status <name>
 service enable|disable <name>      at boot, or not
-init boot [off]                    init at every boot (deploy/install --init does it too)
+init boot [off]                    init at every boot (ccnix setup init does it too)
 ```
 
 CraftOS has no processes: a program is a coroutine its shell resumes, and

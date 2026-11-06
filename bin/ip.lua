@@ -273,7 +273,7 @@ elseif cmd == "down" then
     out(net.down() and "down" or "it wasn't up")
 elseif cmd == "boot" then
     -- the setting net.boot: startup brings the network up while it's on
-    -- (deploy/boot under the ROM, deploy/install's startup line otherwise)
+    -- (deploy/boot, from the ROM's autorun or the startup lines setup writes)
     local on = word(2, ONOFF, "on") == "on"
     noMore(3)
     settings.set("net.boot", on)
