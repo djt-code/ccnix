@@ -105,6 +105,17 @@ check("ip help: each command, as short as it may be, and what it does",
 r = W:run("ip", "route")
 check("ip route while down: the saved routes", r.out:find("default%s+via 10%.0%.1%.1 %(not up%)"), show(r.out))
 
+-- ip neigh add/del: permanent ARP entries, kept in settings
+r = W:run("ip", "neigh", "add", "10.0.1.7", "lladdr", "02:CC:00:00:07:05")
+check("ip neigh add while down: kept in settings, its interface the one whose network it's on",
+    r.status == 0 and STORE["net.neigh"] == "10.0.1.7 lladdr 02:cc:00:00:07:05 dev back"
+        and r.out == "10.0.1.7 lladdr 02:cc:00:00:07:05 dev back permanent\n", show(r.out) .. show(r.errText))
+r = W:run("ip", "n", "a", "10.0.99.9", "lladdr", "02:cc:00:00:63:05")
+r2 = W:run("ip", "neigh", "add", "10.0.1.8", "lladdr", "nope")
+check("... none on its network: says to give dev; a bad MAC refused", r.status ~= 0 and r.errText:find("dev")
+    and r2.status == 2 and r2.errText:find("bad MAC"), show(r.errText) .. show(r2.errText))
+r = W:run("ip", "neigh", "add", "10.0.20.9", "lladdr", "02:cc:00:00:09:05", "dev", "back.20")
+
 --------------------------------------------------------------------------
 -- ip up / down
 --------------------------------------------------------------------------
@@ -117,6 +128,16 @@ check("ip: up, the interfaces (no MACs) and routes", r.out:find("^up") and r.out
     show(r.out))
 r = W:run("ip", "-d", "a")
 check("ip -d a while up: the MACs", r.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 rx 0"), show(r.out))
+r = W:run("ip", "neigh")
+check("ip neigh after ip up: the permanent entries, marked so", r.out:find("10%.0%.1%.7%s+02:cc:00:00:07:05 dev back permanent")
+    and r.out:find("10%.0%.20%.9%s+02:cc:00:00:09:05 dev back%.20 permanent")
+    and _G.ccnet.arp.back[N.parseIP("10.0.1.7")].permanent, show(r.out))
+r = W:run("ip", "neigh", "del", "10.0.20.9")
+r2 = W:run("ip", "neigh", "del", "10.0.20.9")
+check("ip neigh del: gone from the cache and the settings; again: no such neighbour",
+    r.status == 0 and not _G.ccnet.arp["back.20"][N.parseIP("10.0.20.9")]
+        and STORE["net.neigh"] == "10.0.1.7 lladdr 02:cc:00:00:07:05 dev back"
+        and r2.status ~= 0 and r2.errText:find("no neighbour 10%.0%.20%.9"), show(r.errText) .. show(r2.errText))
 r = W:run("ip", "down")
 check("ip down: channels closed", r.out:find("down") and not OPENED["back:60000"] and _G.ccnet == nil)
 r = W:run("ping", "10.0.1.1")

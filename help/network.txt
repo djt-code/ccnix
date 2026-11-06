@@ -48,7 +48,7 @@ Telnet: on B, `wget run https://raw.githubusercontent.com/djt-code/ccnix/main/de
 
 When it doesn't work:
   ip          what's set, and whether it's up
-  ip neigh    the addresses ARP has found
+  ip neigh    the addresses ARP has found (`ip neigh add <addr> lladdr <mac>` fixes one by hand: permanent, never asked for; `ip neigh del <addr>` forgets one)
   router      on R: packets in, out, forwarded and dropped, and messages such as "no ARP answer"
   ping says   "net unreachable": a router has no route; "administratively prohibited": a filter, or a NAT-mode gateway (no ICMP past it; it answers ping itself); "host unreachable": nobody answered ARP (wrong address, or not up); "time to live exceeded": routers pass it round in a loop
   host says   "no DNS servers": `ip dns` sets them; "Temporary failure": no server answered (each one's reason in brackets: can the computer ping it?)

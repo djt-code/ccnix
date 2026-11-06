@@ -1172,6 +1172,7 @@ ip addr add <iface> <addr/len>     ip route add <net/len|default> via <gw>
 ip link (the modems, their MACs)   ip -d addr (the addresses with their MACs)
 ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip host <name> <addr>
 ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)
+ip neigh add <addr> lladdr <mac>   a permanent ARP entry [dev <iface>]; ip neigh del <addr> forgets one
 ip dns <primary> [<secondary>]     host name | host address    (DNS)
 ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host
 tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)

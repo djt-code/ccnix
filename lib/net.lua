@@ -340,15 +340,50 @@ function N.new(opts)
         S.wantTick()
     end
 
-    -- Learn ip -> mac on an interface, and send what was waiting for it.
+    -- Learn ip -> mac on an interface, and send what was waiting for it
+    -- (a permanent entry, set by hand, stays as it is).
     local function learn(ifc, ip, mac)
-        S.arp[ifc.name][ip] = { mac = mac, expires = clock() + ARP_TTL }
+        local e = S.arp[ifc.name][ip]
+        if not (e and e.permanent) then S.arp[ifc.name][ip] = { mac = mac, expires = clock() + ARP_TTL } end
         local key = ifc.name .. "|" .. ip
         local p = S.pending[key]
         if p then
             S.pending[key] = nil
             for _, q in ipairs(p.packets) do sendFrame(ifc, mac, "ip", q.pkt) end
         end
+    end
+
+    -- A permanent ARP entry (`ip neigh add`): ip -> mac on iface (nil: the
+    -- interface whose network ip is on), never expiring, never replaced
+    -- by what ARP hears.  True, or false and why.
+    function S.addNeighbour(ip, mac, iface)
+        local n = type(ip) == "number" and ip or N.parseIP(ip)
+        if not n then return false, "bad address " .. tostring(ip) end
+        local m = N.parseMAC(mac)
+        if not m then return false, "bad MAC " .. tostring(mac) end
+        if not iface then
+            for name, ifc in pairs(S.ifaces) do
+                if netOf(n, ifc.len) == netOf(ifc.ip, ifc.len) then iface = name end
+            end
+            if not iface then return false, "no interface on " .. N.ipString(n) .. "'s network (give dev)" end
+        end
+        local ifc = S.ifaces[iface]
+        if not ifc then return false, "no interface " .. iface end
+        S.arp[iface][n] = { mac = m, expires = math.huge, permanent = true }
+        learn(ifc, n, m)                    -- (what was waiting for it goes)
+        return true
+    end
+
+    -- Forget ip's ARP entry, permanent or learned, on iface (nil: all).
+    -- True if there was one.
+    function S.deleteNeighbour(ip, iface)
+        local n = type(ip) == "number" and ip or N.parseIP(ip)
+        if not n then return false end
+        local gone = false
+        for name, cache in pairs(S.arp) do
+            if (not iface or name == iface) and cache[n] then cache[n] = nil; gone = true end
+        end
+        return gone
     end
 
     local icmpError                 -- (below)
@@ -936,11 +971,12 @@ end
 -- default via 10.0.1.1"; net.forward = true on a router; net.rpfilter =
 -- "strict" | "loose" | "off" (unset: loose); net.hosts =
 -- "router=10.0.1.1, b=10.0.2.5"; net.dns = "1.1.1.1, 9.9.9.9" (the DNS
--- servers lib/netdb asks, primary first).
+-- servers lib/netdb asks, primary first); net.neigh = "10.0.1.7 lladdr
+-- 02:cc:00:00:07:05 dev back, ..." (permanent ARP entries).
 function N.config(st)
     st = st or settings
     local cfg = { ifaces = {}, routes = {}, forward = st.get("net.forward") == true,
-                  rpfilter = N.rpfilter(st.get("net.rpfilter")), hosts = {}, dns = {} }
+                  rpfilter = N.rpfilter(st.get("net.rpfilter")), hosts = {}, dns = {}, neigh = {} }
     for _, name in ipairs(st.getNames()) do
         local iface = name:match("^net%.if%.(.+)$")
         if iface and st.get(name) and st.get(name) ~= "" then cfg.ifaces[iface] = st.get(name) end
@@ -954,6 +990,10 @@ function N.config(st)
         if name then cfg.hosts[name] = ip end
     end
     for ip in tostring(st.get("net.dns") or ""):gmatch("[^,%s]+") do cfg.dns[#cfg.dns + 1] = ip end
+    for item in tostring(st.get("net.neigh") or ""):gmatch("[^,]+") do
+        local ip, mac, rest = item:match("^%s*(%S+)%s+lladdr%s+(%S+)%s*(.-)%s*$")
+        if ip then cfg.neigh[#cfg.neigh + 1] = { ip = ip, mac = mac, iface = rest:match("^dev%s+(%S+)$") } end
+    end
     return cfg
 end
 
@@ -987,6 +1027,10 @@ function N.fromConfig(cfg)
     for _, r in ipairs(cfg.routes) do
         local ok, err = S.addRoute(r.net, r.gw, r.iface)
         if not ok then problems[#problems + 1] = r.net .. " via " .. r.gw .. ": " .. err end
+    end
+    for _, e in ipairs(cfg.neigh or {}) do
+        local ok, err = S.addNeighbour(e.ip, e.mac, e.iface)
+        if not ok then problems[#problems + 1] = "neighbour " .. e.ip .. ": " .. err end
     end
     return S, problems
 end

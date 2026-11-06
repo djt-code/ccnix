@@ -18,7 +18,11 @@ ip: set up and look at the network (lib/net.lua)
   ip route add <net/len|default> via <gw> [dev <iface>]
   ip route del <net/len|default>
   ip neigh
-      the ARP cache: addresses and their MACs
+      the ARP cache: addresses and their MACs (permanent: set by hand)
+  ip neigh add <addr> lladdr <mac> [dev <iface>]
+      a permanent entry: addr is at mac (never asked for, never expires, not changed by what ARP hears); dev: the interface, if not the one whose network addr is on
+  ip neigh del <addr> [dev <iface>]
+      forget addr's entry, permanent or learned
   ip forward [on|off]
       route between interfaces (a router)
   ip rpfilter [strict|loose|off]
@@ -34,4 +38,4 @@ Words may be shortened, as iproute2's may, as far as they stay clear: `ip a` is 
 
 Options go before the command: -d (-details, or any cut between) adds the details, as iproute2's does: the MACs in `ip -d addr` and plain `ip`.
 
-An interface is a modem by its peripheral name ("back", "modem_0"), or a VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on the same wire.  What's set is kept in settings (net.if.<iface>, net.routes, net.forward, net.rpfilter, net.hosts, net.dns) and applies at once if the network is up.  The network runs alongside everything else once `ip up` has started it: see lib/net.lua.  `help network` walks through setting up two networks and a router.
+An interface is a modem by its peripheral name ("back", "modem_0"), or a VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on the same wire.  What's set is kept in settings (net.if.<iface>, net.routes, net.neigh, net.forward, net.rpfilter, net.hosts, net.dns) and applies at once if the network is up.  The network runs alongside everything else once `ip up` has started it: see lib/net.lua.  `help network` walks through setting up two networks and a router.

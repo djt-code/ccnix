@@ -15,6 +15,14 @@
 --   ip route add <net/len|default> via <gw> [dev <iface>]
 --   ip route del <net/len|default>
 --   ip neigh                         the ARP cache: addresses and their MACs
+--                                    (permanent: set by hand)
+--   ip neigh add <addr> lladdr <mac> [dev <iface>]
+--                                    a permanent entry: addr is at mac (never
+--                                    asked for, never expires, not changed by
+--                                    what ARP hears); dev: the interface, if
+--                                    not the one whose network addr is on
+--   ip neigh del <addr> [dev <iface>]
+--                                    forget addr's entry, permanent or learned
 --   ip forward [on|off]              route between interfaces (a router)
 --   ip rpfilter [strict|loose|off]   which sources a router passes on (BCP 38):
 --                                    loose (the default) any it has a route
@@ -49,7 +57,7 @@
 -- An interface is a modem by its peripheral name ("back", "modem_0"), or a
 -- VLAN on one: "back.20" is VLAN 20 on the back modem, its own network on
 -- the same wire.  What's set is kept in settings (net.if.<iface>,
--- net.routes, net.forward, net.rpfilter, net.hosts, net.dns) and applies at
+-- net.routes, net.neigh, net.forward, net.rpfilter, net.hosts, net.dns) and applies at
 -- once if the network is up.  The network runs alongside everything else once `ip up` has
 -- started it: see lib/net.lua.  `help network` walks through setting up
 -- two networks and a router.
@@ -90,7 +98,8 @@ local COMMANDS = {
       what = "the interfaces' addresses (-d: MACs)" },
     { "route", 1, args = "[show | add <net/len|default> via <gw> [dev <iface>] | del <net/len|default>]",
       what = "the routing table" },
-    { "neighbour", 1, "neighbor", args = "[show]", what = "the ARP cache" },
+    { "neighbour", 1, "neighbor", args = "[show | add <addr> lladdr <mac> [dev <iface>] | del <addr> [dev <iface>]]",
+      what = "the ARP cache" },
     { "forward", 1, args = "[on|off]", what = "route between interfaces (a router)" },
     { "rpfilter", 2, args = "[strict|loose|off]", what = "which sources a router passes on (BCP 38)" },
     { "host", 1, args = "[<name> <addr>]", what = "names for addresses" },
@@ -99,7 +108,7 @@ local COMMANDS = {
 }
 local SHOW = { { "show", 1, "list", "ls" } }
 local ADDR_SUBS = { SHOW[1], { "add", 1 }, { "delete", 1 } }
-local NEIGH_SUBS = SHOW
+local NEIGH_SUBS = ADDR_SUBS
 local ONOFF = { { "on", 2 }, { "off", 2 } }
 local RPMODES = { { "strict", 1 }, { "loose", 1 }, { "off", 1 } }
 
@@ -370,17 +379,94 @@ elseif cmd == "route" then
         if not gone then cu.fail("no route " .. dest) end
     end
 elseif cmd == "neighbour" then
-    word(2, NEIGH_SUBS)
-    noMore(3)
-    if not S then cu.fail("the network isn't up"); return cu.exit() end
-    local any = false
-    for iface, cache in pairs(S.arp) do
-        for ip, e in pairs(cache) do
-            any = true
-            out(string.format("%-16s %-17s dev %s", net.ipString(ip), e.mac, iface))
-        end
+    local sub = word(2, NEIGH_SUBS, "show")
+    -- the permanent entries kept in the settings, and saving them
+    local function saved() return net.config().neigh end
+    local function keep(list)
+        local t = {}
+        for _, e in ipairs(list) do t[#t + 1] = e.ip .. " lladdr " .. e.mac .. (e.iface and (" dev " .. e.iface) or "") end
+        settings.set("net.neigh", table.concat(t, ", "))
+        save()
     end
-    if not any then out("(empty)") end
+    -- addr dev iface: dev and the interface, after the address
+    local function devFrom(n)
+        local dev
+        while args[n] ~= nil do
+            word(n, { { "dev", 1 } })
+            if args[n + 1] == nil then badWords(cmd, "dev takes an interface") end
+            dev = args[n + 1]
+            n = n + 2
+        end
+        return dev
+    end
+    if sub == "show" then
+        noMore(3)
+        if S then
+            local any = false
+            for iface, cache in pairs(S.arp) do
+                for ip, e in pairs(cache) do
+                    any = true
+                    out(string.format("%-16s %-17s dev %s%s", net.ipString(ip), e.mac, iface, e.permanent and " permanent" or ""))
+                end
+            end
+            if not any then out("(empty)") end
+        else
+            for _, e in ipairs(saved()) do
+                out(string.format("%-16s %-17s dev %s permanent", e.ip, net.parseMAC(e.mac) or e.mac, e.iface or "?"))
+            end
+            cu.fail("the network isn't up")
+        end
+    elseif sub == "add" then
+        local addr = args[3]
+        if not addr then badWords(cmd, "add takes an address, lladdr and its MAC") end
+        local mac, dev
+        local n = 4
+        while args[n] ~= nil do
+            local k = word(n, { { "lladdr", 1 }, { "dev", 1 } })
+            if args[n + 1] == nil then badWords(cmd, k .. " takes " .. (k == "lladdr" and "a MAC" or "an interface")) end
+            if k == "lladdr" then mac = args[n + 1] else dev = args[n + 1] end
+            n = n + 2
+        end
+        if not mac then badWords(cmd, "add takes lladdr and the MAC: ip neigh add " .. addr .. " lladdr <mac>") end
+        local ip = net.parseIP(addr)
+        if not ip then badWords(cmd, "bad address " .. addr) end
+        if not net.parseMAC(mac) then badWords(cmd, "bad MAC " .. mac .. " (02:cc:00:00:07:05, say)") end
+        if not dev then                    -- the interface whose network it's on
+            local ifaces = S and {} or net.config().ifaces
+            if S then for name, i in pairs(S.ifaces) do ifaces[name] = net.cidrString(i.ip, i.len) end end
+            for name, cidr in pairs(ifaces) do
+                local nip, len = net.parseCIDR(cidr)
+                local size = nip and 2 ^ (32 - len)
+                if nip and math.floor(ip / size) == math.floor(nip / size) then dev = name end
+            end
+            if not dev then cu.fail("no interface on " .. addr .. "'s network: say which, with dev"); return cu.exit() end
+        end
+        if S then
+            local ok, err = S.addNeighbour(addr, mac, dev)
+            if not ok then cu.fail(err); return cu.exit() end
+        end
+        local list = {}
+        for _, e in ipairs(saved()) do
+            if not (net.parseIP(e.ip) == ip and (e.iface or dev) == dev) then list[#list + 1] = e end
+        end
+        list[#list + 1] = { ip = net.ipString(ip), mac = net.parseMAC(mac), iface = dev }
+        keep(list)
+        out(net.ipString(ip) .. " lladdr " .. net.parseMAC(mac) .. " dev " .. dev .. " permanent")
+    else
+        local addr = args[3]
+        if not addr then badWords(cmd, "del takes the address") end
+        local ip = net.parseIP(addr)
+        if not ip then badWords(cmd, "bad address " .. addr) end
+        local dev = devFrom(4)
+        local list, gone = {}, false
+        for _, e in ipairs(saved()) do
+            if net.parseIP(e.ip) == ip and (not dev or e.iface == nil or e.iface == dev) then gone = true
+            else list[#list + 1] = e end
+        end
+        if gone then keep(list) end
+        if S then gone = S.deleteNeighbour(ip, dev) or gone end
+        if not gone then cu.fail("no neighbour " .. addr .. (dev and (" on " .. dev) or "")) end
+    end
 elseif cmd == "forward" then
     local v = word(2, ONOFF)
     noMore(3)
