@@ -199,6 +199,11 @@ section.
 
 ## The mod
 
+- **`/ccnix rom update` asks before the reload** (ccnix-mod 0.16.0): it only
+  pulls, then warns that loading pauses the server (with the last reload's
+  time) and offers `[Load it]`; `confirm` reloads; nothing new, no reload.
+  On 0.15.39 the reload ran at once and paused the server about 15 s.
+
 - **Credits in the mod list** (ccnix-mod 0.15.39): the ccnix entry in the
   mod list shows the new Credits text (from `credits=` in mods.toml).
 - **The ansible EULA gate** (ccnix-mod 0.15.39): a run with
