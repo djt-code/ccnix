@@ -161,6 +161,10 @@ section.
 
 ## Setup and boot
 
+- **`get` and `reset`** (0.31.0): `get` lists every setting, `get name`,
+  `get -n name`, an unknown name (status 1); `reset name` back to its
+  default, kept across a reboot; `help get`, `help reset`.
+
 - **`ccnix update` on many computers at once** (0.30.2): GitHub answered
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
   API's hourly limit for the server's address runs out, it says until when.
