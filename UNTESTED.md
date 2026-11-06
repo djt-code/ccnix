@@ -37,14 +37,10 @@ section.
 
 ## ccsh
 
-- **Background output while typing** (0.30.0). `ping -c 5 10.1.2.10 &`,
-  then start typing a command slowly: each reply line appears where the
-  prompt was, and the prompt with what you typed (and the cursor where it
-  was) comes back on the line below; nothing is jumbled. With a two-row
-  PS1 (`PS1='\h\n\$ '`) both rows come back. A full-screen program run
-  in the background (or one that moves the cursor itself) isn't
-  disturbed. Over telnet the same.
-
+- **Background output while typing, the rest** (0.30.0). A two-row PS1
+  (`PS1='\h
+\$ '`) comes back whole; a full-screen program in the
+  background isn't disturbed; the same over telnet.
 - **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
   (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
@@ -220,6 +216,11 @@ section.
 
 ## Tested
 
+- 2026-11-06 — Background output while typing (0.30.0, by `ccnix update`
+  on Lab-A): `ping -c 5 10.0.0.1 &`, then commands typed while replies
+  came: each reply took the prompt's place, the prompt and the typed line
+  came back below, nothing jumbled; the job's Done reported before the
+  next prompt.
 - 2026-11-06 — Network diagnostics on Lab-A (ROM 0.29.1): `ping` running
   until Ctrl+T then its summary with rtt min/avg/max/mdev, `-c 3 -q`, `-w
   2` stopping on time, `-s 1000` through R and the TUN gateway
