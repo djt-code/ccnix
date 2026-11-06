@@ -891,6 +891,22 @@ check("went over the finished left column's floor, found the leak and sealed it"
     logHas("Carrying on with lane 4") and wetI == 0 and (get(-1, 0, 10) or {}).name ~= "minecraft:glow_lichen",
     wetI .. " tunnel blocks wet")
 
+-- 13m. stopped partway through a segment by an older mine.lua, whose
+--      progress file names a lane of another plan (no lane count in it):
+--      the resume goes over the segment from its first lane instead, and
+--      digs all of it
+holeWorld()
+STOP_AT_DIG = 200
+run("3", "3", "40")
+STOP_AT_DIG = nil
+Mine.files["mine.seg"] = (Mine.files["mine.seg"] or ""):match("^(%d+ %d+ %-?%d+)")
+run("reset")
+run("--resume")
+check("an older progress file (no lane count): the segment again from its first lane, all dug",
+    logHas("planned differently") and not logHas("Carrying on with lane") and leftIn(0, 2, 0, 2, 1, 40) == 0,
+    leftIn(0, 2, 0, 2, 1, 40) .. " blocks left")
+check("back at the start", atStart())
+
 -- 13j. resuming from the start of a long tunnel (6 homes 64 apart, all
 --      dug): the walk out to home 6 and back takes more than a segment's
 --      fuel, so the tank is filled from the start's chest for it rather

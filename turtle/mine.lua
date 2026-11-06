@@ -520,17 +520,17 @@ end
 -- the lane it's on, and the last block of that lane it finished.
 function saveProgress(lane, z)
     local f = fs.open(PROGRESS_FILE, "w")
-    f.write(string.format("%d %d %d", home.k, lane, z))
+    f.write(string.format("%d %d %d %d", home.k, lane, z, laneCount))
     f.close()
 end
 
 function loadProgress()
     if not fs.exists(PROGRESS_FILE) then return nil end
     local f = fs.open(PROGRESS_FILE, "r")
-    local k, lane, z = (f.readAll() or ""):match("(%d+) (%d+) (-?%d+)")
+    local k, lane, z, n = (f.readAll() or ""):match("(%d+) (%d+) (-?%d+) ?(%d*)")
     f.close()
     if not k then return nil end
-    return { k = tonumber(k), lane = tonumber(lane), z = tonumber(z) }
+    return { k = tonumber(k), lane = tonumber(lane), z = tonumber(z), lanes = tonumber(n) }
 end
 
 function clearProgress()
@@ -2263,8 +2263,10 @@ end
 -- Mine the segment from z1 to z2, starting and ending at the home.
 -- `from`: how far it got before (resuming): its finished lanes are gone
 -- over only for water getting in, and it carries on from there.
+laneCount = 0        -- lanes in this segment's plan (saved with the progress)
 function mineSegment(z1, z2, from)
     local lanes = planLanes()
+    laneCount = #lanes
     laneAt = {}
     for _, lane in ipairs(lanes) do laneAt[lane.x .. "," .. lane.y] = true end
     print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
@@ -2891,6 +2893,13 @@ T.withTool(pickaxe, function()
         if not resume then clearProgress() end
         local progress = resume and loadProgress()
         if not (progress and progress.k == lastHome) then progress = nil end
+        -- lanes planned another way since (an update, a scanner added or
+        -- taken away): "lane N" means something else now, so the segment
+        -- starts again from its first lane (what's dug is just walked through)
+        if progress and progress.lanes ~= #planLanes() then
+            print("The lanes are planned differently from when it stopped: going over this segment from its first lane.")
+            progress = nil
+        end
         while home.z < LENGTH do
             segEnd = math.min(home.z + SPACING, LENGTH)
             if home.k < lastHome then
