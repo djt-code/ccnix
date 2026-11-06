@@ -1780,6 +1780,7 @@ function lightHere()
     if T.pos.x == 0 then d = WALL
     elseif torchWalls == 2 and T.pos.x == (WIDTH > 0 and X1 or X0) then d = (WALL + 2) % 4
     else return end
+    local wetFront = wetAhead()            -- (before it turns to the niche)
     local function isTorch(n) return TORCHES[n] end
     if T.countItem(isTorch) == 0 then
         if not warnedTorch then
@@ -1826,7 +1827,7 @@ function lightHere()
         eachAround(OPP[d], cutOff)
         retreat(d)
     end
-    if wetBeside(d) then
+    if wetFront and wetBeside(d) then
         print("Water next to " .. T.posString() .. "; no torch there for now.")
         unlit[key(T.pos)] = here()
         return
@@ -1842,7 +1843,13 @@ end
 -- tunnel; d is the niche): standing there it keeps the water out of its
 -- own block, but once it moves on the water flows in, and on into the
 -- niche, washing the torch away.  (Fewest turns first: up, the two
--- along the tunnel, then across.)
+-- along the tunnel, then across.)  It's looked for only when there's
+-- water in front of the turtle (wetAhead, no turning): turning to look
+-- all round at every torch costs more than it's worth in a dry tunnel.
+function wetAhead()
+    local ok, data = look(T.dir)
+    return ok and (FLUID[data.name] or waterIn(data)) or false
+end
 function wetBeside(d)
     for _, e in ipairs({ "up", (d + 1) % 4, (d + 3) % 4, (d + 2) % 4 }) do
         local ok, data = look(e)
@@ -1866,10 +1873,11 @@ function relight()
     for _, t in ipairs(list) do
         broken[t] = nil
         alongAxis("y", t.at.y); alongAxis("x", t.at.x); alongAxis("z", t.at.z)
+        local wetFront = wetAhead()
         local ok, data = look(t.d)
         if T.at(t.at) and not (ok and TORCH_BLOCKS[data.name]) then
             if ok and not FLUID[data.name] and not protected(data.name) then digDir(t.d) end
-            if wetBeside(t.d) then
+            if wetFront and wetBeside(t.d) then
                 unlit[key(T.pos)] = here()     -- (back once the water's seen to)
             elseif placeTorch(t.d) then
                 stats.relit = stats.relit + 1
