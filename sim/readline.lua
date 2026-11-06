@@ -178,6 +178,11 @@ same("Ctrl+B and Ctrl+F, Left and Right", "abYXc",edit("abc<C-b>X<Left><Left><C-
 same("Left at the start and Right at the end stay put", "Xab", edit("ab<Home><Left>X<End><Right><CR>"))
 same("Backspace and Ctrl+H: the character before", "abc", edit("abXYc<Left><BS><C-h><CR>"))
 same("Backspace takes the one before the cursor", "abd", edit("abcd<Left><BS><CR>"))
+same("Backspace at the start of the line does nothing; typing goes on in order", "xab",
+    edit("ab<Home><BS><BS>x<CR>"))
+same("Backspace on an empty line, then typing", "xyz", edit("<BS><BS>xyz<CR>"))
+same("Delete at the end of the line does nothing", "abc", edit("ab<Del><Del>c<CR>"))
+same("Ctrl+H, Ctrl+D, Ctrl+W, Ctrl+U at the edges do nothing", "ok", edit("<C-h><C-w><C-u>o<End><C-d>k<CR>"))
 same("Delete and Ctrl+D the one under the cursor", "bd", edit("abcd<Home><Del><Right><C-d><CR>"))
 
 -- 2. words

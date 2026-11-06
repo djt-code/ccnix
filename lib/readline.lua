@@ -194,8 +194,11 @@ local function insert(e, text)
     changed(e)
 end
 
--- Take out the characters between positions from and to.
+-- Take out the characters between positions from and to (kept inside the
+-- line: Backspace at its start asks for -1, and line:sub(1, -1) would be
+-- the whole line, not none of it).
 local function remove(e, from, to)
+    from, to = math.max(0, from), math.min(#e.line, to)
     if to <= from then return end
     e.line = e.line:sub(1, from) .. e.line:sub(to + 1)
     e.pos = from
@@ -204,6 +207,7 @@ end
 
 -- Cut them: kept for Ctrl+Y.
 local function cut(e, from, to)
+    from, to = math.max(0, from), math.min(#e.line, to)
     if to <= from then return end
     R.killed = e.line:sub(from + 1, to)
     remove(e, from, to)

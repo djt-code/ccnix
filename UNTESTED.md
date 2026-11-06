@@ -37,6 +37,11 @@ section.
 
 ## ccsh
 
+- **Backspace at the start of the line** (0.29.2). At the prompt: type
+  `ab`, Home, Backspace twice, type `x`: the line reads `xab`; on an empty
+  line, Backspace a few times then type: the letters come in order.
+  Delete at the end of a line does nothing.
+
 - **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
   (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
@@ -80,23 +85,14 @@ section.
   screen; `/var/log/panic.count` holds the count. Remove the fault, boot:
   no panic; a panic more than ten minutes later counts from 1 again.
 
-- **A crashing service fails with a traceback** (0.26.0). `service add boom
-  lua -e "error('x')"` (or a script with a runtime error) shows `failed:
-  <file>:<line>: <msg>` instead of `ended`; `service status boom` shows
-  `(status 1, Ns ago)` and the indented traceback; `/var/log/messages` has
-  `boom[pid]: crashed: ...` and the traceback lines at err. Restart backoff
-  still applies. A syntax error or a missing command now ends `failed: exit
-  status 1`; Ctrl+T or `kill -TERM` from outside `service stop` shows
-  `failed: Terminated` with no traceback.
+- **A crashing service, the rest** (0.26.0). A syntax error or a missing
+  command ends `failed: exit status 1`; Ctrl+T or `kill -TERM` from outside
+  `service stop` shows `failed: Terminated` with no traceback.
 - **Commands run through lib/procrun** (0.26.0). Services, telnet sessions
   and the console chain (autostart, ccsh) still start and get their quoted
   arguments as before; `shell.getRunningProgram()` and `arg` inside them are
   unchanged; a cu utility's own non-zero exit still shows as `failed: exit
   status N` with no "crashed" line.
-- **Sockets closed at reap** (0.26.0). `kill -9` a service that listens
-  (telnetd, or httpd on 80), let it restart: it binds its port again without
-  a reboot; `netstat -p` no longer lists the dead pid; a telnet client
-  connected to a killed telnetd gets a close or reset.
 - **An init panic** (0.26.0). Hard to trigger (a temporary `error()` in a
   K.after callback in lib/proc.lua): `/var/log/panic` has the error,
   traceback, ps table and unfiled log lines; it prints "Rebooting in 10 s"
@@ -104,10 +100,9 @@ section.
   init.panic 0` shuts down at once, as before. After the reboot,
   `/var/log/messages` has a kern.crit "the last boot ended in a panic: ..."
   line and the report is at `/var/log/panic.1`.
-- **init under xpcall and the coroutine.resume swap** (0.26.0). init runs
-  normally (services, the console, telnet), so yielding across xpcall works
-  under Cobalt; programs that use `parallel` (telnet, httpd, the miner under
-  init) show no cost or side effects from the per-turn swap.
+- **init's per-turn swap with `parallel`** (0.26.0). Programs that use
+  `parallel` (telnet, httpd, the miner under init) show no cost or side
+  effects.
 
 ## Network
 
@@ -230,6 +225,12 @@ section.
 
 ## Tested
 
+- 2026-11-06 — Services under init (ROM 0.29.1): a crashing service
+  (`error('boom')`) shown as failed with its error, status 1 and a
+  traceback in `service status` and `/var/log/messages`, restarting with a
+  doubling wait (16 s, 32 s); `kill -9` of telnetd: its port 23 freed and
+  bound again by the new process, the open session from Lab-B closed. It
+  found the Backspace bug fixed in 0.29.2.
 - 2026-11-06 — ccsh on the dev server (ROM 0.29.1, under init): the line
   editor's Ctrl+A/E, Ctrl+W, Ctrl+U then Ctrl+Y; Ctrl+R finding an old
   command; Tab completing a file name; Ctrl+L; Ctrl+C at the prompt (^C,
