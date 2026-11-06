@@ -18,7 +18,8 @@
 -- apart on one wire, joined by the router; a
 -- closed port; loopback; forged sources (BCP 38: rpfilter, martians);
 -- frames for others ignored; the event hook
--- handling a frame once however many coroutines see it; the settings.
+-- handling a frame once however many coroutines see it; the settings;
+-- TCP; what a process that's gone had open let go (closeOwned).
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -39,10 +40,11 @@ local function copy(v)
 end
 
 local stacks = {}
+local OWNER                 -- the process opening a socket now (as init's proc.self() would say)
 local function computer(id, forward)
     local S
     S = N.new({
-        id = id, forward = forward, clock = function() return CLOCK end,
+        id = id, forward = forward, clock = function() return CLOCK end, owner = function() return OWNER end,
         queue = function(...) table.insert(EVENTS[id], table.pack(...)) end,
         transmit = function(ifc, frame)          -- to every other modem on the wire, on its channel
             for _, m in ipairs(segments[wires[id .. ":" .. ifc.modem]] or {}) do
@@ -475,3 +477,39 @@ run()
 check("TCP to a router's other address: its segments come from that address, and it opens",
     cr.state == "ESTABLISHED" and rr and rr.state == "ESTABLISHED" and B.tcpRead(cr) == "from 10.0.1.1", cr.state)
 B.tcpAbort(cr); run(); R1.tcpUnlisten(24)
+
+-- 14. a process gone (closeOwned, as init calls it when it reaps one):
+-- what process 7 opened on A is let go, process 8's isn't; its
+-- connections close in order (FIN), or reset if something came in it
+-- never read; one made to its listener but not accepted yet is reset;
+-- its ports are free again
+OWNER = nil
+assert(B.tcpListen(25))
+OWNER = 7
+local u7 = A.udpOpen(6100)
+assert(A.tcpListen(80))
+local out7 = A.tcpConnect("10.0.2.5", 25)                -- (A to B: A's end is 7's)
+OWNER = 8
+local u8 = A.udpOpen(6101)
+OWNER = nil
+local in1 = B.tcpConnect("10.0.1.2", 80)
+run()
+local acc1 = A.tcpAccept(80)                            -- (accepted: 7's, as its listener is)
+local in2 = B.tcpConnect("10.0.1.2", 80)                -- (made, not accepted)
+local b25 = B.tcpAccept(25)
+B.tcpSend(in1, "unread")
+run()
+check("process 7's: a socket, a listener, a connection out and one accepted (its listener's)",
+    A.sockets[u7].pid == 7 and A.listeners[80].pid == 7 and out7.pid == 7 and acc1 and acc1.pid == 7
+        and #A.listeners[80] == 1 and in2.state == "ESTABLISHED" and b25 and acc1.inbox == "unread")
+local let = A.closeOwned(7)
+run()
+check("closeOwned(7): its socket and listener closed, process 8's socket kept",
+    let == 4 and A.sockets[u7] == nil and A.listeners[80] == nil and A.sockets[u8] ~= nil, let)
+check("... its connection with nothing unread closed in order (the other side reads the end), the one with unread data reset",
+    select(2, B.tcpRead(b25)) == true and b25.state == "CLOSE_WAIT" and in1.state == "CLOSED" and in1.err == "connection reset",
+    b25.state .. " " .. in1.state .. " " .. tostring(in1.err))
+check("... the one waiting to be accepted reset", in2.state == "CLOSED" and in2.err == "connection reset", in2.state)
+check("... its ports free again", A.udpOpen(6100) == 6100 and A.tcpListen(80) == true and A.closeOwned(nil) == 0)
+B.tcpClose(b25); run(5)
+A.udpClose(6100); A.udpClose(u8); A.tcpUnlisten(80); B.tcpUnlisten(25)

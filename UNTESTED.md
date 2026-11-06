@@ -23,6 +23,37 @@ section.
   keys work.
 - **`nano`** (0.25.0) opens CraftOS's `edit`.
 
+## Processes and services
+
+- **A crashing service fails with a traceback** (0.26.0). `service add boom
+  lua -e "error('x')"` (or a script with a runtime error) shows `failed:
+  <file>:<line>: <msg>` instead of `ended`; `service status boom` shows
+  `(status 1, Ns ago)` and the indented traceback; `/var/log/messages` has
+  `boom[pid]: crashed: ...` and the traceback lines at err. Restart backoff
+  still applies. A syntax error or a missing command now ends `failed: exit
+  status 1`; Ctrl+T or `kill -TERM` from outside `service stop` shows
+  `failed: Terminated` with no traceback.
+- **Commands run through lib/procrun** (0.26.0). Services, telnet sessions
+  and the console chain (autostart, ccsh) still start and get their quoted
+  arguments as before; `shell.getRunningProgram()` and `arg` inside them are
+  unchanged; a cu utility's own non-zero exit still shows as `failed: exit
+  status N` with no "crashed" line.
+- **Sockets closed at reap** (0.26.0). `kill -9` a service that listens
+  (telnetd, or httpd on 80), let it restart: it binds its port again without
+  a reboot; `netstat -p` no longer lists the dead pid; a telnet client
+  connected to a killed telnetd gets a close or reset.
+- **An init panic** (0.26.0). Hard to trigger (a temporary `error()` in a
+  K.after callback in lib/proc.lua): `/var/log/panic` has the error,
+  traceback, ps table and unfiled log lines; it prints "Rebooting in 10 s"
+  and reboots; holding Ctrl+T during the wait shuts down instead; `set
+  init.panic 0` shuts down at once, as before. After the reboot,
+  `/var/log/messages` has a kern.crit "the last boot ended in a panic: ..."
+  line and the report is at `/var/log/panic.1`.
+- **init under xpcall and the coroutine.resume swap** (0.26.0). init runs
+  normally (services, the console, telnet), so yielding across xpcall works
+  under Cobalt; programs that use `parallel` (telnet, httpd, the miner under
+  init) show no cost or side effects from the per-turn swap.
+
 ## Network
 
 - **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,

@@ -51,6 +51,11 @@
 --    netdb.h does, getaddrinfo and friends; net.resolve, and so connect
 --    and a socket's send, take a name wherever they take an address.
 --
+-- Under init, a socket, listening port or connection belongs to the
+-- process that opened it (netstat -p shows it; an accepted connection is
+-- its listener's), and init closes them when that process ends
+-- (S.closeOwned), so a port a killed service had is free again.
+--
 --   local conn = net.connect("10.0.2.5", 23)   -- or net.listen(23):accept()
 --   conn:send("hello\r\n"); local s = conn:read(5); conn:close()
 --
@@ -923,6 +928,42 @@ function N.new(opts)
         if c.state == "CLOSED" then return end
         if c.state ~= "SYN_SENT" then emit(c, { seq = c.sndNxt, rst = true }) end
         finish(c, nil)
+    end
+
+    ----------------------------------------------------------------------
+    -- A process gone
+    ----------------------------------------------------------------------
+    -- Process pid has ended (init's kernel says so as it reaps it): let go
+    -- of what it had open, as Unix closes a dead process's files.  Its UDP
+    -- sockets and listening ports close, with the connections waiting on
+    -- them to be accepted (reset); its connections close as conn:close()
+    -- does, or are reset if what came in was never read or they aren't
+    -- open yet, as Linux does.  How many it let go.
+    function S.closeOwned(pid)
+        if pid == nil then return 0 end
+        local n = 0
+        for port, sock in pairs(S.sockets) do
+            if sock.pid == pid then S.sockets[port] = nil; n = n + 1 end
+        end
+        for port, l in pairs(S.listeners) do
+            if l.pid == pid then
+                S.listeners[port] = nil
+                for _, c in ipairs(l) do S.tcpAbort(c) end      -- (made, never accepted)
+                n = n + 1
+            end
+        end
+        local mine = {}
+        for _, c in pairs(S.tcbs) do
+            local done = c.closing or c.state == "TIME_WAIT" or c.state == "CLOSED"
+            if c.pid == pid and not done then mine[#mine + 1] = c end
+        end
+        table.sort(mine, function(a, b) return a.id < b.id end)        -- (in the order they were made)
+        for _, c in ipairs(mine) do
+            local early = c.state == "SYN_SENT" or c.state == "SYN_RCVD"
+            if c.inbox ~= "" or early then S.tcpAbort(c) else S.tcpClose(c) end
+            n = n + 1
+        end
+        return n
     end
 
     return S

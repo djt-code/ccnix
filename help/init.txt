@@ -12,3 +12,7 @@ At boot (init.boot on: `ccnix setup init`) startup runs init last. It starts the
 What a service prints is logged too, a line each under its name (printError's at err), and so is each service starting, ending and failing: syslogd, a service of its own, files it (`help syslog`). service.<name>.log false leaves a service's output out.
 
 The keyboard and mouse go to the console: to the process group in front of it (ccsh puts each job there in turn; Ctrl+Z stops it); every other event to every process.  The console keeps a scrollback, as a Linux console does: Shift+Page Up and Down look back through what scrolled off its top (the last 500 lines); any other key comes back.  A program that computes for a long time without waiting holds everything up, as it does in CraftOS.
+
+A program that crashes ends its own process alone, failed (status 1 unless it gave one): the error and its traceback go to the log, and `service status` shows a service's.  When a process ends, the sockets it had open are closed (its ports free again).
+
+A panic: if init itself fails (a bug in it, not in a program), it writes what it knew to /var/log/panic (the error and where, the processes, the log's messages not yet filed), then reboots after init.panic seconds (10 unless set; holding Ctrl+T meanwhile shuts the computer down instead; 0: no wait, it shuts down at once, as it did before).  The next boot logs the panic at crit and moves the report to /var/log/panic.1.

@@ -1,7 +1,7 @@
 -- service.lua -- background services, kept running by init
 --
 --   service                         the services: state, process ID, whether at boot
---   service status [name]           the same, with its command, when it started, what it last showed
+--   service status [name]           the same, with its command, when it started, how it last ended, what it last showed
 --   service start|stop|restart name
 --   service enable|disable name     start it at boot, or not
 --   service add name command...     a new service (not started: start or enable it)
@@ -15,6 +15,10 @@
 -- last of it; and to the system log, a line each under its name
 -- (/var/log/messages: `help syslog`), unless service.<name>.log is false.  add, remove, enable and disable work without init; the
 -- rest need it running (`help init`).
+--
+-- A service that crashes (an error in its program) has failed, status 1:
+-- status shows the error, the status, how long ago, and the traceback of
+-- where it happened, which is in the log too.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("service",
@@ -59,7 +63,12 @@ if action == "list" or action == "status" then
         if action == "status" then
             io.write("  " .. (s.cmd or "?") .. "\n")
             if s.since then io.write("  started " .. since(s.since) .. " ago; restarts: " .. s.restarts .. "\n") end
-            if s.last then io.write("  last time: " .. s.last .. "\n") end
+            local e = s.exit
+            if s.last then
+                local when = e and (" (status " .. tostring(e.status) .. ", " .. since(e.at) .. " ago)") or ""
+                io.write("  last time: " .. s.last .. when .. "\n")
+            end
+            for _, line in ipairs(e and e.trace or {}) do io.write("    " .. line .. "\n") end
             for i = math.max(1, #(s.lines or {}) - 4), #(s.lines or {}) do io.write("  | " .. s.lines[i] .. "\n") end
         end
     end

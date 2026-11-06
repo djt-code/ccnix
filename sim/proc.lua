@@ -7,7 +7,10 @@
 -- each process's own terminal and environment, in place only while it
 -- runs; ps; proc_exit and wait; services: started from the settings,
 -- started again after they end (1 s, 2 s, 4 s...), not with restart =
--- "no", stopped (Ctrl+T, then KILL after 3 s), what they showed.
+-- "no", stopped (Ctrl+T, then KILL after 3 s), what they showed.  A
+-- crash (through lib/procrun.lua, under a shell that catches errors as
+-- CraftOS's does): failed, its traceback logged and kept; the last 32
+-- exits; onReap; a panic's report and the next boot's look at it.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -605,3 +608,238 @@ K.input("con", "key", KEYS.pageUp)
 check("a program in front that keeps Shift+Page Up/Down (telnet): it gets them, the console's scrollback stays shut",
     cwin.visible and K.sb.back == 0 and saw("tn:"):find("tn:key:201", 1, true), saw())
 K.input("con", "key_up", KEYS.leftShift)
+
+-- 10. a crash: a command runs through lib/procrun.lua in a CraftOS
+-- shell, which catches its program's error (and prints it); the kernel
+-- sees it anyway: failed, status 1 (or the program's own), the error and
+-- the traceback of where it happened, logged at err and kept with the
+-- exit; not a clean non-zero exit, a failure caught and got over, or
+-- Ctrl+T.  A function's process the same.  The last 32 exits, oldest
+-- first.  onReap hooks.  A panic's report, and the next boot's look at it.
+local RUNNER = "/lib/procrun"
+local PROGRAMS, printed = {}, {}
+-- fn(...) in a coroutine of its own, handed the events it waits for, as
+-- the CraftOS shell runs a program: true, or false, the error and the
+-- coroutine it failed in
+local function try(fn, ...)
+    local co = coroutine.create(fn)
+    local r = table.pack(coroutine.resume(co, ...))
+    while coroutine.status(co) ~= "dead" do
+        local want = r[2]
+        local ev = table.pack(fakeOs.pullEventRaw(want))
+        if want == nil or ev[1] == want or ev[1] == "terminate" then
+            r = table.pack(coroutine.resume(co, table.unpack(ev, 1, ev.n)))
+        end
+    end
+    if r[1] then return true end
+    return false, r[2], co
+end
+local fakeShell = {}
+local runnerChunk = assert(loadfile(PROJ .. "/lib/procrun.lua", "t", setmetatable({ shell = fakeShell }, { __index = _G })))
+-- shell.execute: the program, its error printed (not passed on); its success
+function fakeShell.execute(cmd, ...)
+    local fn = cmd == RUNNER and runnerChunk or PROGRAMS[cmd]
+    if not fn then printed[#printed + 1] = "No such program"; return false end
+    local ok, err = try(fn, ...)
+    if not ok and err ~= nil and err ~= "" then printed[#printed + 1] = tostring(err) end
+    return ok
+end
+-- the shell's words: split at spaces, a "quoted part" one word
+local function shellWords(line)
+    local out, cur, quoted = {}, "", false
+    for i = 1, #line do
+        local ch = line:sub(i, i)
+        if ch == '"' then
+            if quoted or cur ~= "" then out[#out + 1] = cur end
+            cur, quoted = "", not quoted
+        elseif not quoted and (ch == " " or ch == "\t") then
+            if cur ~= "" then out[#out + 1] = cur end
+            cur = ""
+        else
+            cur = cur .. ch
+        end
+    end
+    if cur ~= "" or quoted then out[#out + 1] = cur end
+    return out
+end
+-- os.run(env, "rom/programs/shell.lua", ...): the shell runs its arguments
+-- as a command line, and says nothing of how it went
+local exitEvents = {}
+local shellOs = setmetatable({ run = function(env, path, ...)
+    local words = shellWords(table.concat({ ... }, " "))
+    if words[1] then fakeShell.execute(table.unpack(words)) end
+    return true
+end, queueEvent = function(...)
+    local e = table.pack(...)
+    if e[1] == "proc_exit" then exitEvents[#exitEvents + 1] = e end
+    return fakeOs.queueEvent(...)
+end }, { __index = fakeOs })
+-- a file system in memory, for the panic's file
+local FILES = {}
+local fakeFs = {
+    exists = function(p) return FILES[p] ~= nil end,
+    getDir = function(p)
+        local i = #p
+        while i > 0 and p:sub(i, i) ~= "/" do i = i - 1 end
+        return p:sub(1, math.max(0, i - 1))
+    end,
+    makeDir = function() end,
+    delete = function(p) FILES[p] = nil end,
+    move = function(a, b) FILES[b], FILES[a] = FILES[a], nil end,
+    open = function(p, mode)
+        if mode == "w" then
+            local buf = {}
+            return { write = function(s) buf[#buf + 1] = s end, close = function() FILES[p] = table.concat(buf) end }
+        end
+        if not FILES[p] then return nil, "No such file" end
+        return { readAll = function() return FILES[p] end, close = function() end }
+    end,
+}
+local K2 = P.new({ native = native, osT = shellOs, term = fakeTerm, window = fakeWindow, settings = fakeSettings,
+    keys = KEYS, runner = RUNNER, fs = fakeFs })
+local function drain2()
+    for _ = 1, 1000 do
+        if not events[1] then return end
+        K2.dispatch(table.remove(events, 1))
+    end
+end
+local function heldText(app)
+    local t = {}
+    for _, r in ipairs(K2.held) do
+        if not app or r.app == app then t[#t + 1] = r.sev .. ":" .. tostring(r.app) .. ":" .. r.msg end
+    end
+    return table.concat(t, " | ")
+end
+local function crashesSince(n)
+    local c = 0
+    for i = n + 1, #K2.held do if K2.held[i].msg:sub(1, 8) == "crashed:" then c = c + 1 end end
+    return c
+end
+local function lastExit() return exitEvents[#exitEvents] end
+
+local gotArgs
+PROGRAMS.boom = function(...)
+    gotArgs = table.pack(...)
+    local function deeper() error("boom") end
+    fakeOs.pullEvent("go10")
+    deeper()
+end
+STORE["service.crashy.cmd"] = 'boom "two words" x'
+STORE["service.crashy.restart"] = "no"
+K2.serviceStart("crashy")
+drain2()
+local cpid2 = K2.services.crashy.pid
+check("through the runner: the program gets the command's words as the shell splits them",
+    gotArgs and gotArgs.n == 2 and gotArgs[1] == "two words" and gotArgs[2] == "x", gotArgs and table.concat(gotArgs, ","))
+noBefore()
+fakeOs.queueEvent("go10")
+drain2()
+local ce = K2.exited[cpid2]
+local traceText = table.concat(ce and ce.trace or {}, " / ")
+check("a service that crashes: failed (not ended), status 1, its error, though the shell caught it (printed it)",
+    ce and ce.ok == false and ce.status == 1 and ce.err:find("boom", 1, true) and K2.services.crashy.state == "exited"
+        and K2.services.crashy.last == "failed: " .. ce.err and printed[#printed] == ce.err,
+    tostring(ce and ce.err) .. " " .. tostring(K2.services.crashy.last))
+check("... the traceback of where it happened, kept with the exit", traceText:find("deeper", 1, true) ~= nil, traceText)
+local pe = lastExit()
+check("... proc_exit carries the error and the status", pe and pe[2] == cpid2 and pe[3] == ce.err and pe[4] == 1)
+check("... logged at err under its name: the error, then the traceback a line each",
+    heldText("crashy"):find("3:crashy:crashed: " .. ce.err, 1, true) and heldText("crashy"):find("deeper", 1, true)
+        and heldText("init"):find("3:init:crashy failed: " .. ce.err, 1, true),
+    heldText())
+local sst
+for _, s in ipairs(K2.serviceStatus()) do if s.name == "crashy" then sst = s end end
+check("... and service status has that exit", sst and sst.exit == ce and sst.exit.trace[1] ~= nil)
+
+PROGRAMS.two = function() _G.POSIX_STATUS = 2; error("", 0) end        -- (as cu.exit(2) does)
+PROGRAMS.fine = function() end
+PROGRAMS.catches = function()
+    coroutine.resume(coroutine.create(function() error("inner trouble") end))
+    fakeOs.pullEvent("go11")
+end
+PROGRAMS.catchesLast = function() coroutine.resume(coroutine.create(function() error("last thing") end)) end
+PROGRAMS.waits = function() fakeOs.pullEvent("never") end
+local before = #K2.held
+printed = {}
+local pTwo, pFine, pNone = K2.spawn({ cmd = "two" }), K2.spawn({ cmd = "fine" }), K2.spawn({ cmd = "nosuch thing" })
+local pCatch, pLast = K2.spawn({ cmd = "catches" }), K2.spawn({ cmd = "catchesLast" })
+fakeOs.queueEvent("go11")
+drain2()
+local pWait = K2.spawn({ cmd = "waits" })
+K2.kill(pWait, "TERM")
+drain2()
+local function ex(pid) local e = K2.exited[pid] return e and (tostring(e.ok) .. ":" .. e.status .. ":" .. tostring(e.err)) end
+check("a program's own non-zero status (cu.exit): that status, not a crash", ex(pTwo) == "true:2:nil", ex(pTwo))
+check("one that ends well: 0", ex(pFine) == "true:0:nil", ex(pFine))
+check("no such program: status 1 (the shell's run said it failed)",
+    ex(pNone) == "true:1:nil" and table.concat(printed, "|"):find("No such program", 1, true), ex(pNone))
+check("a coroutine's failure the program caught, then carried on, or ended well: not a crash",
+    ex(pCatch) == "true:0:nil" and ex(pLast) == "true:0:nil", tostring(ex(pCatch)) .. " " .. tostring(ex(pLast)))
+check("Ctrl+T (TERM): ended by Terminated, status 1, but no traceback",
+    ex(pWait) == "false:1:Terminated" and K2.exited[pWait].trace == nil and K2.exited[pWait].terminated, ex(pWait))
+check("none of those logged as a crash", crashesSince(before) == 0, heldText())
+
+-- a function's process: its own coroutine's traceback; a CC:T exception
+-- (message and thread) as parallel throws it
+local fnPid = K2.spawn({ name = "fnboom", fn = function()
+    local function deepfn() error("fn boom") end
+    fakeOs.pullEvent("go12")
+    deepfn()
+end })
+local th = coroutine.create(function() local function origin() error("at the origin") end origin() end)
+local exPid = K2.spawn({ name = "exn", fn = function()
+    coroutine.resume(th)
+    error(setmetatable({ message = "wrapped", thread = th }, { __name = "exception" }), 0)
+end })
+fakeOs.queueEvent("go12")
+drain2()
+local fe, xe = K2.exited[fnPid], K2.exited[exPid]
+check("a function that fails: its error, status 1, its traceback, logged",
+    fe.ok == false and fe.err:find("fn boom", 1, true) and fe.status == 1
+        and table.concat(fe.trace, " "):find("deepfn", 1, true) and heldText("fnboom"):find("crashed:", 1, true),
+    table.concat(fe.trace or {}, " / "))
+check("an exception: its message, and the traceback of the coroutine it came from",
+    xe.err == "wrapped" and table.concat(xe.trace, " "):find("origin", 1, true), table.concat(xe.trace or {}, " / "))
+
+-- the last 32 exits, oldest first; onReap before onExit, a failing hook logged
+local order = {}
+K2.onReap(function(p) order[#order + 1] = "hook:" .. p.name end)
+K2.onReap(function() error("hook broke") end)
+local hooked2 = K2.spawn({ name = "h", fn = function() end, onExit = function(p) order[#order + 1] = "onExit:" .. p.name end })
+check("onReap: each hook as it ends, before onExit; one that fails is logged and the rest goes on",
+    table.concat(order, " ") == "hook:h onExit:h" and K2.exited[hooked2] and heldText("init"):find("hook broke", 1, true),
+    table.concat(order, " "))
+for i = 1, 40 do K2.spawn({ name = "n" .. i, fn = function() end }) end
+local exits = K2.api.exited()
+check("proc.exited(): the last 32 that ended, oldest first",
+    #exits == 32 and exits[32].name == "n40" and exits[1].name == "n9" and K2.exited[hooked2] == nil, #exits)
+
+-- a panic: init failed; what it knew, in /var/log/panic
+local live = K2.spawn({ cmd = "waits" })
+drain2()
+local sd2 = K2.spawn({ name = "syslogd", fn = function() K2.api.register("syslog"); fakeOs.pullEvent("never") end })
+drain2()
+local heldBefore = #K2.held                                     -- (handed over at register: none now)
+K2.log({ fac = 3, sev = 4, app = "late", pid = 7, msg = "in the inbox still" })
+local path = K2.writePanic("kernel bug", "stack traceback:\n\tinit.lua:93: in main chunk")
+local report = FILES[P.PANIC] or ""
+check("a panic: the report written to " .. P.PANIC .. ", with the error and where",
+    path == P.PANIC and report:find("\nerror: kernel bug\n", 1, true) and report:find("init.lua:93: in main chunk", 1, true),
+    report)
+check("... the processes, as ps -l lists them", report:find("\nprocesses:\n", 1, true)
+    and report:find(" " .. live .. " +1 +" .. live .. " %? +S +%d+%.%d waits\n") ~= nil)
+check("... and the log's messages not yet filed (the inbox's here)", heldBefore == 0
+    and report:find("log messages not yet filed (1):\ndaemon.warning ", 1, true)
+    and report:find("late[7]: in the inbox still", 1, true))
+K2.kill(sd2, "KILL")
+
+-- the next boot: logged at crit, the report moved to .1
+local K3 = P.new({ native = native, osT = shellOs, term = fakeTerm, window = fakeWindow, settings = fakeSettings,
+    keys = KEYS, runner = RUNNER, fs = fakeFs })
+local said3 = K3.lastPanic()
+local r3 = K3.held[#K3.held]
+check("the next boot: the panic logged at crit (kern), the report moved to .1",
+    said3 == "kernel bug" and r3 and r3.sev == 2 and r3.fac == 0
+        and r3.msg == "the last boot ended in a panic: kernel bug (" .. P.PANIC .. ".1)"
+        and FILES[P.PANIC] == nil and FILES[P.PANIC .. ".1"] == report, r3 and r3.msg)
+check("... and only once", K3.lastPanic() == nil and #K3.held == 1)

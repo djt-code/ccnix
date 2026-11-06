@@ -259,6 +259,7 @@ next to itself in `turtle/`, not in the current directory.
 | `ccnix.autostart` | "" | what a turtle runs at boot |
 | `ccsh.login` | false | ccsh at boot |
 | `init.boot` | false | [init](#processes-and-services) at boot: processes, services |
+| `init.panic` | 10 | seconds before rebooting after init itself fails (0: shut down at once) |
 
 A size given on the command line is saved: after `farm learn 9 12` or
 `mine 5 3 64`, plain `farm` or `mine` (and the autostart) uses it again.
@@ -1499,9 +1500,28 @@ runs everything:
   name (`printError`'s at err), and so is each service starting, ending
   and failing; `service.<name>.log false` leaves one out. See
   [The system log](#the-system-log).
+- **Crashes:** the CraftOS shell catches a program's error itself and
+  carries on, so `init` runs each command through `lib/procrun.lua`,
+  which keeps what the shell's run said. A program that crashes ends
+  its process failed (status 1, unless it set its own), and the error
+  and the traceback of where it happened go to the log at err under its
+  name. `service status <name>` shows a service's last exit: the error,
+  the status, how long ago and the traceback. Ctrl+T's "Terminated" ends
+  a process failed too, but isn't a crash (no traceback).
+- **What a process had open:** when one ends (killed, crashed or done),
+  the sockets, listening ports and connections it opened are closed, so
+  a service that's killed and started again gets its port back.
+- **A panic:** if `init` itself fails (a bug in it, not in a program),
+  it writes `/var/log/panic`: the error and its traceback, the processes
+  as `ps -l` shows them, and the log's messages that hadn't reached
+  syslogd yet. Then it reboots after `init.panic` seconds (10 unless
+  set; holding Ctrl+T meanwhile shuts the computer down instead; 0 shuts
+  down at once, as before). The next boot logs the panic at `kern.crit`
+  and moves the report to `/var/log/panic.1`.
 - **Programs** reach it through `_G.proc`: `proc.spawn{cmd = "..."}`,
   `proc.kill(pid)` (`-pgid` for a group), `proc.list()`, `proc.self()`,
-  `proc.wait(pid)`, `proc.inject(pid, event, ...)` (an event for one
+  `proc.wait(pid)`, `proc.exited()` (the last 32 to end, with their
+  status, error and a crash's traceback), `proc.inject(pid, event, ...)` (an event for one
   process alone), `proc.input(tty, event, ...)` (typed at a terminal),
   `proc.getpgid()`, `proc.foreground()` and `proc.setForeground(pgid)`,
   `proc.term(pid)` (its terminal: `getLine` reads it back), `proc.log(rec)`

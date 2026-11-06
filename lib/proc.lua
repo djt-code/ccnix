@@ -48,6 +48,29 @@
 -- started again after 1 s, 2 s, 4 s... (up to a minute; back to 1 s once
 -- it has run 30 s).
 --
+-- A crash.  The CraftOS shell catches a program's error itself (it
+-- prints it and goes on), so a command is run through lib/procrun.lua
+-- (o.runner), which keeps what the shell's run said: a program that
+-- failed ends with status 1 if it didn't set one of its own.  While a
+-- process runs, coroutine.resume notes the last of its coroutines that
+-- failed (forgotten when one of them carries on after), so when a
+-- command ends failed, that's the error that ended it: the process
+-- ends with it (not "ok"), and the traceback of the coroutine it
+-- happened in is logged at err under its name and kept with the exit.
+-- A function's process (spec.fn) fails the same way, with its own
+-- coroutine's traceback.  Ctrl+T's "Terminated" isn't a crash.  The
+-- last P.EXITS exits are kept (K.exited, proc.exited()), and `service
+-- status` shows a service's last one.
+--
+-- K.onReap(fn) has fn(p) called as each process ends (before its onExit
+-- and proc_exit): init lets lib/net close the sockets it had open so.
+--
+-- A panic (init itself failing, a bug in the kernel rather than in a
+-- program): K.writePanic puts the error, the traceback, the processes
+-- and the log's messages not yet filed in P.PANIC (/var/log/panic), and
+-- at the next boot K.lastPanic logs it at crit and moves it to
+-- /var/log/panic.1.
+--
 -- The system log (`help syslog`): proc.log(rec) takes a message (lib/log's
 -- record) for syslogd, the process that has called proc.register("syslog").
 -- It's handed over in memory (the inbox, not CC's event queue) as a
@@ -65,8 +88,9 @@
 -- Programs reach it through _G.proc (init sets it): proc.spawn, kill
 -- (a negative ID: that process group), list, self, console, term,
 -- inject, input, getpgid, foreground, setForeground, ignore,
--- ownScrollback, signal, wait, log, register, uncaptured (fn(...) with
--- capture off), and the service functions.
+-- ownScrollback, signal, wait, exited (the last few to end, oldest
+-- first), log, register, uncaptured (fn(...) with capture off), and the
+-- service functions.
 -- The module's P.serviceDef, serviceNames and serviceStatus read the
 -- settings' services without init (service.lua).
 
@@ -77,6 +101,11 @@ local USER = { char = true, key = true, key_up = true, paste = true, terminate =
 P.USER = USER
 P.HISTORY = 500                 -- lines of the console's scrollback (K.scrollback)
 P.SIGNALS = { HUP = 1, INT = 2, KILL = 9, TERM = 15, CONT = 18, STOP = 19, TSTP = 20 }
+P.EXITS = 32                    -- processes' ends kept (K.exited)
+P.TRACE = 16                    -- lines of a crash's traceback kept
+P.PANIC = "/var/log/panic"      -- what init knew when it failed
+
+local rawResume = coroutine.resume      -- (while a process runs, coroutine.resume is watched: see resume)
 
 -- A signal as its name: "TERM", "SIGTERM", "term", "15" and 15 are all
 -- "TERM"; 0 and "0" are 0; nil for one that isn't known.
@@ -91,6 +120,42 @@ local function copy(t)
     local c = {}
     for k, v in pairs(t) do c[k] = v end
     return c
+end
+
+-- The lines of text s (without their newlines).
+local function splitLines(s)
+    local out, pos = {}, 1
+    while pos <= #s do
+        local nl = s:find("\n", pos, true)
+        if not nl then out[#out + 1] = s:sub(pos); break end
+        out[#out + 1] = s:sub(pos, nl - 1)
+        pos = nl + 1
+    end
+    return out
+end
+
+-- An error as its message and the coroutine it happened in: CC:T's
+-- exceptions (a table with a message and a thread, as parallel throws
+-- them) carry both; anything else is the message, in coroutine co.
+local function errorOf(e, co)
+    if type(e) == "table" and type(rawget(e, "message")) == "string" and type(rawget(e, "thread")) == "thread" then
+        return rawget(e, "message"), rawget(e, "thread")
+    end
+    return tostring(e), co
+end
+
+-- The traceback of coroutine co, which failed with msg: its lines after
+-- the message, tabs as two spaces, at most P.TRACE of them.
+local function traceOf(co, msg)
+    local ok, text = pcall(debug.traceback, co, msg)
+    if not ok or type(text) ~= "string" then return {} end
+    if text:sub(1, #msg) == msg then text = text:sub(#msg + 2) end      -- (the message, and its newline)
+    local out = {}
+    for _, line in ipairs(splitLines(text)) do
+        if #out == P.TRACE then out[#out + 1] = "  ..."; break end
+        out[#out + 1] = (line:gsub("\t", "  "))
+    end
+    return out
 end
 
 -- os.getenv, os.setenv and os.environ over the table env.
@@ -135,9 +200,10 @@ function P.serviceNames(settingsT, known)
 end
 
 -- { name, state ("running", "restarting", "stopped", "exited", or
--- "-" never started), pid, enabled, cmd, restarts, since, last, lines
--- (what it last showed) } for each service: kernel K's, or the settings'
--- alone without one (init isn't running).
+-- "-" never started), pid, enabled, cmd, restarts, since, last, exit
+-- (how it last ended: K.exited's entry), lines (what it last showed) }
+-- for each service: kernel K's, or the settings' alone without one
+-- (init isn't running).
 function P.serviceStatus(settingsT, K)
     local out = {}
     for _, name in ipairs(P.serviceNames(settingsT, K and K.services)) do
@@ -152,7 +218,7 @@ function P.serviceStatus(settingsT, K)
         end
         out[#out + 1] = { name = name, state = svc.state or "-", pid = svc.pid, enabled = d and d.enabled or false,
                           cmd = d and d.cmd, restarts = svc.restarts or 0, since = svc.since, last = svc.last,
-                          lines = lines }
+                          exit = svc.exit, lines = lines }
     end
     return out
 end
@@ -160,21 +226,27 @@ end
 -- o: native (the terminal under everything), shell (the shell to run
 -- commands under), multishell, settings, window (the window API), osT
 -- (os: pullEventRaw, queueEvent, startTimer, run, epoch), env (the first
--- processes' environment), keys (for Ctrl+Z).
+-- processes' environment), keys (for Ctrl+Z), runner (lib/procrun.lua's
+-- path: a command runs through it, so a failure is seen; without it,
+-- straight in the shell), fs (for the panic's file).
 function P.new(o)
     local osT = o.osT or os
     local settingsT = o.settings or settings
     local windowT = o.window or window
     local native = o.native or term.current()
     local termT = o.term or term
+    local fsT = o.fs or rawget(_G, "fs")
     local SHELL = o.shellProgram or "rom/programs/shell.lua"
+    local RUNNER = o.runner
     local keysT = o.keys or rawget(_G, "keys")
     local function now() return osT.epoch("utc") end
 
     local K = {
         procs = {},             -- pid -> process
         list = {},              -- the processes, oldest first
-        exited = {},            -- pid -> { ok, err, name }: the last few that ended
+        exited = {},            -- pid -> { pid, name, cmd, service, ok, err, status, terminated, at, trace }
+        exitOrder = {},         -- the pids in exited, oldest first (the last P.EXITS)
+        reapHooks = {},         -- fn(p), as each process ends (K.onReap)
         services = {},          -- name -> { state, pid, restarts, fails, since, last, term }
         timers = {},            -- timer id -> function
         inbox = {},             -- events for one process, { pid, ev }, or typed at a terminal, { tty, ev }
@@ -310,6 +382,22 @@ function P.new(o)
     --------------------------------------------------------------------
     local reap
 
+    -- coroutine.resume while a process runs: the same, but a coroutine
+    -- that fails is noted on the process (p.fault: its error and the
+    -- coroutine), and forgotten when one is resumed and carries on (it
+    -- yields again).  So what's noted when a command ends is the error
+    -- that ended its program, which the CraftOS shell caught (and only
+    -- printed): the try it runs a program in is a coroutine too.
+    local function watchedResume(co, ...)
+        local r = table.pack(rawResume(co, ...))
+        local p = K.current
+        if p then
+            if not r[1] then p.fault = { err = r[2], co = co }
+            elseif coroutine.status(co) == "suspended" then p.fault = nil end
+        end
+        return table.unpack(r, 1, r.n)
+    end
+
     -- Resume p with the event ...: its terminal and environment in place
     -- while it runs.
     local function resume(p, ...)
@@ -318,22 +406,25 @@ function P.new(o)
         local api = p.envApi
         local saved = { rawget(osT, "getenv"), rawget(osT, "setenv"), rawget(osT, "environ") }
         osT.getenv, osT.setenv, osT.environ = api.getenv, api.setenv, api.environ
+        local savedResume = coroutine.resume
+        coroutine.resume = watchedResume
         local prevTerm = termT.redirect(p.term)
         local status = rawget(_G, "POSIX_STATUS")     -- (each process's own: what its last program said)
         _G.POSIX_STATUS = p.posixStatus
         local ctx = p.enter and p.enter(p)
         local t0 = now()
-        local r = table.pack(coroutine.resume(p.co, ...))
+        local r = table.pack(rawResume(p.co, ...))
         p.cpu = p.cpu + (now() - t0)
         if p.leave then p.leave(p, ctx) end
         p.posixStatus = rawget(_G, "POSIX_STATUS")
         _G.POSIX_STATUS = status
         p.term = termT.current()
         termT.redirect(prevTerm)
+        coroutine.resume = savedResume
         osT.getenv, osT.setenv, osT.environ = saved[1], saved[2], saved[3]
         K.current = was
         if coroutine.status(p.co) == "dead" then
-            reap(p, r[1], r[2])
+            reap(p, r[1], r[2], p.co)
         elseif p.killed then
             reap(p, false, "killed")
         else
@@ -467,9 +558,14 @@ function P.new(o)
         else
             local shellEnv = { shell = o.shell, multishell = o.multishell }
             -- (its status: what its program said, as cu.exit and ccsh set
-            -- it; the CraftOS shell doesn't pass that on itself)
+            -- it, or the runner for one that failed; the CraftOS shell
+            -- doesn't pass that on itself.  The shell splits the runner's
+            -- name and the command line into words as it would the line
+            -- alone, so the runner gets the command's words as they are.)
             co = coroutine.create(function()
-                if spec.cmd then osT.run(shellEnv, SHELL, spec.cmd) else osT.run(shellEnv, SHELL) end
+                if spec.cmd and RUNNER then osT.run(shellEnv, SHELL, '"' .. RUNNER .. '"', spec.cmd)
+                elseif spec.cmd then osT.run(shellEnv, SHELL, spec.cmd)
+                else osT.run(shellEnv, SHELL) end
                 return rawget(_G, "POSIX_STATUS")
             end)
         end
@@ -478,7 +574,7 @@ function P.new(o)
             name = spec.name or (spec.cmd and spec.cmd:match("^%S+"):match("([^/]*)$")) or "shell",
             cmd = spec.cmd or spec.name or "shell",
             term = spec.term or K.newTerm(), tty = tty, env = env, envApi = envApi(env),
-            started = now(), cpu = 0, service = spec.service, onExit = spec.onExit,
+            started = now(), cpu = 0, service = spec.service, onExit = spec.onExit, isCmd = spec.fn == nil,
             capture = capture, enter = spec.enter, leave = spec.leave,
             sid = session and pid or parent.sid,
             pgid = (session or spec.pgid == true) and pid or tonumber(spec.pgid) or parent.pgid,
@@ -496,23 +592,48 @@ function P.new(o)
 
     local signalOne
 
-    reap = function(p, ok, err)
+    -- A crash, to the log at err under the process's name: the error,
+    -- then its traceback a line each.
+    local function logCrash(p, trace)
+        local fac = p.service and 3 or 1                -- (daemon, or user)
+        local function put(msg) K.log({ fac = fac, sev = 3, app = p.service or p.name, pid = p.pid, msg = msg }) end
+        put("crashed: " .. p.err)
+        for _, line in ipairs(trace) do put(line) end
+    end
+
+    -- Process p has ended: ok and what its coroutine returned (a number is
+    -- its status), or false and its error (co: the coroutine it failed
+    -- in; none when it was killed).
+    reap = function(p, ok, err, co)
         if not K.procs[p.pid] then return end
         local value = ok and err                -- (what it returned: a number is its status)
         p.status = type(value) == "number" and value or (ok and value ~= false) and 0 or 1
-        p.state, p.ok, p.err = "dead", ok, (not ok) and tostring(err) or nil
+        -- a command whose program failed (the runner's status) with an
+        -- error the shell caught: that error is how it ended
+        if ok and p.isCmd and p.status ~= 0 and p.fault then
+            local msg, where = errorOf(p.fault.err, p.fault.co)
+            if msg ~= "" then ok, err, co = false, msg, where end
+        end
+        local where
+        if not ok then err, where = errorOf(err, co) end
+        p.state, p.ok, p.err = "dead", ok, (not ok) and err or nil
+        p.fault = nil
+        -- (Ctrl+T's end isn't a crash: there's no bug to trace)
+        local trace = where and not (p.terminated and err == "Terminated") and traceOf(where, err) or nil
         K.procs[p.pid] = nil
         for i, q in ipairs(K.list) do
             if q == p then table.remove(K.list, i); break end
         end
         if p.logbuf and p.logbuf ~= "" then K.logLine(p, p.logbuf); p.logbuf = "" end
         if K.syslog == p.pid then K.syslog = nil end
-        K.exited[p.pid] = { ok = ok, err = p.err, name = p.name, at = now(), status = p.status,
-                            terminated = p.terminated == true }
-        local n = 0
-        for pid in pairs(K.exited) do
-            n = n + 1
-            if n > 32 then K.exited[pid] = nil end
+        if trace then logCrash(p, trace) end
+        K.exited[p.pid] = { pid = p.pid, name = p.name, cmd = p.cmd, service = p.service, ok = ok, err = p.err,
+                            status = p.status, terminated = p.terminated == true, at = now(), trace = trace }
+        K.exitOrder[#K.exitOrder + 1] = p.pid
+        while #K.exitOrder > P.EXITS do K.exited[table.remove(K.exitOrder, 1)] = nil end
+        for _, fn in ipairs(K.reapHooks) do
+            local hookOk, why = pcall(fn, p)
+            if not hookOk then K.say(3, "at the end of process " .. p.pid .. ": " .. tostring(why)) end
         end
         for _, q in ipairs(K.list) do
             if q.ppid == p.pid then q.ppid = 1 end              -- (orphans go to init)
@@ -608,6 +729,20 @@ function P.new(o)
         K.inbox[#K.inbox + 1] = { tty = tty, ev = table.pack(...) }
         if not K.current then flush() end
         return true
+    end
+
+    -- fn(p) as each process ends, before its onExit and proc_exit (what it
+    -- held let go first: init has lib/net close its sockets so).  An
+    -- error in fn is logged, and the rest go on.
+    function K.onReap(fn)
+        K.reapHooks[#K.reapHooks + 1] = fn
+    end
+
+    -- The last few processes to end, oldest first: K.exited's entries.
+    function K.exits()
+        local out = {}
+        for _, pid in ipairs(K.exitOrder) do out[#out + 1] = copy(K.exited[pid]) end
+        return out
     end
 
     --------------------------------------------------------------------
@@ -767,6 +902,82 @@ function P.new(o)
     end
 
     --------------------------------------------------------------------
+    -- A panic: init itself failed
+    --------------------------------------------------------------------
+    -- What init knew when it failed with err (trace: debug.traceback's
+    -- text): the error and where, the processes as ps -l lists them, and
+    -- the log's messages that hadn't reached syslogd yet (held, or in the
+    -- inbox), which would be lost.  A text, for P.PANIC.
+    function K.panicReport(err, trace)
+        local okL, L = pcall(require, "log")
+        if not (okL and type(L) == "table") then L = nil end
+        local out = {}
+        local function put(s) out[#out + 1] = s end
+        local okH, host = pcall(hostname)
+        put("init panicked at " .. (L and L.stamp(now()) or tostring(now())) .. " on " .. (okH and tostring(host) or "?"))
+        put("error: " .. tostring(err))
+        for _, line in ipairs(splitLines(tostring(trace or ""))) do put(line) end
+        put("")
+        put("processes:")
+        put("  PID  PPID  PGID TTY    STAT   TIME CMD")
+        local okP, rows = pcall(K.ps)
+        for _, p in ipairs(okP and rows or {}) do
+            put(string.format("%5s %5s %5s %-6s %-4s %6.1f %s", tostring(p.pid), tostring(p.ppid), tostring(p.pgid),
+                tostring(p.tty), tostring(p.state), tonumber(p.cpu) or 0, tostring(p.cmd)))
+        end
+        local waiting = {}
+        for _, rec in ipairs(K.held) do waiting[#waiting + 1] = rec end
+        for _, m in ipairs(K.inbox) do
+            if m.ev and m.ev[1] == "syslog" and type(m.ev[2]) == "table" then waiting[#waiting + 1] = m.ev[2] end
+        end
+        put("")
+        put("log messages not yet filed (" .. #waiting .. "):")
+        for _, rec in ipairs(waiting) do
+            if L then
+                put(L.facilityName(rec.fac) .. "." .. L.severityName(rec.sev) .. " " .. L.line(rec))
+            else
+                put(tostring(rec.app) .. ": " .. tostring(rec.msg))
+            end
+        end
+        return table.concat(out, "\n") .. "\n"
+    end
+
+    -- Write the panic's report (K.panicReport) to P.PANIC: the path, or
+    -- nil and why it couldn't.
+    function K.writePanic(err, trace)
+        if not fsT then return nil, "no file system" end
+        local okR, text = pcall(K.panicReport, err, trace)
+        if not okR then text = "init panicked: " .. tostring(err) .. "\n(and the report failed: " .. tostring(text) .. ")\n" end
+        pcall(fsT.makeDir, fsT.getDir(P.PANIC))
+        local h, why = fsT.open(P.PANIC, "w")
+        if not h then return nil, why or "can't write " .. P.PANIC end
+        h.write(text)
+        h.close()
+        return P.PANIC
+    end
+
+    -- At boot: if the last one ended in a panic (P.PANIC is there), log
+    -- it at crit (facility kern) and move the report to P.PANIC .. ".1"
+    -- (one there before is dropped).  Its error line, or nil.
+    function K.lastPanic()
+        if not (fsT and fsT.exists(P.PANIC)) then return nil end
+        local h = fsT.open(P.PANIC, "r")
+        local text = h and h.readAll() or ""
+        if h then h.close() end
+        local errLine = "?"
+        local prefix = "error: "
+        for _, line in ipairs(splitLines(text)) do
+            if line:sub(1, #prefix) == prefix then errLine = line:sub(#prefix + 1); break end
+        end
+        local old = P.PANIC .. ".1"
+        if fsT.exists(old) then fsT.delete(old) end
+        local moved = pcall(fsT.move, P.PANIC, old)
+        K.log({ fac = 0, sev = 2, app = "init", pid = 1,
+                msg = "the last boot ended in a panic: " .. errLine .. " (" .. (moved and old or P.PANIC) .. ")" })
+        return errLine
+    end
+
+    --------------------------------------------------------------------
     -- Services
     --------------------------------------------------------------------
     local function def(name) return P.serviceDef(name, settingsT) end
@@ -779,7 +990,7 @@ function P.new(o)
         -- failed: an error, or its program exited non-zero
         local failed = not p.ok or (p.status or 0) ~= 0
         local why = not p.ok and tostring(p.err) or ("exit status " .. tostring(p.status))
-        svc.pid, svc.last = nil, failed and ("failed: " .. why) or "ended"
+        svc.pid, svc.last, svc.exit = nil, failed and ("failed: " .. why) or "ended", K.exited[p.pid]
         local d = def(svc.name)
         local what = svc.name .. (failed and (" failed: " .. why) or " ended")
         if svc.stopping or not d or d.restart == "no" then
@@ -916,6 +1127,10 @@ function P.new(o)
             local e = K.exited[pid]
             return e and e.ok or false, e and e.err
         end,
+        -- The last few processes to end, oldest first: { pid, name, cmd,
+        -- service, ok, err, status, terminated, at, trace (a crash's
+        -- traceback, its lines) }.
+        exited = K.exits,
         -- A process ID nothing will use (ccsh numbers its jobs so).
         reservePid = function()
             local pid = K.nextPid

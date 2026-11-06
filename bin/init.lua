@@ -31,6 +31,19 @@
 -- Linux console does: Shift+Page Up and Down look back through what
 -- scrolled off its top (the last 500 lines); any other key comes back.  A program that computes for a long time
 -- without waiting holds everything up, as it does in CraftOS.
+--
+-- A program that crashes ends its own process alone, failed (status 1
+-- unless it gave one): the error and its traceback go to the log, and
+-- `service status` shows a service's.  When a process ends, the sockets
+-- it had open are closed (its ports free again).
+--
+-- A panic: if init itself fails (a bug in it, not in a program), it
+-- writes what it knew to /var/log/panic (the error and where, the
+-- processes, the log's messages not yet filed), then reboots after
+-- init.panic seconds (10 unless set; holding Ctrl+T meanwhile shuts the
+-- computer down instead; 0: no wait, it shuts down at once, as it did
+-- before).  The next boot logs the panic at crit and moves the report to
+-- /var/log/panic.1.
 
 local args = { ... }
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
@@ -59,11 +72,20 @@ if rawget(_G, "proc") then
     return
 end
 
-local K = require("proc").new({ native = term.current(), shell = shell, multishell = multishell })
+local P = require("proc")
+local resume0 = coroutine.resume                -- (the kernel swaps it while a process runs)
+-- (commands run through lib/procrun, so a crash is seen)
+local K = P.new({ native = term.current(), shell = shell, multishell = multishell, runner = program("lib/procrun") })
 _G.proc = K.api
 -- what services print, to the system log (syslogd: `help syslog`)
 local uncapture = K.capture(_G)
 K.say(5, "init started")
+K.lastPanic()                                   -- (the last boot's, if it ended in one: logged at crit)
+-- a process's sockets closed when it ends (lib/net's running stack, if it's up)
+K.onReap(function(p)
+    local S = rawget(_G, "ccnet")
+    if S and S.closeOwned then S.closeOwned(p.pid) end
+end)
 
 -- the console: each of these in turn
 local chain = {}
@@ -90,7 +112,25 @@ end
 
 K.startServices()
 nextConsole()
-local ok, err = pcall(K.run)
+-- (the traceback taken where it failed, before the stack unwinds)
+local ok, failure = xpcall(K.run, function(e) return { err = e, trace = debug.traceback(tostring(e), 2) } end)
 uncapture()
 _G.proc = nil
-if not ok then error(err, 0) end
+if ok then return end
+
+-- A panic: init itself failed.  What it knew to /var/log/panic, then a
+-- reboot after init.panic seconds (0: shut down now, as boot does after
+-- an error).
+local err = type(failure) == "table" and failure.err or failure
+-- (it may have failed in the middle of a process's turn: its window and
+-- the kernel's coroutine.resume in place)
+pcall(term.redirect, term.native())
+coroutine.resume = resume0
+local wrote, why = K.writePanic(err, type(failure) == "table" and failure.trace or nil)
+printError("init panicked: " .. tostring(err))
+printError(wrote and ("(what it knew is in " .. wrote .. ")") or ("(" .. P.PANIC .. " not written: " .. tostring(why) .. ")"))
+local delay = tonumber(settings.get("init.panic")) or 10
+if delay <= 0 then error(err, 0) end
+print("Rebooting in " .. delay .. " s (hold Ctrl+T to shut down instead; the setting init.panic is the wait)")
+sleep(delay)
+os.reboot()
