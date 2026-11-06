@@ -7,11 +7,9 @@ section.
 
 ## Editors
 
-- **Ctrl+C in `vi`** (0.29.1). It's Esc and never quits: in insert mode it
-  leaves it, on a `:` line it drops the line. In normal mode the bottom
-  line says "Type :q and Enter to exit" on a saved file, ":wq saves and
-  exits, :q! exits unsaved" after a change, and the whole hint fits on a
-  turtle (39 columns). Over telnet Ctrl+C does the same.
+- **Ctrl+C in `vi`, the rest** (0.29.1). On a `:` line it drops the line;
+  on a saved file the hint says "Type :q and Enter to exit"; the hint fits
+  on a turtle (39 columns); over telnet Ctrl+C does the same.
 
 - **vi and vim parse with lib/scan** (0.27.1, no change meant). `vim` on a
   big Lua file (lib/vi.lua, about 2,000 lines): `G`, then scroll back up;
@@ -26,28 +24,22 @@ section.
   before one, Ctrl+A on `x = -7`, `~` over mixed case, `%` from before a
   bracket.
 
-- **`vi` on a computer** (0.25.0). `vi notes`, type with `i`, leave insert
-  mode with Ctrl+[ and with Ctrl+C (Esc closes the screen), `:wq`; the file
-  has the text. Ctrl+R (a tap) redoes after `u` without rebooting; Ctrl+A
-  adds one to a number. `dd`, `p`, `.`, `/word`, `:%s/a/b/g` behave as
-  in vi. Mouse wheel scrolls, a click moves the cursor, Ctrl+V pastes.
-  On a turtle (39 columns) and a pocket computer (26) the bottom line
-  still fits.
-- **`vim` colours on an Advanced Computer** (0.25.0). `vim
-  /rom/ccnix/bin/ls.lua` (or any Lua file): keywords yellow, strings red,
-  comments green; a ccsh script with `#!/ccnix/bin/ccsh` gets the shell's
-  colours. On a basic computer it's plain vi. `:set nu`, `:set hls`.
+- **`vi`, the rest** (0.25.0). Ctrl+A adds one to a number; `dd`, `p`,
+  `.`, `:%s/a/b/g` behave as in vi. Mouse wheel scrolls, a click moves
+  the cursor, Ctrl+V pastes. On a turtle (39 columns) and a pocket
+  computer (26) the bottom line still fits.
+- **`vim`, the rest** (0.25.0). A ccsh script with `#!/ccnix/bin/ccsh`
+  gets the shell's colours; on a basic computer it's plain vi; `:set
+  hls`.
 - **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
   (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
   keys work.
-- **`nano`** (0.25.0) opens CraftOS's `edit`.
 
 ## ccsh
 
 - **Ctrl+C left to programs that use it** (0.29.1). In ccsh, with and
-  without init: `nano notes` (CraftOS's edit), type a line, press Ctrl+C:
-  edit stays open, nothing lost (Ctrl+T still ends it). The same in
-  `lua`, `paint x` and `vi`; in `telnet <host>` Ctrl+C reaches the far
+  without init: the same as `nano` (tested) in `lua`, `paint x`; in
+  `telnet <host>` Ctrl+C reaches the far
   side's program (a `ping` there stops), not the local telnet. `sleep
   30`, `ping <host>` and `tail -f` still stop on Ctrl+C.
 
@@ -253,6 +245,12 @@ section.
 
 ## Tested
 
+- 2026-11-06 — On the dev server with ROM 0.29.1: `vi` (i, Ctrl+[, `yyp`,
+  `u` and a tapped Ctrl+R, Ctrl+C leaving insert mode and in normal mode
+  giving the ":wq / :q!" hint without quitting, `:wq`); `vim` on
+  bin/ls.lua with Lua colours (keywords, strings, comments, numbers,
+  library names, fields plain), `:set nu`, `/local` and `n`; `nano` opening
+  CraftOS's edit, and Ctrl+C in it leaving edit open with the text kept.
 - 2026-11-06 — `mine where` (0.23.0): last home, next home and the reset
   line shown, while mine ran as a service.
 - 2026-11-06 — mine as a service under init (0.21.0): started at boot,
