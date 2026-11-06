@@ -96,9 +96,22 @@ section.
 
 ## The mod
 
+- **Credits in the mod list** (ccnix-mod 0.15.39): the ccnix entry in the
+  mod list shows the new Credits text (from `credits=` in mods.toml).
+- **The ansible EULA gate** (ccnix-mod 0.15.39): a run with
+  `minecraft_eula_accepted` unset skips the eula.txt task and leaves an
+  existing eula.txt alone; on a fresh host the server doesn't start until
+  eula.txt says true; `-e minecraft_eula_accepted=true` writes it.
+
 - **Everything since ROM 0.19.1 on a modded server**: the dev server still
   runs ccnix-mod 0.15.22. Deploying a newer jar brings the ROM up to date;
   then `ccnix version` there, and the items above that need the mod.
+
+## Help pages
+
+- **Trademark and wording notes** (0.25.2): `help git`, `help tcpdump`,
+  `help claude`, `help vi` and `help vim` end with the new trademark,
+  credit and wording paragraphs. Docs only; just read them.
 
 ## Known issues seen, not yet looked at
 

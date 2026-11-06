@@ -111,4 +111,4 @@ Options: number (nu), tabstop (ts, 4), shiftwidth (sw, 4), expandtab (et, on), a
 
 Patterns are POSIX basic regular expressions (as grep's).  Lines that don't fit scroll sideways rather than wrap.  Not supported: visual mode, macros (q, @), text objects, :map and abbreviations, multiple windows.  If the editor itself fails, the text so far goes to /.vi-recover.
 
-Written for ccnix from vi's documented behaviour; no code comes from vi, nvi or Vim.
+Written for ccnix from vi's documented behaviour; no code comes from vi, nvi or Vim.  Its messages follow Vim's wording and E-numbers.

@@ -40,6 +40,10 @@
 --
 -- --token is only needed for private repos (Forgejo access token or
 -- GitHub PAT); it is saved in .gitlite so pull can reuse it.
+--
+-- Git is the Git project's (https://git-scm.com), and "Git" is a trademark
+-- of Software Freedom Conservancy.  This isn't Git, only a small client
+-- for ccnix that borrows its name and a few of its commands.
 
 local STATE_FILE = ".gitlite"
 

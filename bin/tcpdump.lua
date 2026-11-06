@@ -39,6 +39,11 @@
 -- mean and: `tcpdump -n icmp or udp port 53`, `tcpdump tcp and not port 23`.
 -- Exit status 0, 1 for trouble (a bad expression, an interface that isn't
 -- there).
+--
+-- tcpdump is the Tcpdump Group's (https://www.tcpdump.org), first written
+-- at Lawrence Berkeley Laboratory.  This isn't that tcpdump, only a small
+-- one for ccnix's own frames that borrows its name, its options, its
+-- filter expressions and the shape of its output, with thanks.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local USAGE = "tcpdump [-DenpqSvx] [-t...] [-c count] [-i iface]... [-r file] [-w file] [expression]"

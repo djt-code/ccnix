@@ -41,3 +41,5 @@ The expression picks which frames, as tcpdump's does (a part of it):
   vlan [<n>]
       (a VLAN interface's frames)
 joined with and (&&), or (||), not (!) and parentheses; two side by side mean and: `tcpdump -n icmp or udp port 53`, `tcpdump tcp and not port 23`. Exit status 0, 1 for trouble (a bad expression, an interface that isn't there).
+
+tcpdump is the Tcpdump Group's (https://www.tcpdump.org), first written at Lawrence Berkeley Laboratory.  This isn't that tcpdump, only a small one for ccnix's own frames that borrows its name, its options, its filter expressions and the shape of its output, with thanks.

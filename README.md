@@ -36,7 +36,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `bin/cat.lua`, `bin/more.lua` | `cat` writes files out whole (POSIX `cat`); `more` shows them a screenful at a time in the pager: `more claude.log`. |
 | `lib/pager.lua` | Library: a `less`-style viewer for `more`, `git log` and `claude`. Space/PgDn/`f` and `b`/PgUp page (11 lines on a turtle), the mouse wheel 3 lines, `j`/`k`/arrows/Enter go a line, `d`/`u` half a page, `g`/`G`/Home/End top and bottom, `h`/`l`/arrows 8 columns sideways (lines aren't wrapped), `0`/`$` left edge and far right, `q` back to the shell. The bottom line shows where you are. Text that fits is just printed. A program that colours its output can hand it lines as `{ text, fg }` (`fg` one blit digit per character, as `term.blit` takes them), and on a colour screen they're shown in those colours. |
 | `bin/echo.lua` | Prints its arguments, or writes them to a file with `>` (replace) or `>>` (append), which the CraftOS shell can't do itself. The shell strips double quotes, so use single quotes for Lua strings. |
-| `bin/vi.lua`, `bin/vim.lua` | Screen editors: `vi` (a subset of POSIX vi: motions with counts, `d`/`c`/`y` and their doubles, `p`, `.`, undo and redo, registers, marks, `/` search, `:s`, `:g` and the usual `:` commands) and `vim`, the same editor with syntax colours for Lua and ccsh scripts on a colour screen. Esc closes the computer's screen in game, so Ctrl+[ or Ctrl+C leave insert mode. `lib/vi.lua` is the editor, `lib/syntax.lua` the colouring. `nano` is an alias for CraftOS's `edit`. See `help vi`. |
+| `bin/vi.lua`, `bin/vim.lua` | Screen editors: `vi` (a subset of POSIX vi: motions with counts, `d`/`c`/`y` and their doubles, `p`, `.`, undo and redo, registers, marks, `/` search, `:s`, `:g` and the usual `:` commands) and `vim`, the same editor with syntax colours for Lua and ccsh scripts on a colour screen. Esc closes the computer's screen in game, so Ctrl+[ or Ctrl+C leave insert mode. `lib/vi.lua` is the editor, `lib/syntax.lua` the colouring. Not Vim (Bram Moolenaar and the Vim team's): ccnix's own, written from vi's documented behaviour, with Vim's wording for its messages. `nano` is an alias for CraftOS's `edit`; it is not GNU nano. See `help vi`. |
 | POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `mkdir` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`: the basic options of each, for the commands CraftOS lacks (and `ls`, `rm` and `mkdir`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
 | `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z (under `init`, programs as processes and jobs as process groups), `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
@@ -325,6 +325,10 @@ recorded: free some space and `git pull` fetches the rest. `pull` deletes
 files removed upstream before fetching new ones, so files that moved
 don't need room twice.
 
+Git is the Git project's ([git-scm.com](https://git-scm.com)), and "Git"
+is a trademark of Software Freedom Conservancy. This isn't Git, only a
+small client for ccnix that borrows its name and a few of its commands.
+
 ## Utilities
 
 CraftOS has `ls`, `cp`, `mv`, `rm`, `mkdir`, `cd`, `edit` and not much
@@ -407,7 +411,7 @@ What CraftOS can't do:
   `alias mkdir` (no program: the alias goes) brings the old one back
   until the next boot. `rmdir`
   is ccnix's (CraftOS has none), and the boot makes `nano` an alias for
-  CraftOS's `edit`.
+  CraftOS's `edit` (it is not GNU nano).
 - `ls -l` has no owner, group or link-count columns (CraftOS has none):
   the mode (`d`, and no `w` on read-only files such as `/rom`), the size,
   the modification time and the name.
@@ -1144,6 +1148,10 @@ token) off the turtle. It can do anything the turtle can, though, so keep valuab
 the first few times, and `claude.log` keeps every piece of code it ran
 and what came back.
 
+Claude and Anthropic are trademarks of Anthropic. This program calls the
+Claude API with your own API key, under Anthropic's terms; it isn't made
+or endorsed by Anthropic.
+
 ## autocompost
 
 ```
@@ -1752,4 +1760,28 @@ game too.
 ## License
 
 BSD 3-Clause, copyright (c) 2026 Dan Theisen <dan@wi7fi.dev>. See
-[LICENSE](LICENSE).
+[LICENSE](LICENSE). Except `lib/etlua.lua`, which is
+[etlua](https://github.com/leafo/etlua) by Leaf Corcoran under the MIT
+licence (see [lib/etlua-license.txt](lib/etlua-license.txt)).
+
+## Acknowledgements
+
+ccnix's taste for small tools that follow the standards takes its cues
+from [Alpine Linux](https://alpinelinux.org) (Natanael Copa),
+[musl libc](https://musl.libc.org) (Rich Felker) and
+[BusyBox](https://busybox.net). They are inspirations for the design
+only: ccnix contains none of their code, and none of them has been
+involved with it or endorsed it.
+
+Greetz to solar-operator.
+
+## Trademarks
+
+ccnix is an independent project. NOT AN OFFICIAL MINECRAFT PRODUCT. NOT
+APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. It is not affiliated
+with or endorsed by the CC: Tweaked or ComputerCraft developers or the
+NeoForged project. Minecraft, ComputerCraft, CC: Tweaked and NeoForge are
+the names of their respective owners. POSIX is a registered trademark of
+the IEEE and UNIX of The Open Group; ccnix follows their published
+specifications for familiarity but isn't certified by or affiliated with
+either.

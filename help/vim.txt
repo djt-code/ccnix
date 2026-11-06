@@ -11,4 +11,4 @@ Line numbers (:set nu) are yellow, and :set hlsearch marks the last search's mat
 
 Which language: a #! line naming lua or a shell, then the name: .lua; .sh, .ccsh and /.profile are ccsh; a name with no extension is a CraftOS program, so Lua.  :set ft=lua, :set ft=sh or :set ft=off says otherwise; :syntax off and :syntax on turn the colours off and on.  On a screen without colours it's vi.  At start the ex commands in /.vimrc are run (or /.exrc if there's no /.vimrc).
 
-This is ccnix's own vi, written from vi's documented behaviour; it isn't Vim (by Bram Moolenaar and the Vim team) and has none of its code.
+This is ccnix's own vi, written from vi's documented behaviour; it isn't Vim (by Bram Moolenaar and the Vim team) and has none of its code. Its messages (the E-numbered errors, "-- INSERT --", '"file" 3L, 42B written' and the like) use Vim's wording, so they read as Vim users expect.

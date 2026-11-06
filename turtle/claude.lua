@@ -53,6 +53,10 @@
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
 -- facing +z.
+--
+-- Claude and Anthropic are trademarks of Anthropic.  This program calls
+-- the Claude API with your own API key, under Anthropic's terms; it isn't
+-- made or endorsed by Anthropic.
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")

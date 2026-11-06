@@ -82,7 +82,7 @@
 -- /.vi-recover.
 --
 -- Written for ccnix from vi's documented behaviour; no code comes from
--- vi, nvi or Vim.
+-- vi, nvi or Vim.  Its messages follow Vim's wording and E-numbers.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 require("vi").main({ ... }, { vim = false })
