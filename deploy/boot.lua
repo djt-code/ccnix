@@ -23,7 +23,7 @@
 -- It puts bin/ (and turtle/ on a turtle, pc/ on a computer) on the shell's
 -- path after CraftOS's own, help/ on the help path, ls, rm and mkdir on
 -- ccnix's (aliases, as CraftOS's ls and rm are: `alias ls list` brings
--- that back), and brings
+-- that back), nano on CraftOS's edit, and brings
 -- the network up while net.boot is on.  Programs find their libraries
 -- through _G.ccnix.
 --
@@ -124,6 +124,7 @@ if not ending then
         local prog = find("bin/" .. name .. ".lua")
         if prog then shell.setAlias(name, prog) end
     end
+    shell.setAlias("nano", "edit")      -- CraftOS's editor, by the name people reach for
     if stale then
         print("ccnix: this computer's updates were made for another ROM; `ccnix update` brings them back")
     end

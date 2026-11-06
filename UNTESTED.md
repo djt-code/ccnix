@@ -5,6 +5,24 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## Editors
+
+- **`vi` on a computer** (0.25.0). `vi notes`, type with `i`, leave insert
+  mode with Ctrl+[ and with Ctrl+C (Esc closes the screen), `:wq`; the file
+  has the text. Ctrl+R (a tap) redoes after `u` without rebooting; Ctrl+A
+  adds one to a number. `dd`, `p`, `.`, `/word`, `:%s/a/b/g` behave as
+  in vi. Mouse wheel scrolls, a click moves the cursor, Ctrl+V pastes.
+  On a turtle (39 columns) and a pocket computer (26) the bottom line
+  still fits.
+- **`vim` colours on an Advanced Computer** (0.25.0). `vim
+  /rom/ccnix/bin/ls.lua` (or any Lua file): keywords yellow, strings red,
+  comments green; a ccsh script with `#!/ccnix/bin/ccsh` gets the shell's
+  colours. On a basic computer it's plain vi. `:set nu`, `:set hls`.
+- **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
+  (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
+  keys work.
+- **`nano`** (0.25.0) opens CraftOS's `edit`.
+
 ## Network
 
 - **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,

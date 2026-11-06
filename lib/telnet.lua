@@ -240,6 +240,31 @@ function T.decoder(emit, keysT)
             press(CSI_KEYS[final])
         end
     end
+    -- a byte outside any escape sequence
+    local function ground(ch, b)
+        if b == 27 then
+            state = "esc"
+        elseif b == 13 then
+            press("enter")
+        elseif b == 10 or b == 0 then
+            if not lastCR then press("enter") end
+        elseif b == 8 or b == 127 then
+            press("backspace")
+        elseif b == 9 then
+            press("tab")
+        elseif b == 20 then
+            emit("ctrl-t")
+        elseif b < 32 then
+            -- Ctrl+letter: Ctrl down, the letter, Ctrl up
+            local letter = string.char(b + 96)
+            local ctrl = keysT.leftCtrl
+            if ctrl then emit("key", ctrl, false) end
+            press(letter)
+            if ctrl then emit("key_up", ctrl) end
+        else
+            char(ch)
+        end
+    end
     return function(s)
         for i = 1, #s do
             local ch = s:sub(i, i)
@@ -255,7 +280,7 @@ function T.decoder(emit, keysT)
             elseif state == "esc" then
                 if ch == "[" then state, buf = "csi", ""
                 elseif ch == "O" then state = "ss3"
-                else state = "ground"; char(ch) end
+                else state = "ground"; press("escape"); ground(ch, b) end
             elseif state == "csi" then
                 if b >= 0x40 and b <= 0x7E then
                     state = "ground"
@@ -267,30 +292,14 @@ function T.decoder(emit, keysT)
             elseif state == "ss3" then
                 state = "ground"
                 press(CSI_KEYS[ch])
-            elseif b == 27 then
-                state = "esc"
-            elseif b == 13 then
-                press("enter")
-            elseif b == 10 or b == 0 then
-                if not lastCR then press("enter") end
-            elseif b == 8 or b == 127 then
-                press("backspace")
-            elseif b == 9 then
-                press("tab")
-            elseif b == 20 then
-                emit("ctrl-t")
-            elseif b < 32 then
-                -- Ctrl+letter: Ctrl down, the letter, Ctrl up
-                local letter = string.char(b + 96)
-                local ctrl = keysT.leftCtrl
-                if ctrl then emit("key", ctrl, false) end
-                press(letter)
-                if ctrl then emit("key_up", ctrl) end
             else
-                char(ch)
+                ground(ch, b)
             end
             lastCR = b == 13
         end
+        -- an Esc with nothing after it in the same read is the Esc key
+        -- (a key's escape sequence comes in one piece)
+        if state == "esc" and not paste then state = "ground"; press("escape") end
     end
 end
 

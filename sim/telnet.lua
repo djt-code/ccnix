@@ -138,7 +138,7 @@ check("a screen without colour: greys", select(2, g.getLine(1)):sub(1, 1) == "7"
 
 -- 3. the server decodes what a terminal sends
 local fakeKeys = { a = 30, b = 48, enter = 28, up = 200, delete = 211, backspace = 14, tab = 15, leftCtrl = 29,
-    space = 57, one = 2, pageDown = 209, home = 199 }
+    space = 57, one = 2, pageDown = 209, home = 199, escape = 1 }
 fakeKeys.getName = function(code) for k, v in pairs(fakeKeys) do if v == code then return k end end end
 local evs = {}
 local decode = T.decoder(function(...)
@@ -158,6 +158,9 @@ check("arrows, Delete, Page Down, Home (both forms), Backspace, Tab",
         .. "key,199,false key_up,199 key,14,false key_up,14 key,15,false key_up,15", decoded("\27[A\27[3~\27[6~\27OH\27[1~\127\t"))
 check("Ctrl+A: Ctrl down, a, Ctrl up; Ctrl+T on its own", decoded("\1\20")
     == "key,29,false key,30,false key_up,30 key_up,29 ctrl-t", decoded("\1\20"))
+check("Esc on its own is the Esc key (vi's); Esc then a letter is Esc, then the letter",
+    decoded("\27") == "key,1,false key_up,1"
+        and decoded("\27a") == "key,1,false key_up,1 key,30,false char,a key_up,30", decoded("\27a"))
 evs = {}
 decode("\27[200~two\r")
 decode("lines\27[201~")

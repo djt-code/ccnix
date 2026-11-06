@@ -70,6 +70,8 @@ Anywhere (bin/):
   traceroute: the routers on the way to a host
   true: do nothing, successfully (POSIX true)
   uniq: report or filter out repeated lines (POSIX uniq)
+  vi: a screen editor (vi, a subset)
+  vim: vi with colours: syntax highlighting for Lua and ccsh scripts
   wc: count lines, words and bytes (POSIX wc)
   which: show which program a command name runs (not in POSIX)
   xargs: run a command with arguments read from input (POSIX xargs)

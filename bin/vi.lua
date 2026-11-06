@@ -1,0 +1,88 @@
+-- vi.lua -- a screen editor (vi, a subset)
+--
+--   vi [-R] [+line | +/pattern | +] [file...]
+--
+-- Edits a file full-screen: the last line shows messages, the mode and
+-- where the cursor is.  vim is the same editor with colours.  -R opens
+-- read-only; +line starts at that line, +/pattern at the first match, +
+-- at the end.  More than one file: :n and :N go between them.  At start
+-- the ex commands in /.exrc are run (one per line, " starts a comment), so
+-- `set nu` there turns line numbers on for good.
+--
+-- Esc closes the computer's screen in the game, so Ctrl+[ or Ctrl+C do
+-- its job (over telnet, Esc works too).  Holding Ctrl+R or Ctrl+S reboots
+-- or shuts the computer down: tap them.
+--
+-- Moving (a number in front repeats most of these):
+--   h j k l, arrows    left, down, up, right
+--   w b e / W B E      words / words of anything but blanks
+--   0 ^ $              line start, first non-blank, line end
+--   gg G, nG           first line, last line, line n
+--   H M L              top, middle, bottom of the screen
+--   f F t T x, ; ,     to (or just before) character x on the line; again
+--   %                  the matching bracket
+--   { }                paragraph back, forward
+--   /pat ?pat n N      search forward, back, again, again the other way
+--   # *                search back, forward for the word under the cursor
+--   ma 'a `a ''        set mark a; go to its line, its place; jump back
+--   Ctrl+F Ctrl+B      a screen down, up (PgDn, PgUp)
+--   Ctrl+D Ctrl+U      half a screen down, up
+--   Ctrl+E Ctrl+Y      scroll a line; zz zt zb: cursor line to middle, top, bottom
+--
+-- Changing:
+--   i a I A o O        insert before, after, at line start, end, new line below, above
+--   R                  replace (overtype) until Esc
+--   x X                delete the character under, before the cursor
+--   d{motion} dd D     delete over a motion, lines, to the line end
+--   c{motion} cc C     change (delete, then insert)
+--   s S                change characters, lines
+--   y{motion} yy Y     yank (copy)
+--   p P                put after, before the cursor
+--   "a                 before d c y p: use register a (A appends; "_ discards)
+--   r x                replace the character with x
+--   J gJ               join lines, with or without a space
+--   > <  >> <<         shift lines right or left
+--   ~                  swap case
+--   Ctrl+A Ctrl+X      add 1 to, take 1 from the number at or after the cursor
+--   u Ctrl+R           undo, redo
+--   .                  repeat the last change
+--   &                  repeat the last :s on this line
+--   Ctrl+G             file name, line count, where you are
+--
+-- In insert mode: Backspace (joins lines at the start), Tab (spaces to the
+-- next stop, while expandtab is on), Ctrl+W deletes a word, Ctrl+U the
+-- line before the cursor, Ctrl+R x puts register x, Ctrl+V pastes.
+-- New lines keep the indent of the one before (autoindent).
+--
+-- Ex commands, after ":" (Up and Down recall earlier ones, Tab completes a
+-- file name).  A range goes in front: n, n,m, ., $, %, 'a, /pat/, +n -n.
+--   :w [file]  :w!     write (to file)
+--   :q  :q!            quit, quit throwing away changes
+--   :wq  :x  ZZ        write and quit (:x and ZZ only write if changed)
+--   ZQ                 quit without writing
+--   :e file  :e!       edit another file, reload this one
+--   :r file            read a file in below the cursor
+--   :n  :N             next, previous file
+--   :s/pat/rep/[gi]    substitute (& and \1-\9 in rep; \r makes a new line)
+--   :g/pat/cmd :v      run cmd (default p) on the lines that match, don't
+--   :d :y :pu :j       delete, yank, put, join lines
+--   :m addr  :t addr   move, copy lines to below addr
+--   :> :<              shift lines
+--   :12                go to line 12
+--   :!cmd              run a shell command
+--   :set opt=n         set an option (opt, noopt, opt? for on, off, show)
+-- Options: number (nu), tabstop (ts, 4), shiftwidth (sw, 4), expandtab
+-- (et, on), autoindent (ai, on), ignorecase (ic), smartcase (scs),
+-- wrapscan (ws, on), readonly (ro).
+--
+-- Patterns are POSIX basic regular expressions (as grep's).  Lines that
+-- don't fit scroll sideways rather than wrap.  Not supported: visual
+-- mode, macros (q, @), text objects, :map and abbreviations, multiple
+-- windows.  If the editor itself fails, the text so far goes to
+-- /.vi-recover.
+--
+-- Written for ccnix from vi's documented behaviour; no code comes from
+-- vi, nvi or Vim.
+
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
+require("vi").main({ ... }, { vim = false })

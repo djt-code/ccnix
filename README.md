@@ -36,6 +36,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `bin/cat.lua`, `bin/more.lua` | `cat` writes files out whole (POSIX `cat`); `more` shows them a screenful at a time in the pager: `more claude.log`. |
 | `lib/pager.lua` | Library: a `less`-style viewer for `more`, `git log` and `claude`. Space/PgDn/`f` and `b`/PgUp page (11 lines on a turtle), the mouse wheel 3 lines, `j`/`k`/arrows/Enter go a line, `d`/`u` half a page, `g`/`G`/Home/End top and bottom, `h`/`l`/arrows 8 columns sideways (lines aren't wrapped), `0`/`$` left edge and far right, `q` back to the shell. The bottom line shows where you are. Text that fits is just printed. A program that colours its output can hand it lines as `{ text, fg }` (`fg` one blit digit per character, as `term.blit` takes them), and on a colour screen they're shown in those colours. |
 | `bin/echo.lua` | Prints its arguments, or writes them to a file with `>` (replace) or `>>` (append), which the CraftOS shell can't do itself. The shell strips double quotes, so use single quotes for Lua strings. |
+| `bin/vi.lua`, `bin/vim.lua` | Screen editors: `vi` (a subset of POSIX vi: motions with counts, `d`/`c`/`y` and their doubles, `p`, `.`, undo and redo, registers, marks, `/` search, `:s`, `:g` and the usual `:` commands) and `vim`, the same editor with syntax colours for Lua and ccsh scripts on a colour screen. Esc closes the computer's screen in game, so Ctrl+[ or Ctrl+C leave insert mode. `lib/vi.lua` is the editor, `lib/syntax.lua` the colouring. `nano` is an alias for CraftOS's `edit`. See `help vi`. |
 | POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `mkdir` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`: the basic options of each, for the commands CraftOS lacks (and `ls`, `rm` and `mkdir`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
 | `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z (under `init`, programs as processes and jobs as process groups), `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
@@ -405,7 +406,8 @@ What CraftOS can't do:
   `delete` stay CraftOS's; `alias ls list`, `alias rm delete` or
   `alias mkdir` (no program: the alias goes) brings the old one back
   until the next boot. `rmdir`
-  is ccnix's (CraftOS has none).
+  is ccnix's (CraftOS has none), and the boot makes `nano` an alias for
+  CraftOS's `edit`.
 - `ls -l` has no owner, group or link-count columns (CraftOS has none):
   the mode (`d`, and no `w` on read-only files such as `/rom`), the size,
   the modification time and the name.
