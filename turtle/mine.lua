@@ -2287,8 +2287,9 @@ end
 -- that (see dry).  Then it goes back over just where it found water (and
 -- as far as water spreads either side), tracing it afresh, till that's
 -- dry (twice at most), rather than the whole length again.  Only if it's
--- still wet there (it couldn't follow the water up from the floor: water
--- coming in high up) does it walk the other lanes, there.  Where the
+-- still wet there (it couldn't follow the water to where it gets in:
+-- coming in high up, or by many ways) does it look at every side of the
+-- tunnel there (sweep).  Where the
 -- floor lane's floor had a hole or a patch (a hole filled before, a
 -- bridge), it goes along the other columns' floor there too.  With
 -- lights, the first walk goes along the floor by the lit wall (both, in a
@@ -2384,11 +2385,11 @@ function repair(z1, z2, done, aheadDug)
         wetZ = {}
         walk(first, where)
     end
-    -- still wet there: it couldn't follow all the water up from the
-    -- floor (its way in high up): the other lanes, which pass it, there;
-    -- not for water from past the ends, which they can't reach either
+    -- still wet there: it couldn't follow all the water to where it gets
+    -- in: chase it down by looking at every side of the tunnel there
+    -- (see sweep); not for water from past the ends, out of its reach
     if stats.wet > before and not fromOutside then
-        walk(function(lane) return not first(lane) end, spansOf(wetZ, WET_REACH))
+        for _, sp in ipairs(spansOf(wetZ, WET_REACH)) do sweep(sp.lo, sp.hi) end
     end
     -- a hole under the floor lane, or a patch (a hole filled before, a
     -- bridge): the floor under the other columns may be open there too
@@ -2400,6 +2401,58 @@ function repair(z1, z2, done, aheadDug)
     repairing, repairRange = false, nil
     relight()                              -- torches left out while water flowed
     tunnelHome()
+end
+
+-- Every side of the tunnel from z=lo to hi that's outside it (walls,
+-- floor, ceiling), looked at from the tunnel block beside it, and what
+-- lets water in sealed (a fluid, a waterlogged or thin block; a hole in
+-- the floor filled): along every row of the side columns, and the floor
+-- and ceiling rows of the ones between, back and forth.  For water it
+-- couldn't follow to where it gets in.
+function sweep(lo, hi)
+    local xs, xn = T.sgn(WIDTH)
+    local cols = {}
+    for c = 0, xn - 1 do cols[#cols + 1] = c * xs end
+    if math.abs(T.pos.x - cols[#cols]) < math.abs(T.pos.x - cols[1]) then   -- (the nearer side first)
+        local rev = {}
+        for i = #cols, 1, -1 do rev[#rev + 1] = cols[i] end
+        cols = rev
+    end
+    local back = math.abs(T.pos.z - hi) < math.abs(T.pos.z - lo)
+    for _, x in ipairs(cols) do
+        local rows = {}
+        if x == X0 or x == X1 then
+            for y = Y0, Y1 do rows[#rows + 1] = y end
+        else
+            rows = Y0 == Y1 and { Y0 } or { Y0, Y1 }
+        end
+        if math.abs(T.pos.y - rows[#rows]) < math.abs(T.pos.y - rows[1]) then
+            local rev = {}
+            for i = #rows, 1, -1 do rev[#rev + 1] = rows[i] end
+            rows = rev
+        end
+        for _, y in ipairs(rows) do
+            local from, to = lo, hi
+            if back then from, to = hi, lo end
+            back = not back
+            alongAxis("z", from); alongAxis("x", x); alongAxis("y", y)
+            local dz = to >= from and 1 or -1
+            for z = from, to, dz do
+                for _, e in ipairs({ "up", "down", 0, 1, 2, 3 }) do
+                    local m = neighbour(e)
+                    if not inBox(m) then
+                        local ok, data = look(e)
+                        if isFloor(m) then
+                            if not (ok and not leaky(data)) then fill(e) end
+                        elseif ok and leaky(data) and not TORCH_BLOCKS[data.name] then
+                            seal(e)
+                        end
+                    end
+                end
+                if z ~= to then go(dz > 0 and 0 or 2) end
+            end
+        end
+    end
 end
 
 -- Go over a segment dug already (resumed from an earlier home than the

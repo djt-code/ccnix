@@ -891,7 +891,7 @@ local farAfter = 0
 for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farAfter = farAfter + 1 end end end end
 check("water through the far wall of a 64-block segment: dried", farWet > 50 and farAfter == 0,
     farWet .. " wet before, " .. farAfter .. " after")
-check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.moves < 1260,
+check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.moves < 1300,
     Mine.moves .. " moves")
 
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
