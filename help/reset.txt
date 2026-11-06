@@ -1,0 +1,5 @@
+reset: put settings back to their defaults
+
+  reset name...
+
+Takes each setting named out of /.settings, undoing `set name value`: it reads as its default again, or as not set if it has none.  Says what each one is now.  One that wasn't set is left as it is, and said so.  (Not Unix's reset, which sets a terminal straight: a CraftOS terminal has nothing to set straight.)  `get name` shows a setting. Exit status: 0; 2 with no name.

@@ -1,0 +1,5 @@
+get: show settings (CraftOS's set changes them)
+
+  get [-n] [name...]
+
+Writes a "name = value" line for each setting named, or with none named for every one there is (set, or defined with a default), sorted by name, as sysctl writes them.  -n writes the values alone, a line each, for a script: x=$(get -n motd.enable).  A string is written as it is, a table as textutils.serialise writes it on one line, a setting with no value as nothing.  A name that is neither set nor defined is an error; the others are still written.  `set name value` changes a setting, `reset name` puts it back to its default. Exit status: 0; 1 if a name wasn't found; 2 for a usage error.

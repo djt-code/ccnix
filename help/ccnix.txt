@@ -32,6 +32,7 @@ Anywhere (bin/):
   expr: evaluate an expression and print the result (POSIX expr)
   false: do nothing, unsuccessfully (POSIX false)
   find: find files by name, type, size or age (POSIX find)
+  get: show settings (CraftOS's set changes them)
   git: minimal git client for CC:Tweaked
   grep: print the lines that match a pattern (POSIX grep)
   head: copy the first part of files to standard output (POSIX head)
@@ -51,6 +52,7 @@ Anywhere (bin/):
   printf: write formatted output (POSIX printf)
   ps: list the processes
   pwd: print the working directory (POSIX pwd)
+  reset: put settings back to their defaults
   rm: remove files (POSIX rm)
   rmdir: remove empty directories (POSIX rmdir)
   seq: print a sequence of numbers (as GNU's seq; not in POSIX)

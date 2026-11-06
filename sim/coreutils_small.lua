@@ -1,8 +1,8 @@
 -- sim/coreutils_small.lua
 --
 -- The small utilities in a shellworld: touch, pwd, basename, dirname,
--- true, false, sleep, which, xargs and seq -- their options, operands, output
--- formats, diagnostics and exit statuses.
+-- true, false, sleep, which, xargs, seq, and get and reset (settings) --
+-- their options, operands, output formats, diagnostics and exit statuses.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -382,3 +382,42 @@ W:file("deep/a/b/c.txt", "c") W:file("deep/d.txt", "d")
 r = W:run("rm", "-rf", "/deep", "/not-there")
 check("rm -rf /dir: the directory and everything in it, no questions, nothing said of what's missing",
     r.status == 0 and #r.err == 0 and not W.fs.exists("deep"), show(r.errText))
+
+--------------------------------------------------------------------------
+-- get, reset (settings, as CC:T's API keeps them: getDetails' value falls
+-- back to the default, changed says it's set)
+--------------------------------------------------------------------------
+local DEFS = { ["motd.enable"] = false, ["shell.allow_disk_startup"] = true }
+local VALS, saved = { ["motd.enable"] = true, ["my.list"] = { 1, 2 } }, 0
+settings = {
+    get = function(k) local v = VALS[k]; if v == nil then return DEFS[k] end return v end,
+    unset = function(k) VALS[k] = nil end,
+    save = function() saved = saved + 1 end,
+    getNames = function()
+        local n, seen = {}, {}
+        for k in pairs(DEFS) do n[#n + 1] = k; seen[k] = true end
+        for k in pairs(VALS) do if not seen[k] then n[#n + 1] = k end end
+        return n
+    end,
+    getDetails = function(k)
+        local v = VALS[k]
+        return { default = DEFS[k], value = v == nil and DEFS[k] or v, changed = v ~= nil }
+    end,
+}
+textutils = textutils or M.textutilsApi()
+r = W:run("get")
+check("get: every setting there is, set or defined, sorted, name = value (a table on one line)", r.status == 0
+    and r.out:sub(1, 30) == "motd.enable = true\nmy.list = {"
+    and r.out:sub(-34) == "}\nshell.allow_disk_startup = true\n" and select(2, r.out:gsub("\n", "")) == 3, show(r.out))
+r = W:run("get", "-n", "shell.allow_disk_startup", "nope", "motd.enable")
+check("get -n: the values alone; one neither set nor defined an error (status 1), the rest still written", r.status == 1
+    and r.out == "true\ntrue\n" and r.err[1] == "get: nope: no such setting", show(r.out) .. show(r.errText))
+r = W:run("reset", "motd.enable", "my.list", "shell.allow_disk_startup")
+check("reset: what each is now; one not set said so; saved", r.status == 0 and VALS["motd.enable"] == nil
+    and VALS["my.list"] == nil and saved == 1
+    and r.out == "motd.enable: false (its default)\nmy.list: not set\nshell.allow_disk_startup: was true (its default) already\n",
+    show(r.out))
+r = W:run("reset")
+check("reset with no name: usage, status 2, nothing saved", r.status == 2 and saved == 1
+    and r.err[#r.err] == "usage: reset name...", show(r.errText))
+settings = nil
