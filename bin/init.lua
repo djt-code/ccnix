@@ -29,8 +29,11 @@
 -- front of it (ccsh puts each job there in turn; Ctrl+Z stops it, Ctrl+C
 -- ends it); every
 -- other event to every process.  The console keeps a scrollback, as a
--- Linux console does: Shift+Page Up and Down look back through what
--- scrolled off its top (the last 500 lines); any other key comes back.  A program that computes for a long time
+-- Linux console does: Shift+Page Up and Down, or the mouse wheel, look
+-- back through what scrolled off its top (the last 500 lines); any other
+-- key comes back.  What scrolls with the wheel itself keeps it: vi, the
+-- pager, CraftOS's edit.  What boot showed (the MOTD, the startup
+-- files' output) stays on the console.  A program that computes for a long time
 -- without waiting holds everything up, as it does in CraftOS.
 --
 -- A program that crashes ends its own process alone, failed (status 1
@@ -103,18 +106,25 @@ chain[#chain + 1] = false                       -- the CraftOS shell
 
 local w, h = term.getSize()
 local under = term.current()
-local console = window.create(under, 1, 1, w, h, true)
--- (a new window starts blank: what boot left on the screen under it, the
--- MOTD and the startup files' output, is copied over when it can be read
--- back; boot sees that it can)
+-- A new window starts blank, and draws itself so over what's under it as
+-- it's made: what boot left on the screen (the MOTD, the startup files'
+-- output) is read first, when it can be read back (boot sees that it
+-- can), then put in the console.
+local shown
 if under.getLine then
+    shown = { lines = {}, x = 0, y = 0, fg = under.getTextColour(), bg = under.getBackgroundColour() }
+    for y = 1, h do shown.lines[y] = { under.getLine(y) } end
+    shown.x, shown.y = under.getCursorPos()
+end
+local console = window.create(under, 1, 1, w, h, true)
+if shown then
     for y = 1, h do
         console.setCursorPos(1, y)
-        console.blit(under.getLine(y))
+        console.blit(table.unpack(shown.lines[y]))
     end
-    console.setCursorPos(under.getCursorPos())
-    console.setTextColour(under.getTextColour())
-    console.setBackgroundColour(under.getBackgroundColour())
+    console.setCursorPos(shown.x, shown.y)
+    console.setTextColour(shown.fg)
+    console.setBackgroundColour(shown.bg)
 end
 K.scrollback(console, term.current())          -- (Shift+Page Up/Down on the console)
 local function nextConsole()

@@ -125,7 +125,9 @@
 --   Ctrl+W, Alt+Backspace, Alt+D   cut the word before / before / after
 --   Ctrl+Y                         put back what was cut last
 --   Up, Down, Ctrl+P, Ctrl+N       the history (Up and Down go through
---                                  the completions while one shows)
+--                                  the completions while one shows; a
+--                                  line from the history shows none
+--                                  until it's changed)
 --   Ctrl+R                         search back through the history as
 --                                  you type: Ctrl+R again for an older
 --                                  match, Enter runs it, Ctrl+G gives up,
@@ -1924,9 +1926,16 @@ local function redirect(redirs, fd, opened)
             if name == "/dev/null" then
                 s = stream(function() end)
             else
+                -- (CC's fs.open would make the folders on the way: a
+                -- shell doesn't, so > /disk/f with no disk in is an error,
+                -- not a new /disk)
                 local path = shell.resolve(name)
-                local f = not fs.isDir(path) and fs.open(path, (r.op == ">>" or r.op == "&>>") and "ab" or "wb")
-                if not f then report(fd[2], "ccsh: " .. name .. ": can't create"); return false end
+                local dir = fs.getDir(path)
+                local why = fs.isDir(path) and "Is a directory"
+                    or (dir ~= "" and not fs.isDir(dir)) and "No such file or directory"
+                    or fs.isReadOnly(path) and "Read-only file system" or nil
+                local f = not why and fs.open(path, (r.op == ">>" or r.op == "&>>") and "ab" or "wb")
+                if not f then report(fd[2], "ccsh: " .. name .. ": " .. (why or "can't create")); return false end
                 s = stream(function(x) f.write(x) end, function() f.close() end)
                 opened[#opened + 1] = s
             end
@@ -2125,13 +2134,19 @@ end
 local KEEPS_CTRL_C = { edit = true, paint = true, lua = true, shell = true, multishell = true,
     fg = true, bg = true, adventure = true, worm = true, redirection = true, chat = true,
     vi = true, vim = true, telnet = true }
-local function keepsCtrlC(name)
+-- CraftOS's programs that scroll with the mouse wheel, so under init
+-- it's theirs and not the console's scrollback (ccnix's own, vi and the
+-- pager, say so themselves)
+local OWNS_WHEEL = { edit = true }
+-- Whether program name (as the path finds it) is one of list's
+local function listed(list, name)
     local path = name and shell.resolveProgram(name)
     if not path then return false end
     local base = fs.getName(path)
     if base:sub(-4) == ".lua" then base = base:sub(1, -5) end
-    return KEEPS_CTRL_C[base] == true
+    return list[base] == true
 end
+local function keepsCtrlC(name) return listed(KEEPS_CTRL_C, name) end
 
 local function spawnCommand(ctx, argv, env)
     local j = currentJob
@@ -2143,6 +2158,7 @@ local function spawnCommand(ctx, argv, env)
         leave = function(_, o) leave(ctx, o) end,
         fn = function()
             if keepsCtrlC(argv[1]) then kern.ignore("INT") end
+            if listed(OWNS_WHEEL, argv[1]) and kern.ownScrollback then kern.ownScrollback(true) end
             _G.POSIX_STATUS = nil
             local ok, r = pcall(shell.execute, table.unpack(argv))
             if not ok then printError(tostring(r)) end

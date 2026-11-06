@@ -89,8 +89,13 @@ r = sh([[cat nope 2>/dev/null; echo x > /dev/null; cat < /dev/null; echo done]])
 check("/dev/null swallows output and reads as empty", r.out == "done\n" and #r.err == 0, show(r.out))
 r = sh([[echo x > /rom/x; echo $?; cat < nope; echo $?]])
 check("a file that can't be made or read: the shell says so, status 1, command not run",
-    r.out == "1\n1\n" and r.err[1] == "ccsh: /rom/x: can't create"
+    r.out == "1\n1\n" and r.err[1] == "ccsh: /rom/x: Read-only file system"
     and r.err[2] == "ccsh: nope: No such file or directory", show(r.out) .. " " .. table.concat(r.err, "|"))
+r = sh([[echo x > /disk/f.txt; echo $?; echo x >> nodir/f.txt; echo $?; echo x > /rom; echo $?]])
+check("> into a folder that isn't there (a disk drive with no disk), or onto a folder: an error, no folder made",
+    r.out == "1\n1\n1\n" and r.err[1] == "ccsh: /disk/f.txt: No such file or directory"
+    and r.err[2] == "ccsh: nodir/f.txt: No such file or directory" and r.err[3] == "ccsh: /rom: Is a directory"
+    and not W.fs.exists("disk") and not W.fs.exists("nodir"), show(r.out) .. " " .. table.concat(r.err, "|"))
 r = sh([[echo '>' x; echo hi '>' f2.txt]])
 check("a quoted > is just text to echo under ccsh", r.out == "> x\nhi > f2.txt\n" and W:read("f2.txt") == nil,
     show(r.out))

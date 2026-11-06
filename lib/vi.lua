@@ -2042,9 +2042,11 @@ function V.main(args, o)
     ctrlDown, altDown, swallow, quitting, needRender = false, false, nil, false, true
     synLang, gutter, cmdline, aiLine, jumpFrom, repeating, pasted = nil, 0, nil, nil, nil, false, nil
     KEYTOK = keyTokens()
-    -- under init, Ctrl+C is a key here (Esc's stand-in), not an interrupt
+    -- under init, Ctrl+C is a key here (Esc's stand-in), not an interrupt,
+    -- and the wheel scrolls the file, not the console's scrollback
     local kernel = rawget(_G, "proc")
     if type(kernel) == "table" and kernel.ignore then kernel.ignore("INT") end
+    if type(kernel) == "table" and kernel.ownScrollback then kernel.ownScrollback(true) end
 
     local files, startCmd, ro = {}, nil, false
     for _, a in ipairs(args or {}) do

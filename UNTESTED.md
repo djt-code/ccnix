@@ -161,6 +161,20 @@ section.
 
 ## Setup and boot
 
+- **0.33.0, from test 5's second try:** init copies the screen before
+  making its console window (0.30.1 made the window first, which drew it
+  blank, so the startup files' output was still lost).  Retry 5.1-5.4.
+- **The mouse wheel scrolls the console's scrollback** (0.33.0), at the
+  prompt and under programs that don't scroll with it (ping, cat); vi,
+  vim, more, git log and edit/nano keep the wheel; the wheel down at the
+  live screen still reaches the program.
+- **Up through the history doesn't loop** (0.33.0): a recalled line shows
+  no grey completion, so Up goes on back.
+- **`> /disk/f` with no disk in** (0.33.0): `ccsh: /disk/f: No such file
+  or directory`, status 1, and no `/disk` folder made (CC's fs.open makes
+  folders; 0.32.0 and before made one).  `> /rom/x`: Read-only file
+  system; `> /rom`: Is a directory.
+
 - **`sysctl`** (0.32.0): `sysctl -a`, `sysctl name`, `-n`, `-d`, an unknown
   name (status 1); `sysctl name=value` (a boolean setting refusing `yes`),
   `sysctl name=` back to its default, kept across a reboot; `help sysctl`.

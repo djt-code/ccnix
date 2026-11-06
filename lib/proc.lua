@@ -37,10 +37,11 @@
 -- process's children go to init (process 1) when it ends.
 --
 -- The console keeps a scrollback, as a Linux virtual console does
--- (K.scrollback, which init sets up): Shift+Page Up and Down look back
--- through what scrolled off its top, under whatever runs there, unless
--- what's in front keeps those keys for itself (proc.ownScrollback: the
--- telnet client, whose scrollback is the other computer's).
+-- (K.scrollback, which init sets up): Shift+Page Up and Down, and the
+-- mouse wheel, look back through what scrolled off its top, under
+-- whatever runs there, unless what's in front keeps them for itself
+-- (proc.ownScrollback: the telnet client, whose scrollback is the other
+-- computer's; vi and the pager, which scroll with the wheel themselves).
 --
 -- Services are commands kept running: settings service.<name>.cmd (the
 -- command line), service.<name>.enabled (started at boot) and
@@ -102,6 +103,7 @@ local USER = { char = true, key = true, key_up = true, paste = true, terminate =
     mouse_click = true, mouse_up = true, mouse_scroll = true, mouse_drag = true }
 P.USER = USER
 P.HISTORY = 500                 -- lines of the console's scrollback (K.scrollback)
+P.WHEEL = 3                     -- lines a turn of the mouse wheel scrolls it
 P.SIGNALS = { HUP = 1, INT = 2, KILL = 9, TERM = 15, CONT = 18, STOP = 19, TSTP = 20 }
 P.EXITS = 32                    -- processes' ends kept (K.exited)
 P.TRACE = 16                    -- lines of a crash's traceback kept
@@ -358,22 +360,37 @@ function P.new(o)
         K.sb = sb
     end
 
-    -- Shift+Page Up/Down at the console: true if it was the scrollback's.
+    -- Whether one in front of terminal t keeps the scrollback's keys and
+    -- wheel: its own
+    local function frontOwns(t)
+        local tt = K.ttys[t]
+        for _, p in ipairs(K.list) do
+            if tt and p.pgid == tt.fg and p.tty == t and p.ownScrollback and K.procs[p.pid] then return true end
+        end
+        return false
+    end
+
+    -- Shift+Page Up/Down or the wheel at the console: true if it was the
+    -- scrollback's.
     local function scrollKey(t, ev)
         if not (sb and keysT and t == "con") then return false end
         local kind, k = ev[1], ev[2]
         if (kind == "key" or kind == "key_up") and (k == keysT.leftShift or k == keysT.rightShift) then
             sb.shift = kind == "key"
         elseif kind == "key" and sb.shift and (k == keysT.pageUp or k == keysT.pageDown) then
-            local tt = K.ttys[t]
-            for _, p in ipairs(K.list) do                       -- (one in front keeps them: its own)
-                if tt and p.pgid == tt.fg and p.tty == t and p.ownScrollback and K.procs[p.pid] then return false end
-            end
+            if frontOwns(t) then return false end
             local _, h = sb.win.getSize()
             local page = math.max(1, h - 2)
             sb.back = sb.back + (k == keysT.pageUp and page or -page)
             showBack()
             return true
+        elseif kind == "mouse_scroll" and type(k) == "number" then
+            if frontOwns(t) then return false end
+            if k < 0 or sb.back > 0 then                        -- (down at the live screen: the program's)
+                sb.back = sb.back - k * P.WHEEL
+                showBack()
+                return true
+            end
         elseif sb.back > 0 and (kind == "key" or kind == "char" or kind == "paste") then
             sb.back = 0
             showBack()
@@ -1123,14 +1140,16 @@ function P.new(o)
             tt.fg = pgid
             return true
         end,
-        -- the caller keeps Shift+Page Up/Down for itself while it's in
-        -- front of the console (its own scrollback), or with on false no
-        -- longer does
+        -- the caller keeps Shift+Page Up/Down and the mouse wheel for
+        -- itself while it's in front of the console (its own scrollback,
+        -- or it scrolls with them), or with on false no longer does; true
+        -- and whether it did before
         ownScrollback = function(on)
             local p = K.current
             if not p then return false end
+            local was = p.ownScrollback == true
             p.ownScrollback = on ~= false or nil
-            return true
+            return true, was
         end,
         -- the caller ignores signal sig (TSTP or INT: the ones that can
         -- be, so Ctrl+Z or Ctrl+C reaches it as a key), or with on false,

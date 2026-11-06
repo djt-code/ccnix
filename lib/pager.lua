@@ -128,6 +128,10 @@ function P.page(src, opts)
     local rows, first, wrappedAt = lines, nil, nil
     local top, left = opts.from or 1, 1
     local up = opts.up
+    -- under init, the wheel is the pager's while it shows, not the
+    -- console's scrollback
+    local kernel = rawget(_G, "proc")
+    local claimed, owned = type(kernel) == "table" and kernel.ownScrollback and kernel.ownScrollback(true)
     while true do
         w, h = term.getSize()
         if opts.wrap and wrappedAt ~= w then
@@ -205,6 +209,7 @@ function P.page(src, opts)
             end
         end
     end
+    if claimed and not owned then kernel.ownScrollback(false) end
     term.setCursorPos(1, h)
     term.clearLine()
 end

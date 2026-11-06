@@ -32,7 +32,9 @@
 --   Ctrl+Y                        put back what was cut last
 --   Up, Down, Ctrl+P, Ctrl+N      the line before / after in the history
 --                                 (Up and Down go through the
---                                 completions instead while one shows)
+--                                 completions instead while one shows;
+--                                 a line from the history shows none
+--                                 until it's changed)
 --   Ctrl+R                        search back through the history as you
 --                                 type: (search)`text': shows it; Ctrl+R
 --                                 again an older match, Backspace a letter
@@ -287,7 +289,7 @@ local function historyTo(e, i)
     e.at = i
     e.line = (i == n + 1) and (e.typed or "") or e.history[i]
     e.pos, e.scroll = #e.line, 0
-    changed(e)
+    e.comps, e.ci = nil, 1              -- (none for a line from the history, so Up and Down go on through it)
 end
 
 -- Up or Down: through the completions while there are some, else the

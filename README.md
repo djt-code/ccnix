@@ -1494,10 +1494,12 @@ runs everything:
   what's left of the session gets HUP; a process's children go to init
   when it ends.
 - **The console's scrollback,** as a Linux console's: Shift+Page Up and
-  Down look back through what scrolled off its top (the last 500 lines),
-  under whatever runs there; any other key returns. A program in front
-  can keep those keys (`proc.ownScrollback()`): the telnet client does,
-  for its own scrollback of the other computer.
+  Down, or the mouse wheel, look back through what scrolled off its top
+  (the last 500 lines), under whatever runs there; any other key returns.
+  A program in front can keep those keys and the wheel
+  (`proc.ownScrollback()`): the telnet client does, for its own
+  scrollback of the other computer, and vi and the pager do, as they
+  scroll with the wheel; ccsh does it for CraftOS's edit.
 - **The console:** the autostart first, if `ccnix.autostart` names one
   (the miner, the farmer, the router's screen), then ccsh if
   `ccsh.login` is on, then the CraftOS shell, each when the one before

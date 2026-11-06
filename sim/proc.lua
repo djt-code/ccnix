@@ -597,6 +597,15 @@ K.input("con", "key_up", KEYS.leftShift)
 K.input("con", "char", "x")
 check("any other key: back to the live screen, and the key on to the program",
     cwin.visible and cwin.redraws == 1 and K.sb.back == 0 and saw("conp:"):find("conp:char:x", 1, true), saw())
+seen = {}
+K.input("con", "mouse_scroll", -1, 1, 1)
+check("the wheel up: the scrollback too (as far back as there is), the program not told",
+    not cwin.visible and K.sb.back == 2 and scr.lines[1]:find("^aa ") and not saw("conp:"):find("mouse_scroll", 1, true),
+    K.sb.back .. " " .. saw())
+K.input("con", "mouse_scroll", 1, 1, 1)
+K.input("con", "mouse_scroll", 1, 1, 1)
+check("  ... down to the live screen; down there, the wheel is the program's",
+    cwin.visible and K.sb.back == 0 and select(2, saw("conp:"):gsub("mouse_scroll", "")) == 1, saw())
 local telnetLike = K.spawn({ name = "tn", tty = "con", fn = function()
     K.api.ownScrollback()
     noter("tn")()
@@ -608,6 +617,9 @@ K.input("con", "key", KEYS.pageUp)
 check("a program in front that keeps Shift+Page Up/Down (telnet): it gets them, the console's scrollback stays shut",
     cwin.visible and K.sb.back == 0 and saw("tn:"):find("tn:key:201", 1, true), saw())
 K.input("con", "key_up", KEYS.leftShift)
+K.input("con", "mouse_scroll", -1, 1, 1)
+check("  ... and the wheel (vi and the pager keep it so too; edit, through ccsh)",
+    cwin.visible and K.sb.back == 0 and saw("tn:"):find("tn:mouse_scroll", 1, true), saw())
 
 -- 10. a crash: a command runs through lib/procrun.lua in a CraftOS
 -- shell, which catches its program's error (and prints it); the kernel

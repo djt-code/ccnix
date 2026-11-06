@@ -79,7 +79,7 @@ At the prompt, ccsh first runs the commands in /.profile (PS1, export...), as `.
   Ctrl+Y
       put back what was cut last
   Up, Down, Ctrl+P, Ctrl+N
-      the history (Up and Down go through the completions while one shows)
+      the history (Up and Down go through the completions while one shows; a line from the history shows none until it's changed)
   Ctrl+R
       search back through the history as you type: Ctrl+R again for an older match, Enter runs it, Ctrl+G gives up, another key edits it
   Tab

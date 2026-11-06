@@ -314,6 +314,10 @@ edit("ecc<Left><BS><CR>", { complete = complete })
 s = screens[#screens]
 check("none with the cursor before the end", s.rows[1]:sub(1, 7) == "$ ec   " and s.x == 4, s.rows[1]:sub(1, 8))
 same("Up with no completion showing walks the history", "old", edit("x<Up><CR>", { complete = complete, history = { "old" } }))
+same("a line from the history shows no completion: Up goes on back, past one that would have one", "first",
+    edit("<Up><Up><Up><CR>", { complete = complete, history = { "first", "ec", "echo" } }))
+same("  ... until it's changed: then they show again", "echo2",
+    edit("<Up><BS>c<Down><Tab><CR>", { complete = complete, history = { "x", "ec" } }))
 
 -- 9. a line wider than the screen
 local long = string.rep("abcdefghij", 7)       -- 70 characters on 49 columns
