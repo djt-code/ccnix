@@ -161,9 +161,12 @@ section.
 
 ## Setup and boot
 
-- **`get` and `reset`** (0.31.0): `get` lists every setting, `get name`,
-  `get -n name`, an unknown name (status 1); `reset name` back to its
-  default, kept across a reboot; `help get`, `help reset`.
+- **`sysctl`** (0.32.0): `sysctl -a`, `sysctl name`, `-n`, `-d`, an unknown
+  name (status 1); `sysctl name=value` (a boolean setting refusing `yes`),
+  `sysctl name=` back to its default, kept across a reboot; `help sysctl`.
+- **ccsh's `set`** (0.32.0, POSIX's): `set` lists the variables; `set --
+  a b` then `echo $1 $2`; `set -x`, `set -e` in a script, `set -u`, `set
+  -f`, `set -o`, `echo $-`.  CraftOS's `set` is still there outside ccsh.
 
 - **`ccnix update` on many computers at once** (0.30.2): GitHub answered
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the

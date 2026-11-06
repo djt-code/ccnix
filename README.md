@@ -37,7 +37,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `lib/pager.lua` | Library: a `less`-style viewer for `more`, `git log` and `claude`. Space/PgDn/`f` and `b`/PgUp page (11 lines on a turtle), the mouse wheel 3 lines, `j`/`k`/arrows/Enter go a line, `d`/`u` half a page, `g`/`G`/Home/End top and bottom, `h`/`l`/arrows 8 columns sideways (lines aren't wrapped), `0`/`$` left edge and far right, `q` back to the shell. The bottom line shows where you are. Text that fits is just printed. A program that colours its output can hand it lines as `{ text, fg }` (`fg` one blit digit per character, as `term.blit` takes them), and on a colour screen they're shown in those colours. |
 | `bin/echo.lua` | Prints its arguments, or writes them to a file with `>` (replace) or `>>` (append), which the CraftOS shell can't do itself. The shell strips double quotes, so use single quotes for Lua strings. |
 | `bin/vi.lua`, `bin/vim.lua` | Screen editors: `vi` (a subset of POSIX vi: motions with counts, `d`/`c`/`y` and their doubles, `p`, `.`, undo and redo, registers, marks, `/` search, `:s`, `:g` and the usual `:` commands) and `vim`, the same editor with syntax colours for Lua and ccsh scripts on a colour screen. Esc closes the computer's screen in game, so Ctrl+[ or Ctrl+C leave insert mode. `lib/vi.lua` is the editor, `lib/syntax.lua` the colouring. Not Vim (Bram Moolenaar and the Vim team's): ccnix's own, written from vi's documented behaviour, with Vim's wording for its messages. `nano` is an alias for CraftOS's `edit`; it is not GNU nano. See `help vi`. |
-| POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `mkdir` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`, and `get` and `reset` for CraftOS's settings: the basic options of each, for the commands CraftOS lacks (and `ls`, `rm` and `mkdir`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
+| POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `mkdir` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`, and `sysctl` for CraftOS's settings: the basic options of each, for the commands CraftOS lacks (and `ls`, `rm` and `mkdir`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
 | `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z (under `init`, programs as processes and jobs as process groups), `/.profile`, and history kept in `/.ccsh_history`. Its line editor (a Unix shell's keys, Ctrl+C) is `lib/readline.lua`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
 | `turtle/autocompost.lua` | A stationary turtle on top of a composter: composts everything compostable in its inventory, forever. |
@@ -170,7 +170,7 @@ just those, with what they need and their help:
 | `router` | the network, and `router` to route between networks: forwarding on, up at every boot |
 | `init` | [processes and services](#processes-and-services): `init` at boot, `ps`, `kill`, `service`; [the system log](#the-system-log): `syslogd` as a service, `logger` |
 | `telnet` | the [telnet](#telnet) client, and the network |
-| `telnetd` | the [telnet](#telnet) server as a service, with `init` and the network (then `set telnetd.password ...`) |
+| `telnetd` | the [telnet](#telnet) server as a service, with `init` and the network (then `sysctl telnetd.password=...`) |
 
 `git`, `deploy/`, the pager and the help index always come. Options: `--autostart <app>` (a turtle
 runs it at every boot, see [Autostart](#autostart); on a computer,
@@ -248,7 +248,7 @@ next to itself in `turtle/`, not in the current directory.
 ## Settings and autostart
 
 `mine`, `farm` and `mow` keep their sizes in CraftOS's settings, so
-`set` lists them with what they mean and `set mine.length 64` changes one:
+`sysctl -d` says what they mean and `sysctl mine.length=64` changes one:
 
 | Setting | Default | |
 |---|---|---|
@@ -270,7 +270,7 @@ A size given on the command line is saved: after `farm learn 9 12` or
 A turtle restarts whenever its chunk loads again (a player comes back, the
 server restarts), and a job then stops where it was. With
 `ccnix.autostart` set (`setup ... --autostart mine`, `ccnix setup
---autostart mine`, or `set ccnix.autostart mine`), startup runs
+--autostart mine`, or `sysctl ccnix.autostart=mine`), startup runs
 `turtle/autostart`, which waits 5 seconds (any key cancels, for the
 prompt) and then:
 
@@ -297,7 +297,7 @@ and the console is free for `service status mine`, `tail -f
 /var/log/messages`, `service stop mine` (as Ctrl+T) and `service start
 mine`. Stop the service before running the program by hand.
 
-`set ccnix.autostart ""` turns it off. (The setting was
+`sysctl ccnix.autostart=` turns it off. (The setting was
 `cc-turtles.autostart` until 2026-10-29; boot renames it.)
 
 ## git
@@ -376,8 +376,7 @@ departs from POSIX.
 | `env` | `-i -u name`, `name=value`; the environment ccsh gives programs (none outside it) |
 | `which` | `-a` (not POSIX: which file the shell would run) |
 | `seq` | `-s sep -w -f format`, `[first [increment]] last`, decimals and negatives (not POSIX: GNU's) |
-| `get` | `-n`; `name = value` for each setting named, or all (not POSIX: CraftOS's settings, as sysctl shows its; `set` changes one) |
-| `reset` | none; each setting named back to its default (not POSIX, nor Unix's `reset`) |
+| `sysctl` | `-a -n -d -w`, `name`, `name=value`, `name=` (back to its default) (not POSIX: CraftOS's settings, as Linux's and the BSDs' sysctl has its own) |
 
 They all work the same way, so [ccsh](#ccsh) can join them up with
 pipes. With no file operands, or the operand `-`, a utility reads standard
@@ -445,7 +444,7 @@ A POSIX-style shell for CraftOS. Type `ccsh` to start it, and `exit`
 (or Ctrl+D on an empty line, or hold Ctrl+T at its prompt) to get back
 to the stock shell.
 `ccnix setup --ccsh` starts it at every boot, until you
-`set ccsh.login false`.
+`sysctl ccsh.login=false`.
 
 ```
 /$ wc -l *.lua | sort -n | tail -n 3
@@ -472,7 +471,7 @@ to the stock shell.
 | Substitution | `$(cmd)`, `` `cmd` `` (a subshell) |
 | Compound commands | `if a; then b; elif c; then d; else e; fi`, `while`/`until a; do b; done`, `for x in words; do b; done` (without `in`: `"$@"`), `case w in a\|b*) x;; *) y;; esac`, `{ a; b; }`, `( a; b )` (a subshell: its variables, functions, `exit` and `cd` are its own), `break [n]`, `continue [n]`. Each can be piped and redirected whole: `for f in *.lua; do wc -l $f; done \| sort -n`, `while read l; do ...; done < file` |
 | Functions | `name() { body; }` (or `function name { body; }`): `$1`... are its arguments, `return [n]`, `local x=1` until it returns |
-| Builtins | `exit [n]`, `:`, `true`, `false`, `[ expression ]` (`test`), `read [-r] name...`, `shift [n]`, `unset [-v\|-f] name...`, `export`, `. file`, `jobs`, `fg`, `bg`, `wait`, `kill`, `break`, `continue`, `return`, `local` |
+| Builtins | `exit [n]`, `:`, `true`, `false`, `[ expression ]` (`test`), `read [-r] name...`, `shift [n]`, `set` (POSIX's: `-e -u -x -f`, `-o name`, `set -- args`; CraftOS's settings are `sysctl`'s), `unset [-v\|-f] name...`, `export`, `. file`, `jobs`, `fg`, `bg`, `wait`, `kill`, `break`, `continue`, `return`, `local` |
 | Scripts | `ccsh file [args]`, `ccsh -c 'commands' [name [args]]`, or a file starting `#!/ccnix/bin/ccsh` run by name |
 
 A line ending in `\`, `|`, `&&` or `||`, or inside quotes, carries on at a
@@ -1394,7 +1393,7 @@ and its exit codes, with thanks.
 **httpd** serves a folder over HTTP: `httpd` serves `httpd.root` (/www)
 on `httpd.port` (80). A folder answers with its `index.html` or
 `index.htm` (`httpd.index` names others), else a listing with links;
-`httpd -L` or `set httpd.listing false` turns listings off (a folder
+`httpd -L` or `sysctl httpd.listing=false` turns listings off (a folder
 without an index is then 403). GET and HEAD, nothing outside the root,
 each request logged (on its screen and in [the system log](#the-system-log),
 `/var/log/httpd.log`). `setup httpd` makes it a service started at boot.
@@ -1457,7 +1456,7 @@ network as typed, as with any telnet); `telnetd.open` (`true`: no
 password); `telnetd.attach` (`console`, or unset for a shell each);
 `telnetd.port` (23). telnetd needs [init](#processes-and-services), which
 runs the shells, and the network up. `setup telnetd` sets it all up as a
-service started at boot; then `set telnetd.password ...`. Who connects,
+service started at boot; then `sysctl telnetd.password=...`. Who connects,
 logs in or gives a wrong password goes to [the system log](#the-system-log),
 `/var/log/telnetd.log`; `service status telnetd` shows the last of it.
 

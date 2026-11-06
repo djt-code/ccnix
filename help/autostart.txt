@@ -4,7 +4,7 @@ Usage:  autostart          what startup runs (setup puts it there)
         autostart --now
             the same, without the 5 second wait
 
-Runs the program named by the setting ccnix.autostart (mine, farm, mow or autocompost; `set ccnix.autostart farm`, or `ccnix setup --autostart farm`).  A turtle reboots whenever its chunk loads again, so this is what keeps a job going.  It waits 5 seconds first: any key cancels, for the prompt.
+Runs the program named by the setting ccnix.autostart (mine, farm, mow or autocompost; `sysctl ccnix.autostart=farm`, or `ccnix setup --autostart farm`).  A turtle reboots whenever its chunk loads again, so this is what keeps a job going.  It waits 5 seconds first: any key cancels, for the prompt.
 
   mine
       a tunnel it was digging when it went down: back to the last home if it's elsewhere, then `mine --resume`.  No tunnel yet: a new one, as the settings say (mine.width, mine.height, mine.length: 3x3, 32 long unless changed). A tunnel it finished, or stopped itself (out of chests or fuel): it says so and leaves it to you.

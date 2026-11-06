@@ -26,7 +26,7 @@
 --          the turtle can't (out of chests or fuel, a full chest, bedrock)
 --
 -- With no size, it digs the one in the settings: 3x3, 32 long unless
--- changed (`set mine.width 5`, `set mine.length 0` for no end; also
+-- changed (`sysctl mine.width=5`, `sysctl mine.length=0` for no end; also
 -- mine.height, mine.spacing, mine.lights).  A size given here is saved
 -- there, so the next `mine` (or the autostart) digs the same.
 --

@@ -15,7 +15,7 @@
 -- part of the lawn, so the box is x = 1..width, z = 1..length.
 --
 -- With no size it mows the one in the settings (mow.width, mow.length:
--- 16 x 16 unless changed with `set mow.width 30`); mow.repeat is the
+-- 16 x 16 unless changed with `sysctl mow.width=30`); mow.repeat is the
 -- minutes between passes (0 = once), mow.torches false keeps the torches.
 -- A size given here is saved there for the next `mow` (or the autostart).
 --

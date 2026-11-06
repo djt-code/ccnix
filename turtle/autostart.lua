@@ -4,7 +4,7 @@
 --         autostart --now    the same, without the 5 second wait
 --
 -- Runs the program named by the setting ccnix.autostart (mine, farm,
--- mow or autocompost; `set ccnix.autostart farm`, or
+-- mow or autocompost; `sysctl ccnix.autostart=farm`, or
 -- `ccnix setup --autostart farm`).  A turtle reboots whenever its chunk
 -- loads again, so this is what keeps a job going.  It waits 5 seconds
 -- first: any key cancels, for the prompt.
@@ -68,7 +68,7 @@ local function plan()
     elseif prog == "farm" then
         if not fs.exists(T.dataPath("farm.map")) then
             if not (settings.get("farm.width") and settings.get("farm.length")) then
-                return nil, "no farm learned yet, and no size to learn: `set farm.width 9`, `set farm.length 9`"
+                return nil, "no farm learned yet, and no size to learn: `sysctl farm.width=9 farm.length=9`"
             end
             return { { "farm" } }
         end
@@ -77,7 +77,7 @@ local function plan()
     elseif prog == "mow" then
         if away() then return { { "mow", "reset" }, { "mow" } } end
         if (settings.get("mow.repeat") or 0) > 0 then return { { "mow" } } end
-        return nil, "the lawn was mowed (set mow.repeat to keep mowing)"
+        return nil, "the lawn was mowed (sysctl mow.repeat=<minutes> to keep mowing)"
     end
     return { { prog } }
 end

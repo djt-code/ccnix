@@ -22,7 +22,7 @@ width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 height = blocks UP from the turtle (negative = DOWN)
 length = blocks the tunnel runs ahead; leave it out to keep going until the turtle can't (out of chests or fuel, a full chest, bedrock)
 
-With no size, it digs the one in the settings: 3x3, 32 long unless changed (`set mine.width 5`, `set mine.length 0` for no end; also mine.height, mine.spacing, mine.lights).  A size given here is saved there, so the next `mine` (or the autostart) digs the same.
+With no size, it digs the one in the settings: 3x3, 32 long unless changed (`sysctl mine.width=5`, `sysctl mine.length=0` for no end; also mine.height, mine.spacing, mine.lights).  A size given here is saved there, so the next `mine` (or the autostart) digs the same.
 
 The turtle's own column and row are part of the tunnel: it stands in the mouth at one bottom (or top, for negative heights) corner, and the tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3 tunnel 32 long, up and to the right of the turtle.
 

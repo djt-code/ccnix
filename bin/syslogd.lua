@@ -21,7 +21,7 @@
 -- Settings:
 --   syslog.maxSize   a log file past this many bytes is moved to <name>.1
 --                    and started again (32768; K or M after it for KiB
---                    or MiB: `set syslog.maxSize 2M` on a bigger disk)
+--                    or MiB: `sysctl syslog.maxSize=2M` on a bigger disk)
 --   syslog.keep      how many old files to keep: .1, .2... (1; 0: none)
 --   syslog.burst     at most this many messages from one program in 10 s;
 --                    past that they're dropped, and counted (100)

@@ -25,7 +25,7 @@
 -- of the farm, so the box is x = 1..width, z = 1..length.
 -- repeatMinutes defaults to 20; 0 = single pass.
 --
--- Settings (`set farm.repeat 30`): farm.width and farm.length are the box
+-- Settings (`sysctl farm.repeat=30`): farm.width and farm.length are the box
 -- to learn when none is given (a size given is saved there, so a turtle
 -- that boots with no map can learn the same farm again), farm.repeat the
 -- minutes between passes.

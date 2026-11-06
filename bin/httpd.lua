@@ -61,7 +61,7 @@ local index = {}
 for name in tostring(settings.get("httpd.index") or "index.html index.htm"):gmatch("[^%s,]+") do index[#index + 1] = name end
 
 if not net.stack() then cu.fail("the network isn't up (`ip up`)"); return cu.exit() end
-if not fs.isDir(root) then cu.fail("no folder " .. root .. ": make it, or set httpd.root"); return cu.exit() end
+if not fs.isDir(root) then cu.fail("no folder " .. root .. ": make it, or sysctl httpd.root=<folder>"); return cu.exit() end
 
 -- each request, and what failed, to the system log (and this screen)
 local syslog = require("log").new("httpd", settings.get("httpd.facility") or "local7", { perror = true })

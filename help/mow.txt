@@ -12,6 +12,6 @@ width  = tiles to the RIGHT of the turtle (negative = to the LEFT)
 length = tiles AHEAD of the turtle (negative = BEHIND)
 Both are counted OUT from the turtle: its own row and column are not part of the lawn, so the box is x = 1..width, z = 1..length.
 
-With no size it mows the one in the settings (mow.width, mow.length: 16 x 16 unless changed with `set mow.width 30`); mow.repeat is the minutes between passes (0 = once), mow.torches false keeps the torches. A size given here is saved there for the next `mow` (or the autostart).
+With no size it mows the one in the settings (mow.width, mow.length: 16 x 16 unless changed with `sysctl mow.width=30`); mow.repeat is the minutes between passes (0 = once), mow.torches false keeps the torches. A size given here is saved there for the next `mow` (or the autostart).
 
 Place the turtle diagonally outside one corner of the lawn, on the ground at grass level, facing along the LENGTH axis. Optional chest/barrel directly below the start position for seeds. Put torches in the inventory and it lights the lawn as it mows.

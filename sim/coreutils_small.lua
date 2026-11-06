@@ -1,7 +1,7 @@
 -- sim/coreutils_small.lua
 --
 -- The small utilities in a shellworld: touch, pwd, basename, dirname,
--- true, false, sleep, which, xargs, seq, and get and reset (settings) --
+-- true, false, sleep, which, xargs, seq, and sysctl (settings) --
 -- their options, operands, output formats, diagnostics and exit statuses.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -383,14 +383,19 @@ r = W:run("rm", "-rf", "/deep", "/not-there")
 check("rm -rf /dir: the directory and everything in it, no questions, nothing said of what's missing",
     r.status == 0 and #r.err == 0 and not W.fs.exists("deep"), show(r.errText))
 
+
 --------------------------------------------------------------------------
--- get, reset (settings, as CC:T's API keeps them: getDetails' value falls
--- back to the default, changed says it's set)
+-- sysctl (settings, as CC:T's API keeps them: getDetails' value falls
+-- back to the default, changed says it's set; type and description from
+-- settings.define)
 --------------------------------------------------------------------------
-local DEFS = { ["motd.enable"] = false, ["shell.allow_disk_startup"] = true }
+local DEFS = { ["motd.enable"] = { default = false, type = "boolean", description = "Show a message of the day." },
+               ["shell.allow_disk_startup"] = { default = true, type = "boolean" },
+               ["host.name"] = { type = "string" } }
 local VALS, saved = { ["motd.enable"] = true, ["my.list"] = { 1, 2 } }, 0
 settings = {
-    get = function(k) local v = VALS[k]; if v == nil then return DEFS[k] end return v end,
+    get = function(k) local v = VALS[k]; if v == nil then return DEFS[k] and DEFS[k].default end return v end,
+    set = function(k, v) VALS[k] = v end,
     unset = function(k) VALS[k] = nil end,
     save = function() saved = saved + 1 end,
     getNames = function()
@@ -400,24 +405,34 @@ settings = {
         return n
     end,
     getDetails = function(k)
-        local v = VALS[k]
-        return { default = DEFS[k], value = v == nil and DEFS[k] or v, changed = v ~= nil }
+        local d, v = DEFS[k] or {}, VALS[k]
+        return { default = d.default, type = d.type, description = d.description,
+                 value = v == nil and d.default or v, changed = v ~= nil }
     end,
 }
 textutils = textutils or M.textutilsApi()
-r = W:run("get")
-check("get: every setting there is, set or defined, sorted, name = value (a table on one line)", r.status == 0
-    and r.out:sub(1, 30) == "motd.enable = true\nmy.list = {"
-    and r.out:sub(-34) == "}\nshell.allow_disk_startup = true\n" and select(2, r.out:gsub("\n", "")) == 3, show(r.out))
-r = W:run("get", "-n", "shell.allow_disk_startup", "nope", "motd.enable")
-check("get -n: the values alone; one neither set nor defined an error (status 1), the rest still written", r.status == 1
-    and r.out == "true\ntrue\n" and r.err[1] == "get: nope: no such setting", show(r.out) .. show(r.errText))
-r = W:run("reset", "motd.enable", "my.list", "shell.allow_disk_startup")
-check("reset: what each is now; one not set said so; saved", r.status == 0 and VALS["motd.enable"] == nil
-    and VALS["my.list"] == nil and saved == 1
-    and r.out == "motd.enable: false (its default)\nmy.list: not set\nshell.allow_disk_startup: was true (its default) already\n",
-    show(r.out))
-r = W:run("reset")
-check("reset with no name: usage, status 2, nothing saved", r.status == 2 and saved == 1
-    and r.err[#r.err] == "usage: reset name...", show(r.errText))
+r = W:run("sysctl", "-a")
+check("sysctl -a: every setting there is, set or defined, sorted, name = value (a table on one line)", r.status == 0
+    and r.out:sub(1, 43) == "host.name = \nmotd.enable = true\nmy.list = {"
+    and r.out:sub(-34) == "}\nshell.allow_disk_startup = true\n" and select(2, r.out:gsub("\n", "")) == 4, show(r.out))
+r = W:run("sysctl", "-n", "shell.allow_disk_startup", "nope", "motd.enable")
+check("sysctl -n: the values alone; an unknown key an error (status 1), the rest still shown", r.status == 1
+    and r.out == "true\ntrue\n" and r.err[1] == "sysctl: nope: unknown key", show(r.out) .. show(r.errText))
+r = W:run("sysctl", "-d", "motd.enable")
+check("sysctl -d: the description", r.status == 0 and r.out == "motd.enable: Show a message of the day.\n", show(r.out))
+r = W:run("sysctl", "motd.enable=false", "my.count=12", "host.name=42", "my.word=hello there")
+check("sysctl name=value: as each one's type has it (a string-typed one keeps 42 as text), new ones guessed; shown; saved once",
+    r.status == 0 and VALS["motd.enable"] == false and VALS["my.count"] == 12 and VALS["host.name"] == "42"
+    and VALS["my.word"] == "hello there" and saved == 1
+    and r.out == "motd.enable = false\nmy.count = 12\nhost.name = 42\nmy.word = hello there\n", show(r.out))
+r = W:run("sysctl", "motd.enable=yes")
+check("a value of the wrong type: refused, status 1, nothing saved", r.status == 1 and VALS["motd.enable"] == false
+    and saved == 1 and r.err[1] == "sysctl: motd.enable is a boolean: not yes", show(r.errText))
+r = W:run("sysctl", "motd.enable=", "my.list=")
+check("sysctl name=: back to the default, or not set with none; saved", r.status == 0 and VALS["motd.enable"] == nil
+    and VALS["my.list"] == nil and saved == 2 and r.out == "motd.enable = false (its default)\nmy.list: not set\n", show(r.out))
+r = W:run("sysctl")
+local r2 = W:run("sysctl", "-a", "motd.enable")
+check("sysctl with nothing, or -a and a name: usage, status 2", r.status == 2 and r2.status == 2
+    and r.err[#r.err] == "usage: sysctl [-n | -d] -a | name[=value]...", show(r.errText))
 settings = nil

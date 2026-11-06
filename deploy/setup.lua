@@ -213,7 +213,7 @@ local function services(from)
             settings.save()
         end
         if a == "telnetd" and not settings.get("telnetd.password") then
-            print("telnetd needs a password: set telnetd.password <password> (then reboot, or service start telnetd)")
+            print("telnetd needs a password: sysctl telnetd.password=<password> (then reboot, or service start telnetd)")
         end
         if a == "httpd" then
             local root = settings.get("httpd.root") or "/www"

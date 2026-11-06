@@ -45,7 +45,7 @@ if not net.stack() then fail("the network isn't up (`ip up`)") end
 local password = settings.get("telnetd.password")
 local open = settings.get("telnetd.open") == true
 if (type(password) ~= "string" or password == "") and not open then
-    fail("no password: set telnetd.password (or telnetd.open true, for anyone)")
+    fail("no password: sysctl telnetd.password=<password> (or telnetd.open=true, for anyone)")
 end
 local attach = settings.get("telnetd.attach") == "console"
 local port = tonumber(settings.get("telnetd.port")) or 23

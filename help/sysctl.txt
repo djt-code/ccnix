@@ -1,0 +1,10 @@
+sysctl: show and change CraftOS's settings
+
+  sysctl [-n | -d] name[=value]...
+  sysctl [-n | -d] -a
+
+As Linux's and the BSDs' sysctl, over CraftOS's settings (in ccsh, set is the shell's own, as POSIX has it).  name shows a setting as
+name = value; name=value changes it, and name= (nothing after the =)
+puts it back to its default, or takes it away if it has none; either way it's saved to /.settings at once and shown as it is now.  -a shows every setting there is (set, or defined with a default), sorted.  -n shows the values alone, for a script: x=$(sysctl -n motd.enable).  -d shows each one's description (as the BSDs' -d) instead.  -w is taken and ignored (a name=value is a change anyway).
+
+A setting defined with a type takes a value of that type: true or false, a number, or the text as it is.  One without is read as true, false or a number when it looks like one, else as the text.  A table is shown as textutils.serialise writes it, on one line. Exit status: 0; 1 if a name to show doesn't exist, or a value is of the wrong type; 2 for a usage error.

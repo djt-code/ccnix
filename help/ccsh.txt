@@ -57,6 +57,8 @@ ccsh runs inside the stock CraftOS shell and has it find and run the programs (t
       end a job as Ctrl+T would; -9 drops it at once, -STOP stops it, -CONT carries it on.  Under init, a pid that isn't a job's is a process's (see ps), and -pid a process group's.
   builtins
       also exit [n], :, true, false, read [-r] name..., shift [n], unset [-v] name... (variables), unset -f name... (functions), . file, export [-n] name[=value]... and export -p, [ expression ] (test, with a last ])
+  set
+      POSIX's: set alone lists the variables; set -- a b (or set a b) makes them $1 $2, set -- alone none; -e (errexit: a failing command ends the shell, but not in an if, while or until condition, before && or ||, or after !), -u (nounset: an unset $X is an error), -x (xtrace: each command on stderr after $PS4, "+ "), -f (noglob) on, +e and so on off, or by name: -o errexit; set -o and set +o show them, $- has the letters on.  CraftOS's settings are sysctl's.
 
 Not yet: here-documents, $(( arithmetic )) (expr does sums), ~.
 

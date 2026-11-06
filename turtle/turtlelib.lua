@@ -849,8 +849,8 @@ function T.sortedKeys(t, cmp)
     return keys
 end
 
--- A setting from CC's settings (`set mine.width 5` at the prompt), defined
--- here so `set` lists it with its description; its default where there is
+-- A setting from CC's settings (`sysctl mine.width=5` at the prompt), defined
+-- here so `sysctl -d` describes it with its description; its default where there is
 -- no settings API.
 function T.setting(name, default, description)
     if not settings then return default end

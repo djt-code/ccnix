@@ -453,3 +453,39 @@ check("Tab: not the command's own name (that's the stock shell's), nor a glob or
     comp("no") == "nil" and comp("cat no*") == "nil" and comp("cat $no") == "nil")
 W.files["notes.txt"], W.files[".nohide"] = nil, nil
 W.fs.delete("nodir")
+
+--------------------------------------------------------------------------
+-- set (POSIX's special builtin): positional parameters, options, $-
+--------------------------------------------------------------------------
+r = sh([[set -- a 'b c'; args "$#" "$@"; set x; args $#; set --; args "$#"; set -e; args $# "$-"]])
+check("set -- and set word: the positional parameters; set -- alone clears them; an option alone keeps them",
+    r.out == "[2][a][b c]\n[1]\n[0]\n[0][e]\n", show(r.out))
+r = sh([[B=2; A='it''s'; set]])
+check("set alone: the variables, sorted, quoted to read back in", r.out:find("A='its'\nB='2'\n", 1, true) ~= nil, show(r.out))
+r = sh([[set -e; true; false; echo no]])
+check("set -e: a failing command ends the shell with its status", r.out == "" and r.status == 1, show(r.out))
+r = sh([[set -e; if false; then :; fi; while false; do :; done; false || true; false && true; ! true; echo yes; f() { false; echo in; }; f; echo no]])
+check("set -e: not in a condition, before && or ||, after !; in a function it ends there",
+    r.out == "yes\n" and r.status == 1, show(r.out) .. " " .. r.status)
+r = sh([[set -u; echo "${U-ok}" "$#" "$@"; echo $U; echo no]])
+check("set -u: an unset variable is an error (not ${U-word}, $# or $@)", r.out == "ok 0\n" and r.status == 1
+    and r.err[1] == "ccsh: U: parameter not set", show(r.out) .. " " .. show(r.errText))
+W:file("gf1.txt", "") W:file("gf2.txt", "")
+r = sh([[set -f; args gf*.txt; set +f; args gf*.txt]])
+check("set -f: no globbing; +f back on", r.out == "[gf*.txt]\n[gf1.txt][gf2.txt]\n", show(r.out))
+W.fs.delete("gf1.txt") W.fs.delete("gf2.txt")
+r = sh([[set -x; X=1 args a 'b c'; set +x; args d]])
+check("set -x: each command on stderr after +, quoted to read back in", r.out == "[a][b c]\n[d]\n"
+    and r.err[1] == "+ X=1 args a 'b c'" and r.err[2] == "+ set +x" and #r.err == 2, show(r.errText))
+r = sh([[set -o errexit -o nounset; echo "$-"; set -o; set +o; set +eu -o xtrace; set +x; echo "$-"]])
+check("set -o name, set -o and +o to see them (+o as commands), $- the letters",
+    r.out == "eu\nerrexit         on\nnoglob          off\nnounset         on\nxtrace          off\n"
+        .. "set -o errexit\nset +o noglob\nset -o nounset\nset +o xtrace\n\n", show(r.out))
+r = sh([[set -v; echo $?; set -q; echo $?; set -o nope; echo $?]])
+check("options not here yet, and ones POSIX hasn't: refused, status 2", r.out == "2\n2\n2\n"
+    and r.err[1] == "ccsh: set: -v (verbose) isn't supported yet" and r.err[2] == "ccsh: set: -q: bad option"
+    and r.err[3] == "ccsh: set: nope: no such option", show(r.errText))
+r = sh([[set() { echo mine; }; set -- a; echo "$1"]])
+check("set is special: a function can't hide it", r.out == "a\n", show(r.out))
+r = sh([[args a "$@" b; set -- x; args "$@" "${@}"]])
+check("\"$@\" with no positional parameters: no field at all, not an empty one", r.out == "[a][b]\n[x][x]\n", show(r.out))

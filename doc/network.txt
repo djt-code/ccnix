@@ -45,7 +45,7 @@ The real network: the ccnix mod (in the repo's mod/) adds a Network Gateway bloc
 
 Names: `ip host b 10.0.2.20` on A lets `ping b` work.  With a way out through the gateway, `ip dns 1.1.1.1 9.9.9.9` (a primary and a secondary; one will do) on each computer lets real names work too: `ping example.com`, `nc example.com http`, `host example.com`.  The hosts are looked at first, then DNS; if the primary doesn't answer, the secondary is asked.
 
-Telnet: on B, `wget run https://raw.githubusercontent.com/djt-code/ccnix/main/deploy/setup.lua telnetd`, then `set telnetd.password pick-one` and reboot. On A, `telnet 10.0.2.20` and the password: B's shell, on A's screen. Ctrl+] then q comes back. `set telnetd.attach console` on B shows its console instead (the miner's screen, say).
+Telnet: on B, `wget run https://raw.githubusercontent.com/djt-code/ccnix/main/deploy/setup.lua telnetd`, then `sysctl telnetd.password=pick-one` and reboot. On A, `telnet 10.0.2.20` and the password: B's shell, on A's screen. Ctrl+] then q comes back. `sysctl telnetd.attach=console` on B shows its console instead (the miner's screen, say).
 
 When it doesn't work:
   ip          what's set, and whether it's up

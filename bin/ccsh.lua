@@ -92,6 +92,17 @@
 --                         unset -f name... (functions), . file,
 --                         export [-n] name[=value]... and export -p,
 --                         [ expression ] (test, with a last ])
+--   set                   POSIX's: set alone lists the variables; set --
+--                         a b (or set a b) makes them $1 $2, set -- alone
+--                         none; -e (errexit: a failing command ends the
+--                         shell, but not in an if, while or until
+--                         condition, before && or ||, or after !), -u
+--                         (nounset: an unset $X is an error), -x (xtrace:
+--                         each command on stderr after $PS4, "+ "), -f
+--                         (noglob) on, +e and so on off, or by name: -o
+--                         errexit; set -o and set +o show them, $- has
+--                         the letters on.  CraftOS's settings are
+--                         sysctl's.
 --
 -- Not yet: here-documents, $(( arithmetic )) (expr does sums), ~.
 --
@@ -192,6 +203,8 @@ local P = {
     lastBg = nil,                    -- $!
     funcs = {},                      -- name -> the function's body
     loopDepth = 0, funcDepth = 0, dotDepth = 0,
+    opts = {},                       -- set's options on: e, f, u, x
+    condDepth = 0,                   -- in an if, while or until condition (set -e lets it fail)
     locals = nil,                    -- in a function: what `local` hid, name -> { value, exported }
     -- breaking, continuing (how many loops), returning: stop what's running
 }
@@ -205,7 +218,7 @@ end
 
 local function cloneState(s)
     local c = copy(s)
-    c.vars, c.exported, c.pos, c.funcs = copy(s.vars), copy(s.exported), copy(s.pos), copy(s.funcs)
+    c.vars, c.exported, c.pos, c.funcs, c.opts = copy(s.vars), copy(s.exported), copy(s.pos), copy(s.funcs), copy(s.opts)
     return c
 end
 
@@ -414,7 +427,7 @@ local function isLetter(c) return c ~= "" and ((c >= "a" and c <= "z") or (c >= 
 local function isNameStart(c) return c == "_" or isLetter(c) end
 local function isNameChar(c) return isNameStart(c) or isDigit(c) end
 -- $? $# $@ $* $$ $!: the one-character special parameters
-local SPECIAL_PARAMS = { ["?"] = true, ["#"] = true, ["@"] = true, ["*"] = true, ["$"] = true, ["!"] = true }
+local SPECIAL_PARAMS = { ["?"] = true, ["#"] = true, ["@"] = true, ["*"] = true, ["$"] = true, ["!"] = true, ["-"] = true }
 -- the operators of ${name<op>word}: with a colon, an empty value counts
 -- as unset too
 local PARAM_OPS = { ["-"] = true, ["="] = true, ["+"] = true, ["?"] = true }
@@ -439,7 +452,7 @@ local function lex(src)
 
     -- A parameter's name at j: a name (a letter or _, then letters,
     -- digits and _), a positional number (one digit, or with braces all
-    -- the digits: ${10}) or one of ? # @ * $ !.  The name and the
+    -- the digits: ${10}) or one of ? # @ * $ ! -.  The name and the
     -- position after it, or nil.
     local function readParamName(j, braced)
         local c = src:sub(j, j)
@@ -859,6 +872,18 @@ do
     end
 end
 
+-- set's options: the letter, and the name for set -o
+local OPTIONS = { { "e", "errexit" }, { "f", "noglob" }, { "u", "nounset" }, { "x", "xtrace" } }
+-- POSIX's others, not here yet
+local NOT_YET = { a = "allexport", b = "notify", C = "noclobber", h = "hashall", m = "monitor", n = "noexec", v = "verbose" }
+
+-- $-: the letters of the options on
+local function optionLetters()
+    local on = {}
+    for _, o in ipairs(OPTIONS) do if P.opts[o[1]] then on[#on + 1] = o[1] end end
+    return table.concat(on)
+end
+
 local function getVar(name)
     if name == "?" then return tostring(P.status)
     elseif name == "#" then return tostring(#P.pos)
@@ -872,6 +897,7 @@ local function getVar(name)
         return os.getComputerLabel and os.getComputerLabel() or tostring(os.getComputerID())
     elseif name == "PPID" then return ids.ppid and tostring(ids.ppid) or ""
     elseif name == "!" then return P.lastBg and tostring(P.lastBg) or ""
+    elseif name == "-" then return optionLetters()
     end
     return P.vars[name] or ""
 end
@@ -944,8 +970,10 @@ local function fields(parts, whole)
             cur.keep = true
         end
     end
+    -- (a field that is only a "$@" of no parameters, quotes and all, is
+    -- none: POSIX's zero fields)
     local function cut()
-        if cur.keep then out[#out + 1] = cur end
+        if cur.keep and not (cur.noParams and #cur.chars == 0) then out[#out + 1] = cur end
         new()
     end
     -- v, what an expansion gave: quoted (q), all of it; else split at blanks
@@ -975,7 +1003,13 @@ local function fields(parts, whole)
     --                                       :?  ... or empty
     local function param(p)
         local v, list = getVar(p.name)
-        if not p.op then return v, list end
+        if not p.op then
+            if P.opts.u and not list and not isSet(p.name) then         -- (set -u; $@ and $* may be empty)
+                report(P.defaultErr or TTY, "ccsh: " .. p.name .. ": parameter not set")
+                error(EXPANSION, 0)
+            end
+            return v, list
+        end
         local colon = p.op:sub(1, 1) == ":"
         local kind = p.op:sub(-1)
         local empty = not isSet(p.name) or (colon and (list and #v == 0 or v == ""))
@@ -1013,6 +1047,7 @@ local function fields(parts, whole)
                 if v == nil then
                     expandParts(isList)                 -- (the word of a ${name:-word})
                 elseif isList and p.q and p.name == "@" and not whole then
+                    if #v == 0 then cur.noParams = true end
                     for k, a in ipairs(v) do
                         add(a, true)
                         if k < #v then cut() end
@@ -1589,6 +1624,11 @@ function builtins.unset(a, b)
     return st
 end
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
+-- A word as set -x shows it: quoted if it needs to be to read back in
+local function traced(s)
+    if s ~= "" and not s:find("[^%w_%-%./:=,+@%%]") then return s end
+    return quote(s)
+end
 function builtins.export(a, b)
     local k, un = 2, a[2] == "-n"
     if un then k = 3 end
@@ -1718,6 +1758,70 @@ function builtins.shift(a, b)
     for _ = 1, n do table.remove(P.pos, 1) end
     return 0
 end
+-- set: the variables (none named); options on (-x, -o xtrace) and off
+-- (+x, +o xtrace), -o or +o alone to see them; what's left (all of it
+-- after --) the positional parameters
+function builtins.set(a, b)
+    if #a == 1 then
+        local names = {}
+        for name in pairs(P.vars) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do b.out(name .. "=" .. quote(P.vars[name]) .. "\n") end
+        return 0
+    end
+    local function letterOf(name)
+        for _, o in ipairs(OPTIONS) do if o[2] == name then return o[1] end end
+    end
+    local k = 2
+    while a[k] do
+        local w = a[k]
+        local sign, rest = w:sub(1, 1), w:sub(2)
+        if w == "--" or w == "-" then
+            if w == "-" then P.opts.x = nil end         -- (as historical shells: - turns off -x)
+            k = k + 1
+            if w == "--" or a[k] then P.pos = { table.unpack(a, k) } end
+            return 0
+        elseif (sign ~= "-" and sign ~= "+") or rest == "" then
+            break
+        elseif rest == "o" then
+            local name = a[k + 1]
+            if not name or name:match("^[-+]") then
+                for _, o in ipairs(OPTIONS) do
+                    local on = P.opts[o[1]] and true or false
+                    b.out(sign == "-" and string.format("%-15s %s\n", o[2], on and "on" or "off")
+                        or ("set " .. (on and "-o " or "+o ") .. o[2] .. "\n"))
+                end
+                k = k + 1
+            else
+                local c = letterOf(name)
+                if not c then
+                    for l, n in pairs(NOT_YET) do
+                        if n == name then b.err("set: " .. name .. " (-" .. l .. ") isn't supported yet"); return 2 end
+                    end
+                    b.err("set: " .. name .. ": no such option")
+                    return 2
+                end
+                P.opts[c] = sign == "-" or nil
+                k = k + 2
+            end
+        else
+            for c in rest:gmatch(".") do
+                if letterOf(({ e = "errexit", f = "noglob", u = "nounset", x = "xtrace" })[c] or "") then
+                    P.opts[c] = sign == "-" or nil
+                elseif NOT_YET[c] then
+                    b.err("set: -" .. c .. " (" .. NOT_YET[c] .. ") isn't supported yet")
+                    return 2
+                else
+                    b.err("set: " .. sign .. c .. ": bad option")
+                    return 2
+                end
+            end
+            k = k + 1
+        end
+    end
+    if a[k] then P.pos = { table.unpack(a, k) } end
+    return 0
+end
 function builtins.read(a, b)
     local names = {}
     for k = (a[2] == "-r") and 3 or 2, #a do names[#names + 1] = a[k] end
@@ -1784,7 +1888,7 @@ builtins["local"] = function(a, b)
 end
 -- builtins a function can't hide
 local SPECIAL = { [":"] = true, ["."] = true, ["break"] = true, ["continue"] = true, ["return"] = true,
-    exit = true, export = true, unset = true, shift = true, ["local"] = true }
+    exit = true, export = true, unset = true, shift = true, set = true, ["local"] = true }
 
 -- Something has to stop what's running: Ctrl+T, exit, break, continue or return.
 local function halted()
@@ -1861,7 +1965,7 @@ local function expandWords(words)
     local argv = {}
     for _, w in ipairs(words) do
         for _, f in ipairs(fields(w)) do
-            local g = glob(f)
+            local g = not P.opts.f and glob(f)                  -- (set -f: none)
             if g then
                 for _, s in ipairs(g) do argv[#argv + 1] = s end
             else
@@ -1908,7 +2012,9 @@ local function loop(cmd, items)
             if k > #items then break end
             setVar(cmd.name, items[k])
         else
+            P.condDepth = P.condDepth + 1
             runList(cmd.cond)
+            P.condDepth = P.condDepth - 1
             if halted() then
                 if loopTurn() then break end
                 go = false
@@ -1938,7 +2044,9 @@ local function compound(cmd)
         return subshell(function() runList(cmd.body) end)
     elseif kind == "if" then
         for _, c in ipairs(cmd.clauses) do
+            P.condDepth = P.condDepth + 1
             runList(c.cond)
+            P.condDepth = P.condDepth - 1
             if halted() then return P.status end
             if P.status == 0 then
                 P.status = 0
@@ -2082,6 +2190,12 @@ local function runCommand(cmd, inText, out)
         error(redirected, 0)
     end
     if not redirected then return done(1) end
+    if P.opts.x then                                    -- (set -x: the command as it runs, after $PS4)
+        local line = {}
+        for _, a in ipairs(assigns) do line[#line + 1] = a.name .. "=" .. traced(a.value) end
+        for _, w in ipairs(argv) do line[#line + 1] = traced(w) end
+        report(fd[2], (P.vars.PS4 or "+ ") .. table.concat(line, " "))
+    end
     if #argv == 0 then
         for _, a in ipairs(assigns) do setVar(a.name, a.value) end
         return done(P.subStatus or 0)
@@ -2175,9 +2289,15 @@ local function runPipeline(p)
 end
 
 function runAndOr(ao)
+    local last
     for k, item in ipairs(ao) do
-        if k == 1 or (item.conn == "&&") == (P.status == 0) then runPipeline(item.pipe) end
+        if k == 1 or (item.conn == "&&") == (P.status == 0) then runPipeline(item.pipe); last = k end
         if halted() then return end
+    end
+    -- set -e: a failure ends the shell, but not in a condition, before
+    -- && or ||, or after !
+    if P.opts.e and P.status ~= 0 and P.condDepth == 0 and last == #ao and not ao[#ao].pipe.neg then
+        P.exiting = true
     end
 end
 
