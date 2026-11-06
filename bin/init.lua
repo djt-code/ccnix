@@ -16,7 +16,9 @@
 -- is set, then ccsh if ccsh.login is on, then the CraftOS shell;
 -- each when the one before it ends.  Leaving that last shell shuts the
 -- computer down, as leaving CraftOS's own does.  Run by hand, init skips
--- the autostart.
+-- the autostart.  A turtle's job that's a service of the same name
+-- (service.mine..., which setup sets up with init) runs as that instead,
+-- in the background, and the console starts at ccsh or the shell.
 --
 -- What a service prints is logged too, a line each under its name
 -- (printError's at err), and so is each service starting, ending and
@@ -66,7 +68,8 @@ K.say(5, "init started")
 -- the console: each of these in turn
 local chain = {}
 local auto = settings.get("ccnix.autostart", "")
-if args[1] == "--boot" and auto ~= "" then
+local def = auto ~= "" and require("proc").serviceDef(auto)
+if args[1] == "--boot" and auto ~= "" and not (turtle and def and def.enabled) then
     if turtle and program("turtle/autostart") then chain[#chain + 1] = program("turtle/autostart")
     elseif auto == "router" and program("pc/router") then chain[#chain + 1] = program("pc/router") end
 end

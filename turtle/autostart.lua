@@ -22,6 +22,14 @@
 --                on repeat (mow.repeat > 0): mow.  Otherwise nothing: the
 --                lawn was mowed.
 --   autocompost  autocompost.
+--
+-- With init at boot (`ccnix setup init`), the job runs as a service of
+-- its own name instead (service mine: `autostart --now`, not started
+-- again when it ends), so what it prints is kept in the system log
+-- (/var/log/messages) and the console is free: `service status mine`,
+-- `tail -f /var/log/messages`, `service stop mine` (as Ctrl+T) and
+-- `service start mine` (picks it up again).  Stop the service before
+-- running the program by hand.
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")

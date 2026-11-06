@@ -105,6 +105,11 @@ check("... the lines it can't read told by number",
 check("a program block: only that program's messages",
     D.matches(rules[2], { fac = 1, sev = 6, app = "httpd" }) and not D.matches(rules[2], { fac = 1, sev = 6, app = "other" }))
 
+-- syslog.maxSize: bytes, or K/M
+check("sizes: a number, K and M (KiB, MiB), junk is nil",
+    D.size(32768) == 32768 and D.size("2M") == 2097152 and D.size("512k") == 524288 and D.size("1.5M") == 1572864
+        and D.size("2MB") == 2097152 and D.size("4096") == 4096 and D.size("big") == nil and D.size(nil) == nil)
+
 -- rotation, in the world's filesystem
 local fsT = W.fs
 for i = 1, 5 do D.append(fsT, "var/log/r.log", ("a"):rep(30), 64, 2) end

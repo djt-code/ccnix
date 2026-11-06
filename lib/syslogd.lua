@@ -40,6 +40,17 @@ D.MAX_SIZE, D.KEEP = 32768, 1       -- a file past MAX_SIZE bytes is moved to .1
 D.BURST, D.WINDOW = 100, 10         -- at most BURST messages from one app in WINDOW seconds
 D.PORT = 514
 
+-- A size in bytes: a number, or one with K or M after it (KiB, MiB:
+-- "2M", "512K"); nil if it's neither.
+function D.size(v)
+    if type(v) == "number" then return v >= 0 and math.floor(v) or nil end
+    if type(v) ~= "string" then return nil end
+    local n, unit = v:upper():match("^%s*(%d+%.?%d*)%s*([KM]?)I?B?%s*$")
+    n = tonumber(n)
+    if not n then return nil end
+    return math.floor(n * (unit == "M" and 1048576 or unit == "K" and 1024 or 1))
+end
+
 local function parseSelectors(s)
     local sels = {}
     for part in s:gmatch("[^;]+") do

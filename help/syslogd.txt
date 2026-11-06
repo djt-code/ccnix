@@ -18,7 +18,7 @@ Programs log through lib/log (C's syslog(3)), shell scripts with `logger`, and i
 
 Settings:
   syslog.maxSize
-      a log file past this many bytes is moved to <name>.1 and started again (32768)
+      a log file past this many bytes is moved to <name>.1 and started again (32768; K or M after it for KiB or MiB: `set syslog.maxSize 2M` on a bigger disk)
   syslog.keep
       how many old files to keep: .1, .2... (1; 0: none)
   syslog.burst

@@ -20,7 +20,8 @@
 --
 -- Settings:
 --   syslog.maxSize   a log file past this many bytes is moved to <name>.1
---                    and started again (32768)
+--                    and started again (32768; K or M after it for KiB
+--                    or MiB: `set syslog.maxSize 2M` on a bigger disk)
 --   syslog.keep      how many old files to keep: .1, .2... (1; 0: none)
 --   syslog.burst     at most this many messages from one program in 10 s;
 --                    past that they're dropped, and counted (100)
@@ -60,7 +61,7 @@ local function num(key, default)
     if v and v >= 0 then return math.floor(v) end
     return default
 end
-local maxSize, keep, burst = num("syslog.maxSize", D.MAX_SIZE), num("syslog.keep", D.KEEP), num("syslog.burst", D.BURST)
+local maxSize, keep, burst = D.size(settings.get("syslog.maxSize")) or D.MAX_SIZE, num("syslog.keep", D.KEEP), num("syslog.burst", D.BURST)
 local listen, port = settings.get("syslog.listen") == true, num("syslog.port", D.PORT)
 local me = proc.self()
 

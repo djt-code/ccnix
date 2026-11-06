@@ -254,6 +254,19 @@ local function services(from)
             end
         end
     end
+    -- with init, a turtle's job is a service of its own name, not the
+    -- console's: what it prints goes in the system log, and the console
+    -- is free.  `autostart --now` picks the job up as at boot; when the
+    -- job ends, it isn't started again.
+    local job = autostart or settings.get("ccnix.autostart")
+    if turtle and AUTOSTART[job] and (initBoot or settings.get("init.boot") == true)
+            and not settings.get("service." .. job .. ".cmd") then
+        settings.set("service." .. job .. ".cmd", "autostart --now")
+        settings.set("service." .. job .. ".restart", "no")
+        settings.set("service." .. job .. ".enabled", true)
+        settings.save()
+        print(job .. " runs as a service under init: `service status " .. job .. "`, its log in /var/log/messages (`tail -f`).")
+    end
 end
 
 -- The settings the apps want; from a checkout, the two startup lines

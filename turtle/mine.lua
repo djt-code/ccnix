@@ -38,7 +38,8 @@
 -- turtle builds a new home out of two of them every `spacing` blocks.
 -- Torches in it too, and it lights the tunnel (unless --no-lights).  And a
 -- crafting table, so it can craft more chests and torches from wood it
--- finds (see Crafting below).
+-- finds (see Crafting below).  And an empty bucket, so it burns the lava
+-- it meets for fuel (see Lava below).
 --
 -- How it works:
 --  * Homes: the tunnel is dug a segment at a time.  At the end of each
@@ -128,7 +129,12 @@
 --    but are water sources), water plants, and thin things that aren't
 --    solid (lichen, vines, grass) in the walls, floor or ceiling: those are
 --    dug out first.  The bulk comes from the inventory (it keeps a stack
---    for this).  Turtles take
+--    for this).  With an empty bucket on board (it takes one from the
+--    start's top chest and keeps it), a lava source is taken up and
+--    burned first, 1000 fuel each, when the tank has room for it: inside
+--    the tunnel that's all it takes, and in a wall the hole it leaves is
+--    filled as any other.  Flowing lava can't be taken up: it's sealed.
+--    Turtles take
 --    no harm from lava, but lava burns any item that falls in it and
 --    makes the tunnel deadly for players.  Lava or water inside the
 --    tunnel is dried out (see dry): filled and dug out, and if it comes
@@ -336,6 +342,8 @@ function isPlanks(name) return name:find("_planks$") ~= nil end
 function isWood(name) return isLog(name) or isPlanks(name) or name == STICK end
 -- The Advanced Peripherals Geo Scanner: kept on board, never unloaded.
 function isScanner(name) return name:find("geo_scanner") ~= nil end
+-- A bucket: kept on board (one), for taking up lava to burn (see scoop).
+BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 function isSupply(name)
     return CHEST_ITEMS[name] or T.fuel[name] or (lights and TORCHES[name]) or isWood(name)
         or name == CRAFTING_TABLE
@@ -581,7 +589,7 @@ filled = {}          -- blocks it has put back where it dug (floors, seals, ches
 fillerDry = false    -- no filler on board, at its home or behind: don't go looking again till it unloads
 fillerKeep = FILLER_KEEP  -- FILLER_KEEP_WET once water has used it up
 stats = { veins = 0, ore = 0, sealed = 0, filled = 0, torches = 0, relit = 0, homes = 0, fetched = 0, wet = 0,
-          wood = 0 }
+          wood = 0, lava = 0 }
 -- From the Geo Scanner (see there): the world direction of the tunnel's +z
 -- once lined up, this segment's blocks touching the tunnel ("rock",
 -- "ore", "fluid" or "air"), and its ore further out.
@@ -747,8 +755,28 @@ function filledIn(d)
     filled[key(p)] = true
 end
 
--- Seal lava or water in direction d with a bulk block.
+-- With an empty bucket on board and room in the tank, a lava source in
+-- direction d is taken up and burned (1000 fuel): the lava's gone, and
+-- the tank fuller.  True if it was.
+function scoop(d)
+    local ok, data = look(d)
+    if not (ok and data.name == LAVA and isSource(data)) then return false end
+    local level, limit = turtle.getFuelLevel(), turtle.getFuelLimit()
+    if type(level) ~= "number" or type(limit) ~= "number" or limit - level < 1000 then return false end
+    if not T.selectItem(BUCKET) then return false end
+    placeDir(d)                            -- (an empty bucket takes up the source)
+    local it = turtle.getItemDetail()
+    local burned = it and it.name == LAVA_BUCKET and turtle.refuel(1)
+    turtle.select(1)
+    if burned then stats.lava = stats.lava + 1 end
+    return burned
+end
+
+-- Seal lava or water in direction d with a bulk block.  Lava a bucket
+-- takes up (see scoop) is gone: inside the tunnel that's the end of it;
+-- in a wall, floor or ceiling the hole it leaves is filled as before.
 function seal(d)
+    if scoop(d) and inBox(neighbour(d)) then return true end
     local okb, b = look(d)
     if okb and not FLUID[b.name] and (soft(b) or waterIn(b)) and not protected(b.name) then digDir(d) end
     local ok = putFiller(d)
@@ -1108,7 +1136,7 @@ end
 function unload(only)
     if not (containerOn(home.val) and containerOn(home.bulk)) then return false, "missing" end
     fillerDry = false                    -- (what it brings may be filler, or the chest may have some now)
-    local fits, kept, torches, fuel = true, 0, 0, 0
+    local fits, kept, torches, fuel, buckets = true, 0, 0, 0, 0
     for s = 1, 16 do
         local it = turtle.getItemDetail(s, true)
         if it and not T.isTool(it.name) then
@@ -1124,6 +1152,8 @@ function unload(only)
                 fuel = fuel + keep
             elseif isScanner(it.name) and only ~= "everything" then
                 keep = it.count
+            elseif it.name == BUCKET and buckets < 1 and only ~= "everything" then
+                keep, buckets = 1, 1
             end
             local bulk = isBulk(it)
             if it.count > keep and (bulk or only == nil or only == "everything") then
@@ -1477,7 +1507,7 @@ function craftSupplies()
     local scanners = {}
     for s = 1, 16 do
         local it = turtle.getItemDetail(s)
-        if it and isScanner(it.name) then scanners[#scanners + 1] = it.name end
+        if it and (isScanner(it.name) or it.name == BUCKET) then scanners[#scanners + 1] = it.name end
     end
     if roomIn(home.val) < 16 - T.freeSlots() + 3 then
         print("No room in home " .. home.k .. "'s chest to craft in; not crafting.")
@@ -2466,7 +2496,7 @@ function cheapestSlot(than)
     for s = 1, 16 do
         local it = turtle.getItemDetail(s, true)
         if it and not T.isTool(it.name) and not isSupply(it.name) and not isScanner(it.name)
-            and not isBulk(it) then
+            and it.name ~= BUCKET and not isBulk(it) then
             local v = value(it.name)
             if v < than and (not low or v < low) then slot, low = s, v end
         end
@@ -2822,10 +2852,14 @@ T.withTool(pickaxe, function()
         if not fuelToGoOn() then stop("Not enough fuel to start: put fuel in the top chest.") end
         roomAboveChest(home)               -- a home built before chests got room above them
         -- a Geo Scanner in the top chest (or on board): use it
+        -- and a bucket (see scoop)
         for name in pairs(chestCounts("top")) do
             if isScanner(name) and T.countItem(isScanner) == 0 then
                 T.restockFrom("top", name, 1, { quiet = true, room = 1 })
             end
+        end
+        if chestCounts("top")[BUCKET] and T.countItem(BUCKET) == 0 then
+            T.restockFrom("top", BUCKET, 1, { quiet = true, room = 1 })
         end
         hasScanner = T.countItem(isScanner) > 0 or (T.equipped("left") or ""):find("geo_scanner") ~= nil
             or (T.equipped("right") or ""):find("geo_scanner") ~= nil
@@ -2932,7 +2966,8 @@ print(string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid bloc
     lights and (", " .. stats.torches .. " torches placed"
         .. (stats.relit > 0 and (" (" .. stats.relit .. " put back after digging knocked them off)") or "")) or "",
     hasScanner and (", " .. stats.fetched .. " deposits fetched from further out") or "")
-    .. (stats.wood > 0 and string.format(" Dug %d blocks of wood for chests and torches.", stats.wood) or ""))
+    .. (stats.wood > 0 and string.format(" Dug %d blocks of wood for chests and torches.", stats.wood) or "")
+    .. (stats.lava > 0 and string.format(" Burned %d lava sources for fuel.", stats.lava) or ""))
 for _, k in ipairs(T.sortedKeys(leftBehind)) do
     print(string.format("No room to bring back %d items from home %d (z=%d).", leftBehind[k], k, homeAt(k).z))
 end

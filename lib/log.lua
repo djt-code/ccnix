@@ -176,7 +176,7 @@ local function fallback(rec)
             if h then text = h.readAll() or ""; h.close() end
         end
         fallbackEngine = D.new({ rules = (D.parse(text)), fs = fs, files = true,
-            maxSize = tonumber(settings.get("syslog.maxSize")), keep = tonumber(settings.get("syslog.keep")) })
+            maxSize = D.size(settings.get("syslog.maxSize")), keep = tonumber(settings.get("syslog.keep")) })
     end
     pcall(fallbackEngine.route, rec)
 end

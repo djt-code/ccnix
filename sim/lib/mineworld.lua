@@ -287,6 +287,14 @@ local function place(x, y, z, dir)
     local it = Mine.inv[Mine.sel]
     if not it then return false end
     if Mine.ENTITIES[k(x, y, z)] then return true end   -- as in game: right-clicks the minecart
+    if it.name == "minecraft:bucket" then           -- an empty bucket takes up a source
+        local b = get(x, y, z)
+        if not (b and b.name == "minecraft:lava" and b.level == 0) then return false end
+        set(x, y, z, nil)
+        M.useSel(Mine)
+        M.addItem(Mine, "minecraft:lava_bucket", 1)
+        return true
+    end
     if not passable(get(x, y, z)) then return false end
     local on, hangsOn                      -- what a torch hangs on or stands on; hung on a wall
     if it.name == "minecraft:torch" then

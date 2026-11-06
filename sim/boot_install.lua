@@ -309,6 +309,31 @@ check("without init.boot, `--end` runs the autostart (the router), then ccsh",
     ran() == "startup/00-ccnix.lua, ccnix/deploy/boot.lua, ccnix/bin/ip.lua up, startup/50-mine.lua, startup/zz-ccnix.lua, "
         .. "ccnix/deploy/boot.lua --end, ccnix/pc/router.lua, ccnix/bin/ccsh.lua", ran())
 
+-- a turtle with init: its job is a service of its own name, not the console's
+turtle = {}
+W = checkout()
+for k in pairs(STORE) do STORE[k] = nil end
+r = W:session({}, function()
+    return W:osRun("ccnix/deploy/setup.lua", { "--init", "--autostart", "mine", "--no-reboot" })
+end)
+check("a turtle with init and --autostart mine: service mine runs `autostart --now`, at boot, not restarted when it ends",
+    r.ok and STORE["service.mine.cmd"] == "autostart --now" and STORE["service.mine.restart"] == "no"
+        and STORE["service.mine.enabled"] == true and STORE["ccnix.autostart"] == "mine",
+    show(STORE["service.mine.cmd"]) .. " " .. show(r.out) .. show(r.errText))
+STORE["service.mine.cmd"] = "mine --resume --custom"
+r = W:session({}, function()
+    return W:osRun("ccnix/deploy/setup.lua", { "--no-reboot" })
+end)
+check("... and a service of that name already set is left as it is",
+    r.ok and STORE["service.mine.cmd"] == "mine --resume --custom", show(STORE["service.mine.cmd"]))
+for k in pairs(STORE) do STORE[k] = nil end
+r = W:session({}, function()
+    return W:osRun("ccnix/deploy/setup.lua", { "--autostart", "mine", "--no-reboot" })
+end)
+check("... without init, no service: the console runs the autostart", r.ok and STORE["service.mine.cmd"] == nil,
+    show(STORE["service.mine.cmd"]))
+turtle = nil
+
 --------------------------------------------------------------------------
 -- ccnix: the version in use, the ROM's and the updates'
 --------------------------------------------------------------------------

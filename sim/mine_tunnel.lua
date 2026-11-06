@@ -52,6 +52,27 @@ check("never moved on an empty tank", DRY == 0, "tried " .. DRY)
 check("nothing spilled", (SPILLED or 0) == 0, tostring(SPILLED or 0))
 check("job done", jobState() == "done", tostring(jobState()))
 
+-- 1l. the same with a bucket in the start chest: the lava sources, one in
+--     the right wall and one in the tunnel, are taken up and burned (the
+--     wall's hole filled as ever); the bucket comes back to the start
+local stockB = stock(4, 64)
+stockB[#stockB + 1] = { name = "minecraft:bucket", count = 1 }
+setup(stockB); features(); remember()
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY, SPILLED = 1000, 1000, 0, 0
+local burntBefore = BURNT["minecraft:lava_bucket"] or 0
+run("3", "3", "12")
+check("with a bucket: both lava sources burned for fuel", (BURNT["minecraft:lava_bucket"] or 0) - burntBefore == 2
+    and logHas("Burned 2 lava sources"), tostring((BURNT["minecraft:lava_bucket"] or 0) - burntBefore))
+check("the wall's lava spot filled, the tunnel's left open", get(3, 0, 3) ~= nil and get(3, 0, 3).name ~= "minecraft:lava"
+    and get(1, 2, 9) == nil, tostring((get(3, 0, 3) or {}).name) .. ", " .. tostring((get(1, 2, 9) or {}).name))
+check("tunnel clear", leftIn(0, 2, 0, 2, 1, 12) == 0, leftIn(0, 2, 0, 2, 1, 12) .. " blocks left")
+checkLava(12)
+local _, bt = contents(chestAt(0, 1, 0))
+check("the bucket back in the start chest, empty", (bt["minecraft:bucket"] or 0) == 1 and not bt["minecraft:lava_bucket"],
+    tostring(bt["minecraft:bucket"]) .. " buckets, " .. tostring(bt["minecraft:lava_bucket"]) .. " full")
+check("back at the start", atStart())
+
 -- 1b. no size: the settings' tunnel, 3x3 and 32 long unless they say
 --     otherwise; a size given is saved in them
 setup(stock(4, 64)); remember()

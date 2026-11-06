@@ -287,6 +287,13 @@ router`, `ccnix setup --autostart router`): the network comes up with
 forwarding on, then the router's status screen (`q` leaves it; routing
 goes on).
 
+With init at boot (`ccnix setup init`), a turtle's job runs as a service
+of its own name instead (`service.mine.cmd` is `autostart --now`, not
+started again when it ends): what it prints is kept in the system log,
+and the console is free for `service status mine`, `tail -f
+/var/log/messages`, `service stop mine` (as Ctrl+T) and `service start
+mine`. Stop the service before running the program by hand.
+
 `set ccnix.autostart ""` turns it off. (The setting was
 `cc-turtles.autostart` until 2026-10-29; boot renames it.)
 
@@ -883,6 +890,10 @@ recognise. Needs a pickaxe, equipped or in the inventory.
   But lava burns any item that falls into it, and it makes the tunnel deadly
   for you later. So lava or water touching the tunnel or a vein is sealed with
   a bulk block (the turtle keeps a stack, and fetches more if it runs out).
+  With an empty bucket in the start's top chest, the turtle takes it along
+  and burns lava sources instead (1000 fuel each, when the tank has room):
+  one inside the tunnel is simply gone, and the hole one leaves in a wall
+  is filled as before. Flowing lava can't be taken up, so it's sealed.
   Falling gravel and sand are dug until they stop coming.
 - **Water in the tunnel:** water can't just be dug out. It flows back into
   an open block from any water beside or above it. A block with two sources
@@ -1543,7 +1554,8 @@ and whether it listens, is logged. The defaults:
 
 A line reads `2026-11-03T14:02:11Z base httpd[7]: 10.0.1.5 "GET /" 200
 512`: the time in UTC, the computer's label, the program and its process.
-A file past `syslog.maxSize` (32768 bytes) is moved to `<name>.1`
+A file past `syslog.maxSize` (32768 bytes; `2M` or `512K` work too, for a
+server with bigger disks) is moved to `<name>.1`
 (`syslog.keep` old ones) and started again. At most `syslog.burst` (100)
 messages from one program in 10 s are taken; the rest are counted.
 
