@@ -729,6 +729,7 @@ mine --resume
 mine haul
 mine ... --new
 mine reset [--home N | --to-start | --here]
+mine where
 ```
 
 Digs a tunnel `width` blocks wide (to the right; negative: to the left) and
@@ -1058,7 +1059,10 @@ recognise. Needs a pickaxe, equipped or in the inventory.
   From there `mine --resume` carries on, or `mine haul` brings the valuables
   back. `mine reset --home N` goes to home N instead (0 is the start; homes
   are numbered from the start, every `--spacing` blocks), and
-  `mine reset --to-start` all the way back to the start.
+  `mine reset --to-start` all the way back to the start. `mine where`
+  says where it is: the last home it passed (the one to give `--home`)
+  and the next, from the saved position; it moves nothing, so it works
+  while mine runs (as a service, say).
   It only counts as arrived if the home's chests are there; if not, its
   saved position or heading must be wrong and it stops and says so.
   - **Ctrl+T is safe:** a turtle command (a move or a turn) waits for the

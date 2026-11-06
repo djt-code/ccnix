@@ -15,6 +15,10 @@
 --                                Ctrl+T or restart
 --         mine reset --to-start  back to the start instead
 --         mine reset --here      turtle was put back at the start by hand
+--         mine where             where it is along the tunnel: at which home,
+--                                or between which two; the tunnel's homes
+--                                (it reads the saved job and position, so it
+--                                works while mine runs, as a service say)
 --
 -- width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 -- height = blocks UP from the turtle (negative = DOWN)
@@ -220,6 +224,7 @@ spacingArg, homeArg = spacingArg and tonumber(spacingArg), homeArg and tonumber(
 doReset = args[1] == "reset"
 toStart = T.popFlag(args, "--to-start")
 doHaul = args[1] == "haul"
+doWhere = args[1] == "where"
 WIDTH, HEIGHT, LENGTH = tonumber(args[1]), tonumber(args[2]), tonumber(args[3])
 SET = {
     width = T.setting("mine.width", 3, "Tunnel width for mine: + right, - left"),
@@ -227,12 +232,12 @@ SET = {
     length = T.setting("mine.length", 32, "Tunnel length for mine; 0 = until it can't go on"),
     spacing = T.setting("mine.spacing", 0, "Blocks between mine's homes; 0 = chosen from the size"),
 }
-if not (doReset or doHaul) and args[1] == nil then
+if not (doReset or doHaul or doWhere) and args[1] == nil then
     -- no size given: the settings' tunnel
     WIDTH, HEIGHT = SET.width, SET.height
     LENGTH = SET.length ~= 0 and SET.length or nil
     if not spacingArg and SET.spacing ~= 0 then spacingArg = SET.spacing end
-elseif not (doReset or doHaul or resume) and WIDTH and HEIGHT then
+elseif not (doReset or doHaul or doWhere or resume) and WIDTH and HEIGHT then
     local keep = { ["mine.width"] = WIDTH, ["mine.height"] = HEIGHT, ["mine.length"] = LENGTH or 0 }
     if spacingArg then keep["mine.spacing"] = spacingArg end
     savedSize = keep                   -- saved once the size is checked
@@ -240,11 +245,11 @@ end
 
 function usage()
     print("Usage: mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]")
-    print("       mine --resume | mine haul | mine reset [--home N | --to-start | --here]")
+    print("       mine --resume | mine haul | mine where | mine reset [--home N | --to-start | --here]")
     print("width: + right / - left; height: + up / - down;")
     print("no length: dig until out of chests, fuel or room")
 end
-if not (doReset or resume or doHaul) and (not (WIDTH and HEIGHT) or WIDTH == 0 or HEIGHT == 0
+if not (doReset or resume or doHaul or doWhere) and (not (WIDTH and HEIGHT) or WIDTH == 0 or HEIGHT == 0
         or (args[3] and not (LENGTH and LENGTH >= 1))) then
     usage()
     return
@@ -2910,7 +2915,46 @@ function checkHeading(dugTo)
     return best
 end
 
+-- `mine where`: where the turtle is along the tunnel, from the saved job
+-- and position (nothing moves: safe while mine runs): the last home it
+-- passed (behind it, or the one it's at), and the next.
+function where()
+    local job, p = loadJob(), T.loadPos()
+    if not job then print("No saved job: there's no tunnel to be in."); return end
+    useJob(job)
+    local built = job.homes
+    if not p then
+        print("No saved position: it hasn't moved since its last job.")
+    elseif p.z <= 0 then
+        print(p.z == 0 and p.x == 0 and p.y == 0 and "At the start (home 0)." or
+            string.format("At the start end, x=%d y=%d z=%d.", p.x, p.y, p.z))
+    else
+        local k = math.min(math.floor(p.z / SPACING), built)
+        local at = p.z == k * SPACING and p.x == 0 and p.y == 0
+        if at then
+            print(string.format("At home %d (z=%d).", k, p.z))
+        else
+            print(string.format("At z=%d (x=%d, y=%d).", p.z, p.x, p.y))
+            print(string.format("Last home: %d (z=%d), %d blocks back%s.", k, k * SPACING, p.z - k * SPACING,
+                k == built and ", the furthest built" or ""))
+        end
+        if k < built then
+            print(string.format("Next home: %d (z=%d), %d blocks on.", k + 1, (k + 1) * SPACING, (k + 1) * SPACING - p.z))
+        end
+        if k > 0 and not at then
+            print(string.format("`mine reset --home %d` takes it back to home %d.", k, k))
+        end
+    end
+    local state = job.state == "done" and "finished" or job.state == "stopped" and "stopped itself (`mine --resume` carries on)"
+        or "under way, or stopped part way (`mine --resume` carries on)"
+    print(string.format("The tunnel: %dx%d, %s, homes every %d blocks, %d built (the furthest at z=%d; `mine reset` goes there); %s.",
+        math.abs(WIDTH), math.abs(HEIGHT), job.length and (job.length .. " long") or "no end", SPACING, built,
+        built * SPACING, state))
+    print("Fuel: " .. tostring(turtle.getFuelLevel()) .. ".")
+end
+
 function main()
+if doWhere then where(); return end
 if doReset and forceHere then T.setHomeHere(); return end
 pickaxe = T.findTool("_pickaxe$")      -- one equipped, else one in the inventory
 if not pickaxe then print("Needs a pickaxe, equipped or in the inventory."); return end

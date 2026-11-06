@@ -15,6 +15,8 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
             back to the start instead
         mine reset --here
             turtle was put back at the start by hand
+        mine where
+            where it is along the tunnel: at which home, or between which two; the tunnel's homes (it reads the saved job and position, so it works while mine runs, as a service say)
 
 width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 height = blocks UP from the turtle (negative = DOWN)

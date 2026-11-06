@@ -703,6 +703,23 @@ check("... the diamonds kept on board, not left in home 1",
     tostring(h1["minecraft:diamond"]) .. " in home 1, " .. require("mock").carried(Mine, "minecraft:diamond") .. " on board")
 check("... what fits taken along in one go, not shuttled trip after trip", Mine.moves < 40, Mine.moves .. " moves")
 
+-- 13s. `mine where`: from the saved job and position, the last home it
+--      passed (or the one it's at) and the next (nothing moves)
+setup(stock(4, 64))
+Mine.files = { ["mine.job"] = "3 3 0 64 59 active", [".turtlepos"] = "1 0 2950 0 flat" }
+Mine.inv = {}
+P.x, P.y, P.z, P.d = 1, 0, 2950, 0
+run("where")
+check("mine where: the last home it passed, 46, and the next, 47", logHas("Last home: 46 %(z=2944%), 6 blocks back")
+    and logHas("Next home: 47 %(z=3008%)") and logHas("59 built %(the furthest at z=3776")
+    and logHas("mine reset %-%-home 46") and Mine.moves == 0)
+Mine.files[".turtlepos"] = "0 0 2944 3 flat"
+run("where")
+check("... at home 46", logHas("At home 46 %(z=2944%)"))
+Mine.files[".turtlepos"] = "1 2 3800 0 flat"
+run("where")
+check("... past the furthest home", logHas("Last home: 59 %(z=3776%), 24 blocks back, the furthest built"))
+
 -- 13d. resumed at home 1 with water standing in the tunnel behind it
 --      (flood water spreads back along the floor) and a scanner on board:
 --      scans show the water where it dug, which is no sign its heading's off
