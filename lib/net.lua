@@ -83,6 +83,18 @@
 --         (11: 0); orig holds the original packet's addresses, proto,
 --         ports and ICMP id/seq rather than its first bytes.
 --
+-- What the stack counts, in S.counters (netstat -s prints them grouped):
+-- forwarded, dropped (every packet thrown away, whatever the reason) and
+-- spoofed (martian + rpfilter), as the router screen shows them; each
+-- drop by its reason too (dropMalformed, dropMartian, dropRpfilter,
+-- dropNotForwarding, dropTtl, dropNoRoute, dropArpQueue, dropNoArp,
+-- dropUdpQueue); ipIn, ipDelivered, ipOut, outNoRoute; icmpIn<Type> and
+-- icmpOut<Type> (Echo, Reply, Unreachable, TimeExceeded); udpIn, udpOut,
+-- udpNoPort; tcpActiveOpens, tcpPassiveOpens, tcpSegsIn, tcpSegsOut,
+-- tcpRetransmits, tcpResetsIn, tcpResetsOut; arpRequestsIn/Out,
+-- arpRepliesIn/Out, arpTimeouts (addresses that never answered).  A
+-- counter not counted yet is nil (read it as 0).
+--
 -- ComputerCraft has no background programs on a plain computer, so the
 -- running stack lives in _G.ccnet and handles the network as events pass:
 -- net.hook() wraps os.pullEventRaw, which every program's os.pullEvent,
@@ -225,6 +237,15 @@ function N.new(opts)
     local queue = opts.queue or os.queueEvent
     local nextId, nextPort = 0, EPHEMERAL
     S.wantTick = function() end         -- the hook asks for a tick soon
+    S.clock = clock                     -- (for ip neigh's seconds left)
+
+    -- Counting (see the top): one more of `name`; a drop, by its reason.
+    local counters = S.counters
+    local function count(name) counters[name] = (counters[name] or 0) + 1 end
+    local function drop(why)
+        counters.dropped = counters.dropped + 1
+        count(why)
+    end
 
     local function note(msg, sev)
         S.log[#S.log + 1] = msg
@@ -341,6 +362,7 @@ function N.new(opts)
         local ifc = S.ifaces[p.iface]
         if not ifc then return end
         p.tries, p.next = p.tries + 1, clock() + ARP_RETRY
+        count("arpRequestsOut")
         sendFrame(ifc, N.BROADCAST, "arp", { op = "request", sha = ifc.mac, spa = ifc.ip, tpa = p.ip })
         S.wantTick()
     end
@@ -391,6 +413,46 @@ function N.new(opts)
         return gone
     end
 
+    -- What ARP knows of ip on iface: { iface, ip, state, mac, left,
+    -- queued, tries }.  state is "permanent" (set by hand), "reachable"
+    -- (learned: left is the seconds it has to go), "incomplete" (asked
+    -- for, no answer yet: queued packets wait, tries requests sent so far)
+    -- or nil (nothing: the next packet there asks).
+    function S.neighbour(iface, ip)
+        local e = S.arp[iface] and S.arp[iface][ip]
+        local n = { iface = iface, ip = ip }
+        if e and e.permanent then
+            n.state, n.mac = "permanent", e.mac
+        elseif e and e.expires > clock() then
+            n.state, n.mac, n.left = "reachable", e.mac, e.expires - clock()
+        end
+        local p = S.pending[iface .. "|" .. ip]
+        if p and not n.state then n.state, n.queued, n.tries = "incomplete", #p.packets, p.tries end
+        return n
+    end
+
+    -- Every neighbour ARP has or is asking for (S.neighbour's), by
+    -- interface then address.
+    function S.neighbours()
+        local list, seen = {}, {}
+        local function add(iface, ip)
+            local key = iface .. "|" .. ip
+            if seen[key] then return end
+            seen[key] = true
+            local n = S.neighbour(iface, ip)
+            if n.state then list[#list + 1] = n end
+        end
+        for iface, cache in pairs(S.arp) do
+            for ip in pairs(cache) do add(iface, ip) end
+        end
+        for _, p in pairs(S.pending) do add(p.iface, p.ip) end
+        table.sort(list, function(a, b)
+            if a.iface ~= b.iface then return a.iface < b.iface end
+            return a.ip < b.ip
+        end)
+        return list
+    end
+
     local icmpError                 -- (below)
 
     -- Send pkt out of route r's interface: to the gateway or, on the
@@ -410,7 +472,7 @@ function N.new(opts)
             S.pending[key] = p
         end
         if #p.packets < QUEUE_MAX then p.packets[#p.packets + 1] = { pkt = pkt, mine = mine }
-        else S.counters.dropped = S.counters.dropped + 1 end
+        else drop("dropArpQueue") end
         if p.tries == 0 then arpAsk(p) end
     end
 
@@ -418,6 +480,12 @@ function N.new(opts)
     -- IP out
     ----------------------------------------------------------------------
     local deliver                   -- (below)
+
+    -- the counter for an ICMP message of each type, in and out
+    local ICMP_IN = { echo = "icmpInEcho", reply = "icmpInReply", unreachable = "icmpInUnreachable",
+                      timeexceeded = "icmpInTimeExceeded" }
+    local ICMP_OUT = { echo = "icmpOutEcho", reply = "icmpOutReply", unreachable = "icmpOutUnreachable",
+                       timeexceeded = "icmpOutTimeExceeded" }
 
     -- Send data to dst (an address, as a string or number).  True, or
     -- false and why (no route).  An ARP that gets no answer comes back
@@ -429,6 +497,8 @@ function N.new(opts)
         dst = N.parseIP(dst)
         if not dst then return false, "bad address" end
         nextId = nextId + 1
+        count("ipOut")
+        if proto == "icmp" and type(data) == "table" and ICMP_OUT[data.type] then count(ICMP_OUT[data.type]) end
         if isMine(dst) then
             deliver({ src = dst, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId }, "lo")
             return true
@@ -445,11 +515,40 @@ function N.new(opts)
             return any, not any and "no interfaces" or nil
         end
         local r = S.route(dst, iface)
-        if not r then return false, "no route to " .. N.ipString(dst) .. (iface and (" via " .. iface) or "") end
+        if not r then
+            count("outNoRoute")
+            return false, "no route to " .. N.ipString(dst) .. (iface and (" via " .. iface) or "")
+        end
         local ifc = S.ifaces[r.iface]
         if not (src and src ~= N.ALL and math.floor(src / 16777216) ~= 127 and isMine(src)) then src = ifc.ip end
         output({ src = src, dst = dst, ttl = ttl or N.TTL, proto = proto, data = data, id = nextId }, r, true)
         return true
+    end
+
+    -- The way sendIP would send a packet to dst (out of iface, if given),
+    -- as `ip route get` shows it: { dst, kind, iface, src, route, gw,
+    -- hop, neigh }, or nil and why (no route).  kind is "local" (this
+    -- computer: iface "lo"), "broadcast" (255.255.255.255: every
+    -- interface, iface nil; or a network's broadcast address) or
+    -- "unicast": route the one picked, gw its gateway (nil: dst is on the
+    -- interface's own network), hop the address ARP is asked for, neigh
+    -- what ARP knows of it (S.neighbour).
+    function S.routeGet(dst, iface)
+        dst = N.parseIP(dst)
+        if not dst then return nil, "bad address" end
+        if isMine(dst) then return { dst = dst, kind = "local", iface = "lo", src = dst } end
+        if dst == N.ALL then return { dst = dst, kind = "broadcast" } end
+        local r = S.route(dst, iface)
+        if not r then return nil, "no route to " .. N.ipString(dst) .. (iface and (" via " .. iface) or "") end
+        local ifc = S.ifaces[r.iface]
+        local way = { dst = dst, kind = "unicast", iface = r.iface, src = ifc.ip, route = r, gw = r.gw }
+        if dst == broadcastOf(ifc.ip, ifc.len) then
+            way.kind = "broadcast"
+            return way
+        end
+        way.hop = r.gw or dst
+        way.neigh = S.neighbour(r.iface, way.hop)
+        return way
     end
 
     -- An ICMP error about pkt, to its sender (or, if this computer sent
@@ -474,23 +573,27 @@ function N.new(opts)
         if type(d) ~= "table" or type(d.dport) ~= "number" then return end
         local sock = S.sockets[d.dport]
         if not sock then
+            count("udpNoPort")
             if pkt.dst ~= N.ALL and isMine(pkt.dst) then icmpError(pkt, "unreachable", "port") end
             return
         end
-        if #sock.queue >= SOCKET_MAX then S.counters.dropped = S.counters.dropped + 1; return end
+        if #sock.queue >= SOCKET_MAX then return drop("dropUdpQueue") end
+        count("udpIn")
         sock.queue[#sock.queue + 1] = { data = d.data, src = N.ipString(pkt.src), sport = d.sport, iface = iface }
         queue("net_udp", d.dport)
     end
 
     deliver = function(pkt, iface)
+        count("ipDelivered")
         if pkt.proto == "icmp" and type(pkt.data) == "table" then
             local d = pkt.data
+            if ICMP_IN[d.type] then count(ICMP_IN[d.type]) end
             if d.type == "echo" then
                 if pkt.dst ~= N.ALL then
                     S.sendIP(pkt.src, "icmp", { type = "reply", id = d.id, seq = d.seq, data = d.data }, nil, pkt.dst)
                 end
             elseif d.type == "reply" then
-                queue("net_icmp", "reply", N.ipString(pkt.src), d.id, d.seq, pkt.ttl)
+                queue("net_icmp", "reply", N.ipString(pkt.src), d.id, d.seq, pkt.ttl, d.data)
             elseif d.type == "unreachable" or d.type == "timeexceeded" then
                 queue("net_icmp", d.type, N.ipString(pkt.src), d.code, d.orig or {})
             end
@@ -518,44 +621,50 @@ function N.new(opts)
         return r ~= nil and (S.rpfilter ~= "strict" or r.iface == ifc.name)
     end
 
-    -- Dropped, silently (an error would go to the forged source).
-    local function spoofed(ifc, pkt, why)
-        S.counters.dropped = S.counters.dropped + 1
-        S.counters.spoofed = S.counters.spoofed + 1
+    -- Dropped, silently (an error would go to the forged source); reason:
+    -- the counter, why: the note.
+    local function spoofed(ifc, pkt, reason, why)
+        drop(reason)
+        counters.spoofed = counters.spoofed + 1
         note(string.format("dropped %s > %s in on %s: %s", N.ipString(pkt.src), N.ipString(pkt.dst), ifc.name, why))
     end
 
     local function ipIn(ifc, pkt)
         if type(pkt) ~= "table" or type(pkt.src) ~= "number" or type(pkt.dst) ~= "number"
-            or type(pkt.ttl) ~= "number" then return end
-        if martian(ifc, pkt.src) then return spoofed(ifc, pkt, "a source that can't be") end
+            or type(pkt.ttl) ~= "number" then return drop("dropMalformed") end
+        count("ipIn")
+        if martian(ifc, pkt.src) then return spoofed(ifc, pkt, "dropMartian", "a source that can't be") end
         if pkt.dst == N.ALL or isMine(pkt.dst) or pkt.dst == broadcastOf(ifc.ip, ifc.len) then
             return deliver(pkt, ifc.name)
         end
-        if not S.forward then return end
-        if not sourceOk(ifc, pkt.src) then return spoofed(ifc, pkt, "the source fails rpfilter " .. S.rpfilter) end
+        if not S.forward then return drop("dropNotForwarding") end
+        if not sourceOk(ifc, pkt.src) then
+            return spoofed(ifc, pkt, "dropRpfilter", "the source fails rpfilter " .. S.rpfilter)
+        end
         if pkt.ttl <= 1 then
-            S.counters.dropped = S.counters.dropped + 1
+            drop("dropTtl")
             return icmpError(pkt, "timeexceeded", "ttl")
         end
         local r = S.route(pkt.dst)
         if not r then
-            S.counters.dropped = S.counters.dropped + 1
+            drop("dropNoRoute")
             return icmpError(pkt, "unreachable", "net")
         end
         local copy = {}
         for k, v in pairs(pkt) do copy[k] = v end
         copy.ttl = pkt.ttl - 1
-        S.counters.forwarded = S.counters.forwarded + 1
+        counters.forwarded = counters.forwarded + 1
         output(copy, r, false)
     end
 
     local function arpIn(ifc, a)
         if type(a) ~= "table" or type(a.spa) ~= "number" or type(a.sha) ~= "string" then return end
+        count(a.op == "request" and "arpRequestsIn" or "arpRepliesIn")
         local known = S.arp[ifc.name][a.spa]
         if a.tpa == ifc.ip then
             learn(ifc, a.spa, a.sha)
             if a.op == "request" then
+                count("arpRepliesOut")
                 sendFrame(ifc, a.sha, "arp", { op = "reply", sha = ifc.mac, spa = ifc.ip, tha = a.sha, tpa = a.spa })
             end
         elseif known then
@@ -593,9 +702,10 @@ function N.new(opts)
             if now >= p.next then
                 if p.tries >= ARP_TRIES then
                     S.pending[key] = nil
+                    count("arpTimeouts")
                     note("no ARP answer from " .. N.ipString(p.ip) .. " on " .. p.iface)
                     for _, q in ipairs(p.packets) do
-                        S.counters.dropped = S.counters.dropped + 1
+                        drop("dropNoArp")
                         icmpError(q.pkt, "unreachable", "host", q.mine)
                     end
                 else
@@ -633,6 +743,7 @@ function N.new(opts)
     end
     function S.udpClose(port) S.sockets[port] = nil end
     function S.udpSend(sport, dst, dport, data)
+        count("udpOut")
         return S.sendIP(dst, "udp", { sport = sport, dport = dport, data = data })
     end
     function S.udpTake(port)
@@ -640,9 +751,10 @@ function N.new(opts)
         if sock and sock.queue[1] then return table.remove(sock.queue, 1) end
     end
 
-    -- An echo request (src and iface as sendIP's).
-    function S.echo(dst, id, seq, ttl, src, iface)
-        return S.sendIP(dst, "icmp", { type = "echo", id = id, seq = seq }, ttl, src, iface)
+    -- An echo request (src and iface as sendIP's), carrying data (a string,
+-- or nil): the reply brings it back (ping -s).
+    function S.echo(dst, id, seq, ttl, src, iface, data)
+        return S.sendIP(dst, "icmp", { type = "echo", id = id, seq = seq, data = data }, ttl, src, iface)
     end
 
     ----------------------------------------------------------------------
@@ -681,6 +793,8 @@ function N.new(opts)
         seg.sport, seg.dport, seg.wnd, seg.data = c.lport, c.rport, window(c), seg.data or ""
         if seg.ack == nil then seg.ack = c.rcvNxt end   -- (nil before the SYN: no ACK flag)
         c.lastSent = clock()
+        count("tcpSegsOut")
+        if seg.rst then count("tcpResetsOut") end
         return S.sendIP(c.rip, "tcp", seg, nil, c.lip)        -- (lip: the address a SYN came in on)
     end
 
@@ -746,6 +860,8 @@ function N.new(opts)
     -- A reset for a segment with no connection (RFC 9293 3.10.7.1).
     local function resetFor(pkt, d)
         if d.rst then return end
+        count("tcpSegsOut")
+        count("tcpResetsOut")
         local seg = { sport = d.dport, dport = d.sport, rst = true, wnd = 0, data = "" }
         if d.ack then
             seg.seq = d.ack
@@ -761,11 +877,14 @@ function N.new(opts)
         if type(d) ~= "table" or type(d.dport) ~= "number" or type(d.sport) ~= "number"
             or type(d.seq) ~= "number" or (d.data ~= nil and type(d.data) ~= "string") then return end
         local data = d.data or ""
+        count("tcpSegsIn")
+        if d.rst then count("tcpResetsIn") end
         local c = S.tcbs[key(d.dport, pkt.src, d.sport)]
 
         if not c then                                   -- LISTEN, or nothing there
             local l = S.listeners[d.dport]
             if l and d.syn and not d.ack and not d.rst then
+                count("tcpPassiveOpens")
                 c = newTcb(d.dport, pkt.src, d.sport, "SYN_RCVD")
                 c.listener, c.rcvNxt, c.sndWnd, c.lip = d.dport, add(d.seq, 1), d.wnd or MSS, pkt.dst
                 c.pid = l.pid
@@ -853,10 +972,12 @@ function N.new(opts)
                 if c.tries > TCP_RETRIES then
                     finish(c, c.state == "SYN_SENT" and "connection timed out" or "connection lost")
                 elseif c.state == "SYN_SENT" or c.state == "SYN_RCVD" then
+                    count("tcpRetransmits")
                     emit(c, { seq = c.iss, syn = true })
                 elseif c.sndWnd == 0 and c.sndNxt == c.sndUna then
                     emit(c, { seq = add(c.sndUna, -1) })     -- a window probe: their ACK says the window
                 else
+                    count("tcpRetransmits")
                     c.sndNxt = c.sndUna                 -- go back N
                     push(c)
                 end
@@ -888,6 +1009,7 @@ function N.new(opts)
         if not dst then return nil, "bad address" end
         local lport = freePort()
         if not lport then return nil, "no free port" end
+        count("tcpActiveOpens")
         local c = newTcb(lport, dst, dport, "SYN_SENT")
         c.pid = owner()
         S.tcpPorts[lport] = c
@@ -1135,7 +1257,7 @@ end
 
 -- The ICMP answer to echo request id/seq (S.echo), waiting up to timeout
 -- seconds: the net_icmp event's values (a reply: "reply", from, id, seq,
--- ttl; an error: its kind, from, code, the packet it's about), or nil.
+-- ttl, the data it brought back; an error: its kind, from, code, the packet it's about), or nil.
 function N.awaitEcho(id, seq, timeout)
     return N.await("net_icmp", function(k, _, x, y)
         if k == "reply" then return x == id and y == seq end

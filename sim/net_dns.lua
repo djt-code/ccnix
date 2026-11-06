@@ -378,4 +378,55 @@ r = call(function(env) local n = env.require("net"); return { n.resolve("lab.exa
 check("net.resolve (and so connect, and a socket's send) go through netdb",
     r.value and r.value[1] == N.parseIP("10.0.2.5") and r.value[2] == nil
         and r.value[3] == "nowhere.invalid: Unknown host", show(r.errText) .. tostring(r.value and r.value[3]))
+
+--------------------------------------------------------------------------
+-- The cache: ip dns flush, host -v (asked, then from the cache), ip dns
+-- cache (answers, "no such name", a server that failed)
+--------------------------------------------------------------------------
+STORE["net.dns"] = "10.0.2.53"
+r = run("ip", "dns", "flush")
+local r2 = run("ip", "dns", "cache")
+check("ip dns flush: how many answers it forgot; then ip dns cache: empty",
+    r.status == 0 and r.out:find("^forgot %d+ answers?, and which servers had failed\n$")
+        and r2.status == 0 and r2.out == "the cache is empty\n", show(r.out) .. show(r2.out))
+local nsWas = asked.NS
+r = run("host", "-v", "lab.example")
+check("host -v: the question, the answer as a zone file has it (TTL 60), who answered and how long it took",
+    r.status == 0 and r.out:find('^Trying "lab%.example"\n;; QUESTION SECTION:\n;lab%.example%.  IN  A\n')
+        and r.out:find(";; ANSWER SECTION:\nlab%.example%.%s+60%s+IN%s+A%s+10%.0%.2%.5\n")
+        and r.out:find("\nReceived from 10%.0%.2%.53#53 in %d+ ms\n$") and asked.NS == nsWas + 1, show(r.out))
+W:advance(10)
+r = run("host", "-v", "lab.example")
+check("host -v again, 10 s on: from the cache (nothing asked), the TTL 10 less, who answered and when",
+    r.status == 0 and r.out:find("lab%.example%.%s+50%s+IN%s+A%s+10%.0%.2%.5\n")
+        and r.out:find("\n;; from the cache: 10%.0%.2%.53#53 answered 10 s ago\n$") and asked.NS == nsWas + 1, show(r.out))
+r = run("host", "-v", "nowhere.invalid")
+check("host -v, no such name: NXDOMAIN, status 1, and who said so",
+    r.status == 1 and r.out:find(";; status: NXDOMAIN\nHost nowhere%.invalid not found: 3%(NXDOMAIN%)\n")
+        and r.out:find("Received from 10%.0%.2%.53#53"), show(r.out))
+STORE["net.dns"] = "10.0.2.5, 10.0.2.53"                -- B: nothing on 53, so it fails
+lookup("two.example")
+r = run("ip", "dns", "cache")
+local cacheLines = {}
+for l in r.out:gmatch("[^\n]+") do cacheLines[#cacheLines + 1] = l end
+check("ip dns cache: each answer kept, by name: its type, seconds left, what it said, who said it; then the failed server",
+    r.status == 0 and #cacheLines == 4
+        and cacheLines[1]:find("^lab%.example%s+A%s+50 s  A 10%.0%.2%.5  %(from 10%.0%.2%.53%)$")
+        and cacheLines[2]:find("^nowhere%.invalid%s+A%s+30 s  no such name %(NXDOMAIN%)  %(from 10%.0%.2%.53%)$")
+        and cacheLines[3]:find("^two%.example%s+A%s+60 s  A 10%.0%.2%.5, A 10%.0%.2%.6  %(from 10%.0%.2%.53%)$")
+        and cacheLines[4] == "server 10.0.2.5 failed: asked last for 60 s more", show(r.out))
+W:advance(31)
+r = run("ip", "dns", "cache")
+check("... 31 s on: the no-such-name answer gone, the others kept", not r.out:find("nowhere", 1, true)
+    and r.out:find("lab%.example%s+A%s+19 s"), show(r.out))
+r = run("ip", "dns", "f")
+check("ip dns f[lush]: the two still kept forgotten, and the failed server",
+    r.out == "forgot 2 answers, and which servers had failed\n" and next(ME.dnsDown) == nil, show(r.out))
+STORE["net.dns"] = "10.0.2.53"
+nsWas = asked.NS
+r = run("host", "-v", "lab.example")
+check("and the next lookup asks again", r.out:find("Received from 10%.0%.2%.53#53") and asked.NS == nsWas + 1, show(r.out))
+
 _G.ccnet = nil
+r = run("ip", "dns", "cache")
+check("ip dns cache with the network down: says so, status 1", r.status == 1 and r.errText:find("isn't up"), show(r.errText))

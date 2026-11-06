@@ -114,6 +114,29 @@ section.
 
 ## Network
 
+- **ping until Ctrl+T, and its options** (0.29.0). `ping <host>` with no
+  `-c` runs until Ctrl+T, under ccsh and inside a job too, and Ctrl+T still
+  prints the summary with rtt min/avg/max/mdev (times in multiples of 50
+  ms). `ping -c 0 -q`, and `ping -w 5 <host>` stopping on time. `ping -s
+  1000` and `ping -s 65507` through the gateway, in NAT mode (the gateway's
+  own address) and in TUN mode (a real host): replies show bytes=N with no
+  "(sent ...)" or "changed" note.
+- **`ip route get` and `ip neigh`** (0.29.0). `ip route get <addr>` for a
+  host through the router, one on the local network, this computer and a
+  name; the neigh line shows the router's MAC and seconds left. `ip neigh`
+  shows INCOMPLETE with "n queued" for an address that never answers (the
+  native-VLAN case), and the entry goes after about 3 s.
+- **`netstat -s`** (0.29.0) on a router after some forwarding and a forged
+  source: drops by reason, and the router screen's forwarded/dropped/spoofed
+  agreeing with it.
+- **`host -v` and the DNS cache** (0.29.0). `host -v example.com` twice: the
+  first says "Received from <server>#53", the second "from the cache"; `ip
+  dns cache` lists it (an NXDOMAIN too); `ip dns flush` makes the next
+  lookup ask again.
+- **`nc -z`** (0.29.0). `nc -z -v <host> 20-25` against telnetd: open,
+  refused, and timed out (with `-w`) for a host that's down; the far side's
+  telnetd shows no error for the empty connection.
+
 - **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,
   `ip neigh add <addr> lladdr <mac>` for a host on its network, with the
   network down and again up: `ip neigh` shows it `permanent`; a ping to that

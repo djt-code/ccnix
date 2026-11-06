@@ -3,7 +3,7 @@
 --   netstat [-atulnpe]          sockets
 --   netstat -r                  the routing table
 --   netstat -i                  the interfaces, with their frame counts
---   netstat -s                  the stack's counters
+--   netstat -s                  the stack's counters, grouped (Ip, Icmp, Udp, Tcp, Arp)
 --
 -- As BSD's and Linux's netstat: one line a socket, its protocol, the
 -- bytes waiting to be read (Recv-Q: for UDP, datagrams; for a listener,
@@ -16,6 +16,15 @@
 -- changes nothing (looking names up would wait on DNS).  -e is taken too.
 -- Over this computer's network stack (`ip up`); exit status 1 if it isn't
 -- up.  `ip` sets the routes and interfaces -r and -i show.
+--
+-- -s counts from when the network came up: packets in, delivered, sent
+-- and forwarded, and every one dropped, by why (a source that can't be,
+-- or failing rpfilter; for another address on a computer that isn't a
+-- router; its TTL run out; no route on; no ARP answer, or too many
+-- waiting on one; a full socket); ICMP messages in and out by type; UDP
+-- datagrams, and those for a port nobody has; TCP's opens, segments,
+-- resends and resets; ARP's requests and replies, and the addresses that
+-- never answered.  Each drop is in Ip's total too.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("netstat", "netstat [-atulnpe] | -r | -i | -s")
@@ -76,16 +85,62 @@ if opts.i then
     return cu.exit()
 end
 
+-- netstat -s: each group's counters (lib/net.lua's names) and what each
+-- line says after its number
+local GROUPS = {
+    { "Ip", {
+        { "ipIn", "packets received" },
+        { "ipDelivered", "delivered to this computer" },
+        { "ipOut", "sent by this computer" },
+        { "outNoRoute", "not sent: no route" },
+        { "forwarded", "forwarded" },
+        { "dropped", "dropped, in all:" },
+        { "dropMartian", "  from a source that can't be (martian)" },
+        { "dropRpfilter", "  failing rpfilter" },
+        { "dropNotForwarding", "  for another address, and not forwarding" },
+        { "dropTtl", "  TTL ran out (time exceeded sent)" },
+        { "dropNoRoute", "  no route on (net unreachable sent)" },
+        { "dropNoArp", "  no ARP answer for the next hop (host unreachable)" },
+        { "dropArpQueue", "  too many waiting on one ARP answer" },
+        { "dropUdpQueue", "  a UDP socket's queue full" },
+        { "dropMalformed", "  not a packet" },
+    } },
+    { "Icmp", {
+        { "icmpInEcho", "echo requests in" }, { "icmpInReply", "echo replies in" },
+        { "icmpInUnreachable", "destination unreachable in" }, { "icmpInTimeExceeded", "time exceeded in" },
+        { "icmpOutEcho", "echo requests out" }, { "icmpOutReply", "echo replies out" },
+        { "icmpOutUnreachable", "destination unreachable out" }, { "icmpOutTimeExceeded", "time exceeded out" },
+    } },
+    { "Udp", {
+        { "udpIn", "datagrams received" }, { "udpOut", "datagrams sent" },
+        { "udpNoPort", "for a port nobody has (port unreachable)" },
+    } },
+    { "Tcp", {
+        { "tcpActiveOpens", "connections opened" }, { "tcpPassiveOpens", "connections taken (a SYN in)" },
+        { "tcpSegsIn", "segments received" }, { "tcpSegsOut", "segments sent" },
+        { "tcpRetransmits", "times sent again" },
+        { "tcpResetsIn", "resets received" }, { "tcpResetsOut", "resets sent" },
+    } },
+    { "Arp", {
+        { "arpRequestsIn", "requests heard" }, { "arpRequestsOut", "requests sent" },
+        { "arpRepliesIn", "replies heard" }, { "arpRepliesOut", "replies sent" },
+        { "arpTimeouts", "addresses that never answered" },
+    } },
+}
+
 if opts.s then
     local c = S.counters
     local n = { tcp = 0, udp = 0, listen = 0 }
     for _ in pairs(S.tcbs or {}) do n.tcp = n.tcp + 1 end
     for _ in pairs(S.sockets) do n.udp = n.udp + 1 end
     for _ in pairs(S.listeners or {}) do n.listen = n.listen + 1 end
-    io.write("Ip:\n", "    ", c.forwarded, " forwarded\n", "    ", c.dropped, " dropped\n",
-        "    ", c.spoofed, " dropped as spoofed (martian or failing rpfilter)\n",
-        "Tcp:\n", "    ", n.tcp, " connections\n", "    ", n.listen, " listening\n",
-        "Udp:\n", "    ", n.udp, " sockets\n")
+    -- what's open now, after its group's counters
+    local open = { Tcp = { { n.tcp, "connections open" }, { n.listen, "listening" } }, Udp = { { n.udp, "sockets" } } }
+    for _, g in ipairs(GROUPS) do
+        io.write(g[1], ":\n")
+        for _, line in ipairs(g[2]) do io.write("    ", c[line[1]] or 0, " ", line[2], "\n") end
+        for _, line in ipairs(open[g[1]] or {}) do io.write("    ", line[1], " ", line[2], "\n") end
+    end
     return cu.exit()
 end
 

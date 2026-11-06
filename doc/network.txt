@@ -27,10 +27,11 @@ Configure (`ip link` lists the modems' names); what's set is kept, and applies a
     ip route add default via 10.0.2.1
     ip up
 
-Test, from A:
+Test, from A (ping goes on until Ctrl+T, then sums up; `ping -c 4` sends four):
   ping 10.0.1.1          the router
   ping 10.0.2.20         B, through it: ttl=63
   traceroute 10.0.2.20   1: 10.0.1.1, 2: 10.0.2.20
+  nc -z -v 10.0.2.20 7   is anything listening on B's port 7? (open, refused or timed out)
 TCP chat: `nc -l 7` on B, then `nc 10.0.2.20 7` on A and type: the lines show on B, and B's on A. Ctrl+T ends your side; the other's ends when it sees that.
 UDP: the same with `nc -u -l 7` and `nc -u 10.0.2.20 7`: the lines go one way, as datagrams.
 A web server: on B, `mkdir /www`, put an index.html there (any HTML) and run `httpd` (or `setup httpd`, a service at boot); `help httpd` says more.
@@ -48,7 +49,10 @@ Telnet: on B, `wget run https://raw.githubusercontent.com/djt-code/ccnix/main/de
 
 When it doesn't work:
   ip          what's set, and whether it's up
-  ip neigh    the addresses ARP has found (`ip neigh add <addr> lladdr <mac>` fixes one by hand: permanent, never asked for; `ip neigh del <addr>` forgets one)
+  ip route get 10.0.2.20   the way a packet there goes: the next hop, interface and source address, the route that picked them, and whether ARP has the next hop
+  ip neigh    the addresses ARP has found, and the seconds each is kept for yet; one asked for that never answers shows as INCOMPLETE, with the packets waiting on it (`ip neigh add <addr> lladdr <mac>` fixes one by hand: permanent, never asked for; `ip neigh del <addr>` forgets one)
+  netstat -s  what the stack has counted: packets dropped, by why (no route, no ARP answer, TTL run out, a forged source, a full socket), ICMP, UDP, TCP and ARP
   router      on R: packets in, out, forwarded and dropped, and messages such as "no ARP answer"
+  ping -s 1000 10.0.2.20   a ping that goes on while you re-cable or change a VLAN, carrying 1000 bytes each way; Ctrl+T sums up (sent, lost, min/avg/max/mdev)
   ping says   "net unreachable": a router has no route; "administratively prohibited": a filter, or a NAT-mode gateway (no ICMP past it; it answers ping itself); "host unreachable": nobody answered ARP (wrong address, or not up); "time to live exceeded": routers pass it round in a loop
-  host says   "no DNS servers": `ip dns` sets them; "Temporary failure": no server answered (each one's reason in brackets: can the computer ping it?)
+  host says   "no DNS servers": `ip dns` sets them; "Temporary failure": no server answered (each one's reason in brackets: can the computer ping it?); `host -v` shows the TTLs and who answered, or that it came from the cache; `ip dns cache` lists what's kept (a "no such name" too, for 30 s) and `ip dns flush` forgets it, after a DNS fix

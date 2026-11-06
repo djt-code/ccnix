@@ -1,5 +1,7 @@
 host: ask DNS for a name's addresses, or an address's name
 
-  host [-t type] name [server]
+  host [-v] [-t type] name [server]
 
 A name's addresses (its A records), or an address's name (the PTR record at d.c.b.a.in-addr.arpa), with the aliases (CNAMEs) on the way. -t asks for A, CNAME or PTR records instead.  The DNS servers asked are net.dns's (`ip dns`), primary then secondary, or server alone. DNS only, as the real host does it: names from `ip host` aren't looked at (ping, nc and the rest look at both: lib/netdb).  Exit status 1 if there's no such name or record, 2 for trouble (no servers, none answered, the network isn't up).
+
+-v shows the question and the answer as a zone file has them (name, TTL, IN, type, data), with the seconds the TTL has left, and who answered: the server and how long it took, or, from the cache (`ip dns cache`), which server answered and how long ago.  `ip dns flush` empties the cache, to ask again.

@@ -58,9 +58,14 @@
 --   res_query(name, type, servers) -> { { name, type, ttl, data }... }
 --       type "A" (the default), "CNAME" or "PTR"; data an address or a
 --       name.  servers: a list of addresses to ask instead of net.dns.
---       Every answer comes back (the CNAMEs on the way too).  Errors:
---       nil, why, and "NXDOMAIN", "again" (no server answered), "noservers"
---       or "system" (the network isn't up).
+--       Every answer comes back (the CNAMEs on the way too), and where
+--       from: { server (the one that answered), cached (true: from the
+--       cache), age (seconds since it answered) }.  Errors: nil, why, and
+--       "NXDOMAIN" (and where from, as above), "again" (no server
+--       answered), "noservers" or "system" (the network isn't up).
+--   cache() -> { entries, down }, flush() -> how many were kept: the
+--       answers kept in the running stack, and the servers asked last
+--       for now (see below).
 --
 -- The wire format is netdb.dnsQuery(id, name, type) -> bytes and
 -- netdb.dnsParse(bytes) -> { id, qr, tc, rcode, questions, answers }, for
@@ -272,8 +277,10 @@ local function ask(S, server, name, qtype)
 end
 
 -- DNS's reply to name/qtype (rcode NOERROR or NXDOMAIN), from the cache
--- or the servers (net.dns unless given), or nil, why and a kind:
--- "noservers", "again", "system".
+-- or the servers (net.dns unless given), and where it came from: { server
+-- (the one that answered), cached (true: from the cache), age (seconds
+-- since it answered) }.  Or nil, why and a kind: "noservers", "again",
+-- "system".
 local function query(name, qtype, servers)
     servers = servers or net.config().dns
     if #servers == 0 then return nil, "no DNS servers are set (ip dns)", "noservers" end
@@ -283,7 +290,7 @@ local function query(name, qtype, servers)
     S.dnsCache, S.dnsDown = S.dnsCache or { n = 0 }, S.dnsDown or {}
     local key = table.concat(servers, ",") .. " " .. qtype .. " " .. name
     local hit = S.dnsCache[key]
-    if hit and hit.expires > now then return hit.m end
+    if hit and hit.expires > now then return hit.m, { server = hit.server, cached = true, age = now - hit.at } end
     local order = {}
     for _, broken in ipairs({ false, true }) do
         for _, s in ipairs(servers) do
@@ -299,8 +306,11 @@ local function query(name, qtype, servers)
                 local ttl = (m.rcode == 3 or #m.answers == 0) and NEGATIVE_TTL or CACHE_MAX
                 for _, rr in ipairs(m.answers) do ttl = math.min(ttl, rr.ttl) end
                 if S.dnsCache.n >= CACHE_SIZE then S.dnsCache = { n = 0 } end
-                S.dnsCache[key], S.dnsCache.n = { m = m, expires = os.clock() + ttl }, S.dnsCache.n + 1
-                return m
+                local at = os.clock()
+                S.dnsCache[key] = { m = m, expires = at + ttl, at = at, server = server, name = name, qtype = qtype,
+                                    servers = servers }
+                S.dnsCache.n = S.dnsCache.n + 1
+                return m, { server = server, cached = false, age = 0 }
             end
             S.dnsDown[server] = os.clock() + DOWN_FOR
             problems[server] = err or (m.tc and "truncated") or RCODES[m.rcode] or ("rcode " .. m.rcode)
@@ -497,10 +507,53 @@ function D.res_query(name, qtype, servers)
     if not TYPES[qtype] then return nil, "can't ask for " .. qtype .. " records (A, CNAME, PTR)" end
     local key = lower(name)
     if not encodeName(key) then return nil, "not a name: " .. tostring(name) end
-    local m, why, kind = query(key, qtype, servers)
-    if not m then return nil, why, kind end
-    if m.rcode == 3 then return nil, "no such name", "NXDOMAIN" end
-    return m.answers
+    local m, info, kind = query(key, qtype, servers)
+    if not m then return nil, info, kind end            -- (info: why it failed)
+    if m.rcode == 3 then return nil, "no such name", "NXDOMAIN", info end
+    return m.answers, info
+end
+
+--------------------------------------------------------------------------
+-- The cache (ip dns cache, ip dns flush)
+--------------------------------------------------------------------------
+-- What the running stack has kept: { entries, down }.  An entry is
+-- { name, type, rcode, answers, server (the one that answered), servers
+-- (the list asked), left (seconds it's kept for yet) }, by name then type;
+-- down is { server, left }: a server that failed, asked last for left
+-- seconds more.  nil and why if the network isn't up.
+function D.cache()
+    local S, why = net.stack()
+    if not S then return nil, why end
+    local now = os.clock()
+    local entries, down = {}, {}
+    for key, e in pairs(S.dnsCache or {}) do
+        if key ~= "n" and e.expires > now then
+            entries[#entries + 1] = { name = e.name, type = e.qtype, rcode = e.m.rcode, answers = e.m.answers,
+                                      server = e.server, servers = e.servers, left = e.expires - now }
+        end
+    end
+    table.sort(entries, function(a, b)
+        if a.name ~= b.name then return tostring(a.name) < tostring(b.name) end
+        return tostring(a.type) < tostring(b.type)
+    end)
+    for server, untilT in pairs(S.dnsDown or {}) do
+        if untilT > now then down[#down + 1] = { server = server, left = untilT - now } end
+    end
+    table.sort(down, function(a, b) return a.server < b.server end)
+    return { entries = entries, down = down }
+end
+
+-- Forget every answer kept, "no such name" too, and which servers failed.
+-- How many answers were still kept; nil and why if the network isn't up.
+function D.flush()
+    local S, why = net.stack()
+    if not S then return nil, why end
+    local n, now = 0, os.clock()
+    for key, e in pairs(S.dnsCache or {}) do
+        if key ~= "n" and e.expires > now then n = n + 1 end
+    end
+    S.dnsCache, S.dnsDown = { n = 0 }, {}
+    return n
 end
 
 return D

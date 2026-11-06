@@ -1190,11 +1190,16 @@ ip link (the modems, their MACs)   ip -d addr (the addresses with their MACs)
 ip up | ip down | ip boot          ip link | ip neigh | ip forward on|off | ip host <name> <addr>
 ip rpfilter strict|loose|off       (on a router: which sources it passes on, BCP 38)
 ip neigh add <addr> lladdr <mac>   a permanent ARP entry [dev <iface>]; ip neigh del <addr> forgets one
-ip dns <primary> [<secondary>]     host name | host address    (DNS)
-ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host
+ip neigh                           the ARP cache: seconds left, permanent, INCOMPLETE (asked, no answer)
+ip route get <addr>                the way a packet goes: via, dev, src, the route, the next hop's ARP
+ip dns <primary> [<secondary>]     host [-v] name | host address    (DNS; -v: TTLs, who answered)
+ip dns cache | ip dns flush        the answers kept (no such name too), and forgetting them
+ping [-c n] [-t ttl] [-I if] host  traceroute [-n] host    (ping: until Ctrl+T, or -c n)
+ping [-q] [-w secs] [-s size] host a deadline, data in each request; the summary min/avg/max/mdev
 tcpdump [-env] [-i iface] [expr]   the frames on the wire, in and out (tcp port 23, icmp or arp...)
 nc host port | nc -l port          (TCP)    nc -u host port | nc -u -l port   (UDP)
-netstat [-atulp] | -r | -i | -s    the sockets (-l listening, -p which process), routes, interfaces, counters
+nc -z [-v] [-w secs] host port[-port]   is anything listening? open, refused or timed out
+netstat [-atulp] | -r | -i | -s    the sockets (-l listening, -p which process), routes, interfaces, counters (drops by why)
 curl [-iILfsv] [-d data] url       HTTP: a page, headers, POSTs, redirects (-L); lib/httpc for programs
 httpd [-L] [-p port] [root]        a web server: a folder's files, index.html, listings (-L: none)
 router                             (on a router: forwarding on, and a status screen)

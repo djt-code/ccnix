@@ -14,8 +14,16 @@
 --   ip route                         the routing table
 --   ip route add <net/len|default> via <gw> [dev <iface>]
 --   ip route del <net/len|default>
---   ip neigh                         the ARP cache: addresses and their MACs
---                                    (permanent: set by hand)
+--   ip route get <addr> [dev <iface>]
+--                                    the way a packet to addr would go: the
+--                                    next hop (via), interface, source
+--                                    address, the route that picked them,
+--                                    and what ARP knows of the next hop
+--   ip neigh                         the ARP cache: addresses, their MACs and
+--                                    the seconds each is kept for yet
+--                                    (permanent: set by hand); and those
+--                                    being asked for, not yet answered
+--                                    (INCOMPLETE), with the packets waiting
 --   ip neigh add <addr> lladdr <mac> [dev <iface>]
 --                                    a permanent entry: addr is at mac (never
 --                                    asked for, never expires, not changed by
@@ -43,7 +51,12 @@
 --                                    the DNS servers names are looked up at
 --                                    after the hosts (lib/netdb); none: the
 --                                    hosts alone
---   ip help                          the commands, and how short each may be
+--   ip dns cache                     the answers kept (each name's, "no such
+--                                    name" too, for the seconds its TTL
+--                                    says) and the servers asked last for
+--                                    now, having failed
+--   ip dns flush                     forget them all: the next lookup asks
+--   ip help                         the commands, and how short each may be
 --
 -- Words may be shortened, as iproute2's may, as far as they stay clear:
 -- `ip a` is ip address, `ip r a 10.0.3.0/24 v 10.0.1.1` ip route add ...
@@ -96,19 +109,21 @@ local COMMANDS = {
     { "link", 1, args = "", what = "the modems, their MACs, which are set up" },
     { "address", 1, args = "[show | add <iface> <addr/len> | del <iface>]",
       what = "the interfaces' addresses (-d: MACs)" },
-    { "route", 1, args = "[show | add <net/len|default> via <gw> [dev <iface>] | del <net/len|default>]",
+    { "route", 1, args = "[show | add <net/len|default> via <gw> [dev <iface>] | del <net/len|default> | get <addr> [dev <iface>]]",
       what = "the routing table" },
     { "neighbour", 1, "neighbor", args = "[show | add <addr> lladdr <mac> [dev <iface>] | del <addr> [dev <iface>]]",
       what = "the ARP cache" },
     { "forward", 1, args = "[on|off]", what = "route between interfaces (a router)" },
     { "rpfilter", 2, args = "[strict|loose|off]", what = "which sources a router passes on (BCP 38)" },
     { "host", 1, args = "[<name> <addr>]", what = "names for addresses" },
-    { "dns", 2, args = "[<primary> [<secondary>] | off]", what = "the DNS servers" },
+    { "dns", 2, args = "[<primary> [<secondary>] | off | cache | flush]", what = "the DNS servers" },
     { "help", 2, args = "", what = "this list" },
 }
 local SHOW = { { "show", 1, "list", "ls" } }
 local ADDR_SUBS = { SHOW[1], { "add", 1 }, { "delete", 1 } }
+local ROUTE_SUBS = { SHOW[1], { "add", 1 }, { "delete", 1 }, { "get", 1 } }
 local NEIGH_SUBS = ADDR_SUBS
+local DNS_WORDS = { { "off", 2 }, { "cache", 1 }, { "flush", 1 } }
 local ONOFF = { { "on", 2 }, { "off", 2 } }
 local RPMODES = { { "strict", 1 }, { "loose", 1 }, { "off", 1 } }
 
@@ -237,6 +252,14 @@ local function showRoutes(S)
     end
 end
 
+-- What ARP knows of a neighbour (S.neighbour's), after its interface:
+-- permanent, the seconds it's kept for yet, or the packets waiting on it.
+local function neighState(n)
+    if n.state == "permanent" then return "permanent" end
+    if n.state == "reachable" then return string.format("%d s left", math.ceil(n.left)) end
+    return string.format("%d queued, asked %d time%s", n.queued, n.tries, n.tries == 1 and "" or "s")
+end
+
 --------------------------------------------------------------------------
 -- The commands
 --------------------------------------------------------------------------
@@ -341,10 +364,49 @@ elseif cmd == "address" then
         out(iface .. " removed")
     end
 elseif cmd == "route" then
-    local sub = word(2, ADDR_SUBS, "show")
+    local sub = word(2, ROUTE_SUBS, "show")
     if sub == "show" then
         noMore(3)
         showRoutes(S)
+    elseif sub == "get" then
+        -- ip route get <addr> [dev <iface>]: the way sendIP would send to addr
+        local addr, dev = args[3], nil
+        if not addr then badWords(cmd, "get takes an address") end
+        local n = 4
+        while args[n] ~= nil do
+            word(n, { { "dev", 1 } })
+            if args[n + 1] == nil then badWords(cmd, "dev takes an interface") end
+            dev = args[n + 1]
+            n = n + 2
+        end
+        if not S then cu.fail("the network isn't up (ip up)"); return cu.exit() end
+        local dst, why = net.parseIP(addr), nil
+        if not dst then dst, why = net.resolve(addr) end
+        if not dst then cu.fail(why); return cu.exit() end
+        if dev and not S.ifaces[dev] then cu.fail("no interface " .. dev .. " (ip addr lists them)"); return cu.exit() end
+        local way, err = S.routeGet(dst, dev)
+        if not way then cu.fail(err .. " (network unreachable)"); return cu.exit() end
+        local ip = net.ipString
+        if way.kind == "local" then
+            out("local " .. ip(dst) .. " dev lo src " .. ip(way.src))
+        elseif way.kind == "broadcast" and not way.iface then
+            out("broadcast " .. ip(dst) .. ": out of every interface, each from its own address")
+        elseif way.kind == "broadcast" then
+            out("broadcast " .. ip(dst) .. " dev " .. way.iface .. " src " .. ip(way.src))
+        else
+            out(ip(dst) .. (way.gw and (" via " .. ip(way.gw)) or "") .. " dev " .. way.iface .. " src " .. ip(way.src))
+            local r = way.route
+            out("    route " .. (r.len == 0 and "default" or net.cidrString(r.net, r.len))
+                .. (r.gw and (" via " .. ip(r.gw)) or " direct") .. " dev " .. r.iface)
+            local nb = way.neigh
+            if nb.state == "incomplete" then
+                out("    neigh " .. ip(way.hop) .. " INCOMPLETE: " .. neighState(nb) .. ", no answer yet")
+            elseif nb.state then
+                out("    neigh " .. ip(way.hop) .. " lladdr " .. nb.mac .. " " .. neighState(nb))
+            else
+                out("    neigh " .. ip(way.hop) .. " not in the ARP cache: the first packet asks for it")
+            end
+        end
     elseif sub == "add" then
         local dest, gw, dev = args[3], nil, nil
         if not dest then badWords(cmd, "add takes a network, via and the router") end
@@ -402,14 +464,14 @@ elseif cmd == "neighbour" then
     if sub == "show" then
         noMore(3)
         if S then
-            local any = false
-            for iface, cache in pairs(S.arp) do
-                for ip, e in pairs(cache) do
-                    any = true
-                    out(string.format("%-16s %-17s dev %s%s", net.ipString(ip), e.mac, iface, e.permanent and " permanent" or ""))
-                end
+            -- address, MAC (INCOMPLETE: asked for, no answer yet), interface,
+            -- then permanent, the seconds left, or what's waiting
+            local list = S.neighbours()
+            for _, n in ipairs(list) do
+                out(string.format("%-16s %-17s dev %s %s", net.ipString(n.ip),
+                    n.state == "incomplete" and "INCOMPLETE" or n.mac, n.iface, neighState(n)))
             end
-            if not any then out("(empty)") end
+            if #list == 0 then out("(empty)") end
         else
             for _, e in ipairs(saved()) do
                 out(string.format("%-16s %-17s dev %s permanent", e.ip, net.parseMAC(e.mac) or e.mac, e.iface or "?"))
@@ -503,7 +565,33 @@ elseif cmd == "host" then
     table.sort(names)
     for _, k in ipairs(names) do out(string.format("%-16s %s", k, hosts[k])) end
 elseif cmd == "dns" then
-    if args[2] and not net.parseIP(args[2]) and pick(args[2], { { "off", 2 } }) == "off" then
+    local w = args[2] and not net.parseIP(args[2]) and pick(args[2], DNS_WORDS)
+    if w == "cache" or w == "flush" then
+        noMore(3)
+        local netdb = require("netdb")
+        if w == "flush" then
+            local n, why = netdb.flush()
+            if not n then cu.fail(why); return cu.exit() end
+            out(string.format("forgot %d answer%s, and which servers had failed", n, n == 1 and "" or "s"))
+            return cu.exit()
+        end
+        local kept, why = netdb.cache()
+        if not kept then cu.fail(why); return cu.exit() end
+        -- each answer: name, type, seconds left, what it said, who said it
+        for _, e in ipairs(kept.entries) do
+            local said = {}
+            for _, rr in ipairs(e.answers) do said[#said + 1] = tostring(rr.type) .. " " .. tostring(rr.data) end
+            if e.rcode == 3 then said = { "no such name (NXDOMAIN)" }
+            elseif #said == 0 then said = { "no " .. tostring(e.type) .. " record" } end
+            out(string.format("%-24s %-5s %4d s  %s  (from %s)", e.name, tostring(e.type), math.ceil(e.left),
+                table.concat(said, ", "), tostring(e.server)))
+        end
+        for _, d in ipairs(kept.down) do
+            out(string.format("server %s failed: asked last for %d s more", d.server, math.ceil(d.left)))
+        end
+        if #kept.entries == 0 and #kept.down == 0 then out("the cache is empty") end
+        return cu.exit()
+    elseif w == "off" then
         noMore(3)
         settings.unset("net.dns")
         save()

@@ -4,6 +4,7 @@
 --   nc -l [-nv] [-p port | port]            wait for one connection, then the same
 --   nc -u [-nv] [-p port] [-w seconds] host port     send each line as a UDP datagram
 --   nc -u -l [-nv] port                              print the datagrams that come to port
+--   nc -z [-nv] [-w seconds] host port[-port]          is anything listening? (TCP; a range: each)
 --
 -- host is an address or a name, port a number or a service's name (http,
 -- echo...): lib/netdb looks them up (`ip host`, then DNS).  -n: numbers
@@ -13,7 +14,8 @@
 -- with "\n" after it, and whatever comes back is printed as it arrives.
 -- When the input ends (Ctrl+T at the keyboard), nc closes its half and
 -- prints on until the other side closes; with -w, at most that many
--- seconds more.  It also ends when the other side closes.  -l listens on
+-- seconds more (-w also limits how long connecting may take).  It also
+-- ends when the other side closes.  -l listens on
 -- port for one connection.  -v says who connected, and how it ended.
 -- Carriage returns before a newline aren't printed to the screen.
 --
@@ -23,15 +25,25 @@
 -- comes to port until Ctrl+T.  -v puts "from address:port" first.  A
 -- datagram that's a string prints as it is; anything else (a table)
 -- serialised.
+--
+-- Scanning (-z): connect to each port (a range, 20-25, is each port in
+-- it, in order), then close at once, sending nothing.  Quiet, unless -v
+-- says how each went: open, refused (nobody is listening: the far side
+-- reset it), timed out (no answer in -w seconds, or until TCP gave up),
+-- or why it couldn't be tried (no route).  Exit status 0 if any port was
+-- open, 1 if none, as with BSD's netcat: `nc -z router 23 && telnet
+-- router` in a script.
+--
 -- The network must be up (`ip up`).  Exit status 1 if the connection
 -- couldn't be made or broke.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("nc",
-    "nc [-nv] [-w seconds] host port | nc -l [-nv] [-p port | port] | nc -u [-nv] [-p port] [-w seconds] host port | nc -u -l [-nv] port")
+    "nc [-nv] [-w seconds] host port | nc -l [-nv] [-p port | port] | nc -u [-nv] [-p port] [-w seconds] host port"
+        .. " | nc -u -l [-nv] port | nc -z [-nv] [-w seconds] host port[-port]")
 local net = require("net")
 local netdb = require("netdb")
-local opts, operands = cu.getopt({ ... }, "ulnvp:w:")
+local opts, operands = cu.getopt({ ... }, "ulnvzp:w:")
 local socktype = opts.u and netdb.SOCK_DGRAM or netdb.SOCK_STREAM
 local numeric = opts.n and netdb.AI_NUMERICHOST + netdb.AI_NUMERICSERV or 0
 
@@ -52,6 +64,55 @@ if opts.w and not wait then cu.usageError("bad -w " .. opts.w) end
 local function guarded(fn, ...)
     local ok, e = pcall(fn, ...)
     if not ok and e ~= "Terminated" then error(e, 0) end
+end
+
+--------------------------------------------------------------------------
+-- Scanning: -z
+--------------------------------------------------------------------------
+-- A port operand "port" or "low-high": the first and last port number
+-- (a service's name stands for its port, alone, not in a range), or nil
+-- after saying why.
+local function portRange(s)
+    local dash = s:find("-", 2, true)
+    if not dash then
+        local _, port = lookup(nil, s)
+        return port, port
+    end
+    local low, high = tonumber(s:sub(1, dash - 1)), tonumber(s:sub(dash + 1))
+    if not (low and high) or low ~= math.floor(low) or high ~= math.floor(high)
+        or low < 1 or high > 65535 or low > high then
+        cu.fail("bad port range " .. s .. " (low-high, 1-65535)", 2)
+        return nil
+    end
+    return low, high
+end
+
+if opts.z then
+    if opts.u or opts.l then cu.usageError("-z scans TCP ports: not with -u or -l") end
+    if #operands ~= 2 then cu.usageError() end
+    local host = lookup(operands[1], 0)
+    if not host then return cu.exit() end
+    local low, high = portRange(operands[2])
+    if not low then return cu.exit() end
+    local name = operands[1] .. (host ~= operands[1] and (" (" .. host .. ")") or "")
+    local open = 0
+    guarded(function()
+        for port = low, high do
+            local conn, err = net.connect(host, port, wait)
+            local serv = netdb.getservbyport(port, "tcp")
+            local what = name .. " " .. port .. (serv and (" (" .. serv.name .. ")") or "")
+            if conn then
+                open = open + 1
+                conn:close()                -- (nothing sent; the close finishes on its own)
+                if opts.v then printError(what .. ": open") end
+            elseif opts.v then
+                local said = err == "connection refused" and "refused"
+                    or err == "connection timed out" and "timed out" or err
+                printError(what .. ": " .. said)
+            end
+        end
+    end)
+    return cu.exit(cu.status > 0 and cu.status or (open > 0 and 0 or 1))
 end
 
 --------------------------------------------------------------------------
@@ -123,7 +184,7 @@ else
     local host, port = lookup(operands[1], operands[2])
     if not host then return cu.exit() end
     local err
-    conn, err = net.connect(host, port)
+    conn, err = net.connect(host, port, wait)
     if not conn then cu.fail(operands[1] .. " " .. port .. ": " .. err); return cu.exit() end
     if opts.v then printError("connected to " .. operands[1] .. (host ~= operands[1] and (" (" .. host .. ")") or "") .. " " .. port) end
 end

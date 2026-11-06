@@ -7,6 +7,8 @@ netstat: the network's sockets, routes and interfaces
   netstat -i
       the interfaces, with their frame counts
   netstat -s
-      the stack's counters
+      the stack's counters, grouped (Ip, Icmp, Udp, Tcp, Arp)
 
 As BSD's and Linux's netstat: one line a socket, its protocol, the bytes waiting to be read (Recv-Q: for UDP, datagrams; for a listener, connections not yet accepted) and to be sent and acknowledged (Send-Q), its local and foreign address, and TCP's state.  Without -a or -l only connections are listed; -l lists the listening sockets (TCP listeners, and UDP sockets, which wait for anyone), -a both.  -t and -u keep to TCP or UDP.  -p adds the process that opened it, as PID/name (under init; see ps).  Addresses are always numbers: -n is taken and changes nothing (looking names up would wait on DNS).  -e is taken too. Over this computer's network stack (`ip up`); exit status 1 if it isn't up.  `ip` sets the routes and interfaces -r and -i show.
+
+-s counts from when the network came up: packets in, delivered, sent and forwarded, and every one dropped, by why (a source that can't be, or failing rpfilter; for another address on a computer that isn't a router; its TTL run out; no route on; no ARP answer, or too many waiting on one; a full socket); ICMP messages in and out by type; UDP datagrams, and those for a port nobody has; TCP's opens, segments, resends and resets; ARP's requests and replies, and the addresses that never answered.  Each drop is in Ip's total too.

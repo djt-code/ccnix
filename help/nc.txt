@@ -8,9 +8,15 @@ nc: netcat: TCP connections and UDP datagrams over the network stack
       send each line as a UDP datagram
   nc -u -l [-nv] port
       print the datagrams that come to port
+  nc -z [-nv] [-w seconds] host port[-port]
+      is anything listening? (TCP; a range: each)
 
 host is an address or a name, port a number or a service's name (http, echo...): lib/netdb looks them up (`ip host`, then DNS).  -n: numbers only, no lookups.
 
-TCP (the default): each line of standard input goes down the connection with "\n" after it, and whatever comes back is printed as it arrives. When the input ends (Ctrl+T at the keyboard), nc closes its half and prints on until the other side closes; with -w, at most that many seconds more.  It also ends when the other side closes.  -l listens on port for one connection.  -v says who connected, and how it ended. Carriage returns before a newline aren't printed to the screen.
+TCP (the default): each line of standard input goes down the connection with "\n" after it, and whatever comes back is printed as it arrives. When the input ends (Ctrl+T at the keyboard), nc closes its half and prints on until the other side closes; with -w, at most that many seconds more (-w also limits how long connecting may take).  It also ends when the other side closes.  -l listens on port for one connection.  -v says who connected, and how it ended. Carriage returns before a newline aren't printed to the screen.
 
-UDP (-u): lines go as datagrams to host:port (from -p port, else any free one); what comes back to that port is printed meanwhile, and for -w (1) seconds after the input ends.  -l prints every datagram that comes to port until Ctrl+T.  -v puts "from address:port" first.  A datagram that's a string prints as it is; anything else (a table) serialised. The network must be up (`ip up`).  Exit status 1 if the connection couldn't be made or broke.
+UDP (-u): lines go as datagrams to host:port (from -p port, else any free one); what comes back to that port is printed meanwhile, and for -w (1) seconds after the input ends.  -l prints every datagram that comes to port until Ctrl+T.  -v puts "from address:port" first.  A datagram that's a string prints as it is; anything else (a table) serialised.
+
+Scanning (-z): connect to each port (a range, 20-25, is each port in it, in order), then close at once, sending nothing.  Quiet, unless -v says how each went: open, refused (nobody is listening: the far side reset it), timed out (no answer in -w seconds, or until TCP gave up), or why it couldn't be tried (no route).  Exit status 0 if any port was open, 1 if none, as with BSD's netcat: `nc -z router 23 && telnet router` in a script.
+
+The network must be up (`ip up`).  Exit status 1 if the connection couldn't be made or broke.

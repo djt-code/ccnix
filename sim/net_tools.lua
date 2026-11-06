@@ -171,11 +171,14 @@ local function plug(S, iface, cidr, seg)
     table.insert(segments[seg], { S, iface })
 end
 -- (codeAs: a code to put in place of "net" in the ICMP errors ME gets, as
--- a NAT-mode gateway's "prohibited")
-local codeAs
-local ME = computer(1, false, function(ev, kind, from, code, ...)
-    if codeAs and ev == "net_icmp" and code == "net" then code = codeAs end
-    W.os.queueEvent(ev, kind, from, code, ...)
+-- a NAT-mode gateway's "prohibited"; cutReply: an echo reply's data cut
+-- to that many bytes, as a path that loses some would)
+local codeAs, cutReply
+local ME = computer(1, false, function(...)
+    local e = table.pack(...)
+    if codeAs and e[1] == "net_icmp" and e[4] == "net" then e[4] = codeAs end
+    if cutReply and e[1] == "net_icmp" and e[2] == "reply" and type(e[7]) == "string" then e[7] = e[7]:sub(1, cutReply) end
+    W.os.queueEvent(table.unpack(e, 1, e.n))
 end)
 local R, B = computer(10, true), computer(2)
 plug(ME, "back", "10.0.1.2/24", "lan1")
@@ -199,6 +202,81 @@ check("ping where the router has no route: net unreachable from it", r.status ==
 r = W:run("ping", "nowhere")
 check("ping an unknown name: status 2", r.status == 2 and r.errText:find("nowhere: Name or service not known"),
     show(r.errText))
+check("ping's summary: a heading, then the round trips' min/avg/max/mdev",
+    select(2, W:run("ping", "-c", "2", "b").out:gsub("%-%-%- b ping statistics %-%-%-\n2 sent, 2 received, 0%% lost\n"
+        .. "rtt min/avg/max/mdev = 0/0%.0/0/0%.0 ms\n$", "")) == 1)
+
+-- ping with no -c: until Ctrl+T (here while it waits for the fourth
+-- reply), and the summary still comes
+do
+    local pulls = 0
+    r = W:run("ping", "b", { events = {}, onPull = function(w)
+        pulls = pulls + 1
+        if pulls == 4 then table.insert(w.T.events, 1, { "terminate" }) end
+    end })
+    check("ping with no -c: on until Ctrl+T, then the summary (status 0: replies came)",
+        r.status == 0 and select(2, r.out:gsub("reply from 10%.0%.2%.5", "")) == 3
+            and r.out:find("4 sent, 3 received, 25%% lost") and r.out:find("rtt min/avg/max/mdev = "), show(r.out) .. show(r.errText))
+    pulls = 0
+    r = W:run("ping", "-c", "0", "-q", "b", { events = {}, onPull = function(w)
+        pulls = pulls + 1
+        if pulls == 3 then table.insert(w.T.events, 1, { "terminate" }) end
+    end })
+    check("ping -c 0 -q: the same, quiet: the first line and the summary alone",
+        r.status == 0 and not r.out:find("reply from") and r.out:find("^PING b %(10%.0%.2%.5%)\n%-%-%- b ping statistics")
+            and r.out:find("3 sent, 2 received"), show(r.out))
+end
+local c0 = W.clock
+r = W:run("ping", "-w", "3", "b")
+check("ping -w 3 (no -c): stops at the deadline, three sent a second apart", r.status == 0
+    and r.out:find("3 sent, 3 received") and W.clock == c0 + 3, show(r.out) .. " " .. (W.clock - c0))
+r = W:run("ping", "-w", "10", "-c", "2", "b")
+check("ping -w 10 -c 2: done as soon as two replies are in", r.status == 0 and r.out:find("2 sent, 2 received"), show(r.out))
+r = W:run("ping", "-w", "2", "-c", "5", "172.16.0.9")
+check("ping -w 2 -c 5 and no replies: stops at the deadline, status 1", r.status == 1 and r.out:find("2 sent, 0 received"),
+    show(r.out))
+r = W:run("ping", "-c", "1", "-s", "100", "b")
+check("ping -s 100: the data goes, and comes back whole", r.status == 0 and r.out:find("PING b %(10%.0%.2%.5%): 100 data bytes")
+    and r.out:find("reply from 10%.0%.2%.5: bytes=100 seq=1 ttl=63") and not r.out:find("sent 100"), show(r.out))
+cutReply = 40
+r = W:run("ping", "-c", "1", "-s", "100", "b")
+cutReply = nil
+check("ping -s: a reply that comes back short says so", r.out:find("bytes=40 %(sent 100%)"), show(r.out))
+r = W:run("ping", "-s", "70000", "b")
+r2 = W:run("ping", "-c", "x", "b")
+check("ping -s past 65507, or a count that isn't a number: a usage error", r.status == 2 and r.errText:find("at most 65507")
+    and r2.status == 2 and r2.errText:find("bad %-c x"), show(r.errText) .. show(r2.errText))
+
+-- ip route get: the way a packet would go, and what ARP knows of the next hop
+r = W:run("ip", "route", "get", "10.0.2.5")
+check("ip route get <addr> through the router: via, dev, src; the route that picked it; the next hop's MAC and time left",
+    r.status == 0 and r.out:find("^10%.0%.2%.5 via 10%.0%.1%.1 dev back src 10%.0%.1%.2\n")
+        and r.out:find("\n    route default via 10%.0%.1%.1 dev back\n")
+        and r.out:find("\n    neigh 10%.0%.1%.1 lladdr 02:cc:00:00:0a:02 %d+ s left\n$"), show(r.out) .. show(r.errText))
+r = W:run("ip", "r", "g", "10.0.1.77")
+r2 = W:run("ip", "route", "get", "10.0.1.2")
+local r3 = W:run("ip", "route", "get", "b")
+check("ip r g on its own network: direct, nothing in the ARP cache yet; this computer: local; a name: looked up",
+    r.out:find("^10%.0%.1%.77 dev back src 10%.0%.1%.2\n    route 10%.0%.1%.0/24 direct dev back\n")
+        and r.out:find("neigh 10%.0%.1%.77 not in the ARP cache") and r2.out == "local 10.0.1.2 dev lo src 10.0.1.2\n"
+        and r3.out:find("^10%.0%.2%.5 via 10%.0%.1%.1"), show(r.out) .. show(r2.out) .. show(r3.out))
+r = W:run("ip", "route", "get", "10.0.2.5", "dev", "nowhere")
+r2 = W:run("ip", "route", "get")
+check("ip route get dev <one it hasn't>: says so (1); no address: a usage error (2)",
+    r.status == 1 and r.errText:find("no interface nowhere") and r2.status == 2 and r2.errText:find("get takes an address"),
+    show(r.errText) .. show(r2.errText))
+
+-- ip neigh: learned entries' seconds left; one asked for, not answered: INCOMPLETE
+ME.echo("10.0.1.66", 1, 1)
+ME.echo("10.0.1.66", 1, 2)
+r = W:run("ip", "neigh")
+r2 = W:run("ip", "route", "get", "10.0.1.66")
+check("ip neigh: learned, with its seconds left; one asked for and not answered, INCOMPLETE, what's waiting",
+    r.out:find("10%.0%.1%.1%s+02:cc:00:00:0a:02 dev back %d+ s left\n")
+        and r.out:find("10%.0%.1%.66%s+INCOMPLETE%s+dev back 2 queued, asked 1 time\n")
+        and r2.out:find("neigh 10%.0%.1%.66 INCOMPLETE: 2 queued, asked 1 time, no answer yet"), show(r.out) .. show(r2.out))
+for _ = 1, 4 do W:advance(1.01); ME.tick() end           -- (no answer: given up, the two dropped)
+check("... then given up on: no longer listed", not W:run("ip", "neigh").out:find("10.0.1.66", 1, true))
 
 -- ping -I: from an interface (out of it only) or from one of this computer's addresses
 assert(ME.addInterface("top", "10.0.50.2/24"))          -- (on no wire: nothing beyond it)
@@ -362,6 +440,41 @@ r = W:run("nc", "10.0.2.5", "99", { events = {} })
 check("nc to a port nobody listens on: connection refused, status 1",
     r.status == 1 and r.err[1] == "nc: 10.0.2.5 99: connection refused", show(r.errText))
 
+-- nc -z: connect, close, say how it went (-v); timers fire when nothing
+-- else is left to happen (time passing to them), for the one that times out
+do
+    local startWas, lastTimer = W.os.startTimer, 1000
+    W.os.startTimer = function() lastTimer = lastTimer + 1; return lastTimer end
+    local function timersFire(w)
+        if #w.T.events == 0 then W:advance(2); w.T.events[1] = { "timer", lastTimer } end
+    end
+    assert(B.tcpListen(7))
+    r = W:run("nc", "-z", "-v", "10.0.2.5", "6-8", { events = {}, onPull = timersFire })
+    check("nc -z -v host 6-8: each port in turn, open (its service named) or refused; status 0 (one was open)",
+        r.status == 0 and r.out == "" and r.err[1] == "10.0.2.5 6: refused" and r.err[2] == "10.0.2.5 7 (echo): open"
+            and r.err[3] == "10.0.2.5 8: refused" and #r.err == 3, show(r.errText))
+    local cz = B.tcpAccept(7)
+    check("... the open one closed at once, nothing sent", cz and cz.peerFin and B.tcpRead(cz) == "", cz and cz.state)
+    if cz then B.tcpClose(cz) end
+    r = W:run("nc", "-z", "10.0.2.5", "99", { events = {}, onPull = timersFire })
+    r2 = W:run("nc", "-z", "-v", "b", "echo", { events = {}, onPull = timersFire })
+    check("nc -z, nothing open: quiet, status 1; by name and service: the address and port",
+        r.status == 1 and r.out == "" and r.errText == "" and r2.status == 0
+            and r2.err[1] == "b (10.0.2.5) 7 (echo): open", show(r.errText) .. show(r2.errText))
+    cz = B.tcpAccept(7)
+    if cz then B.tcpClose(cz) end
+    B.tcpUnlisten(7)
+    r = W:run("nc", "-z", "-v", "-w", "1", "10.0.1.66", "23", { events = {}, onPull = timersFire })
+    check("nc -z -v -w 1 to nobody (no ARP answer): timed out, status 1",
+        r.status == 1 and r.err[1] == "10.0.1.66 23 (telnet): timed out", show(r.errText))
+    r = W:run("nc", "-z", "-u", "10.0.2.5", "7")
+    r2 = W:run("nc", "-z", "10.0.2.5", "9-3")
+    check("nc -z with -u, or a range backwards: status 2, and why",
+        r.status == 2 and r.errText:find("not with %-u") and r2.status == 2 and r2.errText:find("bad port range 9%-3"),
+        show(r.errText) .. show(r2.errText))
+    W.os.startTimer = startWas
+end
+
 --------------------------------------------------------------------------
 -- netstat: this computer's sockets (with the process that opened each,
 -- under a fake init), routes, interfaces and counters
@@ -407,6 +520,20 @@ check("netstat -i: each interface, its frames in and out", rowWith(r.out, "back"
     and r.out:find("Iface RX%-OK TX%-OK"), show(r.out))
 r = W:run("netstat", "-s")
 check("netstat -s: the counters", r.out:find("Ip:\n") and r.out:find("1 listening") and r.out:find("1 sockets"), show(r.out))
+-- the number on the line of netstat -s that ends " <what>"
+local function counted(out, what)
+    for line in out:gmatch("[^\n]+") do
+        if line:sub(-#what - 1) == " " .. what then return tonumber(line:sub(1, #line - #what - 1)) end
+    end
+end
+check("netstat -s: grouped Ip, Icmp, Udp, Tcp, Arp, in that order; the drops by why (ip neigh's two above), in the total",
+    r.out:find("^Ip:\n.*\nIcmp:\n.*\nUdp:\n.*\nTcp:\n.*\nArp:\n")
+        and counted(r.out, "dropped, in all:") == 2
+        and counted(r.out, "  no ARP answer for the next hop (host unreachable)") == 2
+        and counted(r.out, "addresses that never answered") == 1
+        and counted(r.out, "echo requests out") > 10 and counted(r.out, "echo replies in") > 10
+        and counted(r.out, "connections opened") >= 6 and counted(r.out, "resets received") >= 3
+        and counted(r.out, "  failing rpfilter") == 0, show(r.out))
 ME.tcpAbort(out80)
 ME.tcpUnlisten(23)
 ME.udpClose(u514)

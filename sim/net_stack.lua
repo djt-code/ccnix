@@ -19,7 +19,8 @@
 -- closed port; loopback; forged sources (BCP 38: rpfilter, martians);
 -- frames for others ignored; the event hook
 -- handling a frame once however many coroutines see it; the settings;
--- TCP; what a process that's gone had open let go (closeOwned).
+-- TCP; what a process that's gone had open let go (closeOwned); what the
+-- stack shows (echo data, neighbours, routeGet, the counters).
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -513,3 +514,97 @@ check("... the one waiting to be accepted reset", in2.state == "CLOSED" and in2.
 check("... its ports free again", A.udpOpen(6100) == 6100 and A.tcpListen(80) == true and A.closeOwned(nil) == 0)
 B.tcpClose(b25); run(5)
 A.udpClose(6100); A.udpClose(u8); A.tcpUnlisten(80); B.tcpUnlisten(25)
+
+-- 15. what the stack shows: echo data, neighbours (pending ones too),
+-- the way a packet would go (routeGet), and the counters by reason
+do
+    local ip = N.parseIP
+    clear()
+    A.echo("10.0.2.5", 82, 1, nil, nil, nil, "payload!")
+    run()
+    local er = events(1, "net_icmp")[1]
+    check("an echo's data comes back in the reply (the event's last value)",
+        er and er[2] == "reply" and er[7] == "payload!", er and tostring(er[7]))
+
+    local c0 = {}
+    for _, S in ipairs({ A, B, R1 }) do
+        c0[S] = {}
+        for k, v in pairs(S.counters) do c0[S][k] = v end
+    end
+    local function grew(S, name) return (S.counters[name] or 0) - (c0[S][name] or 0) end
+
+    A.echo("10.0.1.98", 83, 1)
+    A.echo("10.0.1.98", 83, 2)
+    local n = A.neighbour("back", ip("10.0.1.98"))
+    check("asked for, no answer yet: incomplete, the packets waiting, one request so far",
+        n.state == "incomplete" and n.queued == 2 and n.tries == 1 and n.mac == nil, tostring(n.state))
+    assert(A.addNeighbour("10.0.1.50", "02:cc:00:00:32:05"))
+    local learned = A.neighbour("back", ip("10.0.1.1"))
+    check("learned: reachable, its MAC, the seconds it's kept for yet; set by hand: permanent",
+        learned.state == "reachable" and learned.mac == N.mac(10, "left") and learned.left > 0 and learned.left <= 300
+            and A.neighbour("back", ip("10.0.1.50")).state == "permanent"
+            and A.neighbour("back", ip("10.0.1.51")).state == nil, tostring(learned.left))
+    local list, order, pendingSeen = A.neighbours(), true, false
+    for k = 2, #list do
+        if list[k - 1].iface == list[k].iface and list[k - 1].ip >= list[k].ip then order = false end
+    end
+    for _, x in ipairs(list) do if x.ip == ip("10.0.1.98") and x.state == "incomplete" then pendingSeen = true end end
+    check("neighbours: the cache and the ones being asked for, by interface then address", order and pendingSeen
+        and #list >= 3, #list)
+    run(4)
+    check("no answer: gone from the list; each packet dropped as no ARP answer, the address counted once",
+        A.neighbour("back", ip("10.0.1.98")).state == nil and grew(A, "dropNoArp") == 2 and grew(A, "arpTimeouts") == 1
+            and grew(A, "arpRequestsOut") == 3 and grew(A, "dropped") == 2, grew(A, "dropNoArp"))
+    A.deleteNeighbour("10.0.1.50")
+
+    local way = A.routeGet("10.0.2.5")
+    check("routeGet through the router: the default route, via 10.0.1.1 out of back from 10.0.1.2, ARP has it",
+        way and way.kind == "unicast" and way.iface == "back" and way.gw == ip("10.0.1.1") and way.hop == ip("10.0.1.1")
+            and way.src == ip("10.0.1.2") and way.route.len == 0 and way.neigh.state == "reachable")
+    local direct = A.routeGet("10.0.1.3")
+    check("routeGet on its own network: no gateway, the next hop is the address itself",
+        direct and direct.gw == nil and direct.hop == ip("10.0.1.3") and direct.route.len == 24)
+    local bad, why = R1.routeGet("172.16.0.1")
+    local viaTop = A.routeGet("10.0.2.5", "top")
+    check("routeGet: local, a network's broadcast, everyone's; no route says so; out of an interface it hasn't, none",
+        A.routeGet("10.0.1.2").kind == "local" and A.routeGet("127.0.0.1").iface == "lo"
+            and A.routeGet("10.0.1.255").kind == "broadcast" and A.routeGet("10.0.1.255").iface == "back"
+            and A.routeGet("255.255.255.255").kind == "broadcast" and A.routeGet("255.255.255.255").iface == nil
+            and bad == nil and why:find("no route to 172.16.0.1", 1, true) and viaTop == nil, tostring(why))
+
+    clear()
+    A.echo("172.16.0.1", 84, 1)
+    A.echo("10.0.2.5", 84, 2, 1)
+    A.udpSend(pa, "10.0.2.5", 4445, "x")
+    run()
+    check("counted by reason at the router: no route on, TTL ran out; ICMP out by type",
+        grew(R1, "dropNoRoute") == 1 and grew(R1, "dropTtl") == 1 and grew(R1, "icmpOutUnreachable") == 1
+            and grew(R1, "icmpOutTimeExceeded") == 1 and grew(R1, "forwarded") >= 2)
+    check("... and at the hosts: a port nobody has (the unreachable sent, and heard: two, with the router's); four echoes out (the two above too)",
+        grew(B, "udpNoPort") == 1 and grew(B, "icmpOutUnreachable") == 1 and grew(A, "icmpInUnreachable") == 2
+            and grew(A, "icmpInTimeExceeded") == 1 and grew(A, "icmpOutEcho") == 4 and grew(A, "udpOut") == 1,
+        table.concat({ grew(B, "udpNoPort"), grew(B, "icmpOutUnreachable"), grew(A, "icmpInUnreachable"),
+            grew(A, "icmpInTimeExceeded"), grew(A, "icmpOutEcho"), grew(A, "udpOut") }, " "))
+    B.receive("back", N.CHANNEL, { ccnet = 1, dst = B.ifaces.back.mac, src = N.mac(2, "x"), type = "ip",
+        data = { src = ip("10.0.2.9"), dst = ip("10.0.2.77"), ttl = 5, id = 1, proto = "udp", data = {} } })
+    B.receive("back", N.CHANNEL, { ccnet = 1, dst = B.ifaces.back.mac, src = N.mac(2, "x"), type = "ip", data = "junk" })
+    local q = A.udpOpen(6100)
+    for k = 1, 65 do A.udpSend(pa, "127.0.0.1", 6100, k) end
+    check("for another address on a host (not a router), not a packet at all, a socket's queue full: each its own drop",
+        grew(B, "dropNotForwarding") == 1 and grew(B, "dropMalformed") == 1 and grew(A, "dropUdpQueue") == 1
+            and grew(A, "udpIn") == 64)
+    A.udpClose(q)
+    check("martian and rpfilter drops add up to spoofed", (R1.counters.dropMartian or 0) + (R1.counters.dropRpfilter or 0)
+        == R1.counters.spoofed and (R1.counters.dropMartian or 0) > 0 and (R1.counters.dropRpfilter or 0) > 0)
+    local function sumOk(S)
+        local sum = 0
+        for k, v in pairs(S.counters) do if k:sub(1, 4) == "drop" and k ~= "dropped" then sum = sum + v end end
+        return sum == S.counters.dropped
+    end
+    check("every drop has its reason: they add up to dropped", sumOk(A) and sumOk(B) and sumOk(R1) and sumOk(R2))
+    check("TCP and ARP counted: opens both ways, segments, resends, resets; requests and replies",
+        A.counters.tcpActiveOpens > 0 and B.counters.tcpPassiveOpens > 0 and A.counters.tcpSegsOut > 0
+            and B.counters.tcpSegsIn > 0 and A.counters.tcpRetransmits > 0 and B.counters.tcpResetsIn > 0
+            and B.counters.tcpResetsOut > 0 and C.counters.arpRepliesOut > 0 and A.counters.arpRepliesIn > 0
+            and R1.counters.arpRequestsIn > 0)
+end
