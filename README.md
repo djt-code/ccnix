@@ -1545,12 +1545,16 @@ drive's modem to connect it (`peripherals` lists them as `drive_0`,
   500 bytes, so four drives give about 500 KB. `fileserver` shows each
   disk's free space and the total; `fs.getFreeSpace("/jbod")` and
   `fs.getCapacity("/jbod")` give the pool's.
-- **It grows by itself:** a blank floppy put in any drive joins the pool
-  (labelled `jbod` if it has no label), and the pool looks for drives and
-  disks again at most once a second, so a drive added or a disk put in is
-  in `/jbod` straight away. A disk with files on it is left alone until
-  `fileserver add drive_N`; then its files join the pool where they are.
-  Each member has a `.jbod` file at its root.
+- **It grows by itself:** a blank floppy put in any drive joins the pool,
+  and the pool looks for drives and disks again at most once a second, so
+  a drive added or a disk put in is in `/jbod` straight away. A disk with
+  files on it is left alone until `fileserver add drive_N`; then its files
+  join the pool where they are. Each member has a `.jbod` file at its root.
+- **Labels:** each disk in the pool is labelled with the computer's label
+  and the drive it's in, `FS drive_2` say, so hovering over a floppy (or
+  what `fileserver` lists) tells you which drive it's in. The label
+  follows a disk that's moved to another drive or another fileserver; a
+  label you gave it yourself stays.
 - **How files are kept:** folders are shared: a folder is in the pool if
   it's on any disk, and lists what's in it on all of them. A file goes on
   the disk with the most room when it's written; one too big for any

@@ -11,7 +11,7 @@
 --
 --  * Members: every disk in an attached drive (beside the computer, or
 --    over wired modems) with a .jbod file at its root.  A blank disk is
---    made a member when it turns up (labelled "jbod" if it has no label);
+--    made a member when it turns up (opts.label names each member);
 --    one with files on it is left alone until add() makes it one, files
 --    and all.  The drives are looked for again at most once a second, so
 --    the pool grows as drives and disks are added, with nothing to run.
@@ -58,7 +58,8 @@ local function partName(rel, n, of) return escaped(rel) .. "." .. n .. "-" .. of
 
 -- A pool over the drives `opts.drives()` gives, using `base` (the real fs
 -- functions) for its members' files.  opts.clock: seconds now (os.clock);
--- opts.label(name): label a newly adopted disk.
+-- opts.label(name): label member `name`'s disk (each time the drives
+-- are looked at, so a label can follow a disk that's moved).
 function J.new(base, opts)
     opts = opts or {}
     local P = { mount = opts.mount or "jbod" }
@@ -75,7 +76,6 @@ function J.new(base, opts)
         if not h then return false end
         h.write("ccnix jbod member\n")
         h.close()
-        if opts.label then opts.label(d.name) end
         return true
     end
 
@@ -92,6 +92,9 @@ function J.new(base, opts)
             end
             table.sort(members, function(a, b) return a.root < b.root end)
             table.sort(others, function(a, b) return a.root < b.root end)
+            if opts.label then
+                for _, m in ipairs(members) do pcall(opts.label, m.name) end
+            end
         end
         return members
     end

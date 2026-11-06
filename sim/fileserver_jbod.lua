@@ -169,7 +169,7 @@ local P = J.install(fs, {
     mount = "jbod",
     drives = function() local t = {} for i, d in ipairs(DRIVES) do t[i] = d end return t end,
     clock = function() return CLOCK end,
-    label = function(name) LABELS[name] = "jbod" end,
+    label = function(name) LABELS[name] = "FS " .. name end,
 })
 local function write(p, s)
     local h, err = fs.open(p, "w")
@@ -187,8 +187,8 @@ end
 local function kb(n) return string.format("%.1f KB", n / 1000) end
 
 --------------------------------------------------------------------------
-check("four blank floppies joined by themselves, labelled jbod",
-    #P.members() == 4 and LABELS.drive_0 == "jbod" and LABELS.drive_3 == "jbod")
+check("four blank floppies joined by themselves, each labelled (by opts.label) for its drive",
+    #P.members() == 4 and LABELS.drive_0 == "FS drive_0" and LABELS.drive_3 == "FS drive_3")
 local rootList = table.concat(fs.list("/"), " ")
 check("/jbod is in the root listing, an empty folder", rootList:find("jbod") and fs.isDir("/jbod")
     and #fs.list("/jbod") == 0, rootList)

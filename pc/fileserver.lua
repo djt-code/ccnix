@@ -12,8 +12,11 @@
 -- Disk drives count whether they're beside the computer or on wired
 -- modems (right-click each drive's modem to connect it: `peripherals`
 -- lists them as drive_0, drive_1...).  A blank floppy put in any of them
--- joins the pool by itself (labelled "jbod"), so /jbod grows as drives
--- and disks are added; a disk with files on it waits for `fileserver add`.
+-- joins the pool by itself, so /jbod grows as drives and disks are added;
+-- a disk with files on it waits for `fileserver add`.  Each disk in the
+-- pool is labelled for this computer and the drive it's in ("FS drive_2":
+-- hover over it to see), and the label follows it if it's moved; a label
+-- you gave it yourself stays.
 -- Folders are shared across the disks; each file goes on the disk with the
 -- most room, and one too big for any single disk is split across several.
 -- A floppy holds 125 KB (the server's floppy_space_limit), less 500 bytes
@@ -27,12 +30,22 @@ local jbod = require("jbod")
 local MOUNT = "jbod"
 local args = { ... }
 
+-- a member's label: this computer's and the drive's names; one that isn't
+-- of that form (or the old "jbod") was someone's own, and stays
+local SIDES = { top = true, bottom = true, left = true, right = true, front = true, back = true }
+local function ours(label)
+    if label == nil or label == "" or label == "jbod" then return true end
+    local where = label:match(" (%S+)$")
+    return where ~= nil and (where:match("^drive_%d+$") ~= nil or SIDES[where] == true)
+end
+local function label(name)
+    local host = os.getComputerLabel() or ("computer " .. os.getComputerID())
+    local want, have = (host .. " " .. name):sub(1, 32), disk.getLabel(name)
+    if have ~= want and ours(have) then disk.setLabel(name, want) end
+end
+
 local function opts()
-    return {
-        mount = MOUNT,
-        drives = jbod.drives,
-        label = function(name) if not disk.getLabel(name) then disk.setLabel(name, "jbod") end end,
-    }
+    return { mount = MOUNT, drives = jbod.drives, label = label }
 end
 
 local function kb(n) return string.format("%.1f KB", n / 1000) end
