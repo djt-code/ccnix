@@ -52,6 +52,13 @@
 -- break.  A line wider than the space after the prompt scrolls sideways
 -- in it, as read()'s does.  What was cut stays for the next line's
 -- Ctrl+Y.
+--
+--   readline.guard(t)     t, for what a shell runs: while a line is being
+--                         typed, the first thing written to it takes the
+--                         prompt and the line off the screen, so that a
+--                         background job's output goes where they were;
+--                         the editor then writes them again below it
+--                         (as zsh does)
 
 local R = {}
 
@@ -117,19 +124,25 @@ end
 
 local function setColour(c) if c then term.setTextColour(c) end end
 
--- Write the prompt, and note where the line starts after it.
+-- Write the prompt, and note where the line starts after it, and the
+-- row the prompt starts on (top: a "\n" in it, or a full row, makes it
+-- more than one).
 local function writePrompt(e)
+    local rows = 1
     if e.prompt and e.prompt ~= "" then
         if e.promptColour and term.isColour() then term.setTextColour(e.promptColour) end
         write(e.prompt)
         setColour(e.colour)
+        for _ in e.prompt:gmatch("\n") do rows = rows + 1 end
     end
     e.x, e.y = term.getCursorPos()
     local w = term.getSize()
     if e.x > w then                         -- (the prompt filled the row: the line goes on the next)
         write("\n")
         e.x, e.y = term.getCursorPos()
+        rows = rows + 1
     end
+    e.top = math.max(1, e.y - rows + 1)
 end
 
 -- What's drawn before the line: Ctrl+R's (search)`text': while searching.
@@ -166,7 +179,60 @@ local function draw(e)
         setColour(e.colour or colours.white)
     end
     if left > 0 then term.write(string.rep(" ", left)) end
-    term.setCursorPos(x + e.pos - e.scroll, e.y)
+    e.restX, e.restY = x + e.pos - e.scroll, e.y
+    term.setCursorPos(e.restX, e.restY)
+end
+
+--------------------------------------------------------------------------
+-- Output from elsewhere while a line is typed
+--------------------------------------------------------------------------
+-- What a background job prints shouldn't land in the middle of the line
+-- being typed.  While R.read waits, `showing` is its state (the prompt's
+-- rows, top to y, and where it left the cursor, restX and restY).  A
+-- terminal made by R.guard clears those rows before the first thing
+-- written to it, so the output goes where the prompt was; the editor
+-- notices (e.cleared, and a REDRAW event to wake it) and writes the
+-- prompt and the line again below the output, as zsh does.
+local showing
+local REDRAW = "readline_redraw"
+
+local function takePromptOff(t)
+    local e = showing
+    if not e or e.cleared then return end
+    local x, y = t.getCursorPos()
+    if x ~= e.restX or y ~= e.restY then return end     -- (the writer moved the cursor itself: let it be)
+    for row = e.top, e.y do
+        t.setCursorPos(1, row)
+        t.clearLine()
+    end
+    t.setCursorPos(1, e.top)
+    e.cleared = true
+    os.queueEvent(REDRAW)
+end
+
+-- A terminal that is t, but takes the line being typed off the screen
+-- before anything is written to it.  For the commands a shell runs.
+function R.guard(t)
+    local g = setmetatable({}, { __index = t })
+    for _, name in ipairs({ "write", "blit", "clear", "clearLine", "scroll" }) do
+        local f = t[name]
+        if f then
+            g[name] = function(...)
+                takePromptOff(t)
+                return f(...)
+            end
+        end
+    end
+    return g
+end
+
+-- After output took the prompt off: it again, on a line of its own.
+local function reprompt(e)
+    local x = term.getCursorPos()
+    if x ~= 1 then print() end               -- (output that didn't end its line)
+    writePrompt(e)
+    setColour(e.colour)
+    e.cleared = false
 end
 
 --------------------------------------------------------------------------
@@ -441,11 +507,14 @@ function R.read(opts)
     changed(e)
     draw(e)
     term.setCursorBlink(true)
+    local outer = showing
+    showing = e
 
     local why
     while not why do
         local ev = table.pack(os.pullEventRaw())
         local name = ev[1]
+        if e.cleared then reprompt(e) end
         if name == "key" then
             why = onKey(e, ev[2])
         elseif name == "key_up" then
@@ -468,6 +537,8 @@ function R.read(opts)
         if not why then draw(e) end
     end
 
+    showing = outer
+    if e.cleared then reprompt(e) end
     -- the line as it ends: no completion, no search, the cursor at its end
     if e.search then searchEnd(e, true) end
     e.comps = nil

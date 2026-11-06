@@ -1813,9 +1813,11 @@ licence (see [lib/etlua-license.txt](lib/etlua-license.txt)).
 ccnix's taste for small tools that follow the standards takes its cues
 from [Alpine Linux](https://alpinelinux.org) (Natanael Copa),
 [musl libc](https://musl.libc.org) (Rich Felker) and
-[BusyBox](https://busybox.net). They are inspirations for the design
-only: ccnix contains none of their code, and none of them has been
-involved with it or endorsed it.
+[BusyBox](https://busybox.net), and ccsh's feel at the prompt (the line
+editor, background output that leaves the line being typed whole) from
+[zsh](https://www.zsh.org). They are inspirations for the design only:
+ccnix contains none of their code, and none of them has been involved
+with it or endorsed it.
 
 Greetz to solar-operator.
 

@@ -60,6 +60,9 @@ term = {
     setBackgroundColour = function() end,
     isColour = function() return T.isColour end,
     clear = blank,
+    clearLine = function()
+        if T.rows[T.y] then T.rows[T.y], T.fg[T.y] = string.rep(" ", W), string.rep("w", W) end
+    end,
     write = function(s) put(tostring(s)) end,
 }
 term.setTextColor, term.getTextColor, term.isColor = term.setTextColour, term.getTextColour, term.isColour
@@ -138,6 +141,9 @@ end
 local RL = require("readline")
 local queue, screens = {}, {}
 os.pullEventRaw = function()
+    -- a function in the queue is something else running meanwhile (a
+    -- background job writing); what it queues comes next
+    while type(queue[1]) == "function" do table.remove(queue, 1)() end
     screens[#screens + 1] = { rows = { table.unpack(T.rows) }, fg = { table.unpack(T.fg) }, x = T.x, y = T.y }
     if #queue == 0 then error("no more events: the editor wanted another key", 0) end
     return table.unpack(table.remove(queue, 1))
@@ -163,6 +169,42 @@ local function edit(keyText, opts)
     return line, why
 end
 local function show(v) return (tostring(v):gsub("\n", "\\n")) end
+os.queueEvent = function(...) table.insert(queue, 1, table.pack(...)) end
+
+-- Output from a background job while a line is typed, through
+-- readline.guard: it goes where the prompt was, the prompt and the line
+-- come back below it.
+local function withOutput(before, writer, after)
+    local evs = events(before)
+    evs[#evs + 1] = writer
+    for _, ev in ipairs(events(after)) do evs[#evs + 1] = ev end
+    return evs
+end
+local guarded = RL.guard(term)
+local line = edit(withOutput("ab", function()
+    guarded.write("PING 10.1.1.99")
+    guarded.setCursorPos(1, 2)
+end, "c<CR>"))
+check("background output while typing: it takes the prompt's place, the prompt and the line come back below",
+    line == "abc" and text(1) == "PING 10.1.1.99" and text(2) == "$ abc", show(text(1)) .. " / " .. show(text(2)))
+line = edit(withOutput("ab<Left>", function() guarded.write("partial") end, "X<CR>"))
+check("output that doesn't end its line: the prompt starts a new one; the cursor's place in the line kept",
+    line == "aXb" and text(1) == "partial" and text(2) == "$ aXb", show(text(1)) .. " / " .. show(text(2)))
+line = edit(withOutput("ab", function()
+    guarded.setCursorPos(1, 5)
+    guarded.write("status line")
+end, "c<CR>"))
+check("a writer that puts the cursor somewhere first is left alone, and so is the prompt",
+    line == "abc" and text(1) == "$ abc" and text(5) == "status line", show(text(1)) .. " / " .. show(text(5)))
+line = edit(withOutput("ab", function()
+    guarded.write("one")
+    guarded.setCursorPos(1, 2)
+    guarded.write("two")
+    guarded.setCursorPos(1, 3)
+end, "c<CR>"), { prompt = "> \n$ " })
+check("a prompt of two rows comes off whole; several writes in one turn take it off once",
+    line == "abc" and text(1) == "one" and text(2) == "two" and text(3) == ">" and text(4) == "$ abc",
+    show(text(1)) .. " / " .. show(text(2)) .. " / " .. show(text(3)) .. " / " .. show(text(4)))
 local function same(label, want, got, why)
     check(label, got == want, "got " .. show(got) .. (why and (" (" .. show(why) .. ")") or "") .. ", want " .. show(want))
 end

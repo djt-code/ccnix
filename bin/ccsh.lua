@@ -124,7 +124,10 @@
 --   Ctrl+C                         drop the line (status 130)
 --   Ctrl+D on an empty line        leave, as exit does
 --
--- A long line scrolls sideways.  Tap Ctrl+R: held, CraftOS reboots (and
+-- A long line scrolls sideways.  What a background job prints while a
+-- line is being typed goes where the prompt was, and the prompt and the
+-- line (and the cursor's place in it) come back below it, as in zsh.
+-- Tap Ctrl+R: held, CraftOS reboots (and
 -- Ctrl+S held shuts down).  Leave with exit, Ctrl+D, or by holding
 -- Ctrl+T at the prompt; with jobs left, the first try only warns, and the
 -- jobs end with the shell.  Ctrl+C or Ctrl+T while a command runs stops
@@ -2124,7 +2127,7 @@ local function runCommand(cmd, inText, out)
         ctx.term, ctx.output, ctx.write = outS.term, outS.handle, outS.raw
         ctx.kb = function(...) return withReal(real.kb, ...) end
     else
-        ctx.term, ctx.output, ctx.write = real.term, real.output, real.write
+        ctx.term, ctx.output, ctx.write = real.guarded or real.term, real.output, real.write
     end
     if errS then
         ctx.stderr = errS.handle
@@ -2234,6 +2237,9 @@ local function editLine(opts)
     if editor == nil then
         local ok, m = pcall(require, "readline")
         editor = ok and type(m) == "table" and m or false
+        -- commands write through it: a background job's output takes the
+        -- prompt off first, and the editor draws it again below
+        if editor and editor.guard then real.guarded = editor.guard(real.term) end
     end
     if editor then return editor.read(opts) end
     if opts.prompt then

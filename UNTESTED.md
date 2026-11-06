@@ -37,6 +37,14 @@ section.
 
 ## ccsh
 
+- **Background output while typing** (0.30.0). `ping -c 5 10.1.2.10 &`,
+  then start typing a command slowly: each reply line appears where the
+  prompt was, and the prompt with what you typed (and the cursor where it
+  was) comes back on the line below; nothing is jumbled. With a two-row
+  PS1 (`PS1='\h\n\$ '`) both rows come back. A full-screen program run
+  in the background (or one that moves the cursor itself) isn't
+  disturbed. Over telnet the same.
+
 - **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
   (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
