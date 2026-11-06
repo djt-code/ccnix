@@ -94,22 +94,30 @@
 --  * Mineshafts: rails in the tunnel, its walls or floor are dug out (and
 --    the wall or floor filled), and minecarts in its way broken; both are
 --    valuables, brought back to the start.
---  * Lanes: each segment is mined in lanes running along it, one per row
---    in the side columns and every third row (plus the top and bottom ones)
---    in the middle columns, digging the rows in between up and down.  So
---    the turtle touches every block of the walls, floor and ceiling, and
---    looks at each one.
+--  * Lanes: each segment is mined in lanes running along it, every third
+--    row (plus the top and bottom ones) of each column, digging the rows
+--    in between up and down; without a Geo Scanner, one per row in the
+--    two side columns, so it can turn to look at every wall block from
+--    beside it.  The floor and ceiling it looks at from the bottom and top
+--    lanes as it goes.
 --  * Geo Scanner (Advanced Peripherals): put one in the start's top chest
---    and the turtle takes it along and uses it: every 15 blocks along a
---    segment it swaps the scanner in for its pickaxe (a chunk controller
---    on the other side stays put), scans (radius 8, no fuel), and swaps
---    back.  It only turns to look at wall blocks the scan says are ore,
---    lava or water, and right after each scan it tunnels out to the ore it
+--    and the turtle takes it along and uses it instead of looking at the
+--    walls.  It digs a segment out first (fewer lanes, no turning to the
+--    walls), then surveys it: it swaps the scanner in for its pickaxe (a
+--    chunk controller on the other side stays put), scans (radius 8, no
+--    fuel) from as few spots as cover the segment's walls, floor and
+--    ceiling (the tunnel's middle when one reaches all round, spots
+--    round its sides when it's wider or taller, their spare reach out
+--    past the walls), and swaps back.  Then it seals the lava, water and
+--    waterlogged or thin blocks the scans show in the walls, looks by hand
+--    at any wall block no scan covered, and tunnels out to the ore they
 --    found, up to SCAN_REACH (6) from the tunnel, and diamonds and coal
---    however far out as long as the scan saw them, then goes on with the
---    tunnel.  It goes no further than the scan reached, except to follow a
---    diamond or coal vein to its end.  Low on fuel, it fetches the coal first.  See the Geo Scanner section for how it lines the
---    scan's world directions up with the tunnel.
+--    however far out as long as a scan saw them.  It goes no further than
+--    the scan reached, except to follow a diamond or coal vein to its end.
+--    If water got in while it dug, it walks the floor after, as on a
+--    resume, for any still getting in.  Low on fuel, it scans as it digs
+--    and fetches the coal first.  See the Geo Scanner section for how it
+--    lines the scan's world directions up with the tunnel.
 --  * Veins: an ore it touches (anything tagged as an ore, *_ore blocks,
 --    ancient debris) is mined along with its whole vein: the turtle
 --    follows it block by block, looking all round each one, up to
@@ -170,7 +178,6 @@ PROGRESS_FILE = T.dataPath("mine.seg")
 VEIN_REACH = 4       -- how far a vein is followed out from the tunnel
 SCAN_RADIUS = 8      -- Geo Scanner radius (free of fuel up to 8)
 SCAN_REACH = 6       -- with a scanner: how far out from the tunnel ore is fetched
-SCAN_EVERY = 15      -- blocks between scans along a segment's first lane
 ROOM = 2             -- empty slots wanted before each dig
 FILLER_KEEP = 64     -- bulk blocks kept on board for sealing...
 FILLER_KEEP_WET = 192 -- ...once it has run out drying out water
@@ -733,7 +740,7 @@ function putFiller(d)
 end
 
 -- A block put in direction d: where it was dug isn't open any more (a
--- scan that shows a block there isn't turned, see scanNow).
+-- scan that shows a block there isn't turned, see takeScan).
 function filledIn(d)
     local p = neighbour(d)
     opened[key(p)] = nil
@@ -1605,13 +1612,16 @@ function coverRows(n)
     return rows
 end
 
+-- The side columns: a lane in every row, to look at each wall block from
+-- beside it; with a Geo Scanner every third row, as the middle (the walls
+-- are seen by the survey's scans once the segment is dug).
 function planLanes()
     local xs, xn = T.sgn(WIDTH)
     local ys, yn = T.sgn(HEIGHT)
     local lanes = {}
     for c = 0, xn - 1 do
         local rows
-        if c == 0 or c == xn - 1 then
+        if (c == 0 or c == xn - 1) and not hasScanner then
             rows = {}
             for r = 0, yn - 1 do rows[#rows + 1] = r end
         else
@@ -1644,12 +1654,11 @@ function scanHere()
         end
         if isFloor(n) then fill(d) end    -- something to walk on
     end
+    -- the walls (and the tunnel's end): with a scanner, left to the
+    -- survey once the segment is dug; without, turned to and looked at
+    if hasScanner then return end
     for _, d in ipairs({ 1, 3, 0 }) do
-        local n = neighbour(d)
-        local k = known[key(n)]
-        -- turning to look is only worth it for what the scanner hasn't
-        -- seen, or says is ore, lava or water
-        if not inBox(n) and (not k or k == "ore" or k == "fluid") then examine(d) end
+        if not inBox(neighbour(d)) then examine(d) end
     end
 end
 
@@ -1794,14 +1803,14 @@ end
 -- lists every block that isn't air within SCAN_RADIUS, at offsets along
 -- the world's axes, which the turtle doesn't know: it lines them up with
 -- the tunnel by finding the one way round that puts none of them where it
--- knows there's air (what it has dug).  From then on it knows what's in
--- the walls without turning to look at them, and where ore lies further
--- out: right after each scan it tunnels out to what that scan found, up to
--- SCAN_REACH from the tunnel (diamonds and coal however far, as long as
--- the scan saw them), mines it, and goes on with the tunnel; it goes no
--- further than the scan reached from where it was taken, except to follow
--- a diamond or coal vein to its end.  Low on fuel, it fetches the coal first, and
--- burns it.
+-- knows there's air (what it has dug).  The scans are taken once a
+-- segment is dug (see survey): then it knows what's in the walls without
+-- turning to look at them, and where ore lies further out, and tunnels
+-- out to it, up to SCAN_REACH from the tunnel (diamonds and coal however
+-- far, as long as a scan saw them); it goes no further than the scan
+-- reached from where it was taken, except to follow a diamond or coal
+-- vein to its end.  Low on fuel, it scans as it digs, fetches the coal
+-- first, and burns it.
 --------------------------------------------------------------------------
 warnedScan = false
 
@@ -2082,9 +2091,9 @@ function fetchTargets(which)
     alongAxis("y", start.y); alongAxis("x", start.x); alongAxis("z", start.z)
 end
 
--- Scan from here (on the segment's first lane) and file what it finds;
--- low on fuel, go for the coal in it now.
-function scanNow(z1, z2)
+-- Scan from here (a block of the segment) and file what it finds: true
+-- if it did.
+function takeScan(z1, z2)
     local blocks, err = scanBlocks()
     if blocks then blocks, err = relative(blocks) end
     if not blocks then
@@ -2092,7 +2101,7 @@ function scanNow(z1, z2)
             warnedScan = true
             print("Geo scanner: " .. tostring(err) .. "; checking the walls by hand until it works.")
         end
-        return
+        return false
     end
     if warnedScan then
         warnedScan = false
@@ -2132,7 +2141,7 @@ function scanNow(z1, z2)
                 warnedScan = true
                 print("Geo scanner: the scan puts blocks where it has dug, so its heading looks off; skipping scans.")
             end
-            return
+            return false
         end
         if not facing then
             facing = true
@@ -2142,25 +2151,13 @@ function scanNow(z1, z2)
         -- world axes only: line them up with the tunnel from what's dug
         if not facing then
             facing = lineUp(blocks)
-            if not facing then return end      -- try again further on
+            if not facing then return false end   -- try again from the next spot
             print("Geo scanner lined up with the tunnel.")
         end
         toCell = function(e) return toTunnel(facing, e) end
     end
     record(blocks, z1, z2, toCell)
-    -- collect what this scan found (coal first, low on fuel), then go on
-    -- with the tunnel
-    local this = scans
-    if fuelLow() then
-        for _, t in pairs(targets) do
-            if t.coal and t.scan == this then
-                print(string.format("Low on fuel (%s): going for the coal the scanner found first.",
-                    tostring(turtle.getFuelLevel())))
-                break
-            end
-        end
-    end
-    fetchTargets(function(t) return t.scan == this end)
+    return true
 end
 
 -- Tunnel blocks filled to cut water off behind the lanes: dig them out,
@@ -2273,7 +2270,7 @@ function mineSegment(z1, z2, from)
     print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
         tostring(turtle.getFuelLevel())))
     known, targets, scanFrom, scanned = {}, {}, {}, {}
-    local lastScan = nil
+    local wet0 = stats.wet
     local startLane, startZ = 1, nil
     if from then
         startLane, startZ = from.lane, from.z
@@ -2307,16 +2304,9 @@ function mineSegment(z1, z2, from)
                 if ok then ok, what = alongAxis("x", lane.x) end
             end
             if ahead then via = nil end    -- this lane is dug back to the segment's start
-            -- scans are taken along the first lane it digs (and the next,
-            -- if it carried on partway along that one)
-            local scanLane = i == startLane or (from and i == startLane + 1)
             for z = first, to, dz do
                 if not ok then break end
-                if hasScanner and scanLane and ((z - z1) % SCAN_EVERY == math.floor(SCAN_EVERY / 2)
-                        or (z == z2 and (not lastScan or math.abs(z - lastScan) > SCAN_RADIUS))) then
-                    scanNow(z1, z2)
-                    lastScan = z
-                end
+                if hasScanner and fuelLow() then coalScan(z1, z2) end
                 scanHere()
                 lightHere()
                 saveProgress(i, z)
@@ -2328,9 +2318,137 @@ function mineSegment(z1, z2, from)
     via = nil
     saveProgress(#lanes + 1, z2)
     unplug()
+    if hasScanner then survey(z1, z2) end
     fetchTargets()                         -- the scanner's ore further out
     relight()                              -- what veins knocked off
+    -- water got in while it dug (walls aren't looked at till the survey):
+    -- go over the floor for any still getting in
+    if hasScanner and stats.wet > wet0 then repair(z1, z2) end
     tunnelHome()
+end
+
+--------------------------------------------------------------------------
+-- The survey (with a Geo Scanner), once a segment is dug
+--------------------------------------------------------------------------
+-- Spots along one axis to scan from: as few as cover lo..hi with
+-- SCAN_RADIUS either side of each (one: in the middle), each within a..b
+-- (dug).  `outward`: what reach they have to spare goes beyond lo and hi,
+-- half each side, so they see as far past the walls as they can (side
+-- to side, up and down); else it stays inside (along the tunnel: past a
+-- segment's ends is the next segment's, or the last one's, to scan).
+function scanSpots(lo, hi, a, b, outward)
+    local R, w = SCAN_RADIUS, 2 * SCAN_RADIUS + 1
+    local n = math.max(1, math.ceil((hi - lo + 1) / w))
+    local spare = n * w - (hi - lo + 1)
+    local out = {}
+    for i = 0, n - 1 do
+        local c
+        if n == 1 then c = math.floor((lo + hi) / 2)
+        elseif outward then c = lo + R - math.floor(spare / 2) + i * w
+        else c = lo + R + math.floor(i * (hi - lo - 2 * R) / (n - 1) + 0.5) end
+        out[#out + 1] = math.max(a, math.min(b, c))
+    end
+    return out
+end
+
+-- The walls aren't looked at while a segment is dug with a scanner.
+-- Once it's dug, scans from as few spots in it as cover its walls, floor
+-- and ceiling (and the tunnel's end): from the middle of the tunnel while
+-- one reaches both walls and both the floor and the ceiling, from spots
+-- across it (round its sides; none in the middle, that would reach
+-- neither) when it's wider or taller.  What they show as lava or water,
+-- or a waterlogged or thin block, in a wall is sealed or replaced from
+-- beside it; a wall block no scan covered (one that failed) is looked at
+-- by hand; ore they found is fetched after (fetchTargets).  The floor and
+-- ceiling were looked at while digging (from the bottom and top lanes).
+function survey(z1, z2)
+    local R, last = SCAN_RADIUS, z2 == LENGTH
+    local zEnd = last and z2 + 1 or z2
+    local xs, ys = scanSpots(X0 - 1, X1 + 1, X0, X1, true), scanSpots(Y0 - 1, Y1 + 1, Y0, Y1, true)
+    local spots = {}
+    for _, z in ipairs(scanSpots(z1, zEnd, z1, z2)) do
+        for _, y in ipairs(ys) do
+            for _, x in ipairs(xs) do
+                if x - R <= X0 - 1 or x + R >= X1 + 1 or y - R <= Y0 - 1 or y + R >= Y1 + 1
+                        or (last and z + R >= zEnd) then
+                    spots[#spots + 1] = { x = x, y = y, z = z }
+                end
+            end
+        end
+    end
+    local cornered = false
+    for _, p in ipairs(spots) do
+        alongAxis("z", p.z); alongAxis("x", p.x); alongAxis("y", p.y)
+        if not takeScan(z1, z2) and not facing and not cornered then
+            -- not lined up: a scanner that gives only world coordinates is
+            -- lined up from what's dug, and from the middle of a dug tunnel
+            -- that looks the same turned round.  From a corner it can't.
+            cornered = true
+            alongAxis("x", X0); alongAxis("y", Y0)
+            if takeScan(z1, z2) then
+                alongAxis("x", p.x); alongAxis("y", p.y)
+                takeScan(z1, z2)
+            end
+        end
+    end
+    if fuelLow() then
+        for _, t in pairs(targets) do
+            if t.coal then
+                print(string.format("Low on fuel (%s): going for the coal the scanner found first.",
+                    tostring(turtle.getFuelLevel())))
+                break
+            end
+        end
+    end
+    -- the wall blocks to see to, from the tunnel block beside each: a
+    -- row at a time, back and forth along it
+    local rows = {}
+    local function want(p, at)
+        local k = known[key(p)]
+        if opened[key(p)] or (k ~= nil and k ~= "fluid") then return end
+        local r = at.x .. "," .. at.y
+        if not rows[r] then rows[r] = { x = at.x, y = at.y, list = {} }; rows[#rows + 1] = rows[r] end
+        local list = rows[r].list
+        list[#list + 1] = { p = p, at = at }
+    end
+    for _, side in ipairs({ { X0 - 1, X0 }, { X1 + 1, X1 } }) do
+        for y = Y0, Y1 do
+            for z = z1, z2 do want({ x = side[1], y = y, z = z }, { x = side[2], y = y, z = z }) end
+        end
+    end
+    if last then
+        for x = X0, X1 do for y = Y0, Y1 do want({ x = x, y = y, z = zEnd }, { x = x, y = y, z = z2 }) end end
+    end
+    local back = false
+    for _, row in ipairs(rows) do
+        table.sort(row.list, function(a, b)
+            if a.at.z ~= b.at.z then return (a.at.z < b.at.z) ~= back end
+            return key(a.p) < key(b.p)
+        end)
+        for _, w in ipairs(row.list) do
+            alongAxis("z", w.at.z); alongAxis("x", w.at.x); alongAxis("y", w.at.y)
+            examine(dirTo(w.p))
+        end
+        back = not back
+    end
+end
+
+-- Low on fuel while digging: scan here (if no scan this segment reached
+-- this far along) and go for the coal it shows.
+function coalScan(z1, z2)
+    for _, o in ipairs(scanFrom) do
+        if math.abs(T.pos.z - o.z) <= SCAN_RADIUS then return end
+    end
+    if not takeScan(z1, z2) then return end
+    local this = scans
+    for _, t in pairs(targets) do
+        if t.coal and t.scan == this then
+            print(string.format("Low on fuel (%s): going for the coal the scanner found first.",
+                tostring(turtle.getFuelLevel())))
+            fetchTargets(function(c) return c.coal and c.scan == this end)
+            return
+        end
+    end
 end
 
 --------------------------------------------------------------------------

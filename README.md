@@ -856,11 +856,12 @@ recognise. Needs a pickaxe, equipped or in the inventory.
   when the turtle next starts from them or passes them on a resume. It
   isn't done for a tunnel 1 high, or one going down, where the bulk chest
   is above the home.
-- **Lanes:** each segment is dug in lanes along it: every row of the two side
-  columns, and every third row plus the top and bottom ones in the columns
-  between. The rows in between are dug from above and below. So the turtle
-  touches every block of the walls, floor, ceiling and far end, and looks at
-  each one.
+- **Lanes:** each segment is dug in lanes along it: every third row plus the
+  top and bottom ones in each column, the rows in between dug from above
+  and below. Without a Geo Scanner the two side columns get a lane in every
+  row instead, so the turtle can turn to look at every wall block from
+  beside it. The floor and ceiling it looks at from the bottom and top
+  lanes as it goes. (A 6x6 segment: 18 lanes with a scanner, 24 without.)
 - **Veins:** an ore it touches is mined along with its whole vein. That means
   anything tagged as an ore (so modded ores too), any `*_ore` block, and
   ancient debris. The turtle follows the vein block by block, looking all round
@@ -938,9 +939,22 @@ recognise. Needs a pickaxe, equipped or in the inventory.
 - **Geo Scanner:** put an Advanced Peripherals Geo Scanner in the start's
   top chest and the turtle takes it along and uses it instead of checking
   every wall block by hand. There's no slot to spare for it: one side holds
-  the pickaxe, the other the chunk controller. So every 15 blocks it swaps
-  the scanner in for the pickaxe, scans, and swaps back. The chunk
-  controller never moves, so its chunk stays loaded. With the scanner:
+  the pickaxe, the other the chunk controller. So to scan it swaps the
+  scanner in for the pickaxe, scans, and swaps back. The chunk controller
+  never moves, so its chunk stays loaded. With the scanner:
+  - **Dig first, then survey:** it digs each segment out without turning
+    to the walls (and with fewer lanes, see Lanes), then scans it. It scans
+    from as few spots as cover the segment's walls, floor and ceiling (and
+    the tunnel's far end): a scan reaches 8 blocks every way, so a tunnel
+    up to 15 wide and 15 tall is scanned from its middle, every 17 blocks
+    along it, and a wider or taller one from spots round its sides
+    (none in its middle, which would reach neither the walls nor the floor
+    and ceiling). The reach they have to spare goes out past the walls,
+    floor and ceiling, evenly. Then it seals the lava, water and waterlogged
+    or thin blocks the scans show in the walls, from the tunnel beside
+    them, and looks by hand at any wall block no scan covered (if a scan
+    failed). If water got into the tunnel while it dug, it walks the floor
+    afterwards for any still getting in, as on a resume.
   - **Lining up:** a scan reports blocks along the world's directions
     (north, east...), which a turtle doesn't know. So the turtle tries all
     four ways round, and keeps the one that puts none of the scanned blocks
@@ -953,7 +967,7 @@ recognise. Needs a pickaxe, equipped or in the inventory.
   - **Walls and veins:** it only turns to look at blocks the scan says are
     ore, lava or water, both in the walls and round each block of a vein.
     In tests it turned about a fifth as often.
-  - **Ore further out:** right after each scan, it collects what that scan
+  - **Ore further out:** after the survey, it collects what the scans
     found. It tunnels out to ore up to 6 blocks from the tunnel
     (`SCAN_REACH`) and mines the whole vein, then goes on with the tunnel.
     It goes from one deposit straight to the nearest one left, rather than
@@ -969,8 +983,9 @@ recognise. Needs a pickaxe, equipped or in the inventory.
     is a diamond or coal vein: that's followed to its end, past the scan if
     need be. With or without a scanner, a diamond or coal vein the turtle
     finds is always followed all the way.
-  - **Coal first when fuel is low:** when its fuel gets low, it fetches the
-    coal a scan found first, and burns it.
+  - **Coal first when fuel is low:** when its fuel gets low, it scans as it
+    digs, rather than waiting for the survey, and fetches the coal a scan
+    found first, and burns it.
   - **Cost:** scans are radius 8, which costs no fuel (Advanced Peripherals'
     defaults: free up to 8, 2 seconds between scans).
 

@@ -13,7 +13,9 @@
 -- on); --no-lights; a Geo Scanner (lined up with the tunnel from the scan,
 -- fetching ore further out, far fewer turns, coal first when low on
 -- fuel); a crevasse across the tunnel, which it bridges so a player can
--- walk the floor; a cavern filling the last segment, bridged with filler
+-- walk the floor; the survey (with a scanner: fewer lanes, then scans from
+-- as few spots as cover the walls, floor and ceiling, all round a 6x6 and
+-- two across a 24-wide tunnel); a cavern filling the last segment, bridged with filler
 -- from the homes behind (and its scans still trusted); the far end of a
 -- tunnel whose length is a multiple of the spacing lit; a tunnel with no length that runs out of chests, then
 -- `mine --resume` once more chests are added (twice: the second time a
@@ -346,16 +348,18 @@ local function scanWorld(withScanner)
     set(-5, 1, 12, ore("minecraft:deepslate_gold_ore")); set(-5, 2, 12, ore("minecraft:deepslate_gold_ore"))
     set(7, 0, 20, ore("minecraft:coal_ore")); set(8, 0, 20, ore("minecraft:coal_ore"))
     set(-9, 1, 25, ore("minecraft:diamond_ore"))               -- 9 out: no scan reaches it
-    set(-8, 1, 22, ore("minecraft:deepslate_diamond_ore"))     -- 8 out: the edge of a scan
-    set(-9, 1, 22, ore("minecraft:deepslate_diamond_ore"))     -- its vein goes on past the scan
-    set(-10, 1, 22, ore("minecraft:deepslate_diamond_ore"))
-    set(-10, 2, 22, ore("minecraft:deepslate_diamond_ore"))
-    set(-8, 1, 8, ore("minecraft:deepslate_gold_ore"))         -- 8 out, not diamond: too far
+    -- (scans are from the tunnel's middle, x=1: they reach x=-7 and x=9)
+    set(-7, 1, 22, ore("minecraft:deepslate_diamond_ore"))     -- 7 out: the edge of a scan
+    set(-8, 1, 22, ore("minecraft:deepslate_diamond_ore"))     -- its vein goes on past the scan
+    set(-9, 1, 22, ore("minecraft:deepslate_diamond_ore"))
+    set(-9, 2, 22, ore("minecraft:deepslate_diamond_ore"))
+    set(9, 1, 16, ore("minecraft:diamond_ore"))                -- 7 out of the right wall: the other edge
+    set(-7, 1, 8, ore("minecraft:deepslate_gold_ore"))         -- 7 out, not diamond: too far
     set(-9, 1, 3, ore("minecraft:coal_ore"))                   -- 9 out: no scan reaches it
-    set(-8, 1, 10, ore("minecraft:deepslate_coal_ore"))        -- 8 out: the edge of a scan
-    set(-9, 1, 10, ore("minecraft:deepslate_coal_ore"))        -- its vein goes on past the scan
-    set(-10, 1, 10, ore("minecraft:deepslate_coal_ore"))
-    set(-10, 0, 10, ore("minecraft:deepslate_coal_ore"))
+    set(-7, 1, 10, ore("minecraft:deepslate_coal_ore"))        -- 7 out: the edge of a scan
+    set(-8, 1, 10, ore("minecraft:deepslate_coal_ore"))        -- its vein goes on past the scan
+    set(-9, 1, 10, ore("minecraft:deepslate_coal_ore"))
+    set(-9, 0, 10, ore("minecraft:deepslate_coal_ore"))
     set(3, 1, 15, { name = "minecraft:lava", level = 0 })       -- in the right wall
     set(-1, 0, 18, nil); set(-2, 0, 18, nil)                    -- a cave opening in the left wall
     startAt(); Mine.inv, Mine.files = {}, {}
@@ -377,12 +381,13 @@ check("waited for the scanner to show up after equipping it", not logHas("Geo sc
 check("iron touching the wall mined", oreGone(-1, 1, 5))
 check("gold 5 out and coal 5-6 out fetched", oreGone(-5, 1, 12) and oreGone(-5, 2, 12) and oreGone(7, 0, 20) and oreGone(8, 0, 20))
 check("diamond 9 out left", not oreGone(-9, 1, 25))
-check("diamond 8 out (in the scan) mined, and its vein followed on past the scan",
-    oreGone(-8, 1, 22) and oreGone(-9, 1, 22) and oreGone(-10, 1, 22) and oreGone(-10, 2, 22))
+check("diamond 7 out (in the scan) mined, and its vein followed on past the scan",
+    oreGone(-7, 1, 22) and oreGone(-8, 1, 22) and oreGone(-9, 1, 22) and oreGone(-9, 2, 22))
+check("diamond 7 out of the right wall mined too (the scans are from the middle)", oreGone(9, 1, 16))
 check("coal 9 out left", not oreGone(-9, 1, 3))
-check("coal 8 out (in the scan) mined, and its vein followed on past the scan",
-    oreGone(-8, 1, 10) and oreGone(-9, 1, 10) and oreGone(-10, 1, 10) and oreGone(-10, 0, 10))
-check("gold 8 out left (only diamonds and coal go past 6)", not oreGone(-8, 1, 8))
+check("coal 7 out (in the scan) mined, and its vein followed on past the scan",
+    oreGone(-7, 1, 10) and oreGone(-8, 1, 10) and oreGone(-9, 1, 10) and oreGone(-9, 0, 10))
+check("gold 7 out left (only diamonds and coal go past 6)", not oreGone(-7, 1, 8))
 checkLava(30)
 check("tunnel clear", leftIn(0, 2, 0, 2, 1, 30) == 0, leftIn(0, 2, 0, 2, 1, 30) .. " blocks left")
 checkFloor(0, 2, -1, 1, 30)
@@ -1020,3 +1025,52 @@ check("no crafting table: no wood sought, the logs stay",
 woodWorld(64, true, true)
 check("chests enough for many more homes: no wood sought",
     logsLeft("minecraft:oak_log", LINE) == 7 and logsLeft("minecraft:spruce_log", APART) == 2)
+
+-- 17. the survey (with a Geo Scanner): the walls aren't looked at while
+--     digging, so every column gets lanes every third row only (a 6x6:
+--     18 lanes, not 24); once dug, it's scanned from as few spots as
+--     cover its walls, floor and ceiling: a 6x6 from its middle, twice
+--     along 24 blocks, reaching 5 past both walls, the floor and the
+--     ceiling; lava behind a wall block in a row with no lane is sealed,
+--     waterlogged lichen in another is replaced.  A tunnel 24 wide takes
+--     two scans across, their spare reach out past the walls
+local function surveyWorld(w, h, len, extra)
+    local st = stock(8, 128, 32)
+    st[#st + 1] = { name = SCANNER, count = 1 }
+    setup(st)
+    extra()
+    startAt(); Mine.inv, Mine.files = {}, {}
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
+    FUEL, DRY, SCANS = 6000, 0, 0
+    run(tostring(w), tostring(h), tostring(len))
+end
+surveyWorld(6, 6, 24, function()
+    set(-5, 2, 12, ore("minecraft:iron_ore"))                  -- 5 out of the left wall
+    set(10, 3, 12, ore("minecraft:iron_ore"))                  -- 5 out of the right wall
+    set(2, 10, 12, ore("minecraft:iron_ore"))                  -- 5 over the ceiling
+    set(3, -5, 12, ore("minecraft:iron_ore"))                  -- 5 under the floor
+    set(-1, 1, 6, { name = "minecraft:lava", level = 0 })      -- behind the left wall, row 1: no lane
+    set(6, 4, 18, { name = "minecraft:glow_lichen", waterlogged = true })   -- the right wall, row 4
+end)
+check("6x6 with a scanner: 18 lanes, every third row in every column", logHas("18 lanes"))
+check("scanned twice, from the middle", SCANS == 2, SCANS .. " scans")
+check("ore 5 out past both walls, over the ceiling and under the floor fetched",
+    oreGone(-5, 2, 12) and oreGone(10, 3, 12) and oreGone(2, 10, 12) and oreGone(3, -5, 12))
+checkLava(24)
+check("the waterlogged lichen in a row with no lane replaced", (get(6, 4, 18) or {}).name ~= "minecraft:glow_lichen"
+    and get(6, 4, 18) ~= nil, tostring((get(6, 4, 18) or {}).name))
+check("tunnel clear", leftIn(0, 5, 0, 5, 1, 24) == 0, leftIn(0, 5, 0, 5, 1, 24) .. " blocks left")
+checkFloor(0, 5, -1, 1, 24)
+checkLight(0, 5, -1, 1, 24)
+check("back at the start", atStart())
+
+surveyWorld(24, 3, 16, function()
+    set(-5, 1, 8, ore("minecraft:iron_ore"))                   -- 5 out of the left wall
+    set(28, 1, 8, ore("minecraft:iron_ore"))                   -- 5 out of the right wall
+    set(11, -4, 8, ore("minecraft:iron_ore"))                  -- under the middle of the floor
+end)
+check("24 wide: two scans across it", SCANS == 2, SCANS .. " scans")
+check("their spare reach past the walls: ore 5 out of each fetched, and under the middle",
+    oreGone(-5, 1, 8) and oreGone(28, 1, 8) and oreGone(11, -4, 8))
+checkFloor(0, 23, -1, 1, 16)
+check("back at the start", atStart())
