@@ -7,8 +7,9 @@
 -- split and reads back the same; out of space is an error, not a half
 -- file; a fifth drive grows the pool; a disk with files waits for add();
 -- a disk taken out takes its files, and a split file with a part on it
--- says so; copy and move in and out; fs.find; and the paths outside
--- /jbod untouched.
+-- says so (its last part too, and its first); copy and move in and out;
+-- fs.find; Tab completion in the pool; and the paths outside /jbod
+-- untouched.
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -247,6 +248,11 @@ check("copy and move out of the pool and into it", read("/a-copy.txt") == "one\n
     and not fs.exists("/jbod/docs/x.txt") and read("/jbod/docs/x2.txt") == "x")
 local found = table.concat(fs.find("jbod/docs/*.txt"), " ")
 check("fs.find in the pool", found == "jbod/docs/x2.txt jbod/docs/y.txt", found)
+local function comp(...) return table.concat(fs.complete(...), " ") end
+local c1, c2, c3, c4 = comp("/jb", "", true, true), comp("jbod/do", "", true, true),
+    comp("docs/", "jbod", true, false), comp("", "jbod/docs", { include_dirs = false })
+check("Tab completion in the pool: /jbod, its folders, their files", c1 == "od/ od" and c2 == "cs/ cs"
+    and c3 == "x2.txt y.txt" and c4 == "../ x2.txt y.txt", c1 .. " | " .. c2 .. " | " .. c3 .. " | " .. c4)
 check("paths outside /jbod as they were", fs.getDrive("/a-copy.txt") == "hdd" and fs.getDrive("/jbod/a.txt") == "jbod"
     and fs.getFreeSpace("/") < 1000000)
 
@@ -267,6 +273,34 @@ check("a disk with part of a split file taken out: opening it says so", hb == ni
 DRIVES[#DRIVES + 1] = gone
 tick()
 check("put back: it reads again", read("/jbod/big.bin") == BIG)
+-- the disk with its last part, and the one with its first
+local function diskWith(want)
+    for _, d in ipairs(DRIVES) do
+        local dir = d.root .. "/.jbod.parts"
+        if fs.isDir(dir) then
+            for _, n in ipairs(fs.list(dir)) do
+                local i, of = n:match("^big%.bin%.(%d+)%-(%d+)$")
+                if i and want(tonumber(i), tonumber(of)) then return d end
+            end
+        end
+    end
+end
+local lastDisk = diskWith(function(i, of) return i == of and i > 1 end)
+gone = removeDrive(lastDisk.name)
+tick()
+hb, herr = fs.open("/jbod/big.bin", "r")
+check("its last part's disk taken out: opening it says so (not a short file)", hb == nil and tostring(herr):find("disk that's out"),
+    tostring(herr))
+DRIVES[#DRIVES + 1] = gone
+tick()
+gone = removeDrive(diskWith(function(i) return i == 1 end).name)
+tick()
+hb, herr = fs.open("/jbod/big.bin", "r")
+check("its first part's disk taken out: that says so too", hb == nil and tostring(herr):find("disk that's out"),
+    tostring(herr))
+DRIVES[#DRIVES + 1] = gone
+tick()
+check("all back: it reads again", read("/jbod/big.bin") == BIG)
 
 local freeBefore = fs.getFreeSpace("/jbod")
 fs.delete("/jbod/big.bin")
@@ -277,6 +311,22 @@ end
 check("deleting the split file deletes every part, and frees the space",
     not fs.exists("/jbod/big.bin") and leftParts == 0 and fs.getFreeSpace("/jbod") >= freeBefore + 300000,
     leftParts .. " parts left, " .. kb(fs.getFreeSpace("/jbod") - freeBefore) .. " freed")
+-- in two parts (as in game: the second's disk out, nothing else said there were two)
+local TWO = string.rep("t", 200000)
+write("/jbod/two.bin", TWO)
+local twoDisk
+for _, d in ipairs(DRIVES) do
+    if fs.exists(d.root .. "/.jbod.parts/two.bin.2-2") then twoDisk = d end
+end
+gone = removeDrive(twoDisk.name)
+tick()
+hb, herr = fs.open("/jbod/two.bin", "r")
+check("a file in two parts, the second's disk out: opening it says so (not the first part alone)",
+    hb == nil and tostring(herr):find("disk that's out"), tostring(herr))
+DRIVES[#DRIVES + 1] = gone
+tick()
+check("and back: it reads whole", read("/jbod/two.bin") == TWO)
+fs.delete("/jbod/two.bin")
 local apnd = fs.open("/jbod/a.txt", "a")
 apnd.write("three\n")
 apnd.close()

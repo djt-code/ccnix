@@ -365,6 +365,19 @@ W:file("x.txt", "x")
 r = W:run("rmdir", "x.txt", "nope")
 check("rmdir: a file, a missing one", r.status == 1 and r.err[1] == "rmdir: x.txt: Not a directory"
     and r.err[2] == "rmdir: nope: No such file or directory" and W:read("x.txt") == "x", show(r.errText))
+r = W:run("mkdir", "m1", "m2/sub")
+check("mkdir: one made; one whose parent isn't there isn't (status 1)", W.fs.isDir("m1") and not W.fs.exists("m2")
+    and r.status == 1 and r.err[1] == "mkdir: m2/sub: No such file or directory", show(r.errText))
+r = W:run("mkdir", "m1", "x.txt")
+check("mkdir: one that's there already, a folder or a file: File exists", r.status == 1
+    and r.err[1] == "mkdir: m1: File exists" and r.err[2] == "mkdir: x.txt: File exists", show(r.errText))
+r = W:run("mkdir", "-p", "-m", "755", "m2/a/b", "m1")
+check("mkdir -p: the parents too, and nothing said of one that's there (-m taken)", r.status == 0 and #r.err == 0
+    and W.fs.isDir("m2/a/b") and not W.fs.exists("-p") and not W.fs.exists("755"), show(r.errText))
+r = W:run("mkdir", "-p", "x.txt/in", "/rom/new")
+check("mkdir -p: a file on the way, a read-only place", r.status == 1 and r.err[1] == "mkdir: x.txt/in: Not a directory"
+    and r.err[2] == "mkdir: /rom/new: Permission denied" and not W.fs.exists("rom/new"), show(r.errText))
+W.fs.delete("m1") W.fs.delete("m2")
 W:file("deep/a/b/c.txt", "c") W:file("deep/d.txt", "d")
 r = W:run("rm", "-rf", "/deep", "/not-there")
 check("rm -rf /dir: the directory and everything in it, no questions, nothing said of what's missing",

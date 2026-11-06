@@ -40,6 +40,7 @@ Anywhere (bin/):
   kill: signal processes
   logger: put messages in the system log (POSIX logger, with BSD's options)
   ls: list directory contents (POSIX ls, with the GNU options in everyday use)
+  mkdir: make directories (POSIX mkdir)
   more: show files a screenful at a time (POSIX more, a subset)
   nc: netcat: TCP connections and UDP datagrams over the network stack
   netstat: the network's sockets, routes and interfaces

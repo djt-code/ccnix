@@ -20,8 +20,9 @@
 -- checkout there's one layer: the checkout.
 --
 -- It puts bin/ (and turtle/ on a turtle, pc/ on a computer) on the shell's
--- path after CraftOS's own, help/ on the help path, ls on ccnix's ls (an
--- alias, as CraftOS's is: `alias ls list` brings that back), and brings
+-- path after CraftOS's own, help/ on the help path, ls, rm and mkdir on
+-- ccnix's (aliases, as CraftOS's ls and rm are: `alias ls list` brings
+-- that back), and brings
 -- the network up while net.boot is on.  Programs find their libraries
 -- through _G.ccnix.
 --
@@ -116,8 +117,9 @@ if not ending then
     shell.setPath(path)
     help.setPath(helpPath)
     -- CraftOS's ls and rm are aliases (for list and delete), and an alias
-    -- wins over the path: ours take their place
-    for _, name in ipairs({ "ls", "rm" }) do
+    -- wins over the path: ours take their place; and mkdir's, ahead of it
+    -- on the path
+    for _, name in ipairs({ "ls", "rm", "mkdir" }) do
         local prog = find("bin/" .. name .. ".lua")
         if prog then shell.setAlias(name, prog) end
     end

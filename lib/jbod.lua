@@ -20,7 +20,8 @@
 --  * A file is on one member, the one with the most room when it was
 --    written, or, too big for any one, split across several: the first
 --    part at its path on one member, the rest in .jbod.parts/ on the
---    others.  A file is written when it's closed (until then it's held in
+--    others (and beside the first, an empty file there that says how many
+--    parts there are, so a missing last one is missed).  A file is written when it's closed (until then it's held in
 --    memory), so it goes where it fits as a whole.
 --  * Free space and capacity are the members' added up.  CC charges any
 --    file or folder at least 500 bytes, so many small files take more.
@@ -153,8 +154,9 @@ function J.new(base, opts)
         return false
     end
 
-    -- A split file's later parts, in order ({ path on disk }), and whether
-    -- they're all there (false: one is on a disk that's out).
+    -- A split file's later parts, in order ({ path on disk }), whether
+    -- they're all there (false: one is on a disk that's out), and the
+    -- count beside the first part (an empty part 1), if it's in.
     local function partsOf(rel)
         local prefix, byN, of = escaped(rel) .. ".", {}, 1
         for _, m in ipairs(P.members()) do
@@ -175,7 +177,7 @@ function J.new(base, opts)
         for n = 2, of do
             if byN[n] then out[#out + 1] = byN[n] else whole = false end
         end
-        return out, whole
+        return out, whole, byN[1]
     end
 
     local function readFile(path)
@@ -189,7 +191,11 @@ function J.new(base, opts)
     -- The file at rel, nil if there's none; false if part of it is missing.
     local function contents(rel)
         local m = holder(rel)
-        if not m then return nil end
+        if not m then
+            local parts, _, count = partsOf(rel)
+            if count or #parts > 0 then return false end      -- (its first part's disk is out)
+            return nil
+        end
         local parts, whole = partsOf(rel)
         if not whole then return false end
         local t = { readFile(real(m, rel)) or "" }
@@ -218,7 +224,9 @@ function J.new(base, opts)
             local p = real(m, rel)
             if base.exists(p) and not base.isDir(p) then base.delete(p) end
         end
-        for _, p in ipairs(partsOf(rel)) do base.delete(p) end
+        local parts, _, count = partsOf(rel)
+        for _, p in ipairs(parts) do base.delete(p) end
+        if count then base.delete(count) end
     end
 
     local function writeOn(path, data)
@@ -242,11 +250,11 @@ function J.new(base, opts)
             writeOn(real(first, rel), data)
             return
         end
-        -- split: how much each member can take
+        -- split: how much each member can take (the first: its folders and the count too)
         local room, total = {}, 0
         for i, m in ipairs(list) do
-            local cost = SLACK + (i == 1 and missingDirs(m, rel) * MIN
-                or (base.isDir(base.combine(m.root, PARTS)) and 0 or MIN))
+            local cost = SLACK + (i == 1 and (missingDirs(m, rel) + 1) * MIN or 0)
+                + (base.isDir(base.combine(m.root, PARTS)) and 0 or MIN)
             room[i] = math.max(0, free(m) - cost)
             total = total + room[i]
         end
@@ -260,9 +268,11 @@ function J.new(base, opts)
             end
         end
         for n, pc in ipairs(pieces) do
-            if n == 1 then writeOn(real(pc.m, rel), pc.data)
+            base.makeDir(base.combine(pc.m.root, PARTS))
+            if n == 1 then
+                writeOn(real(pc.m, rel), pc.data)
+                writeOn(base.combine(pc.m.root, PARTS .. "/" .. partName(rel, 1, #pieces)), "")
             else
-                base.makeDir(base.combine(pc.m.root, PARTS))
                 writeOn(base.combine(pc.m.root, PARTS .. "/" .. partName(rel, n, #pieces)), pc.data)
             end
         end
@@ -537,6 +547,40 @@ function J.install(fsTable, opts)
         if inside(from) == "" then error("/" .. mount .. ": Access denied", 0) end
         copyTree(from, to)
         fsTable.delete(from)
+    end
+
+    -- completion (the shell's Tab): CraftOS's fs.complete works through
+    -- the fs it was loaded with, not this table, so it never sees the
+    -- pool; this is it again, through this table
+    function fsTable.complete(path, location, files, dirs)
+        local hidden
+        if type(files) == "table" then
+            files, dirs, hidden = files.include_files, files.include_dirs, files.include_hidden
+        end
+        files, dirs, hidden = files ~= false, dirs ~= false, hidden ~= false
+        local dir, rest = location, path
+        if path:match("^[/\\]") then dir, rest = "", path:sub(2) end
+        local head, name = rest:match("^(.*)[/\\]([^/\\]*)$")
+        if head then dir = base.combine(dir, (head:gsub("\\", "/"))) else name = rest end
+        if not fsTable.isDir(dir) then return {} end
+        local out = {}
+        if dirs and path == "" then out[#out + 1] = "." end
+        if base.combine(dir) ~= "" then
+            if path == "" then out[#out + 1] = dirs and ".." or "../"
+            elseif path == "." then out[#out + 1] = dirs and "." or "./" end
+        end
+        for _, f in ipairs(fsTable.list(dir)) do
+            if f:sub(1, #name) == name and (hidden or f:sub(1, 1) ~= "." or name:sub(1, 1) == ".") then
+                local r = f:sub(#name + 1)
+                if fsTable.isDir(base.combine(dir, f)) then
+                    out[#out + 1] = r .. "/"
+                    if dirs and #r > 0 then out[#out + 1] = r end
+                elseif files and #r > 0 then
+                    out[#out + 1] = r
+                end
+            end
+        end
+        return out
     end
 
     -- find: the pool's matches as well as the disk's

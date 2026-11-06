@@ -36,7 +36,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `bin/cat.lua`, `bin/more.lua` | `cat` writes files out whole (POSIX `cat`); `more` shows them a screenful at a time in the pager: `more claude.log`. |
 | `lib/pager.lua` | Library: a `less`-style viewer for `more`, `git log` and `claude`. Space/PgDn/`f` and `b`/PgUp page (11 lines on a turtle), the mouse wheel 3 lines, `j`/`k`/arrows/Enter go a line, `d`/`u` half a page, `g`/`G`/Home/End top and bottom, `h`/`l`/arrows 8 columns sideways (lines aren't wrapped), `0`/`$` left edge and far right, `q` back to the shell. The bottom line shows where you are. Text that fits is just printed. A program that colours its output can hand it lines as `{ text, fg }` (`fg` one blit digit per character, as `term.blit` takes them), and on a colour screen they're shown in those colours. |
 | `bin/echo.lua` | Prints its arguments, or writes them to a file with `>` (replace) or `>>` (append), which the CraftOS shell can't do itself. The shell strips double quotes, so use single quotes for Lua strings. |
-| POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`: the basic options of each, for the commands CraftOS lacks (and `ls` and `rm`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
+| POSIX utilities (`bin/`) | `ls` `head` `tail` `grep` `wc` `sort` `uniq` `cut` `tr` `tee` `od` `strings` `printf` `cmp` `diff` `find` `du` `df` `touch` `mkdir` `rm` `rmdir` `pwd` `basename` `dirname` `test`/`[` `expr` `true` `false` `sleep` `xargs` `env`, plus `which` and `seq`: the basic options of each, for the commands CraftOS lacks (and `ls`, `rm` and `mkdir`, which replace CraftOS's). `lib/cu.lua` is their shared option parser and exit status; `lib/regex.lua` the POSIX regular expressions behind `grep` and `expr`. See [Utilities](#utilities). |
 | `bin/ccsh.lua` | ccsh, a POSIX-style shell that runs inside the stock one: pipes, redirects, `&&`/`\|\|`/`;`, quoting, variables and an environment for programs, globs, `$(...)`, background jobs with `fg`/`bg`/Ctrl+Z (under `init`, programs as processes and jobs as process groups), `/.profile`, and history kept in `/.ccsh_history`. See [ccsh](#ccsh). |
 | `turtle/claude.lua` | Lets Claude drive the turtle: you type a goal, the model writes Lua that runs on the turtle (with `turtlelib` in scope), sees what came of it, and carries on until it's done or asks you something. |
 | `turtle/autocompost.lua` | A stationary turtle on top of a composter: composts everything compostable in its inventory, forever. |
@@ -340,6 +340,7 @@ departs from POSIX.
 | `touch` | `-a -c -m -r -t -d` |
 | `rm` | `-f -i -r -R -d` (a directory only with `-r` or `-d`; `rm -rf dir` asks nothing) |
 | `rmdir` | `-p` |
+| `mkdir` | `-p -m` (`-m` is taken and ignored: no permissions) |
 | `pwd` | `-L -P` |
 | `basename`, `dirname` | none |
 | `test`, `[` | `-e -f -d -s -r -w -x -n -z -t -nt -ot -ef`, `= != < >`, `-eq -ne -lt -le -gt -ge`, `! -a -o ( )` |
@@ -376,14 +377,17 @@ What CraftOS can't do:
   the prompt. [ccsh](#ccsh) adds all of these.
 - The ROM's programs come first on the path, so `cp`, `mv`, `mkdir`,
   `cd`, `clear`, `edit`, `type`, `set` and `alias` are always the
-  CraftOS ones; there is no POSIX version of those here. `ls` and `rm` are
-  the exceptions: CraftOS's are only aliases (for `list`, which shows
-  hidden files only with the setting `list.show_hidden`, and for `delete`,
-  which removes a directory without asking), and aliases come before the
-  path, so ccnix's boot makes them aliases for `bin/ls` and `bin/rm`.
-  `dir` and `delete` stay CraftOS's; `alias ls list` or `alias rm delete`
-  brings the old one back until the next boot. `rmdir` is ccnix's (CraftOS
-  has none).
+  CraftOS ones; there is no POSIX version of those here. `ls`, `rm` and
+  `mkdir` are the exceptions: CraftOS's `ls` and `rm` are only aliases
+  (for `list`, which shows hidden files only with the setting
+  `list.show_hidden`, and for `delete`, which removes a directory without
+  asking), and its `mkdir` comes first on the path (and takes no options:
+  `mkdir -p a` makes a folder called `-p`), so ccnix's boot makes all
+  three aliases for `bin/ls`, `bin/rm` and `bin/mkdir`. `dir` and
+  `delete` stay CraftOS's; `alias ls list`, `alias rm delete` or
+  `alias mkdir` (no program: the alias goes) brings the old one back
+  until the next boot. `rmdir`
+  is ccnix's (CraftOS has none).
 - `ls -l` has no owner, group or link-count columns (CraftOS has none):
   the mode (`d`, and no `w` on read-only files such as `/rom`), the size,
   the modification time and the name.
@@ -1551,14 +1555,17 @@ drive's modem to connect it (`peripherals` lists them as `drive_0`,
   it's on any disk, and lists what's in it on all of them. A file goes on
   the disk with the most room when it's written; one too big for any
   single disk is split across several (the first part at its path, the
-  rest in `.jbod.parts/` on the others). A file is written when it's
+  rest in `.jbod.parts/` on the others, and beside the first an empty
+  file there that says how many parts there are, so a missing last part
+  is noticed). A file is written when it's
   closed, held in memory until then, so it goes where it fits as a whole;
   writing more than the pool has room for is an "Out of space" error with
   nothing half written.
 - **How it works:** ComputerCraft can't mount a file system from Lua, so
   `fileserver mount` changes the computer's `fs` functions in place: a
   path under `/jbod` goes to the pool, and every other path where it always
-  did. Every program, `io`, `edit` and tab completion see it, until the
+  did. Every program, `io`, `edit` and Tab completion (`fs.complete`, which keeps its own copy of
+  `fs`, so the pool brings its own) see it, until the
   computer reboots; `fileserver startup` adds the mount to startup.
 - **Taking a disk out** takes its files with it until it's back, and a
   split file with a part on it says so when opened. The disk is still an

@@ -1,0 +1,5 @@
+mkdir: make directories (POSIX mkdir)
+
+  mkdir [-p] [-m mode] dir...
+
+Makes each directory, whose parent must be there already, and which mustn't be.  -p makes the parents too, as needed, and says nothing of one that's there already.  -m is taken and ignored: CraftOS has no permissions.  Status 1 if any couldn't be made.  (CraftOS's mkdir makes the parents always and takes no options: `mkdir -p a` makes a folder called -p.)
