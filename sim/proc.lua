@@ -843,3 +843,8 @@ check("the next boot: the panic logged at crit (kern), the report moved to .1",
         and r3.msg == "the last boot ended in a panic: kernel bug (" .. P.PANIC .. ".1)"
         and FILES[P.PANIC] == nil and FILES[P.PANIC .. ".1"] == report, r3 and r3.msg)
 check("... and only once", K3.lastPanic() == nil and #K3.held == 1)
+local MIN = 60 * 1000
+local rows = { K3.panicsInRow(0), K3.panicsInRow(5 * MIN), K3.panicsInRow(9 * MIN), K3.panicsInRow(18 * MIN),
+    K3.panicsInRow(40 * MIN) }
+check("panics in a row: counted while each is within 10 minutes of the last; a longer gap starts again",
+    table.concat(rows, " ") == "1 2 3 4 1" and P.PANIC_MOST == 3, table.concat(rows, " "))

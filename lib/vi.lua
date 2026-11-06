@@ -547,7 +547,7 @@ function render()
         local left = msg or (mode == "insert" and "-- INSERT --") or (mode == "replace" and "-- REPLACE --") or ""
         local right = ruler()
         if showcmd ~= "" then right = showcmd .. "  " .. right end
-        if #right >= w then right = "" end
+        if #right >= w or (msg and #msg + #right + 1 > w) then right = "" end    -- a long message gets the line
         local room = w - #right - (right ~= "" and 1 or 0)
         left = left:sub(1, room)
         local line = left .. string.rep(" ", w - #left - #right) .. right
@@ -1374,7 +1374,9 @@ function doCommand(k, n, reg)
         withChange(insertText, pasted or "")
         clampCursor()
     elseif k == "<C-c>" then
-        say("Type  :q!  and press Enter to abandon all changes and exit vi")
+        -- Ctrl+C is Esc; in normal mode it also says how to get out
+        if modified() then say(":wq saves and exits, :q! exits unsaved")
+        else say("Type :q and Enter to exit") end
     elseif k == "<Esc>" or k == "<C-l>" then
         return
     else
@@ -1952,7 +1954,7 @@ function exRun(line)
         shiftLines(a1, a2, name == ">" and 1 or -1, times)
     elseif is(name, "move", 1) or is(name, "copy", 2) or name == "t" then
         local dest = address(scan.new(arg))
-        if not dest then fail("E14: Invalid address") end
+        if not dest or dest < 0 or dest > #lines then fail("E14: Invalid address") end
         local chunk = {}
         for y = a1, a2 do chunk[#chunk + 1] = lines[y] end
         if name:sub(1, 1) == "m" then

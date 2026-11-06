@@ -106,6 +106,8 @@ P.SIGNALS = { HUP = 1, INT = 2, KILL = 9, TERM = 15, CONT = 18, STOP = 19, TSTP 
 P.EXITS = 32                    -- processes' ends kept (K.exited)
 P.TRACE = 16                    -- lines of a crash's traceback kept
 P.PANIC = "/var/log/panic"      -- what init knew when it failed
+P.PANIC_WINDOW = 10 * 60 * 1000 -- panics closer together than this (ms) are in a row
+P.PANIC_MOST = 3                -- after this many in a row, init stops rebooting
 
 local rawResume = coroutine.resume      -- (while a process runs, coroutine.resume is watched: see resume)
 
@@ -962,6 +964,30 @@ function P.new(o)
         h.write(text)
         h.close()
         return P.PANIC
+    end
+
+    -- Count this panic (at time now, in ms) with the ones just before it:
+    -- each within P.PANIC_WINDOW of the one before is in the same row.
+    -- The count is kept in P.PANIC .. ".count", two lines: how many, and
+    -- when the last was.  Returns how many in a row, this one included.
+    function K.panicsInRow(now)
+        if not fsT then return 1 end
+        local countFile = P.PANIC .. ".count"
+        local inRow = 1
+        local h = fsT.exists(countFile) and fsT.open(countFile, "r")
+        if h then
+            local saved = splitLines(h.readAll() or "")
+            h.close()
+            local n, at = tonumber(saved[1] or ""), tonumber(saved[2] or "")
+            if n and at and now - at < P.PANIC_WINDOW then inRow = n + 1 end
+        end
+        pcall(fsT.makeDir, fsT.getDir(countFile))
+        h = fsT.open(countFile, "w")
+        if h then
+            h.write(inRow .. "\n" .. now .. "\n")
+            h.close()
+        end
+        return inRow
     end
 
     -- At boot: if the last one ended in a panic (P.PANIC is there), log

@@ -322,6 +322,10 @@ check("ccsh: Up brings the line before back", r.out:find("/$ \none\n/$ \none\n",
 r = typed("waitT<CR><C-c>echo $?<CR><C-d>")
 check("ccsh: Ctrl+C while a command runs ends it as Ctrl+T does, status 130",
     r.out:find("130\n", 1, true) ~= nil, show(r.out) .. " " .. show(r.errText))
+sw:file("ccnix/bin/adventure.lua", [[local _, k repeat _, k = os.pullEvent("key") until k == keys.c os.pullEvent("char") print("got c")]])
+r = typed("adventure<CR><C-c>echo $?<CR><C-d>")
+check("ccsh: a program that uses Ctrl+C as a key (edit, lua, vi, telnet...) gets it, and isn't ended",
+    r.out:find("got c\n", 1, true) ~= nil and r.out:find("\n0\n", 1, true) ~= nil, show(r.out) .. " " .. show(r.errText))
 r = typed("echo 'a<CR>b<C-c>echo $?<CR><C-d>")
 check("ccsh: Ctrl+C at the > of a line going on drops it all", r.out:find("130\n", 1, true) ~= nil
     and r.out:find("a\nb", 1, true) == nil, show(r.out))

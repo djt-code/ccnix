@@ -43,8 +43,10 @@
 -- processes, the log's messages not yet filed), then reboots after
 -- init.panic seconds (10 unless set; holding Ctrl+T meanwhile shuts the
 -- computer down instead; 0: no wait, it shuts down at once, as it did
--- before).  The next boot logs the panic at crit and moves the report to
--- /var/log/panic.1.
+-- before).  After three panics in a row (each within ten minutes of the
+-- last) it shuts down instead, so a fault that comes back every boot
+-- doesn't reboot it for ever.  The next boot logs the panic at crit and
+-- moves the report to /var/log/panic.1.
 
 local args = { ... }
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
@@ -131,6 +133,13 @@ local wrote, why = K.writePanic(err, type(failure) == "table" and failure.trace 
 printError("init panicked: " .. tostring(err))
 printError(wrote and ("(what it knew is in " .. wrote .. ")") or ("(" .. P.PANIC .. " not written: " .. tostring(why) .. ")"))
 local delay = tonumber(settings.get("init.panic")) or 10
+-- (a fault that comes back every boot stops after a few, not a reboot
+-- every few seconds for ever)
+local inRow = K.panicsInRow(os.epoch("utc"))
+if delay > 0 and inRow > P.PANIC_MOST then
+    printError("init has panicked " .. inRow .. " times in a row: not rebooting again")
+    delay = 0
+end
 if delay <= 0 then error(err, 0) end
 print("Rebooting in " .. delay .. " s (hold Ctrl+T to shut down instead; the setting init.panic is the wait)")
 sleep(delay)

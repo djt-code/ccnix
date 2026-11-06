@@ -128,8 +128,10 @@
 -- Ctrl+S held shuts down).  Leave with exit, Ctrl+D, or by holding
 -- Ctrl+T at the prompt; with jobs left, the first try only warns, and the
 -- jobs end with the shell.  Ctrl+C or Ctrl+T while a command runs stops
--- it, and the rest of the line, with status 130 (a program that wants
--- Ctrl+C as a key, as vi and telnet do, gets it under init, below).  A
+-- it, and the rest of the line, with status 130.  Programs that use Ctrl+C
+-- as a key get it as a key instead: CraftOS's edit (so nano), paint, lua,
+-- shell, multishell and games, which Ctrl+T still stops, and ccnix's vi,
+-- vim and telnet (and, under init, any program that ignores INT).  A
 -- script or -c waits for its background jobs before it ends: they can't
 -- outlive it.
 --
@@ -1414,10 +1416,11 @@ local function dispatch(top, ev)
             if ev[2] == keys.leftCtrl or ev[2] == keys.rightCtrl then ctrlDown = down
             elseif ev[2] == keys.leftAlt or ev[2] == keys.rightAlt then altDown = down end
             -- a command line running in front: Ctrl+Z stops it, Ctrl+C
-            -- ends it as Ctrl+T does (Ctrl with Alt is AltGr, typing)
+            -- ends it as Ctrl+T does, unless it's a program that uses
+            -- Ctrl+C itself (Ctrl with Alt is AltGr, typing)
             if jobControl and ctrlDown and not altDown and down and j.text then
                 if ev[2] == keys.z then dropChar = "z"; stop(j); return end
-                if ev[2] == keys.c then dropChar = "c"; ev = table.pack("terminate") end
+                if ev[2] == keys.c and not j.keepsCtrlC then dropChar = "c"; ev = table.pack("terminate") end
             end
         end
         if ev[1] == "terminate" and j.req then signal(j) else deliver(j, ev) end
@@ -2004,6 +2007,21 @@ end
 -- prompt), in front of the terminal while its job is.  Returns what
 -- shell.execute did, whether Ctrl+T reached it, and how it ended ("ok",
 -- "killed", an error), as drive's first two.
+-- Programs that use Ctrl+C as a key, so it isn't made an interrupt for
+-- them: CraftOS's interactive ones (edit, which nano is; paint; the lua
+-- prompt; shells and games), which stop on Ctrl+T as they always have,
+-- and ccnix's vi, vim and telnet (Esc, and the far end's Ctrl+C).
+local KEEPS_CTRL_C = { edit = true, paint = true, lua = true, shell = true, multishell = true,
+    fg = true, bg = true, adventure = true, worm = true, redirection = true, chat = true,
+    vi = true, vim = true, telnet = true }
+local function keepsCtrlC(name)
+    local path = name and shell.resolveProgram(name)
+    if not path then return false end
+    local base = fs.getName(path)
+    if base:sub(-4) == ".lua" then base = base:sub(1, -5) end
+    return KEEPS_CTRL_C[base] == true
+end
+
 local function spawnCommand(ctx, argv, env)
     local j = currentJob
     local res = {}
@@ -2013,6 +2031,7 @@ local function spawnCommand(ctx, argv, env)
         enter = function() return enter(ctx) end,
         leave = function(_, o) leave(ctx, o) end,
         fn = function()
+            if keepsCtrlC(argv[1]) then kern.ignore("INT") end
             _G.POSIX_STATUS = nil
             local ok, r = pcall(shell.execute, table.unpack(argv))
             if not ok then printError(tostring(r)) end
@@ -2123,7 +2142,11 @@ local function runCommand(cmd, inText, out)
     _G.POSIX_STATUS = nil
     local ok, terminated, how
     if procs then ok, terminated, how = spawnCommand(ctx, argv, envT)
-    else ok, terminated = drive(ctx, shell.execute, table.unpack(argv)) end
+    else
+        if currentJob then currentJob.keepsCtrlC = keepsCtrlC(argv[1]) end
+        ok, terminated = drive(ctx, shell.execute, table.unpack(argv))
+        if currentJob then currentJob.keepsCtrlC = nil end
+    end
     local st = _G.POSIX_STATUS
     if how == "killed" then
         st = 137

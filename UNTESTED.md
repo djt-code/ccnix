@@ -7,6 +7,12 @@ section.
 
 ## Editors
 
+- **Ctrl+C in `vi`** (0.29.1). It's Esc and never quits: in insert mode it
+  leaves it, on a `:` line it drops the line. In normal mode the bottom
+  line says "Type :q and Enter to exit" on a saved file, ":wq saves and
+  exits, :q! exits unsaved" after a change, and the whole hint fits on a
+  turtle (39 columns). Over telnet Ctrl+C does the same.
+
 - **vi and vim parse with lib/scan** (0.27.1, no change meant). `vim` on a
   big Lua file (lib/vi.lua, about 2,000 lines): `G`, then scroll back up;
   the colours look as before (keywords, strings, `--[[ ]]` comments, `0x1F`
@@ -37,6 +43,13 @@ section.
 - **`nano`** (0.25.0) opens CraftOS's `edit`.
 
 ## ccsh
+
+- **Ctrl+C left to programs that use it** (0.29.1). In ccsh, with and
+  without init: `nano notes` (CraftOS's edit), type a line, press Ctrl+C:
+  edit stays open, nothing lost (Ctrl+T still ends it). The same in
+  `lua`, `paint x` and `vi`; in `telnet <host>` Ctrl+C reaches the far
+  side's program (a `ping` there stops), not the local telnet. `sleep
+  30`, `ping <host>` and `tail -f` still stop on Ctrl+C.
 
 - **The line editor at the prompt** (0.28.0, lib/readline). On a real
   computer try each key: Ctrl+A/E, Ctrl+B/F, Home/End and the arrows;
@@ -82,6 +95,13 @@ section.
   not found"; plain `unset f` leaves the function.
 
 ## Processes and services
+
+- **Panics in a row stop rebooting** (0.29.1). With init.boot on and a
+  fault init hits at every boot (a temporary `error()` near the top of
+  `K.run`), it reboots after each of the first three panics, then the
+  fourth shuts the computer down with "panicked 4 times in a row" on the
+  screen; `/var/log/panic.count` holds the count. Remove the fault, boot:
+  no panic; a panic more than ten minutes later counts from 1 again.
 
 - **A crashing service fails with a traceback** (0.26.0). `service add boom
   lua -e "error('x')"` (or a script with a runtime error) shows `failed:
@@ -135,7 +155,8 @@ section.
   lookup ask again.
 - **`nc -z`** (0.29.0). `nc -z -v <host> 20-25` against telnetd: open,
   refused, and timed out (with `-w`) for a host that's down; the far side's
-  telnetd shows no error for the empty connection.
+  telnetd shows no error for the empty connection. `nc -w 3 <host> 23`
+  (no `-z`) to a host that's down gives up after 3 s.
 
 - **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,
   `ip neigh add <addr> lladdr <mac>` for a host on its network, with the

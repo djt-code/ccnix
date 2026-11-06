@@ -222,6 +222,8 @@ same(":g/pat/d", edit("keep\ndrop 1\nkeep\ndrop 2\n", ":g/drop/d<CR>:wq<CR>"), "
 same(":v/pat/d", edit("keep\ndrop\n", ":v/keep/d<CR>:wq<CR>"), "keep\n")
 same(":2,3d and :1 then dd", edit("1\n2\n3\n4\n", ":2,3d<CR>:1<CR>dd:wq<CR>"), "4\n")
 same(":m and :t", edit("a\nb\nc\n", ":1m$<CR>:1t0<CR>:wq<CR>"), "b\nb\nc\na\n")
+same(":m and :t past the last line are refused (E14), the text left as it was",
+    edit("a\nb\n", ":1m9<CR>:1t-5<CR>:wq<CR>"), "a\nb\n")
 same(":3 and 2G and G go to lines", edit("1\n2\n3\n", ":3<CR>x2GxGx:wq<CR>"), "1\n\n\n")
 same("& repeats the last :s", edit("aa\naa\n", ":s/a/b/<CR>j&:wq<CR>"), "ba\nba\n")
 same("marks: ma, then d'a", edit("1\n2\n3\n4\n", "jmajjd'a:wq<CR>"), "1\n")
@@ -239,6 +241,13 @@ same("a new file is created on :w", edit(nil, "inew<Esc>:w<CR>:q<CR>"), "new\n")
 local ro, e3 = edit("r\n", "x:w<CR>:q!<CR>", { name = "rom/x" })
 check("a read-only file isn't written", ro == "r\n" and not e3 and bottomHas("E45"), e3)
 same("Ctrl+T (terminate) doesn't quit", edit("a\n", "<Term>x:wq<CR>"), "\n")
+same("Ctrl+C is Esc: it leaves insert mode and doesn't quit", edit("a\n", "Ab<C-c>Ac<C-c>:wq<CR>"), "abc\n")
+local kept, e5 = edit("a\n", "x:wq<C-c>:q!<CR>")
+check("Ctrl+C on the command line drops it", kept == "a\n" and not e5, show(kept))
+edit("a\n", "<C-c>:q<CR>")
+check("Ctrl+C in normal mode on a saved file says :q exits", bottomHas("^Type :q and Enter to exit") ~= nil)
+edit("a\n", "x<C-c>:q!<CR>")
+check("and with unsaved changes, :wq or :q!", bottomHas("^:wq saves and exits, :q! exits unsaved") ~= nil)
 same("a mistake in one command doesn't stop the editor", edit("a\n", ":nonsense<CR>:s/zzz/y/<CR>x:wq<CR>"), "\n")
 
 -- 7. the screen

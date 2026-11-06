@@ -10,8 +10,11 @@
 -- `set nu` there turns line numbers on for good.
 --
 -- Esc closes the computer's screen in the game, so Ctrl+[ or Ctrl+C do
--- its job (over telnet, Esc works too).  Holding Ctrl+R or Ctrl+S reboots
--- or shuts the computer down: tap them.
+-- its job (over telnet, Esc works too, and Ctrl+C is the surest: it's one
+-- byte, never mistaken for the start of an escape sequence).  Ctrl+C
+-- never quits; in normal mode it says how to: :q, or :wq to save first,
+-- or :q! to throw the changes away.  Holding Ctrl+R or Ctrl+S reboots or
+-- shuts the computer down: tap them.
 --
 -- Moving (a number in front repeats most of these):
 --   h j k l, arrows    left, down, up, right

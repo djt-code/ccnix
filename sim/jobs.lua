@@ -173,6 +173,10 @@ W:file("ccnix/bin/rawc.lua", [[proc.ignore("INT") local _, k repeat _, k = os.pu
 r = typed("rawc\necho \"st $?\"\n", { when = { rawc = ctrlC } })
 check("a program that ignores INT (vi, telnet) gets Ctrl+C as a key", r.out:find("got c\n/$ st 0\n", 1, true) ~= nil,
     show(r.out) .. " " .. show(r.errText))
+W:file("ccnix/bin/paint.lua", [[local _, k repeat _, k = os.pullEvent("key") until k == keys.c print("got c")]])
+r = typed("paint\necho \"st $?\"\n", { when = { paint = ctrlC } })
+check("CraftOS's interactive programs (edit, paint, lua...) get Ctrl+C as a key without asking",
+    r.out:find("got c\n/$ st 0\n", 1, true) ~= nil, show(r.out) .. " " .. show(r.errText))
 -- at the prompt, with the real line editor: Ctrl+C is the shell's key
 W.modules.readline = nil
 local evs = { ctrlC[1], ctrlC[2], ctrlC[3] }

@@ -752,7 +752,7 @@ function N.new(opts)
     end
 
     -- An echo request (src and iface as sendIP's), carrying data (a string,
--- or nil): the reply brings it back (ping -s).
+    -- or nil): the reply brings it back (ping -s).
     function S.echo(dst, id, seq, ttl, src, iface, data)
         return S.sendIP(dst, "icmp", { type = "echo", id = id, seq = seq, data = data }, ttl, src, iface)
     end
