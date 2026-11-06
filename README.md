@@ -132,7 +132,8 @@ ROM's: a few files, not the whole repo.
   catches up.
 
 The server's ops update the ROM itself while the server runs, with
-`/ccnix rom update` (a git pull of the server's checkout, then a reload):
+`/ccnix rom update` (a git pull of the server's checkout; `confirm` loads
+it, with a reload that pauses the server):
 the mod's README says more.
 
 `ccnix setup [app...]` (it runs `deploy/setup`) on such a server clones
