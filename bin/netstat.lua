@@ -29,6 +29,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("netstat", "netstat [-atulnpe] | -r | -i | -s")
 local net = require("net")
+local scan = require("scan")
 local opts, operands = cu.getopt({ ... }, "atulnpersi")
 if #operands > 0 then cu.usageError("unexpected operand " .. operands[1]) end
 
@@ -49,7 +50,9 @@ local function columns(rows, right)
             elseif right and right[k] then parts[k] = (" "):rep(widths[k] - #cell) .. cell
             else parts[k] = cell .. (" "):rep(widths[k] - #cell) end
         end
-        io.write((table.concat(parts, " "):gsub("%s+$", "")), "\n")
+        local line = table.concat(parts, " ")
+        while scan.isSpace(line:sub(-1)) do line = line:sub(1, -2) end     -- (no blanks at the end)
+        io.write(line, "\n")
     end
 end
 

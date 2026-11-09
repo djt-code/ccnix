@@ -103,8 +103,10 @@
 -- event, which is nearly always.  A program that computes for a long time
 -- without waiting holds it up (CC queues up to 256 events meanwhile).
 
+local scan = require("scan")
+
 local N = {}
-N.CHANNEL = 60000              -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
+N.CHANNEL = 60000             -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
                                -- rednet's, a computer's ID, but for IDs past 60000)
 N.BROADCAST = "ff:ff:ff:ff:ff:ff"
 N.TTL = 64
@@ -128,11 +130,17 @@ local TCP_TIMEWAIT = 4
 function N.parseIP(s)
     if type(s) == "number" then return s end
     if type(s) ~= "string" then return nil end
-    local a, b, c, d = s:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-    if not a then return nil end
-    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
-    if a > 255 or b > 255 or c > 255 or d > 255 then return nil end
-    return ((a * 256 + b) * 256 + c) * 256 + d
+    -- address: digits "." digits "." digits "." digits, each 0-255
+    local parts = scan.split(s, ".", true)
+    if #parts ~= 4 then return nil end
+    local n = 0
+    for _, part in ipairs(parts) do
+        if part == "" or not scan.all(part, scan.isDigit) then return nil end
+        local octet = tonumber(part)
+        if octet > 255 then return nil end
+        n = n * 256 + octet
+    end
+    return n
 end
 
 function N.ipString(n)
@@ -147,8 +155,13 @@ end
 -- "10.0.1.5/24" -> ip, 24 ("default" is 0.0.0.0/0; no /len: 32).
 function N.parseCIDR(s)
     if s == "default" then return 0, 0 end
-    local ip, len = tostring(s):match("^([%d%.]+)/(%d+)$")
-    if not ip then ip, len = s, "32" end
+    -- cidr: address ["/" digits]
+    local ip, len = scan.cut(tostring(s), "/")
+    if len == nil then
+        ip, len = s, "32"
+    elseif len == "" or not scan.all(len, scan.isDigit) then
+        return nil
+    end
     ip, len = N.parseIP(ip), tonumber(len)
     if not ip or not len or len > 32 then return nil end
     return ip, len
@@ -157,8 +170,9 @@ end
 -- An interface name's modem and channel: "back" -> "back", 60000;
 -- "back.20" -> "back", 60020 (VLAN 20).  nil for a bad VLAN.
 function N.link(name)
-    local modem, vlan = name:match("^(.-)%.(%d+)$")
-    if not modem then return name, N.CHANNEL, nil end
+    -- name: modem ["." digits]
+    local modem, vlan = scan.cutLast(name, ".")
+    if vlan == nil or vlan == "" or not scan.all(vlan, scan.isDigit) then return name, N.CHANNEL, nil end
     vlan = tonumber(vlan)
     if vlan < 1 or vlan > 4094 then return nil end
     return modem, N.CHANNEL + vlan, vlan
@@ -171,7 +185,8 @@ N.SIDES = { top = 0, bottom = 1, left = 2, right = 3, front = 4, back = 5 }
 -- 249), else a hash of its name into 6-255.
 function N.port(modem)
     if N.SIDES[modem] then return N.SIDES[modem] end
-    local n = tonumber(modem:match("^modem_(%d+)$"))
+    local digits = scan.startsWith(modem, "modem_") and modem:sub(#"modem_" + 1)
+    local n = digits and digits ~= "" and scan.all(digits, scan.isDigit) and tonumber(digits)
     if n and n <= 249 then return 6 + n end
     local h = 0
     for i = 1, #modem do h = (h * 31 + modem:byte(i)) % 250 end
@@ -188,8 +203,14 @@ end
 -- "02:CC:00:00:0C:05" or "02-cc-00-00-0c-05" -> "02:cc:00:00:0c:05"; nil if not a MAC.
 function N.parseMAC(s)
     if type(s) ~= "string" then return nil end
-    local b = { s:lower():match("^(%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)[:%-](%x%x)$") }
-    if #b ~= 6 then return nil end
+    -- mac: 6 pairs of hex digits, between each a ":" or "-"
+    local sc, b = scan.new(s:lower()), {}
+    for i = 1, 6 do
+        if i > 1 and not (sc:accept(":") or sc:accept("-")) then return nil end
+        if not (scan.isHexDigit(sc:peek(1)) and scan.isHexDigit(sc:peek(2))) then return nil end
+        b[i] = sc:advance(2)
+    end
+    if not sc:atEnd() then return nil end
     return table.concat(b, ":")
 end
 
@@ -1141,21 +1162,40 @@ function N.config(st)
     local cfg = { ifaces = {}, routes = {}, forward = st.get("net.forward") == true,
                   rpfilter = N.rpfilter(st.get("net.rpfilter")), hosts = {}, dns = {}, neigh = {} }
     for _, name in ipairs(st.getNames()) do
-        local iface = name:match("^net%.if%.(.+)$")
-        if iface and st.get(name) and st.get(name) ~= "" then cfg.ifaces[iface] = st.get(name) end
+        local iface = scan.startsWith(name, "net.if.") and name:sub(#"net.if." + 1)
+        if iface and iface ~= "" and st.get(name) and st.get(name) ~= "" then cfg.ifaces[iface] = st.get(name) end
     end
-    for item in tostring(st.get("net.routes") or ""):gmatch("[^,]+") do
-        local net, gw, dev = item:match("^%s*(%S+)%s+via%s+(%S+)%s*(.-)%s*$")
-        if net then cfg.routes[#cfg.routes + 1] = { net = net, gw = gw, iface = dev:match("^dev%s+(%S+)$") } end
+    -- a list item's "dev <iface>" at the end: words from the first'th on,
+    -- exactly "dev" and a name, else nil
+    local function devAt(w, first)
+        if #w == first + 1 and w[first] == "dev" then return w[first + 1] end
+        return nil
     end
-    for item in tostring(st.get("net.hosts") or ""):gmatch("[^,]+") do
-        local name, ip = item:match("^%s*([^=%s]+)%s*=%s*(%S+)%s*$")
-        if name then cfg.hosts[name] = ip end
+    -- route: net "via" gw ["dev" iface]
+    for _, item in ipairs(scan.split(tostring(st.get("net.routes") or ""), ",")) do
+        local w = scan.words(item)
+        if #w >= 3 and w[2] == "via" then
+            cfg.routes[#cfg.routes + 1] = { net = w[1], gw = w[3], iface = devAt(w, 4) }
+        end
     end
-    for ip in tostring(st.get("net.dns") or ""):gmatch("[^,%s]+") do cfg.dns[#cfg.dns + 1] = ip end
-    for item in tostring(st.get("net.neigh") or ""):gmatch("[^,]+") do
-        local ip, mac, rest = item:match("^%s*(%S+)%s+lladdr%s+(%S+)%s*(.-)%s*$")
-        if ip then cfg.neigh[#cfg.neigh + 1] = { ip = ip, mac = mac, iface = rest:match("^dev%s+(%S+)$") } end
+    -- host: name "=" address (the name without blanks or "=")
+    for _, item in ipairs(scan.split(tostring(st.get("net.hosts") or ""), ",")) do
+        local name, ip = scan.cut(item, "=")
+        if ip then
+            name, ip = scan.trim(name), scan.trim(ip)
+            if name ~= "" and #scan.words(name) == 1 and ip ~= "" and #scan.words(ip) == 1 then cfg.hosts[name] = ip end
+        end
+    end
+    -- dns: addresses between commas or blanks
+    for _, item in ipairs(scan.split(tostring(st.get("net.dns") or ""), ",")) do
+        for _, ip in ipairs(scan.words(item)) do cfg.dns[#cfg.dns + 1] = ip end
+    end
+    -- neighbour: address "lladdr" mac ["dev" iface]
+    for _, item in ipairs(scan.split(tostring(st.get("net.neigh") or ""), ",")) do
+        local w = scan.words(item)
+        if #w >= 3 and w[2] == "lladdr" then
+            cfg.neigh[#cfg.neigh + 1] = { ip = w[1], mac = w[3], iface = devAt(w, 4) }
+        end
     end
     return cfg
 end

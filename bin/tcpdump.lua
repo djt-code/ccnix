@@ -49,6 +49,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local USAGE = "tcpdump [-DenpqSvx] [-t...] [-c count] [-i iface]... [-r file] [-w file] [expression]"
 local cu = require("cu").init("tcpdump", USAGE)
 local net = require("net")
+local scan = require("scan")
 
 local opts, operands, order = cu.getopt({ ... }, "Dc:ei:npqr:Stvw:x", 1)
 local tflag, verbose, ifaceArgs = 0, 0, {}
@@ -108,10 +109,28 @@ local function addrs(f, side)
     if a then return side ~= "dst" and a.spa, side ~= "src" and a.tpa end
 end
 
+-- The filter's tokens: words between blanks, and "(", ")" and "!" each one
+-- of its own (even against a word); "&&" is "and", "||" "or".
+local isBracket = scan.oneOf("()!")
+local function tokens(text)
+    local sc, toks, word = scan.new(text), {}, {}
+    local function endWord()
+        if #word > 0 then toks[#toks + 1] = table.concat(word) end
+        word = {}
+    end
+    while not sc:atEnd() do
+        if sc:accept("&&") then endWord(); toks[#toks + 1] = "and"
+        elseif sc:accept("||") then endWord(); toks[#toks + 1] = "or"
+        elseif isBracket(sc:peek()) then endWord(); toks[#toks + 1] = sc:advance()
+        elseif scan.isSpace(sc:peek()) then endWord(); sc:advance()
+        else word[#word + 1] = sc:advance() end
+    end
+    endWord()
+    return toks
+end
+
 local function compile(words)
-    local toks = {}
-    local text = table.concat(words, " "):gsub("&&", " and "):gsub("||", " or "):gsub("([()!])", " %1 ")
-    for t in text:gmatch("%S+") do toks[#toks + 1] = t end
+    local toks = tokens(table.concat(words, " "))
     local pos = 1
     local function peek() return toks[pos] end
     local function take(what)
@@ -375,7 +394,7 @@ if opts.r then
     showIface = true
     for line in h:lines() do
         if done() then break end
-        if line:sub(1, 2) ~= "--" and line:find("%S") then
+        if line:sub(1, 2) ~= "--" and scan.trim(line) ~= "" then
             local rec = textutils.unserialise(line)
             if type(rec) == "table" and rec.iface and rec.t then handle(rec) end
         end

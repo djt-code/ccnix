@@ -49,6 +49,7 @@
 -- request isn't all there yet.  run() is that, around net.listen.
 
 local net = require("net")
+local scan = require("scan")
 
 local H = {}
 H.SERVER = "ccnix-httpd"
@@ -75,25 +76,64 @@ H.DEFAULT_TYPE = "application/octet-stream"
 --------------------------------------------------------------------------
 -- Bits
 --------------------------------------------------------------------------
+-- s with every from in it (plain text) made to
+local function replace(s, from, to) return table.concat(scan.split(s, from, true), to) end
+
+-- s's pieces between each sep, the empty ones left out (not trimmed)
+local function pieces(s, sep)
+    local out = {}
+    for _, piece in ipairs(scan.split(s, sep, true)) do
+        if piece ~= "" then out[#out + 1] = piece end
+    end
+    return out
+end
+
+-- s, each character made into what map has for it (if anything)
+local function mapChars(s, map)
+    local out = {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        out[i] = map(c) or c
+    end
+    return table.concat(out)
+end
+
+local HTML_ESCAPES = { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#39;" }
 function H.html(s)
-    return (tostring(s):gsub("[&<>\"']", { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#39;" }))
+    return mapChars(tostring(s), function(c) return HTML_ESCAPES[c] end)
 end
 
+-- %XX (two hex digits) made into the byte; any other % stays as it is
 function H.unescape(s)
-    return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+    local sc, out = scan.new(s), {}
+    while not sc:atEnd() do
+        if sc:at("%") and scan.isHexDigit(sc:peek(2)) and scan.isHexDigit(sc:peek(3)) then
+            sc:advance()
+            out[#out + 1] = string.char(tonumber(sc:advance(2), 16))
+        else
+            out[#out + 1] = sc:advance()
+        end
+    end
+    return table.concat(out)
 end
 
--- A path segment as it may go in a URL.
+-- A path segment as it may go in a URL: anything but a letter, digit or
+-- one of -._~!$&'()*+,;=:@ as %XX.
+local URL_SAFE = scan.oneOf("-._~!$&'()*+,;=:@")
 function H.escape(s)
-    return (s:gsub("[^%w%-._~!$&'()*+,;=:@]", function(c) return string.format("%%%02X", c:byte()) end))
+    return mapChars(s, function(c)
+        if scan.isAlnum(c) or URL_SAFE(c) then return nil end
+        return string.format("%%%02X", c:byte())
+    end)
 end
 
 -- "a=1&b=x+y" -> { a = "1", b = "x y" } (the last of a repeated name).
 function H.parseQuery(q)
     local args = {}
-    for pair in (q or ""):gmatch("[^&]+") do
-        local k, v = pair:match("^([^=]*)=?(.*)$")
-        args[H.unescape((k:gsub("%+", " ")))] = H.unescape((v:gsub("%+", " ")))
+    -- query: pair ("&" pair)*; pair: name ["=" value]
+    for _, pair in ipairs(pieces(q or "", "&")) do
+        local k, v = scan.cut(pair, "=")
+        args[H.unescape(replace(k, "+", " "))] = H.unescape(replace(v or "", "+", " "))
     end
     return args
 end
@@ -142,6 +182,45 @@ end
 --------------------------------------------------------------------------
 -- Requests
 --------------------------------------------------------------------------
+-- request-line: method " " target " HTTP/" digit "." digit, method in
+-- capitals, target without blanks.  method, target, major, minor; nil if
+-- the line isn't one.
+local function requestLine(line)
+    local sc = scan.new(line)
+    local method = sc:readWhile(scan.isUpper)
+    if method == "" or not sc:accept(" ") then return nil end
+    local target = sc:readWhile(function(c) return not scan.isSpace(c) end)
+    if target == "" or not sc:accept(" HTTP/") then return nil end
+    local major = sc:advance()
+    if not scan.isDigit(major) or not sc:accept(".") then return nil end
+    local minor = sc:advance()
+    if not scan.isDigit(minor) or not sc:atEnd() then return nil end
+    return method, target, major, minor
+end
+
+-- header: name ":" value, name a token (letters, digits and
+-- !#$%&'*+.^_`|~-), the value without the blanks round it; nil if the
+-- line isn't one.
+local TOKEN_PUNCT = scan.oneOf("!#$%&'*+.^_`|~-")
+local function isTokenChar(c) return scan.isAlnum(c) or TOKEN_PUNCT(c) end
+local function headerLine(line)
+    local sc = scan.new(line)
+    local name = sc:readWhile(isTokenChar)
+    if name == "" or not sc:accept(":") then return nil end
+    return name, scan.trim(sc:rest())
+end
+
+-- An absolute-form target ("http://host:port/path?q") made the path and
+-- query alone; any other target as it is.
+local function originForm(target)
+    local lower = target:lower()
+    local scheme = (scan.startsWith(lower, "http://") and "http://") or (scan.startsWith(lower, "https://") and "https://")
+    if not scheme then return target end
+    local sc = scan.new(target, #scheme + 1)
+    sc:readWhile(function(c) return c ~= "/" and c ~= "?" end)     -- (the authority)
+    return sc:rest()
+end
+
 -- A request from raw: the request; nil if it isn't all there yet; or
 -- false and the status to refuse it with.
 function H.parse(raw)
@@ -152,15 +231,14 @@ function H.parse(raw)
         return nil
     end
     if s > H.MAX_HEAD then return false, 431 end
-    local lines = {}
-    for l in (raw:sub(1, s - 1) .. "\n"):gmatch("(.-)\r?\n") do lines[#lines + 1] = l end
-    local method, target, major, minor = (lines[1] or ""):match("^(%u+) (%S+) HTTP/(%d)%.(%d)$")
+    local lines = scan.lines(raw:sub(1, s - 1) .. "\n")
+    local method, target, major, minor = requestLine(lines[1] or "")
     if not method then return false, 400 end
     if major ~= "1" then return false, 505 end
     if #target > 2048 then return false, 414 end
     local headers = {}
     for i = 2, #lines do
-        local name, value = lines[i]:match("^([%w!#$%%&'*+.^_`|~-]+):%s*(.-)%s*$")
+        local name, value = headerLine(lines[i])
         if not name then return false, 400 end
         name = name:lower()
         headers[name] = headers[name] and (headers[name] .. ", " .. value) or value
@@ -168,21 +246,23 @@ function H.parse(raw)
     if headers["transfer-encoding"] then return false, 501 end
     local len = 0
     if headers["content-length"] then
-        len = tonumber(headers["content-length"]:match("^%d+$") or "")
+        local digits = headers["content-length"]
+        len = digits ~= "" and scan.all(digits, scan.isDigit) and tonumber(digits)
         if not len then return false, 400 end
         if len > H.MAX_BODY then return false, 413 end
     end
     if #raw - e < len then return nil end
-    target = target:match("^[Hh][Tt][Tt][Pp][Ss]?://[^/?]*(.*)$") or target   -- (absolute-form)
+    target = originForm(target)
     if target == "" then target = "/" end
     if target:sub(1, 1) ~= "/" and not (method == "OPTIONS" and target == "*") then return false, 400 end
-    local rawPath, query = target:match("^([^?]*)%??(.*)$")
+    local rawPath, query = scan.cut(target, "?")
+    query = query or ""
     local path = H.unescape(rawPath)
-    if path:find("%z") then return false, 400 end
+    if path:find("\0", 1, true) then return false, 400 end
     local body = raw:sub(e + 1, e + len)
     local args = H.parseQuery(query)
-    local form = (headers["content-type"] or ""):lower():find("^%s*application/x%-www%-form%-urlencoded")
-        and H.parseQuery(body) or {}
+    local contentType = scan.trim((headers["content-type"] or ""):lower())
+    local form = scan.startsWith(contentType, "application/x-www-form-urlencoded") and H.parseQuery(body) or {}
     local params = {}
     for k, v in pairs(args) do params[k] = v end
     for k, v in pairs(form) do params[k] = v end
@@ -194,9 +274,14 @@ end
 -- "a=1; b=two" -> { a = "1", b = "two" }
 function H.parseCookies(s)
     local t = {}
-    for pair in (s or ""):gmatch("[^;]+") do
-        local k, v = pair:match("^%s*([^=]-)%s*=%s*(.-)%s*$")
-        if k and k ~= "" then t[k] = v:match('^"(.*)"$') or v end
+    -- cookies: pair (";" pair)*; pair: name "=" value, the value maybe in "quotes"
+    for _, pair in ipairs(scan.split(s or "", ";")) do
+        local k, v = scan.cut(pair, "=")
+        if v then
+            k, v = scan.trim(k), scan.trim(v)
+            if #v >= 2 and scan.startsWith(v, '"') and scan.endsWith(v, '"') then v = v:sub(2, -2) end
+            if k ~= "" then t[k] = v end
+        end
     end
     return t
 end
@@ -263,7 +348,8 @@ function Server:run()
         if not out then return end
         k.conn:send(out)
         drop(id)
-        self.log(string.format('%s "%s" %d %d', k.remote, req and (req.method .. " " .. req.target) or k.buf:match("^[^\r\n]*"):sub(1, 80),
+        local firstLine = scan.new(k.buf):readWhile(function(c) return c ~= "\r" and c ~= "\n" end)
+        self.log(string.format('%s "%s" %d %d', k.remote, req and (req.method .. " " .. req.target) or firstLine:sub(1, 80),
             status, size))
     end
     self.log("listening on port " .. self.port)
@@ -312,7 +398,8 @@ function H.static(opts)
         if not h then return H.page(403, "That can't be read.") end
         local data = h.readAll() or ""
         h.close()
-        local ext = p:match("%.([^./]+)$")
+        local _, ext = scan.cutLast(p, ".")     -- (the extension: after the last ".", in the file's own name)
+        if ext == "" or (ext and ext:find("/", 1, true)) then ext = nil end
         return 200, { ["Content-Type"] = H.TYPES[ext and ext:lower()] or H.DEFAULT_TYPE }, data
     end
 
@@ -342,7 +429,7 @@ function H.static(opts)
             return H.page(405, req.method .. " isn't something files do.", { Allow = "GET, HEAD" })
         end
         local segs = {}
-        for seg in req.path:gmatch("[^/]+") do
+        for _, seg in ipairs(pieces(req.path, "/")) do
             if seg == ".." then return H.page(403, "No .. in a path here.") end
             if seg ~= "." then segs[#segs + 1] = seg end
         end
@@ -373,12 +460,61 @@ function H.router() return setmetatable({ routes = {} }, Router) end
 
 -- A route: "/notes/:id" (a :name takes one segment), "/files/*" (* the
 -- rest, as params.splat); fn(req, params) answers as a page does.
+-- A route's pattern as parts: { text = "/notes/" }, { name = "id" } (":id",
+-- a name of letters, digits and _), { splat = true } ("*"); any other
+-- character is text.  names: the :names and "splat", in order.
+local function routeParts(pattern)
+    local sc, parts, names, text = scan.new(pattern), {}, {}, {}
+    local function endText()
+        if #text > 0 then parts[#parts + 1] = { text = table.concat(text) } end
+        text = {}
+    end
+    while not sc:atEnd() do
+        if sc:at(":") and scan.isNameChar(sc:peek(2)) then
+            sc:advance()
+            local name = sc:readWhile(scan.isNameChar)
+            endText()
+            parts[#parts + 1] = { name = name }
+            names[#names + 1] = name
+        elseif sc:accept("*") then
+            endText()
+            parts[#parts + 1] = { splat = true }
+            names[#names + 1] = "splat"
+        else
+            text[#text + 1] = sc:advance()
+        end
+    end
+    endText()
+    return parts, names
+end
+
+-- Whether path from at on matches parts from i on, the matches put in caps.
+-- A :name takes one or more characters but "/", a * any; each the most it
+-- can that still lets the rest match.
+local function matchParts(parts, i, path, at, caps)
+    local part = parts[i]
+    if not part then return at == #path + 1 end
+    if part.text then
+        if path:sub(at, at + #part.text - 1) ~= part.text then return false end
+        return matchParts(parts, i + 1, path, at + #part.text, caps)
+    end
+    local last = #path                                          -- (a * can take it all)
+    if part.name then
+        local stop = path:find("/", at, true)
+        last = (stop or #path + 1) - 1
+    end
+    local shortest = part.name and at or at - 1                 -- (a :name takes one at least)
+    for to = last, shortest, -1 do
+        caps[#caps + 1] = path:sub(at, to)
+        if matchParts(parts, i + 1, path, to + 1, caps) then return true end
+        caps[#caps] = nil
+    end
+    return false
+end
+
 function Router:route(method, pattern, fn)
-    local names = {}
-    local pat = "^" .. pattern:gsub("[%^%$%(%)%%%.%[%]%+%-%?]", "%%%0")
-        :gsub(":([%w_]+)", function(n) names[#names + 1] = n return "([^/]+)" end)
-        :gsub("%*", function() names[#names + 1] = "splat" return "(.*)" end) .. "$"
-    self.routes[#self.routes + 1] = { method = method, pat = pat, names = names, fn = fn }
+    local parts, names = routeParts(pattern)
+    self.routes[#self.routes + 1] = { method = method, parts = parts, names = names, fn = fn }
     return self
 end
 for _, m in ipairs({ "get", "post", "put", "delete", "patch" }) do
@@ -391,8 +527,8 @@ end
 function Router:dispatch(req, path)
     local allowed = {}
     for _, r in ipairs(self.routes) do
-        local caps = { path:match(r.pat) }
-        if caps[1] ~= nil then
+        local caps = {}
+        if matchParts(r.parts, 1, path, 1, caps) then
             if r.method == req.method or (req.method == "HEAD" and r.method == "GET") then
                 local params = {}
                 for i, n in ipairs(r.names) do params[n] = caps[i] end
@@ -434,21 +570,22 @@ end
 function H.lua(opts)
     local fs = opts.fs or fs
     local dir = fs.combine(opts.dir, "")
-    local prefix = (opts.prefix or "/cgi"):gsub("/+$", "")
+    local prefix = opts.prefix or "/cgi"
+    while scan.endsWith(prefix, "/") do prefix = prefix:sub(1, -2) end
     local states, templates = {}, {}
 
     -- The script for the part of a path below prefix: its file, its own
     -- part of the path and the part that named it; nil (and 403) if none.
     local function find(rel)
         local segs = {}
-        for seg in rel:gmatch("[^/]+") do
+        for _, seg in ipairs(pieces(rel, "/")) do
             if seg == ".." then return nil, 403 end
             if seg ~= "." then segs[#segs + 1] = seg end
         end
         local at = dir
         for i, seg in ipairs(segs) do
             local p = fs.combine(at, seg)
-            local file = seg:find("%.lua$") and p or (p .. ".lua")
+            local file = scan.endsWith(seg, ".lua") and p or (p .. ".lua")
             if fs.exists(file) and not fs.isDir(file) then
                 return file, "/" .. table.concat(segs, "/", i + 1), table.concat(segs, "/", 1, i)
             end
@@ -552,9 +689,9 @@ function H.lua(opts)
             a = err or ("can't read " .. script)
         end
         if not ok then
-            if opts.log then opts.log("error: " .. req.method .. " " .. req.target .. ": " .. tostring(a):match("^[^\n]*")) end
+            if opts.log then opts.log("error: " .. req.method .. " " .. req.target .. ": " .. (scan.cut(tostring(a), "\n"))) end
             local status, h, body = H.page(500, "The script " .. req.script .. " failed.")
-            if opts.debug then body = body:gsub("</body>", "<pre>" .. H.html(a):gsub("%%", "%%%%") .. "</pre></body>") end
+            if opts.debug then body = replace(body, "</body>", "<pre>" .. H.html(a) .. "</pre></body>") end
             return status, h, body
         end
         return a, b, c

@@ -47,6 +47,7 @@
 -- before Content-Length's end), "read" (it broke, or what came isn't HTTP).
 
 local net = require("net")
+local scan = require("scan")
 
 local H = {}
 H.AGENT = "ccnix-httpc"
@@ -65,26 +66,51 @@ function H.base64(s)
     return table.concat(out)
 end
 
+-- %XX (two hex digits) made into the byte; any other % stays as it is
 local function unescape(s)
-    return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+    local sc, out = scan.new(s), {}
+    while not sc:atEnd() do
+        if sc:at("%") and scan.isHexDigit(sc:peek(2)) and scan.isHexDigit(sc:peek(3)) then
+            sc:advance()
+            out[#out + 1] = string.char(tonumber(sc:advance(2), 16))
+        else
+            out[#out + 1] = sc:advance()
+        end
+    end
+    return table.concat(out)
+end
+
+-- scheme "://" rest, the scheme a letter then letters, digits and +.-:
+-- the scheme and the rest; nil if url doesn't start with one.
+local function isSchemeChar(c) return scan.isAlnum(c) or c == "+" or c == "." or c == "-" end
+local function isHostChar(c) return scan.isAlnum(c) or c == "." or c == "-" end
+local function schemeOf(url)
+    if not scan.isAlpha(url:sub(1, 1)) then return nil end
+    local sc = scan.new(url)
+    local scheme = sc:readWhile(isSchemeChar)
+    if not sc:accept("://") then return nil end
+    return scheme, sc:rest()
 end
 
 -- A URL's parts: { host, port, path (with its query), user, url (as
 -- asked for, less the user and fragment) }, or nil, why and the kind.
+-- url: [scheme "://"] [user "@"] host [":" digits] [path] ["?" query] ["#" fragment]
 function H.parseURL(url)
     if type(url) ~= "string" or url == "" then return nil, "no URL", "url" end
-    url = url:gsub("#.*$", "")
-    local scheme, rest = url:match("^(%a[%w+.-]*)://(.*)$")
+    url = scan.cut(url, "#")
+    local scheme, rest = schemeOf(url)
     if not scheme then scheme, rest = "http", url end
     scheme = scheme:lower()
     if scheme ~= "http" then return nil, 'protocol "' .. scheme .. '" not supported (HTTP only)', "protocol" end
-    local authority, path = rest:match("^([^/?]*)(.*)$")
+    local sc = scan.new(rest)
+    local authority = sc:readWhile(function(c) return c ~= "/" and c ~= "?" end)
+    local path = sc:rest()
     if path == "" or path:sub(1, 1) == "?" then path = "/" .. path end
-    local user, hostport = authority:match("^(.*)@(.-)$")
-    if not user then hostport = authority end
-    local host, port = hostport:match("^(.-):(%d*)$")
-    if not host then host = hostport end
-    if host == "" or host:find("[^%w.-]") then return nil, "bad host in " .. url, "url" end
+    local user, hostport = scan.cutLast(authority, "@")
+    if not hostport then user, hostport = nil, authority end
+    local host, port = scan.cutLast(hostport, ":")
+    if not port or not scan.all(port, scan.isDigit) then host, port = hostport, nil end
+    if host == "" or not scan.all(host, isHostChar) then return nil, "bad host in " .. url, "url" end
     port = (port == nil or port == "") and 80 or tonumber(port)
     if port < 1 or port > 65535 then return nil, "bad port in " .. url, "url" end
     return { host = host:lower(), port = port, path = path, user = user and unescape(user),
@@ -93,10 +119,10 @@ end
 
 -- A path with its . and .. segments worked out.
 local function dots(path)
-    local q = path:match("%?.*$") or ""
-    local segs, out = {}, {}
-    for seg in (path:sub(1, #path - #q) .. "/"):gmatch("(.-)/") do segs[#segs + 1] = seg end
-    for i = 2, #segs do                             -- (segs[1] is before the leading /)
+    local before, query = scan.cut(path, "?")
+    local q = query and ("?" .. query) or ""
+    local segs, out = scan.split(before, "/", true), {}
+    for i = 2, #segs do                            -- (segs[1] is before the leading /)
         local s = segs[i]
         if s == ".." then out[#out] = nil end
         if s ~= "." and s ~= ".." then out[#out + 1] = s
@@ -107,15 +133,16 @@ end
 
 -- Where a redirect's Location points, from the URL that sent it.
 function H.resolve(base, loc)
-    if loc:find("^%a[%w+.-]*://") then return loc end
+    if schemeOf(loc) then return loc end
     local b = H.parseURL(base)
     local origin = "http://" .. b.host .. (b.port ~= 80 and (":" .. b.port) or "")
     if loc:sub(1, 2) == "//" then return "http:" .. loc end
     if loc:sub(1, 1) == "/" then return origin .. dots(loc) end
-    local path = b.path:match("^[^?]*")
+    local path = scan.cut(b.path, "?")
     if loc == "" then return origin .. b.path end
     if loc:sub(1, 1) == "?" then return origin .. path .. loc end
-    return origin .. dots(path:match("^(.*/)") .. loc)
+    local folder = scan.cutLast(path, "/") .. "/"     -- (the path up to its last /; it starts with one)
+    return origin .. dots(folder .. loc)
 end
 
 -- Reading a response off a connection, by lines and by counts.
@@ -133,7 +160,8 @@ local function reader(conn, deadline)
         while true do
             local i = R.buf:find("\n", 1, true)
             if i then
-                local l = R.buf:sub(1, i - 1):gsub("\r$", "")
+                local l = R.buf:sub(1, i - 1)
+                if scan.endsWith(l, "\r") then l = l:sub(1, -2) end
                 R.buf = R.buf:sub(i + 1)
                 return l
             end
@@ -193,8 +221,17 @@ local function requestHeaders(u, opts, auth, body)
     for k, v in pairs(opts.headers or {}) do
         if type(k) == "string" then set(k, v) end
     end
+    -- a header line: name (":" | ";") value, blanks before the name and
+    -- round the value dropped
+    local function headerLine(line)
+        local sc = scan.new(line)
+        sc:skipSpaces()
+        local name = sc:readWhile(function(c) return c ~= ":" and c ~= ";" end)
+        if name == "" or sc:atEnd() then return nil end
+        return name, sc:advance(), scan.trim(sc:rest())
+    end
     for _, line in ipairs(opts.headers or {}) do
-        local name, sep, value = tostring(line):match("^%s*([^:;]+)([:;])%s*(.-)%s*$")
+        local name, sep, value = headerLine(tostring(line))
         if name then
             if sep == ";" then set(name, "")
             elseif value == "" then set(name, false)
@@ -207,6 +244,19 @@ local function requestHeaders(u, opts, auth, body)
 end
 
 local REDIRECTS = { [301] = true, [302] = true, [303] = true, [307] = true, [308] = true }
+
+-- status-line: "HTTP/" digit "." digit, blanks, three digits, the reason
+-- (without the blanks round it): version, code, reason; nil if it isn't one.
+local function statusLine(line)
+    local sc = scan.new(line)
+    if not sc:accept("HTTP/") then return nil end
+    if not (scan.isDigit(sc:peek(1)) and sc:peek(2) == "." and scan.isDigit(sc:peek(3))) then return nil end
+    local version = "HTTP/" .. sc:advance(3)
+    if sc:skipSpaces() == 0 then return nil end
+    local code = sc:advance(3)
+    if #code ~= 3 or not scan.all(code, scan.isDigit) then return nil end
+    return version, code, scan.trim(sc:rest())
+end
 
 -- One request and its response, on a connection of its own.
 local function exchange(u, method, body, opts, auth, deadline, canFollow)
@@ -240,7 +290,7 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
         local status, e0 = R.line()
         if e0 == "closed" and resp == nil and R.buf == "" then return bail(nil, "an empty reply from the server", "empty") end
         if not status then return bail(failed(e0, "waiting for the response")) end
-        local version, code, reason = status:match("^(HTTP/%d%.%d)%s+(%d%d%d)%s*(.-)%s*$")
+        local version, code, reason = statusLine(status)
         if not version then return bail(nil, "not an HTTP response: " .. status:sub(1, 60), "read") end
         resp = { version = version, status = tonumber(code), reason = reason, headers = {}, lines = { status } }
         debug("in", status)
@@ -250,8 +300,9 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
             debug("in", l)
             if l == "" then break end
             resp.lines[#resp.lines + 1] = l
-            local name, value = l:match("^([^:]+):%s*(.-)%s*$")
-            if name then
+            local name, value = scan.cut(l, ":")        -- (name ":" value)
+            if value and name ~= "" then
+                value = scan.trim(value)
                 name = name:lower()
                 resp.headers[name] = resp.headers[name] and (resp.headers[name] .. ", " .. value) or value
             end
@@ -267,11 +318,13 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
     local te, len = resp.headers["transfer-encoding"], tonumber(resp.headers["content-length"] or "")
     if method == "HEAD" or resp.status == 204 or resp.status == 304 or resp.status < 200 then
         -- (no body)
-    elseif te and te:lower():find("chunked") then
+    elseif te and te:lower():find("chunked", 1, true) then
         while true do
             local l, e = R.line()
             if not l then return bail(failed(e, "reading a chunk")) end
-            local n = tonumber(l:match("^%s*(%x+)") or "", 16)
+            local size = scan.new(l)                -- (a chunk's size: blanks, hex digits, anything)
+            size:skipSpaces()
+            local n = tonumber(size:readWhile(scan.isHexDigit), 16)
             if not n then return bail(nil, "a bad chunk size: " .. l:sub(1, 20), "read") end
             if n == 0 then
                 repeat l, e = R.line() until not l or l == ""
