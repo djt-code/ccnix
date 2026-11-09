@@ -13,7 +13,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("head", "head [-c number | -n number] [file...]")
 local args = { ... }
-if args[1] and args[1]:match("^%-%d+$") then
+if args[1] and args[1]:sub(1, 1) == "-" and cu.isInt(args[1]) then     -- -number
     args[1] = "-n" .. args[1]:sub(2)
 end
 local _, files, order = cu.getopt(args, "c:n:")

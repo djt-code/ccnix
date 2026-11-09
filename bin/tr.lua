@@ -22,6 +22,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tr", "tr [-c|-C] [-ds] string1 [string2]")
+local scan = require("scan")
 local opts, ops = cu.getopt({ ... }, "cCds")
 local comp = opts.c or opts.C
 local want = (opts.d and opts.s or not opts.d and not opts.s) and 2 or 1
@@ -29,37 +30,62 @@ if opts.s and not opts.d and #ops == 2 then want = 2 end
 if #ops ~= want then cu.usageError(#ops < want and "missing operand" or "extra operand") end
 
 local ESC = { ["\\"] = "\\", a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v" }
-local CLASS = { alnum = "%w", alpha = "%a", blank = "[ \t]", cntrl = "%c", digit = "%d", graph = "[\33-\126]",
-    lower = "%l", print = "[\32-\126]", punct = "%p", space = "%s", upper = "%u", xdigit = "%x" }
+-- the classes, each a test on one character (bytes 0 to 127 are tried)
+local function byteIn(lo, hi) return function(c) return c:byte() >= lo and c:byte() <= hi end end
+local CLASS = { alnum = scan.isAlnum, alpha = scan.isAlpha, blank = scan.oneOf(" \t"),
+    cntrl = function(c) return c:byte() < 32 or c:byte() == 127 end, digit = scan.isDigit,
+    graph = byteIn(33, 126), lower = scan.isLower, print = byteIn(32, 126), punct = scan.isPunct,
+    space = scan.isSpace, upper = scan.isUpper, xdigit = scan.isHexDigit }
+local isOctal = scan.oneOf("01234567")
 
 -- one character (escapes allowed) at i: the character and the next index
 local function char(s, i)
     local c = s:sub(i, i)
     if c ~= "\\" or i == #s then return c, i + 1 end
-    local oct = s:match("^[0-7][0-7]?[0-7]?", i + 1)
-    if oct then return string.char(tonumber(oct, 8) % 256), i + 1 + #oct end
+    -- \ooo: one to three octal digits
+    local sc, oct = scan.new(s, i + 1), ""
+    while #oct < 3 and isOctal(sc:peek()) do oct = oct .. sc:advance() end
+    if oct ~= "" then return string.char(tonumber(oct, 8) % 256), i + 1 + #oct end
     c = s:sub(i + 1, i + 1)
     return ESC[c] or c, i + 2
+end
+
+-- "[:" letters ":]" at i: the class's name, or nil
+local function className(s, i)
+    local sc = scan.new(s, i)
+    if not sc:accept("[:") then return nil end
+    local name = sc:readWhile(scan.isAlpha)
+    if name == "" or not sc:accept(":]") then return nil end
+    return name
+end
+
+-- digits "]" at i (the n and the end of [c*n]): the digits ("" for none),
+-- or nil if no "]" comes after them
+local function repeatCount(s, i)
+    local sc = scan.new(s, i)
+    local digits = sc:readWhile(scan.isDigit)
+    if not sc:accept("]") then return nil end
+    return digits
 end
 
 -- a string operand as a list of characters; fill is where [c*] goes
 local function parse(s, second)
     local t, fill, i = {}, nil, 1
     while i <= #s do
-        local name = s:match("^%[:(%a+):%]", i)
+        local name = className(s, i)
         local c, j = char(s, i + 1)     -- for [c*n]
         local q, k = char(s, i + 2)     -- for [=c=]
         if name then
             if not CLASS[name] then cu.usageError("invalid class: " .. name, 1) end
             for b = 0, 127 do
-                if string.char(b):find("^" .. CLASS[name]) then t[#t + 1] = string.char(b) end
+                if CLASS[name](string.char(b)) then t[#t + 1] = string.char(b) end
             end
             i = i + #name + 4
         elseif s:sub(i, i + 1) == "[=" and s:sub(k, k + 1) == "=]" then
             t[#t + 1] = q
             i = k + 2
-        elseif s:sub(i, i) == "[" and s:sub(j, j) == "*" and s:find("^%d*%]", j + 1) then
-            local num = s:match("^%d*", j + 1)
+        elseif s:sub(i, i) == "[" and s:sub(j, j) == "*" and repeatCount(s, j + 1) then
+            local num = repeatCount(s, j + 1)
             if not second then cu.usageError("[c*n] belongs in string2", 1) end
             local count = tonumber(num, num:sub(1, 1) == "0" and 8 or 10) or 0
             if count == 0 and not fill then fill = #t + 1; t[#t + 1] = { c } end

@@ -65,8 +65,12 @@ end
 -- flag, the argument string for the others; the last one wins), the list
 -- of operands, and every option in order as { letter, value }.
 function cu.getopt(args, spec, status)
+    -- spec: (letter ":"?)*, a stray colon skipped
     local takes = {}
-    for c, colon in spec:gmatch("([^:])(:?)") do takes[c] = colon == ":" end
+    for k = 1, #spec do
+        local c = spec:sub(k, k)
+        if c ~= ":" then takes[c] = spec:sub(k + 1, k + 1) == ":" end
+    end
     local opts, order, operands = {}, {}, {}
     local i = 1
     while i <= #args do
@@ -97,9 +101,22 @@ function cu.getopt(args, spec, status)
     return opts, operands, order
 end
 
+-- Is s a whole decimal integer: an optional + or -, then digits?  (By
+-- hand, not with lib/scan: every utility loads cu, and it needs nothing.)
+function cu.isInt(s)
+    if type(s) ~= "string" then return false end
+    local from = (s:sub(1, 1) == "+" or s:sub(1, 1) == "-") and 2 or 1
+    if from > #s then return false end
+    for k = from, #s do
+        local b = s:byte(k)
+        if b < 48 or b > 57 then return false end      -- (not 0-9)
+    end
+    return true
+end
+
 -- A whole decimal integer (sign allowed), or nil.
 function cu.int(s)
-    if type(s) == "string" and s:match("^[+-]?%d+$") then return tonumber(s) end
+    if cu.isInt(s) then return tonumber(s) end
     return nil
 end
 

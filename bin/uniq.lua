@@ -14,17 +14,32 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("uniq", "uniq [-c|-d|-u] [-f fields] [-s chars] [input [output]]")
+local scan = require("scan")
 local opts, ops = cu.getopt({ ... }, "cdf:s:u")
 if #ops > 2 then cu.usageError("too many operands") end
 local nf, ns = cu.int(opts.f or "0"), cu.int(opts.s or "0")
 if not nf or nf < 0 then cu.usageError("bad field count: " .. opts.f) end
 if not ns or ns < 0 then cu.usageError("bad character count: " .. opts.s) end
 
--- the part of a line that is compared
+local isBlank = scan.oneOf(" \t")
+local function notBlank(c) return not isBlank(c) end
+
+-- the part of a line that is compared: past nf fields (blanks, then
+-- non-blanks), then ns characters more
 local function key(l)
-    local p = 1
-    for _ = 1, nf do p = (l:find("[^ \t]", p) or #l + 1); p = (l:find("[ \t]", p) or #l + 1) end
-    return l:sub(p + ns)
+    local sc = scan.new(l)
+    for _ = 1, nf do
+        sc:readWhile(isBlank)
+        sc:readWhile(notBlank)
+    end
+    return l:sub(sc:pos() + ns)
+end
+
+-- io.open's message starts with the path and ": ": keep just the reason
+local function reason(e)
+    local _, rest = scan.cut(e, ":")
+    if rest and scan.startsWith(rest, " ") then return rest:sub(2) end
+    return e
 end
 
 local h = cu.open(ops[1] or "-")
@@ -33,8 +48,7 @@ local out = io.output()
 if ops[2] then
     local e
     out, e = io.open(shell.resolve(ops[2]), "wb")
-    -- io.open's message starts with the path: keep just the reason
-    if not out then cu.close(h); cu.fail(ops[2] .. ": " .. tostring(e):gsub("^[^:]*: ", "")); return cu.exit() end
+    if not out then cu.close(h); cu.fail(ops[2] .. ": " .. reason(tostring(e))); return cu.exit() end
 end
 
 local function emit(l, n)

@@ -23,20 +23,29 @@ if opts.t then
     if not fmt then cu.usageError("invalid radix: " .. opts.t) end
 end
 
+-- a run of printable characters, s from a to b: written if it's long enough
+local function found(s, a, b)
+    if b - a + 1 >= min then
+        if fmt then io.write(string.format(fmt, a - 1)) end
+        io.write(s:sub(a, b), "\n")
+    end
+end
+
+-- the runs of printable characters (space to ~, bytes 32 to 126) in s
 cu.each(files, function(h)
     local s = cu.readAll(h)
-    local p, runs = 1, 0
-    while true do
-        local a, b = s:find("[ -~]+", p)
-        if not a then break end
-        -- a big file takes a while: yield now and then, or CC stops us
-        runs = runs + 1
-        if runs % 1000 == 0 then os.queueEvent("strings"); os.pullEvent("strings") end
-        if b - a + 1 >= min then
-            if fmt then io.write(string.format(fmt, a - 1)) end
-            io.write(s:sub(a, b), "\n")
+    local runStart = nil
+    for i = 1, #s + 1 do
+        local b = s:byte(i)     -- (nil past the end, which ends a run)
+        local printable = b ~= nil and b >= 32 and b <= 126
+        if printable and not runStart then
+            runStart = i
+        elseif not printable and runStart then
+            found(s, runStart, i - 1)
+            runStart = nil
         end
-        p = b + 1
+        -- a big file takes a while: yield now and then, or CC stops us
+        if i % 65536 == 0 then os.queueEvent("strings"); os.pullEvent("strings") end
     end
 end)
 return cu.exit()

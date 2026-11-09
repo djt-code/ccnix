@@ -76,7 +76,8 @@ local HALF_YEAR = 182 * 24 * 3600
 local function when(ms)
     if not ms or ms <= 0 then return "           -" end    -- (none recorded: the root)
     local t = math.floor(ms / 1000)
-    local day = os.date("%d", t):gsub("^0", " ")
+    local day = os.date("%d", t)
+    if day:sub(1, 1) == "0" then day = " " .. day:sub(2) end     -- " 5", not "05"
     if math.abs(now - t) < HALF_YEAR then
         return os.date("%b ", t) .. day .. os.date(" %H:%M", t)
     end

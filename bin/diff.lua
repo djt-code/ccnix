@@ -16,6 +16,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("diff", "diff [-c|-e|-f|-u|-C n|-U n] [-bqr] file1 file2")
+local scan = require("scan")
 local args = { ... }
 local opts, ops, order = cu.getopt(args, "bcefqruC:U:", 2)
 if #ops ~= 2 then cu.usageError() end
@@ -72,13 +73,27 @@ end
 -- lines without their newlines, the keys they are compared by, and
 -- whether the last line has no newline (its key gets a marker, so "x"
 -- and "x\n" differ)
+local function notSpace(c) return not scan.isSpace(c) end
+
+-- l for -b: the blanks at its end dropped, every other run of them one space
+local function squeezeBlanks(l)
+    local out, sc = {}, scan.new(l)
+    while not sc:atEnd() do
+        if sc:readWhile(scan.isSpace) ~= "" then
+            if not sc:atEnd() then out[#out + 1] = " " end
+        else
+            out[#out + 1] = sc:readWhile(notSpace)
+        end
+    end
+    return table.concat(out)
+end
+
 local function split(s)
-    local L, K = {}, {}
-    for l in s:gmatch("([^\n]*)\n") do L[#L + 1] = l end
-    local last = s:match("[^\n]*$")
+    local L, K = scan.split(s, "\n", true), {}
+    local last = table.remove(L)    -- (what comes after the last newline)
     if last ~= "" then L[#L + 1] = last end
     for i, l in ipairs(L) do
-        K[i] = opts.b and (l:gsub("%s+$", ""):gsub("%s+", " ")) or l
+        K[i] = opts.b and squeezeBlanks(l) or l
     end
     if last ~= "" then K[#K] = K[#K] .. "\0" end
     return L, K, last ~= ""
@@ -327,7 +342,12 @@ local function diffFiles(n1, n2, inDir)
 end
 
 local function isDir(name) return name ~= "-" and fs.isDir(shell.resolve(name)) end
-local function join(d, f) return (d:gsub("/+$", "")) .. "/" .. f end
+-- directory d (its slashes at the end dropped), "/", name f
+local function join(d, f)
+    local to = #d
+    while to > 0 and d:sub(to, to) == "/" do to = to - 1 end
+    return d:sub(1, to) .. "/" .. f
+end
 
 -- compare two directories by the names in them
 local function diffDirs(d1, d2)

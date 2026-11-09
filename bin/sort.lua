@@ -24,35 +24,73 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("sort", "sort [-cCmu] [-o output] [-bdfinr] [-t char] [-k keydef]... [file...]")
+local scan = require("scan")
 local opts, files, order = cu.getopt({ ... }, "bcCdfik:mno:rt:u")
 local sep = opts.t
 if sep and #sep ~= 1 then cu.usageError("the -t separator must be one character") end
 local check = opts.c or opts.C
 if check and #files > 1 then cu.usageError("-c takes at most one file") end
 
+local MODS = "bdfinr"
+local isMod = scan.oneOf(MODS)
+
+-- one end of a keydef: field ("." char?)? mods, field and char digits, the
+-- mods some of b d f i n r.  The three as text ("" for one left out), or
+-- nil if no field number comes first
+local function readKeyEnd(ks)
+    local field = ks:readWhile(scan.isDigit)
+    if field == "" then return nil end
+    local char = ""
+    if ks:accept(".") then char = ks:readWhile(scan.isDigit) end
+    return field, char, ks:readWhile(isMod)
+end
+
+-- a keydef: start ("," end)?, as the start's field, char and mods, then
+-- the end's (nil if it has none); nil if it's neither
+local function readKeydef(text)
+    local ks = scan.new(text)
+    local sf, sc, sm = readKeyEnd(ks)
+    if not sf then return nil end
+    if ks:atEnd() then return sf, sc, sm end
+    if not ks:accept(",") then return nil end
+    local ef, ec, em = readKeyEnd(ks)
+    if not ef or not ks:atEnd() then return nil end
+    return sf, sc, sm, ef, ec, em
+end
+
 -- the global modifiers, then each key { sf, sc, ef, ec, mods, bstart, bend }
 local global = {}
-for m in ("bdfinr"):gmatch(".") do global[m] = opts[m] end
+for i = 1, #MODS do global[MODS:sub(i, i)] = opts[MODS:sub(i, i)] end
 local keys = {}
 for _, o in ipairs(order) do
     if o[1] == "k" then
-        local sf, sc, sm, rest = o[2]:match("^(%d+)%.?(%d*)([bdfinr]*)(.*)$")
-        local ef, ec, em = (rest or ""):match("^,(%d+)%.?(%d*)([bdfinr]*)$")
-        if not sf or (rest ~= "" and not ef) or tonumber(sf) == 0 or (sc ~= "" and tonumber(sc) == 0) then
+        local sf, sc, sm, ef, ec, em = readKeydef(o[2])
+        if not sf or tonumber(sf) == 0 or (sc ~= "" and tonumber(sc) == 0) then
             cu.usageError("bad key: " .. o[2])
         end
         local k = { sf = tonumber(sf), sc = tonumber(sc) or 1, ef = tonumber(ef), ec = tonumber(ec) or 0 }
         if sm == "" and (em or "") == "" then
             k.mods, k.bs, k.be = global, global.b, global.b
         else
-            k.mods, k.bs, k.be = {}, sm:find("b") ~= nil, (em or ""):find("b") ~= nil
-            for m in (sm .. (em or "")):gmatch(".") do k.mods[m] = true end
+            local mods = sm .. (em or "")
+            k.mods, k.bs, k.be = {}, sm:find("b", 1, true) ~= nil, (em or ""):find("b", 1, true) ~= nil
+            for i = 1, #mods do k.mods[mods:sub(i, i)] = true end
         end
         keys[#keys + 1] = k
     end
 end
 local whole = #keys == 0
 if whole then keys[1] = { sf = 1, sc = 1, ec = 0, mods = global, bs = global.b, be = false } end
+
+local isBlank = scan.oneOf(" \t")
+local function notBlank(c) return not isBlank(c) end
+
+-- where the blanks from p on in l end: the next non-blank (#l + 1 if none)
+local function pastBlanks(l, p)
+    local sc = scan.new(l, p)
+    sc:readWhile(isBlank)
+    return sc:pos()
+end
 
 -- the fields of a line as start and end positions
 local function fields(l)
@@ -65,10 +103,13 @@ local function fields(l)
             p = q + 1
         end
     else
-        while p <= #l do
-            local _, e = l:find("^[ \t]*[^ \t]*", p)
-            f[#f + 1] = { p, e }
-            p = e + 1
+        -- a field: its blanks, then the non-blanks after them
+        local sc = scan.new(l)
+        while not sc:atEnd() do
+            sc:readWhile(isBlank)
+            sc:readWhile(notBlank)
+            f[#f + 1] = { p, sc:pos() - 1 }
+            p = sc:pos()
         end
     end
     return f
@@ -77,8 +118,33 @@ end
 -- the position char c of field n (b: after its blanks), at most its end + 1
 local function at(l, f, n, c, b)
     local p = f[n][1]
-    if b then p = l:find("[^ \t]", p) or #l + 1 end
+    if b then p = pastBlanks(l, p) end
     return math.min(p + c - 1, f[n][2] + 1)
+end
+
+-- t with only the characters for which keep(c) holds
+local function keepOnly(t, keep)
+    local out = {}
+    for i = 1, #t do
+        local c = t:sub(i, i)
+        if keep(c) then out[#out + 1] = c end
+    end
+    return table.concat(out)
+end
+
+local function isDictChar(c) return scan.isAlnum(c) or isBlank(c) end     -- (-d)
+local function isPrintable(c) return c:byte() >= 32 and c:byte() <= 126 end      -- (-i)
+
+-- the number at the start of t for -n: blanks, then "-"? digit* ("."
+-- digit*)?; 0 if that isn't a number
+local function leadingNumber(t)
+    local sc = scan.new(t)
+    sc:readWhile(isBlank)
+    local from = sc:pos()
+    sc:accept("-")
+    sc:readWhile(scan.isDigit)
+    if sc:accept(".") then sc:readWhile(scan.isDigit) end
+    return tonumber(t:sub(from, sc:pos() - 1)) or 0
 end
 
 local function keyText(l, k)
@@ -87,12 +153,12 @@ local function keyText(l, k)
     local s = at(l, f, k.sf, k.sc, k.bs)
     local e = #l
     if k.ef and k.ef <= #f then e = k.ec == 0 and f[k.ef][2] or math.min(at(l, f, k.ef, k.ec, k.be), f[k.ef][2]) end
-    if whole and k.mods.b then s = l:find("[^ \t]") or #l + 1 end
+    if whole and k.mods.b then s = pastBlanks(l, 1) end
     local t = l:sub(s, e)
-    if k.mods.d then t = t:gsub("[^%w \t]", "") end
-    if k.mods.i then t = t:gsub("[^\32-\126]", "") end
+    if k.mods.d then t = keepOnly(t, isDictChar) end
+    if k.mods.i then t = keepOnly(t, isPrintable) end
     if k.mods.f then t = t:upper() end
-    if k.mods.n then t = tonumber(t:match("^[ \t]*(%-?%d*%.?%d*)")) or 0 end
+    if k.mods.n then t = leadingNumber(t) end
     return t
 end
 
@@ -153,8 +219,11 @@ end
 
 if opts.o then
     local h, e = io.open(shell.resolve(opts.o), "wb")
-    -- io.open's message starts with the path: keep just the reason
-    if not h then cu.fail(opts.o .. ": " .. tostring(e):gsub("^[^:]*: ", ""), 2); return cu.exit() end
+    -- io.open's message starts with the path and ": ": keep just the reason
+    local why = tostring(e)
+    local _, rest = scan.cut(why, ":")
+    if rest and scan.startsWith(rest, " ") then why = rest:sub(2) end
+    if not h then cu.fail(opts.o .. ": " .. why, 2); return cu.exit() end
     h:write(table.concat(out))
     h:close()
 else

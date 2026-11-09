@@ -12,6 +12,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("rm", "rm [-fiRrd] file...")
+local scan = require("scan")
 local opts, files, order = cu.getopt({ ... }, "fiRrd")
 local force, ask = false, false
 for _, o in ipairs(order) do
@@ -26,12 +27,19 @@ end
 local function yes(question)
     io.stderr:write("rm: " .. question .. "? ")
     local answer = cu.readLine(io.input()) or ""
-    return answer:match("^%s*[yY]") ~= nil
+    local first = scan.trim(answer):sub(1, 1)       -- (blanks before it are allowed)
+    return first == "y" or first == "Y"
+end
+
+-- fs.delete's message starts with the path and ": ": keep just the reason
+local function reason(e)
+    local _, rest = scan.cut(e, ": ")
+    return rest or e
 end
 
 local function remove(shown, path)
     local ok, err = pcall(fs.delete, path)
-    if not ok then cu.fail(shown .. ": " .. tostring(err):gsub("^.-: ", ""), 1); return false end
+    if not ok then cu.fail(shown .. ": " .. reason(tostring(err)), 1); return false end
     return true
 end
 
@@ -61,8 +69,16 @@ local function rm(shown, path)
     remove(shown, path)
 end
 
+-- the last part of path name f: after its last slash, trailing slashes dropped
+local function lastPart(f)
+    local to = #f
+    while to > 0 and f:sub(to, to) == "/" do to = to - 1 end
+    local _, after = scan.cutLast(f:sub(1, to), "/")
+    return after or f:sub(1, to)
+end
+
 for _, f in ipairs(files) do
-    local last = f:gsub("/+$", ""):match("([^/]*)$")
+    local last = lastPart(f)
     local path = shell.resolve(f)
     if last == "." or last == ".." then
         cu.fail("refusing to remove '.' or '..' directory: skipping '" .. f .. "'")

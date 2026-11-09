@@ -22,6 +22,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("test", "test [expression]")
+local scan = require("scan")
 local args = { ... }
 
 local function bad(msg) cu.err(msg); cu.exit(2) end
@@ -41,12 +42,21 @@ end
 local function int(s) return cu.int(s) or bad(s .. ": integer expression expected") end
 local function no() return false end
 
+-- an integer's sign ("+", "-" or "") and its digits without the leading zeros
+local function signAndDigits(s)
+    local sign = ""
+    if scan.startsWith(s, "+") or scan.startsWith(s, "-") then sign, s = s:sub(1, 1), s:sub(2) end
+    local from = 1
+    while s:sub(from, from) == "0" do from = from + 1 end
+    return sign, s:sub(from)
+end
+
 -- compare two integers as text, -1, 0 or 1, so that numbers past 2^53
 -- (where Lua's doubles lose digits) still compare exactly
 local function icmp(a, b)
     int(a); int(b)
-    local sa, da = a:match("^([+-]?)0*(%d*)$")
-    local sb, db = b:match("^([+-]?)0*(%d*)$")
+    local sa, da = signAndDigits(a)
+    local sb, db = signAndDigits(b)
     local na, nb = sa == "-" and da ~= "", sb == "-" and db ~= ""
     if na ~= nb then return na and -1 or 1 end
     local c = 0
@@ -65,7 +75,7 @@ local UNARY = {
     ["-x"] = function(p)
         if try(fs.isDir, p) then return true end
         local n = fs.getName(shell.resolve(p))
-        return isFile(p) and (n:match("%.lua$") ~= nil or not n:find(".", 1, true))
+        return isFile(p) and (scan.endsWith(n, ".lua") or not n:find(".", 1, true))
     end,
     ["-n"] = function(s) return s ~= "" end,
     ["-z"] = function(s) return s == "" end,
