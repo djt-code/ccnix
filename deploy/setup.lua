@@ -88,6 +88,28 @@ local REPO = "https://github.com/djt-code/ccnix"
 local RAW = "https://raw.githubusercontent.com/djt-code/ccnix/main/"
 local DIR = "/ccnix"
 
+-- Reading text, by hand (setup is fetched alone, before there's a lib/
+-- with lib/scan in it):
+local function endsWith(s, suffix) return s:sub(-#suffix) == suffix end
+
+-- s's lines, the pieces between newlines, empty ones too ("a\nb\n" is
+-- "a", "b" and "")
+local function splitLines(s)
+    local out, from = {}, 1
+    while true do
+        local nl = s:find("\n", from, true)
+        if not nl then break end
+        out[#out + 1] = s:sub(from, nl - 1)
+        from = nl + 1
+    end
+    out[#out + 1] = s:sub(from)
+    return out
+end
+
+local function isAlnum(c)
+    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
+end
+
 -- What each app needs.  A path ending in / is a whole folder.
 local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lua" }
 local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/netstat.lua", "bin/tcpdump.lua", "bin/curl.lua", "lib/net.lua",
@@ -180,7 +202,13 @@ local function paths()
         seen[p] = true
         out[#out + 1] = "--only"
         out[#out + 1] = p
-        local name = p:match("([^/]+)%.lua$")
+        -- a Lua file's name: "bin/ls.lua" is ls
+        local slash = 0
+        for j = 1, #p do
+            if p:sub(j, j) == "/" then slash = j end
+        end
+        local file = p:sub(slash + 1)
+        local name = #file > #".lua" and endsWith(file, ".lua") and file:sub(1, -#".lua" - 1)
         if name and p:sub(1, 4) ~= "lib/" then add("help/" .. name .. ".txt") end
         if p == "bin/" then add("help/") end
     end
@@ -311,7 +339,7 @@ local function configure(repo, romMode)
     -- before (the path lines, the shell's, the autostart's) name the repo
     local function kept(path)
         local lines = {}
-        for line in ((read(path) or "") .. "\n"):gmatch("(.-)\n") do
+        for _, line in ipairs(splitLines(read(path) or "")) do
             if not (line:find(repo .. "/", 1, true) or line:find("/cc-turtles/", 1, true)) then lines[#lines + 1] = line end
         end
         if lines[#lines] == "" then lines[#lines] = nil end         -- (the file's own last newline)
@@ -393,6 +421,27 @@ if fs.exists("/rom/ccnix/.manifest") then
         -- one that runs a program of its own, fileserver mount say, runs it
         -- by name now (ccnix puts it on the path), but not ip up (ccnix's
         -- boot starts the network)
+        -- an old line that ran a program: shell.run("/cc-turtles/<dir>/<prog><args>"),
+        -- in either quotes, the folder letters and digits, prog those and -;
+        -- prog and args, or nil if the line isn't one
+        local function oldRun(line)
+            local head, root = "shell.run(", "/cc-turtles/"
+            local function isQuote(c) return c == '"' or c == "'" end
+            if line:sub(1, #head) ~= head or not isQuote(line:sub(#head + 1, #head + 1)) then return nil end
+            local i = #head + 2
+            if line:sub(i, i + #root - 1) ~= root then return nil end
+            i = i + #root
+            local j = i                                          -- the folder
+            while j <= #line and isAlnum(line:sub(j, j)) do j = j + 1 end
+            if j == i or line:sub(j, j) ~= "/" then return nil end
+            i = j + 1
+            j = i                                                -- the program
+            while j <= #line and (isAlnum(line:sub(j, j)) or line:sub(j, j) == "-") do j = j + 1 end
+            if j == i then return nil end
+            -- the args run to the closing quote and ) that end the line
+            if #line < j + 1 or not isQuote(line:sub(-2, -2)) or line:sub(-1) ~= ")" then return nil end
+            return line:sub(i, j - 1), line:sub(j, -3)
+        end
         local files = { "/startup.lua" }
         if fs.isDir("/startup") then
             for _, name in ipairs(fs.list("/startup")) do files[#files + 1] = "/startup/" .. name end
@@ -403,17 +452,18 @@ if fs.exists("/rom/ccnix/.manifest") then
                 local text = h.readAll() or ""
                 h.close()
                 local out, changed = {}, false
-                for line in (text .. "\n"):gmatch("(.-)\n") do
+                for _, line in ipairs(splitLines(text)) do
                     if line:find("/cc-turtles", 1, true) then
                         changed = true
-                        local prog, rest = line:match('^shell%.run%(["\']/cc%-turtles/%w+/([%w%-]+)(.-)["\']%)$')
+                        local prog, rest = oldRun(line)
                         if prog and prog ~= "ip" then out[#out + 1] = 'shell.run("' .. prog .. rest .. '")' end
                     else
                         out[#out + 1] = line
                     end
                 end
                 if changed then
-                    local new = table.concat(out, "\n"):gsub("\n+$", "")
+                    local new = table.concat(out, "\n")
+                    while endsWith(new, "\n") do new = new:sub(1, -2) end   -- (no blank lines at the end)
                     if new == "" then fs.delete(f)
                     else local h2 = fs.open(f, "w"); h2.write(new .. "\n"); h2.close() end
                 end
@@ -484,7 +534,7 @@ do
         local f = fs.open(p, "r")
         local state = (textutils.unserialiseJSON or textutils.unserializeJSON)(f.readAll() or "")
         f.close()
-        if type(state) == "table" and type(state.url) == "string" and state.url:find("/djt%-code/cc%-turtles") then
+        if type(state) == "table" and type(state.url) == "string" and state.url:find("/djt-code/cc-turtles", 1, true) then
             state.url = REPO
             f = fs.open(p, "w")
             f.write((textutils.serialiseJSON or textutils.serializeJSON)(state))
@@ -507,7 +557,7 @@ else
         -- (a job's files there aren't .lua, and turtlelib moves them).
         for _, name in ipairs(fs.list(DIR)) do
             local p = fs.combine(DIR, name)
-            if name:match("%.lua$") and not fs.isDir(p) then print("Removing " .. p); fs.delete(p) end
+            if endsWith(name, ".lua") and not fs.isDir(p) then print("Removing " .. p); fs.delete(p) end
         end
         local all = false
         for _, a in ipairs(cloneArgs) do all = all or a == "--all" end

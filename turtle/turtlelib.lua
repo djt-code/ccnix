@@ -16,12 +16,79 @@
 --     serpentine plan generation
 --   * chest-below helpers: dump with a keep policy, count, restock,
 --     merge part stacks
+--   * reading item names and saved files without Lua patterns
+--     (T.startsWith, T.endsWith, T.words, T.isInteger ...)
 --
 -- Programs configure it by setting fields on T.cfg and T.diggable before
 -- moving.  Everything is relative to where the turtle starts: (0,0,0)
 -- facing +z, with +x to its right.
 
 local T = {}
+
+--------------------------------------------------------------------------
+-- Reading names and the saved files: a few of lib/scan's helpers, kept
+-- here so turtlelib needs nothing beside it (a turtle may have turtle/
+-- and no lib/).  Plain comparisons, no Lua patterns.
+--------------------------------------------------------------------------
+function T.startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
+function T.endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
+
+-- s without prefix, if it starts with it: dropPrefix("minecraft:wheat", "minecraft:") is "wheat"
+function T.dropPrefix(s, prefix)
+    if T.startsWith(s, prefix) then return s:sub(#prefix + 1) end
+    return s
+end
+
+-- the blanks Lua's %s knows: space, \t \n \v \f \r (bytes 9 to 13)
+local function isBlank(c)
+    local b = c:byte()
+    return b == 32 or (b ~= nil and b >= 9 and b <= 13)
+end
+
+-- s without the blanks at either end
+function T.trim(s)
+    local from, to = 1, #s
+    while from <= to and isBlank(s:sub(from, from)) do from = from + 1 end
+    while to >= from and isBlank(s:sub(to, to)) do to = to - 1 end
+    return s:sub(from, to)
+end
+
+-- the words of s between blanks, as a list
+function T.words(s)
+    local out, i = {}, 1
+    while i <= #s do
+        if isBlank(s:sub(i, i)) then
+            i = i + 1
+        else
+            local j = i
+            while j <= #s and not isBlank(s:sub(j, j)) do j = j + 1 end
+            out[#out + 1] = s:sub(i, j - 1)
+            i = j
+        end
+    end
+    return out
+end
+
+-- true if every character of s (one at least) passes test
+local function allOf(s, test)
+    if s == nil or s == "" then return false end
+    for i = 1, #s do
+        if not test(s:sub(i, i)) then return false end
+    end
+    return true
+end
+local function isDigit(c) return c >= "0" and c <= "9" end
+local function isLetter(c) return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") end
+
+-- digits only: "12"; false for "", nil, "-3" and "1.5"
+function T.isDigits(s) return allOf(s, isDigit) end
+-- a whole number: digits, a - before them or not
+function T.isInteger(s)
+    if s ~= nil and s:sub(1, 1) == "-" then s = s:sub(2) end
+    return T.isDigits(s)
+end
+-- letters only: "flat"
+function T.isLetters(s) return allOf(s, isLetter) end
 
 --------------------------------------------------------------------------
 -- Configuration (override from the program)
@@ -89,7 +156,7 @@ function T.dataPath(name)
     local path = fs.combine(dir, name)
     local old = fs.combine(fs.getDir(dir), name)
     if dir == "ccnix/turtle" and not fs.exists(old) then old = fs.combine("cc-turtles/turtle", name) end
-    if dir:match("[^/]*$") == "turtle" and not fs.exists(path) and fs.exists(old) then fs.move(old, path) end
+    if T.endsWith("/" .. dir, "/turtle") and not fs.exists(path) and fs.exists(old) then fs.move(old, path) end
     return path
 end
 
@@ -146,8 +213,13 @@ function T.loadPos()
     local f = fs.open(p, "r")
     local line = f.readAll() or ""
     f.close()
-    local x, y, z, d, mode = line:match("(-?%d+) (-?%d+) (-?%d+) (%d) (%a+)")
-    if not x then return nil end
+    -- "x y z dir mode", as savePos writes it: three whole numbers, a digit, a word
+    local w = T.words(line)
+    local x, y, z, d, mode = w[1], w[2], w[3], w[4], w[5]
+    if not (T.isInteger(x) and T.isInteger(y) and T.isInteger(z) and T.isDigits(d) and #d == 1
+            and T.isLetters(mode)) then
+        return nil
+    end
     return { x = tonumber(x), y = tonumber(y), z = tonumber(z), dir = tonumber(d), mode = mode }
 end
 
@@ -315,12 +387,12 @@ end
 -- the duration and restored afterwards.  Non-tool upgrades (chunky,
 -- modem, ...) are never touched.
 --------------------------------------------------------------------------
-local TOOL_SUFFIXES = { "_pickaxe$", "_hoe$", "_shovel$", "_axe$", "_sword$" }
+local TOOL_SUFFIXES = { "_pickaxe", "_hoe", "_shovel", "_axe", "_sword" }
 
 function T.isTool(name)
     if not name then return false end
-    for _, pat in ipairs(TOOL_SUFFIXES) do
-        if name:find(pat) then return true end
+    for _, suffix in ipairs(TOOL_SUFFIXES) do
+        if T.endsWith(name, suffix) then return true end
     end
     return false
 end
@@ -374,14 +446,14 @@ function T.equipped(side)
     return name
 end
 
--- A tool whose name matches `pattern` (a Lua pattern: "_pickaxe$"): the
--- one equipped, else the first in the inventory; nil if there's none.
-function T.findTool(pattern)
+-- A tool whose name ends with `suffix` ("_pickaxe"): the one equipped,
+-- else the first in the inventory; nil if there's none.
+function T.findTool(suffix)
     for _, side in ipairs({ "left", "right" }) do
         local name = T.equipped(side)
-        if name and name:find(pattern) then return name end
+        if name and T.endsWith(name, suffix) then return name end
     end
-    local slot = T.findSlot(function(n) return n:find(pattern) ~= nil end)
+    local slot = T.findSlot(function(n) return T.endsWith(n, suffix) end)
     return slot and turtle.getItemDetail(slot).name or nil
 end
 
@@ -561,6 +633,13 @@ end
 function T.here() return { x = T.pos.x, y = T.pos.y, z = T.pos.z } end
 function T.at(p) return T.pos.x == p.x and T.pos.y == p.y and T.pos.z == p.z end
 function T.posKey(p) return p.x .. "," .. p.y .. "," .. p.z end
+-- Inverse of posKey: the x, y, z of "x,y,z".
+function T.keyPos(k)
+    local c1 = k:find(",", 1, true)
+    local c2 = c1 and k:find(",", c1 + 1, true)
+    if not c2 then return nil end
+    return tonumber(k:sub(1, c1 - 1)), tonumber(k:sub(c1 + 1, c2 - 1)), tonumber(k:sub(c2 + 1))
+end
 function T.dist(a, b) return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z) end
 
 -- The block next to the turtle in direction d.
@@ -661,8 +740,9 @@ function T.ckey(x, z) return x .. "," .. z end
 
 -- Inverse of ckey: the x, z a key was made from.
 function T.keyXZ(k)
-    local x, z = k:match("(-?%d+),(-?%d+)")
-    return tonumber(x), tonumber(z)
+    local comma = k:find(",", 1, true)          -- "x,z"
+    if not comma then return nil, nil end
+    return tonumber(k:sub(1, comma - 1)), tonumber(k:sub(comma + 1))
 end
 function T.markBlocked(x, z) T.blocked[T.ckey(x, z)] = true end
 function T.clearBlocked() T.blocked = {} end
@@ -1020,7 +1100,7 @@ function T.freeSlots()
 end
 
 function T.isContainer(name)
-    return name:find("chest") ~= nil or name:find("barrel") ~= nil
+    return name:find("chest", 1, true) ~= nil or name:find("barrel", 1, true) ~= nil
 end
 
 function T.containerBelow() return T.containerOn("bottom") end
@@ -1092,7 +1172,7 @@ function T.inventoryLine(label)
     for s = 1, 16 do
         local it = turtle.getItemDetail(s)
         if it then
-            local name = it.name:gsub("^minecraft:", "")
+            local name = T.dropPrefix(it.name, "minecraft:")
             if not counts[name] then order[#order + 1] = name; counts[name] = 0 end
             counts[name] = counts[name] + it.count
         end
@@ -1169,7 +1249,12 @@ end
 
 -- What kind of thing an item is, for grouping like with like: the last
 -- word of its id ("wheat_seeds" -> "seeds", "water_bucket" -> "bucket").
-local function itemKind(name) return name:match("([^_:]+)$") or name end
+local function itemKind(name)
+    local from = #name
+    while from > 0 and name:sub(from, from) ~= "_" and name:sub(from, from) ~= ":" do from = from - 1 end
+    local kind = name:sub(from + 1)               -- after the last _ or :
+    return kind ~= "" and kind or name
+end
 
 -- Lay the container out in order, packed against its last slot: by kind,
 -- then by item, fullest stack first, so every item's stacks sit together

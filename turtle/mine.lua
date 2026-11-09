@@ -264,17 +264,17 @@ FLUID = { [LAVA] = true, [WATER] = true }
 ORE_EXTRA = { ["minecraft:ancient_debris"] = true }
 
 function isOre(data)
-    if data.name:find("_ore$") or ORE_EXTRA[data.name] then return true end
+    if T.endsWith(data.name, "_ore") or ORE_EXTRA[data.name] then return true end
     for tag in pairs(data.tags or {}) do
-        if tag == "c:ores" or tag == "forge:ores" or tag:find("_ores$") then return true end
+        if tag == "c:ores" or tag == "forge:ores" or T.endsWith(tag, "_ores") then return true end
     end
     return false
 end
 
 -- Blocks never to dig: storage, spawners and ComputerCraft blocks.
 function protected(name)
-    return name:find("chest") or name:find("barrel") or name:find("shulker")
-        or name:find("spawner") or name:find("^computercraft:")
+    return name:find("chest", 1, true) or name:find("barrel", 1, true) or name:find("shulker", 1, true)
+        or name:find("spawner", 1, true) or T.startsWith(name, "computercraft:")
 end
 
 -- Bulk items go in a home's bulk chest; everything else is a valuable.
@@ -358,12 +358,13 @@ TORCH_BLOCKS = { ["minecraft:torch"] = true, ["minecraft:wall_torch"] = true,
 CRAFTING_TABLE, STICK = "minecraft:crafting_table", "minecraft:stick"
 COAL = { ["minecraft:coal"] = true, ["minecraft:charcoal"] = true }   -- what torches are lit with
 function isLog(name)
-    return (name:find("_log$") or name:find("_wood$") or name:find("_stem$") or name:find("_hyphae$")) ~= nil
+    return T.endsWith(name, "_log") or T.endsWith(name, "_wood") or T.endsWith(name, "_stem")
+        or T.endsWith(name, "_hyphae")
 end
-function isPlanks(name) return name:find("_planks$") ~= nil end
+function isPlanks(name) return T.endsWith(name, "_planks") end
 function isWood(name) return isLog(name) or isPlanks(name) or name == STICK end
 -- The Advanced Peripherals Geo Scanner: kept on board, never unloaded.
-function isScanner(name) return name:find("geo_scanner") ~= nil end
+function isScanner(name) return name:find("geo_scanner", 1, true) ~= nil end
 -- A bucket: kept on board (one), for taking up lava to burn (see scoop).
 BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 function isSupply(name)
@@ -386,7 +387,7 @@ VALUE = {
 }
 function value(name)
     if VALUE[name] then return VALUE[name] end
-    if name:find("raw_") or name:find("ore") or name:find("gem") then return 40 end
+    if name:find("raw_", 1, true) or name:find("ore", 1, true) or name:find("gem", 1, true) then return 40 end
     return 10
 end
 
@@ -520,7 +521,7 @@ end
 -- their worth, coal because the turtle runs on it, and wood while it's
 -- wanted, for chests and torches.
 function goesFar(name)
-    return name:find("diamond") ~= nil or name:find("coal") ~= nil or (woodNeed > 0 and isWoodBlock(name))
+    return name:find("diamond", 1, true) ~= nil or name:find("coal", 1, true) ~= nil or (woodNeed > 0 and isWoodBlock(name))
 end
 
 --------------------------------------------------------------------------
@@ -557,10 +558,13 @@ end
 function loadProgress()
     if not fs.exists(PROGRESS_FILE) then return nil end
     local f = fs.open(PROGRESS_FILE, "r")
-    local k, lane, z, n = (f.readAll() or ""):match("(%d+) (%d+) (-?%d+) ?(%d*)")
+    -- "home lane z lanes", as saveProgress writes it (files from before
+    -- the lane count have the first three)
+    local w = T.words(f.readAll() or "")
     f.close()
-    if not k then return nil end
-    return { k = tonumber(k), lane = tonumber(lane), z = tonumber(z), lanes = tonumber(n) }
+    if not (T.isDigits(w[1]) and T.isDigits(w[2]) and T.isInteger(w[3])) then return nil end
+    return { k = tonumber(w[1]), lane = tonumber(w[2]), z = tonumber(w[3]),
+             lanes = T.isDigits(w[4]) and tonumber(w[4]) or nil }
 end
 
 function clearProgress()
@@ -570,11 +574,16 @@ end
 function loadJob()
     if not fs.exists(JOB_FILE) then return nil end
     local f = fs.open(JOB_FILE, "r")
-    local w, h, l, s, k, state = (f.readAll() or ""):match("(-?%d+) (-?%d+) (-?%d+) (%d+) (%d+) (%a+)")
+    -- "width height length spacing homes state", as saveJob writes it
+    local w = T.words(f.readAll() or "")
     f.close()
-    if not w then return nil end
-    return { width = tonumber(w), height = tonumber(h), length = tonumber(l) ~= 0 and tonumber(l) or nil,
-             spacing = tonumber(s), homes = tonumber(k), state = state }
+    if not (T.isInteger(w[1]) and T.isInteger(w[2]) and T.isInteger(w[3]) and T.isDigits(w[4])
+            and T.isDigits(w[5]) and T.isLetters(w[6])) then
+        return nil
+    end
+    local l = tonumber(w[3])
+    return { width = tonumber(w[1]), height = tonumber(w[2]), length = l ~= 0 and l or nil,
+             spacing = tonumber(w[4]), homes = tonumber(w[5]), state = w[6] }
 end
 
 --------------------------------------------------------------------------
@@ -2022,7 +2031,7 @@ function relative(blocks)
     if not far then return blocks end
     local me
     for _, e in ipairs(blocks) do
-        if e.name:find("^computercraft:turtle") then
+        if T.startsWith(e.name, "computercraft:turtle") then
             if me then return nil, "scan gives world coordinates, and there's more than one turtle in range" end
             me = e
         end
@@ -2095,7 +2104,7 @@ function record(blocks, z1, z2, toCell)
         local zTop = z2 == LENGTH and z2 + SCAN_REACH or z2
         if kind == "ore" and out >= 1 and p.z >= z1 and p.z <= zTop and not opened[k]
                 and (inReach(p) or goesFar(e.name)) then
-            targets[k] = { x = p.x, y = p.y, z = p.z, coal = e.name:find("coal") ~= nil,
+            targets[k] = { x = p.x, y = p.y, z = p.z, coal = e.name:find("coal", 1, true) ~= nil,
                            from = from, scan = scans }
         end
     end
@@ -2405,7 +2414,8 @@ function repair(z1, z2, done, aheadDug)
         local ends = {}
         for _, sp in ipairs(spansOf(wetZ, 0)) do ends[sp.lo], ends[sp.hi] = true, true end
         for k in pairs(unfed) do
-            if ends[tonumber(k:match("([^,]+)$"))] then unfed[k] = nil end
+            local _, _, z = T.keyPos(k)
+            if ends[z] then unfed[k] = nil end
         end
         wetZ = {}
         walk(first, where)
@@ -2956,7 +2966,7 @@ end
 function main()
 if doWhere then where(); return end
 if doReset and forceHere then T.setHomeHere(); return end
-pickaxe = T.findTool("_pickaxe$")      -- one equipped, else one in the inventory
+pickaxe = T.findTool("_pickaxe")      -- one equipped, else one in the inventory
 if not pickaxe then print("Needs a pickaxe, equipped or in the inventory."); return end
 job = loadJob()
 
@@ -3113,8 +3123,8 @@ T.withTool(pickaxe, function()
         if chestCounts("top")[BUCKET] and T.countItem(BUCKET) == 0 then
             T.restockFrom("top", BUCKET, 1, { quiet = true, room = 1 })
         end
-        hasScanner = T.countItem(isScanner) > 0 or (T.equipped("left") or ""):find("geo_scanner") ~= nil
-            or (T.equipped("right") or ""):find("geo_scanner") ~= nil
+        hasScanner = T.countItem(isScanner) > 0 or isScanner(T.equipped("left") or "")
+            or isScanner(T.equipped("right") or "")
         if hasScanner then
             print("Geo scanner on board: scanning instead of checking every wall block.")
         end
