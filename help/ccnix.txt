@@ -39,6 +39,8 @@ Anywhere (bin/):
   httpd: a web server: the files under a folder, over HTTP (lib/httpd.lua)
   init: processes and services: the first process
   ip: set up and look at the network (lib/net.lua)
+  irc: an IRC client: BitchX's looks, weechat's buffers, irssi's scripts
+  ircd: an IRC server, with services and a bridge to the game's chat
   kill: signal processes
   logger: put messages in the system log (POSIX logger, with BSD's options)
   ls: list directory contents (POSIX ls, with the GNU options in everyday use)
@@ -96,6 +98,7 @@ Setting up (deploy/setup.lua, or ccnix setup):
 
 Topics:
   httpd-pages: Lua pages on the web server: forms, routes, templates, cookies
+  irc-scripts: irc's scripts: Lua that changes what the IRC client does, as irssi's Perl scripts do.
   network: setting up a network lab (3 computers, 2 networks, a router)
   syslog: the system log: syslogd, logger, lib/log, /etc/syslog.conf, forwarding
 

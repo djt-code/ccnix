@@ -1,0 +1,122 @@
+-- irc.lua -- an IRC client: BitchX's looks, weechat's buffers, irssi's scripts
+--
+--   irc [network | host[:port] [nick]]
+--
+-- A full-screen IRC client.  With no arguments it starts with the
+-- networks marked autoconnect; given a network's name (/network add) or
+-- a host, it connects there.  Any IRC server: an ircd on another
+-- computer here (bin/ircd: NickServ, ChanServ, and #minecraft, the
+-- game's chat), or a real one through the ccnix mod's gateway, when the
+-- network reaches out (6667: no TLS here).
+--
+-- The screen: a title bar (the channel's topic), the chat with each nick
+-- in its own colour, the status bar ([time] [nick] [buffer] [Act: the
+-- buffers with something new] [Lag]) and the line you type.  On a wide
+-- screen (a monitor, 80 columns) the buffer list is on the left and the
+-- channel's nicks on the right.  Each server, channel and private
+-- conversation is a buffer, numbered: Alt+1..9 (or Esc then the digit)
+-- go to one, Alt+Left/Right or Ctrl+P/N step through them, Alt+A goes
+-- to the next with something new, PgUp/PgDn and the wheel scroll, Tab
+-- completes nicks, channels and commands.  The line edits as ccsh's does
+-- (lib/readline: Ctrl+A/E, Ctrl+K/U/W/Y, Alt+B/F, Up and Down, Ctrl+R).
+-- Ctrl+C then b, c (and colour digits), u, r, i or o puts mIRC's bold,
+-- colour, underline, reverse, italic or plain into the line.  Ctrl+T
+-- quits.  Your nick (or hilight_words) in a channel, or a private
+-- message, chimes on a speaker if one is attached.
+--
+-- Commands (/help lists them all; /help <command> says more):
+--   /connect <network | host> [port] [nick]   /disconnect   /reconnect   /quit [message]
+--   /network add <name> <host> [port]         /network list   /network del <name>
+--   /join #chan [key]   /part [msg]   /msg nick text   /query nick   /me text
+--   /notice   /nick   /topic   /names   /whois   /who   /list   /invite
+--   /mode   /op /deop /voice /devoice   /kick   /ban /unban /kb   /away /back
+--   /ctcp nick cmd   /ping nick   /quote <raw line>   /lastlog text   /clear
+--   /window <n | close | list | move n>   /close   /set [name [value]]
+--   /alias name expansion   /ignore mask [levels]   /script load name
+-- Any other command goes to the server as it is (/stats, /admin...).
+-- Aliases come with it (/j /wc /q /w /t /k /m /n /ns /cs /mc ...): /alias
+-- lists them; $0 $1- $* $N (your nick) $C (the channel) in your own.
+--
+-- Settings (/set; kept in ~/.irc/config, ~ being $HOME or /):
+--   nick, alt_nick, user_name, real_name, quit_message, part_message,
+--   away_message, timestamp_format (%H:%M), timestamp_clock (real, or
+--   game: the world's clock), prefix_width (9; 0 for <nick> text),
+--   hilight_words, beep_on_hilight, scrollback (500), buflist and
+--   nicklist (on, off, auto), reconnect_time (30), autojoin_on_invite,
+--   show_banner, scripts (loaded at the start).
+-- A network's: /set network.<name>.<key> with address, port, password,
+-- nick, user_name, autojoin ("#a, #b"), autoconnect (on), sasl_user and
+-- sasl_pass (SASL PLAIN), commands (run once connected, ; between).
+--
+--   /network add lab 10.1.1.5
+--   /set network.lab.autojoin #minecraft, #ccnix
+--   /set network.lab.autoconnect on
+--   /set network.lab.commands msg NickServ IDENTIFY hunter2
+--
+-- Scripts, as irssi has them: Lua files in ~/.irc/scripts (and those that
+-- come with ccnix), loaded with /script load <name>; the ones in
+-- ~/.irc/scripts/autorun, and those named in the scripts setting, at the
+-- start.  A script gets the irc table: signal_add(name, fn) (irssi's
+-- signals: "message public", "message private", "message join", "print
+-- text", "event <command>", "send text"...), signal_stop(),
+-- command_bind(name, fn, help), settings_add_str/int/bool,
+-- settings_get_*, timeout_add(ms, fn), statusbar_item(name, fn), print,
+-- and the buffers and servers, with their own methods (buffer:print,
+-- server:command, server:send_raw).  Unloading takes it all away again.
+-- `help irc-scripts` has the whole API and the scripts that come with it
+-- (autoaway, autorejoin, hilightwin, slap, nickserv).
+
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
+local cu = require("cu").init("irc", "irc [network | host[:port] [nick]]")
+local ircclient = require("ircclient")
+local ircui = require("ircui")
+
+local args = { ... }
+if #args > 3 then cu.usageError() end
+
+-- the scripts that come with it: lib/ircscripts in each of ccnix's lib/s
+local scriptDirs = {}
+for entry in package.path:gmatch("[^;]+") do
+    local dir = entry:match("^(.*/lib/)%?%.lua$")
+    if dir and fs.isDir(dir .. "ircscripts") then scriptDirs[#scriptDirs + 1] = dir .. "ircscripts" end
+end
+local client = ircclient.new({ scriptDirs = scriptDirs })
+
+-- under init: Ctrl+C is the line's (a format key), not an interrupt; Ctrl+Z
+-- stops it as any job, and it draws again when it's back
+local proc = rawget(_G, "proc")
+if proc and not (proc.ignore and proc.getpgid) then proc = nil end
+if proc then proc.ignore("INT") end
+if proc and proc.ownScrollback then proc.ownScrollback() end
+
+local native = term.current()
+local ui = ircui.new(client, native)
+client:start()
+if args[1] then client:command("/connect " .. table.concat(args, " ")) end
+
+local ok, e = pcall(function()
+    ui:draw()
+    while not client.quitting do
+        local ev = table.pack(os.pullEventRaw())
+        local name = ev[1]
+        if name == "terminate" then
+            client:command("/quit")
+        elseif name == "proc_cont" then
+            ui.dirty = true
+        else
+            client:event(table.unpack(ev, 1, ev.n))
+            ui:event(table.unpack(ev, 1, ev.n))
+        end
+        if client.dirty or ui.dirty then ui:draw() end
+    end
+end)
+for _, s in ipairs(client.servers) do
+    if s.conn then s:quit() end
+end
+native.setBackgroundColour(colours.black)
+native.setTextColour(colours.white)
+native.setCursorBlink(false)
+native.clear()
+native.setCursorPos(1, 1)
+if not ok then error(e, 0) end
+return cu.exit()

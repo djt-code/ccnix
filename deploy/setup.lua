@@ -25,6 +25,10 @@
 --   httpd                              the web server as a service, with
 --                                      init and the network: serves /www,
 --                                      Lua pages in /www/cgi
+--   irc                                the IRC client, and the network
+--   ircd                               the IRC server as a service, with
+--                                      init and the network: NickServ,
+--                                      ChanServ, #minecraft (`help ircd`)
 -- git and deploy/ always come; so do the help files of what you pick.
 --
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
@@ -88,6 +92,7 @@ local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", 
               "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
 local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/procrun.lua", "lib/cu.lua",
                "bin/syslogd.lua", "bin/logger.lua", "lib/log.lua", "lib/syslogd.lua", "help/syslog.txt" }
+local IRC = { "lib/irc.lua", "lib/scan.lua" }
 local APPS = {
     mine = { "turtle/mine.lua", TURTLE },
     farm = { "turtle/farm.lua", TURTLE },
@@ -104,6 +109,9 @@ local APPS = {
     telnet = { "bin/telnet.lua", "lib/telnet.lua", NET },
     telnetd = { "bin/telnetd.lua", "lib/telnet.lua", NET, INIT },
     httpd = { "bin/httpd.lua", "lib/httpd.lua", "lib/etlua.lua", "lib/etlua-license.txt", "help/httpd-pages.txt", NET, INIT },
+    irc = { "bin/irc.lua", IRC, "lib/ircclient.lua", "lib/ircui.lua", "lib/readline.lua", "lib/ircscripts/",
+            "help/irc-scripts.txt", NET },
+    ircd = { "bin/ircd.lua", IRC, "lib/ircd.lua", "lib/ircserv.lua", "lib/mc.lua", NET, INIT },
 }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt", "help/setup.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
@@ -156,9 +164,9 @@ end
 -- what the apps want set
 for _, a in ipairs(apps) do
     if a == "ccsh" then login = true end
-    if a == "net" or a == "telnet" or a == "telnetd" or a == "httpd" then netBoot = true end
+    if a == "net" or a == "telnet" or a == "telnetd" or a == "httpd" or a == "irc" or a == "ircd" then netBoot = true end
     if a == "router" then netBoot, router = true, true end
-    if a == "init" or a == "telnetd" or a == "httpd" then initBoot = true end
+    if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" then initBoot = true end
 end
 
 -- The paths the named apps need, with their help files, as --only options
@@ -193,7 +201,7 @@ local function die(msg)
     error("", 0)
 end
 
--- syslogd, telnetd, httpd: services init starts at every boot (syslogd
+-- syslogd, telnetd, httpd, ircd: services init starts at every boot (syslogd
 -- with init, unless it's set up already; httpd's root made, with a first
 -- page, if it isn't there; --example: the guestbook in its script root).
 -- from(path): a repo file's path on this computer.
@@ -201,16 +209,19 @@ local function services(from)
     local list = { table.unpack(apps) }
     if initBoot then list[#list + 1] = "init" end      -- (--init, the app unnamed: syslogd too)
     for _, a in ipairs(list) do
-        if (a == "init" or a == "telnetd" or a == "httpd") and not settings.get("service.syslogd.cmd") then
+        if (a == "init" or a == "telnetd" or a == "httpd" or a == "ircd") and not settings.get("service.syslogd.cmd") then
             settings.set("service.syslogd.cmd", "syslogd")
             settings.set("service.syslogd.enabled", true)
             settings.save()
             print("syslogd keeps the system log (/var/log): `help syslog`")
         end
-        if a == "telnetd" or a == "httpd" then
+        if a == "telnetd" or a == "httpd" or a == "ircd" then
             settings.set("service." .. a .. ".cmd", a)
             settings.set("service." .. a .. ".enabled", true)
             settings.save()
+        end
+        if a == "ircd" then
+            print("ircd serves IRC on port " .. (settings.get("ircd.port") or 6667) .. " at every boot: `help ircd` (sysctl ircd.* to configure)")
         end
         if a == "telnetd" and not settings.get("telnetd.password") then
             print("telnetd needs a password: sysctl telnetd.password=<password> (then reboot, or service start telnetd)")

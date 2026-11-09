@@ -43,6 +43,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `turtle/autocompost.lua` | A stationary turtle on top of a composter: composts everything compostable in its inventory, forever. |
 | Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `bin/tcpdump.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `tcpdump` shows the frames on the wire, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
 | Telnet (`bin/telnet.lua`, `bin/telnetd.lua`, `lib/telnet.lua`) | Another computer's shell, or its console (the miner's screen), over the network, in real Telnet with ANSI, so any telnet client works too. See [Telnet](#telnet). |
+| IRC (`bin/irc.lua`, `bin/ircd.lua`, `lib/irc.lua`, `lib/ircclient.lua`, `lib/ircui.lua`, `lib/ircd.lua`, `lib/ircserv.lua`, `lib/mc.lua`) | `irc`, a full-screen IRC client (BitchX's looks, weechat's buffers, irssi's Lua scripts), and `ircd`, a small IRC server run as a service, with NickServ, ChanServ and MC: `#minecraft` is the game's chat, through an Advanced Peripherals Chat Box. Real IRC clients and servers work with them, through the mod's gateway. See [IRC](#irc). |
 | Processes (`bin/init.lua`, `bin/ps.lua`, `bin/kill.lua`, `bin/service.lua`, `lib/proc.lua`, `lib/procrun.lua`) | `init` runs every program as a process (an ID, its own terminal and environment) and keeps services running in the background, on any computer or turtle. `ps` lists the processes, `kill` signals them, `service` starts, stops and sets up services. See [Processes and services](#processes-and-services). |
 | The system log (`bin/syslogd.lua`, `bin/logger.lua`, `lib/log.lua`, `lib/syslogd.lua`) | `syslogd` files what's logged in `/var/log` by `/etc/syslog.conf`'s rules, shows the worst on the console and forwards to a syslog server (RFC 5424 over UDP). Programs log through `lib/log` (C's `syslog(3)`), scripts with `logger`, and init logs what services print. See [The system log](#the-system-log). |
 | `pc/router.lua` | Runs on a computer with an interface on each of several networks (modems, or VLANs on one): forwards between them, and shows a live status screen. |
@@ -171,6 +172,8 @@ just those, with what they need and their help:
 | `init` | [processes and services](#processes-and-services): `init` at boot, `ps`, `kill`, `service`; [the system log](#the-system-log): `syslogd` as a service, `logger` |
 | `telnet` | the [telnet](#telnet) client, and the network |
 | `telnetd` | the [telnet](#telnet) server as a service, with `init` and the network (then `sysctl telnetd.password=...`) |
+| `irc` | the [IRC](#irc) client, its scripts, and the network |
+| `ircd` | the [IRC](#irc) server as a service, with `init` and the network: NickServ, ChanServ, MC and `#minecraft` |
 
 `git`, `deploy/`, the pager and the help index always come. Options: `--autostart <app>` (a turtle
 runs it at every boot, see [Autostart](#autostart); on a computer,
@@ -1461,6 +1464,112 @@ service started at boot; then `sysctl telnetd.password=...`. Who connects,
 logs in or gives a wrong password goes to [the system log](#the-system-log),
 `/var/log/telnetd.log`; `service status telnetd` shows the last of it.
 
+## IRC
+
+```
+irc [network | host[:port] [nick]]     the client, full-screen (/quit or Ctrl+T leaves)
+ircd [-p port]                         the server: run it as a service (setup ircd does)
+help irc, help ircd, help irc-scripts  the whole of it
+```
+
+**The client.** `irc` takes BitchX's looks, weechat's buffers and irssi's
+scripts. The screen has a title bar (the channel's topic), the chat with
+each nick in its own colour and lined up in a column, a status bar in
+BitchX's manner (`[12:34] [nick(+i)] [3:lab/#ccnix(+nt)] [Act: 2,5] [Lag
+0.4]`), and the line you type, which edits as ccsh's does
+(`lib/readline`). On a screen 80 columns wide (a monitor) the buffer list
+shows on the left, and on 60 the channel's nicks on the right; a pocket
+computer leaves the time out. Each server, channel and private
+conversation is a buffer: Alt+1..9 (or Esc then the digit, over telnet)
+go to one, Alt+Left/Right or Ctrl+P/N step, Alt+A goes to the next with
+something new (hilights first), PgUp/PgDn and the wheel scroll, Tab
+completes nicks, channels and commands, and a click in the buffer list
+goes there. Ctrl+C then b, c, u, r, i or o puts mIRC's formatting codes
+into the line; colours sent by others show in CC's 16. Your nick (or
+`hilight_words`) in a channel, or a private message, marks the buffer
+and rings a speaker if one's attached.
+
+```
+/network add lab 10.1.1.5          a network by name (address, then port: 6667)
+/set network.lab.autojoin #minecraft, #ccnix
+/set network.lab.autoconnect on    connected at the start
+/connect lab                       or /connect irc.example.net 6667 mynick
+/join #ccnix   /msg bob hi   /query bob   /me waves   /whois bob   /quit bye
+```
+
+There are the commands you'd expect (`/help` lists them; anything it
+doesn't know goes to the server as it is), aliases (`/alias`, with `$0
+$1- $* $N $C`; `/j`, `/w`, `/ns`, `/mc` and others come with it),
+`/ignore` by mask and level, `/lastlog`, and CTCP VERSION, PING and TIME
+answered. A lost connection comes back after `reconnect_time` seconds,
+rejoining its channels. SASL PLAIN logs in where a network wants it
+(`network.<name>.sasl_user` and `sasl_pass`); there's no TLS, so a real
+network has to take plain 6667 (most do). Settings live in
+`~/.irc/config` (`~` being `$HOME`, else `/`), changed with `/set`.
+
+**Scripts** are irssi's idea in Lua: a file in `~/.irc/scripts`,
+`/script load name`, and it gets an `irc` table: `signal_add` (the same
+signals: `"message public"`, `"message join"`, `"print text"`, `"event
+privmsg"`, `"send text"`...), `signal_stop`, `command_bind`,
+`settings_add_str`, `timeout_add`, `statusbar_item`, and the buffers and
+servers with methods of their own. Unloading takes everything it
+registered away again, and an error in one is shown without taking
+anything else down. Five come with it: `autoaway`, `autorejoin`,
+`hilightwin` (hilights gathered in a buffer), `nickserv` (identifies when
+asked) and `slap`. `help irc-scripts` is the reference.
+
+**The server.** `ircd` is a small IRC server in ngIRCd's manner: one
+server (no links between servers), the commands clients use, channels
+with operators, voices, bans, keys, limits, invites and moderation, user
+modes `+i` and `+o` (`OPER`), and pings to drop connections that died.
+Any client works: `irc` here, or irssi and HexChat on a real machine
+through the gateway. Services sit on it as users:
+
+- **NickServ**: `REGISTER`, `IDENTIFY`, `GHOST`, `INFO`, `DROP`; a
+  registered nick taken without identifying in 60 seconds becomes
+  `Guest<n>`. `VERIFY <player>` whispers a code to that Minecraft player
+  in the game, and `CONFIRM <code>` ties the nick to them: WHOIS then says
+  "is the Minecraft player Steve".
+- **ChanServ**: `REGISTER #chan` keeps a channel for its founder; its
+  topic stays when it empties, and the founder and its `AOP` list are
+  opped as they join (`OP`, `DEOP`, `INFO`, `DROP`).
+- **MC**, the game: `PLAYERS`, `TIME` (the world's clock), `WEATHER`,
+  `TELL <player> <text>` (a whisper in the game). It sits in
+  `#minecraft`, the bridge: what's said there goes into the game's chat
+  as `[nick] text`, and the game's chat, joins, leaves and deaths come
+  back.
+
+The game is reached through what's attached to the computer
+(`lib/mc.lua`): an Advanced Peripherals **Chat Box** for chat both ways,
+a **Player Detector** for who's on and its join and leave events, an
+**Environment Detector** for the weather; a command computer can speak
+(`tellraw`) and list players without them. The world's clock needs
+nothing. Both of AP's ways of calling the chat box (0.7's arguments,
+0.8's options table) and both names for its peripherals are tried, and a
+chat box's cooldown just makes messages wait their turn.
+
+Running it as a service, so it's up at every boot and comes back if it
+stops:
+
+```
+setup ircd                  the files, the network and init at boot, the service enabled
+service add ircd ircd       or by hand: the service...
+service enable ircd         ...at boot...
+service start ircd          ...and now
+service status ircd         running? its last lines, how it last ended
+service stop ircd           everyone told "Server shutting down"
+service disable ircd        not at boot any more (service remove ircd: gone)
+```
+
+It's configured with `sysctl`, then `service restart ircd`:
+`ircd.port` (6667), `ircd.name` (`irc.<the computer's label>`),
+`ircd.network` (`ccnix`), `ircd.motd` (a file, `/etc/ircd.motd`),
+`ircd.password` (a password every client must give), `ircd.oper`
+(`OPER`'s password; unset, no operators), `ircd.bridge` (`#minecraft`;
+empty for none), `ircd.data` (where the services keep their nicks and
+channels, `/etc/ircd.db`), `ircd.facility` (`daemon`). What it does goes
+to [the system log](#the-system-log) under `ircd`.
+
 ## Processes and services
 
 ```
@@ -1780,6 +1889,17 @@ ROM's), else the one beside `bin/`:
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path
 local cu = require("cu").init("cat", "cat [-u] [file...]")
 ```
+
+### A line editor for full-screen programs: lib/readline
+
+`readline.read(opts)` is the prompt ccsh uses. A program that has more to
+do while a line is typed (`irc`, drawing what comes in) uses
+`readline.editor{ term, x, y, width, prompt, history, ctrl, meta, keys }`
+instead: it feeds each event to `ed:event(...)` (which returns `"enter"`
+or another reason when the line is done), draws it with `ed:draw()` on
+its row, and takes the line with `ed:take()`. The keys are read()'s, and
+`ctrl`, `meta` (Alt, or Esc then the key) and `keys` add bindings of the
+program's own or replace them.
 
 ### Parsing: lib/scan, not patterns
 

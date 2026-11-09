@@ -1,0 +1,81 @@
+irc's scripts: Lua that changes what the IRC client does, as irssi's Perl scripts do.
+
+A script is a Lua file. irc looks for it in ~/.irc/scripts (~ is $HOME, else /), then ~/.irc/scripts/autorun, then the scripts that come with ccnix (lib/ircscripts). /script load <name> loads one, /script unload <name> takes it away again (everything it registered goes with it), /script reload <name> does both, /script list shows what's loaded and what's there. The ones in ~/.irc/scripts/autorun load at the start, and so do those named in the scripts setting (/script autorun <name> adds one).
+
+The scripts that come with ccnix:
+  autoaway     marked away after autoaway_minutes without typing; back when you type
+  autorejoin   join a channel again after being kicked (autorejoin_delay seconds)
+  hilightwin   hilights and private messages, copied into a "hilight" buffer
+  nickserv     IDENTIFY when NickServ asks, with network.<name>.nickserv_pass
+  slap         /slap <nick>: * you slap nick around a bit with a large trout
+
+A first one, ~/.irc/scripts/hello.lua:
+
+  script.name, script.version = "hello", "1.0"
+  irc.settings_add_str("hello_word", "hi", "what /hello says")
+  irc.command_bind("hello", function(args, server, buffer)
+      buffer:command(irc.settings_get_str("hello_word") .. " " .. args)
+  end, "greet someone", "<nick>")
+  irc.signal_add("message public", function(server, text, nick, address, target)
+      if text == "!ping" then server:send_message(target, nick .. ": pong") end
+  end)
+
+Then /script load hello, and /hello bob says "hi bob" in the channel.
+
+A script runs with its own globals; the rest of Lua and CC's APIs are there as usual. print() writes into the core buffer. script is a table for its name, version and description. A function named unload, if the script defines one, runs when it's unloaded.
+
+The irc table:
+  signal_add(name, fn)          fn(...) at each signal of that name (the list below)
+  signal_add_first(name, fn)    the same, before the others
+  signal_remove(name, fn)       not any more
+  signal_emit(name, ...)        emit one (your own names too); true if a handler stopped it
+  signal_stop()                 in a handler: no more handlers, and the client's own handling of it is skipped (for "event ...", "send text", "send command")
+  command_bind(name, fn, help, usage)    /name: fn(args, server, buffer); replaces a built-in while loaded
+  command_unbind(name)
+  command(line, buffer)         run a line as typed: "/join #a", or text for the buffer
+  settings_add_str(name, default, help)  and _int, _bool: a setting /set shows and changes
+  settings_get_str(name)        and _int, _bool
+  settings_set(name, value)
+  print(text, buffer, level)    a line in a buffer (the core one if none); mIRC codes work
+  timeout_add(ms, fn)           fn every ms milliseconds; returns a handle
+  timeout_add_once(ms, fn)      once
+  timeout_remove(handle)
+  statusbar_item(name, fn)      fn(buffer) returns text for the status bar (nil: nothing)
+  active_buffer(), active_server(), buffers(), servers()
+  buffer_find(name, server), buffer_new(name), server_find(name), switch(buffer)
+  strip(text)                   the text without mIRC's codes
+  colour(n, text)               text in mIRC colour n (0-15)
+  nick_colour(nick)             the colour irc gives that nick
+  parse(line), build(command, ...)       IRC messages (lib/irc)
+  casefold(s), match(mask, s)
+
+A buffer: name, kind ("core", "server", "channel", "query", "script"), server, topic, lines (each { time, prefix, prefixColour, text, level, hilight }), activity (0-3), joined (a channel); buffer:print(text, opts) (opts: prefix, prefixColour, level, hilight), buffer:command(line), buffer:nickList() (each { nick, prefix }), buffer:getNick(nick), buffer:number().
+
+A server: name, address, port, nick, network, registered, isupport (the server's 005 tokens), buffer; server:send_raw(line), server:send_message(target, text), server:command(line) ("msg bob hi", no /), server:isMe(nick), server:isChannel(name), server:fold(name) (in the server's case rules).
+
+Signals, with what they pass:
+  "message public"        server, text, nick, address, target
+  "message private"       server, text, nick, address
+  "message own_public"    server, text, target
+  "message own_private"   server, text, target
+  "message irc action"    server, text, nick, address, target
+  "message irc notice"    server, text, nick, address, target
+  "message join"          server, channel, nick, address
+  "message part"          server, channel, nick, address, reason
+  "message quit"          server, nick, address, reason
+  "message kick"          server, channel, nick, kicker, address, reason
+  "message nick"          server, newnick, oldnick, address
+  "message topic"         server, channel, topic, nick, address
+  "ctcp msg"              server, command, args, nick, address, target (stop: not answered)
+  "event <command>"       server, message, line: every line from a server, before irc handles it ("event privmsg", "event 001"); message is lib/irc's parse
+  "server connecting"     server
+  "server connected"      server (logged in)
+  "server disconnected"   server, why
+  "channel joined"        buffer
+  "print text"            buffer, line: after any line is added to a buffer
+  "send text"             text, server, buffer: text typed for a channel (stop: not sent)
+  "send command"          line, server, buffer: a /command typed (stop: not run)
+  "window changed"        buffer
+  "setup changed"         the setting's name
+
+An error in a handler is shown in the core buffer; the script stays loaded, and the other handlers still run.

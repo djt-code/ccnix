@@ -26,6 +26,10 @@ Apps (any number; none means everything for this kind of device):
       the telnet server as a service, with init and the network (then set telnetd.password)
   httpd
       the web server as a service, with init and the network: serves /www, Lua pages in /www/cgi
+  irc
+      the IRC client, and the network
+  ircd
+      the IRC server as a service, with init and the network: NickServ, ChanServ, #minecraft (`help ircd`)
 git and deploy/ always come; so do the help files of what you pick.
 
 Options: --autostart <app> (a turtle runs it at every boot: resumes its job, or starts one from the settings; see turtle/autostart.lua; on a computer: router, its status screen at every boot), --example (httpd, and a guestbook in its script root: /cgi/guestbook), --ccsh, --net, --router, --init (what ccsh, net, router and init set, without naming them), --no-reboot, --all (everything, sim/ too), --skip <dir> (leave out more).

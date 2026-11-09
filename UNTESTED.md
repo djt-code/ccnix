@@ -223,6 +223,57 @@ section.
 - **Disk labels** (0.18.1): each pooled disk labelled `<computer label>
   <drive>`; labels it didn't set left alone.
 
+## IRC
+
+- **ircd as a service** (0.35.0). On A: `setup ircd`, reboot: `service`
+  shows ircd running, `service status ircd` its "listening on port 6667;
+  the game: ..." line (what it found: chat box, players, weather).
+  `service stop ircd` with a client connected: the client sees "Server
+  shutting down". `service disable ircd`, reboot: not running.
+  `sysctl ircd.oper=pw`, `service restart ircd`, then `/quote OPER x pw`
+  from a client gives +o.
+- **irc against ircd, two computers** (0.35.0). B: `irc 10.1.1.6` (A's
+  address). The banner, then the server buffer (2) with the welcome and
+  MOTD. `/join #ccnix`: you're @, the buffer switches. C does the same:
+  B sees C join; messages both ways, B's nick in C's line hilights it
+  (yellow behind the nick, Act in the status bar, a speaker's chime if
+  one is attached). Alt+1/2/3, Ctrl+N/P, Alt+A, PgUp/PgDn, the wheel,
+  Tab on a nick, Ctrl+C b for bold. `/quit`: the shell comes back clean.
+- **irc on a monitor or a wide screen** (0.35.0). On a computer with an
+  80-column monitor redirected (`monitor right irc ...`, or a big
+  advanced monitor): the buffer list on the left, the nick list on the
+  right; a click on a buffer goes there. A pocket computer: no time,
+  shorter nick column, still readable.
+- **NickServ and ChanServ** (0.35.0). `/ns register pw`, `/quit`, back
+  as the same nick without identifying: after 60 s you're Guest1. Back
+  again, `/ns identify pw`: kept. `/cs register #ccnix` (while @), all
+  leave, rejoin: the topic's kept and the founder is opped by ChanServ.
+- **The Minecraft bridge** (0.35.0). An Advanced Peripherals Chat Box
+  beside A (and a Player Detector): `/join #minecraft` from B, say
+  something: it shows in the game's chat as [nick] text. Say something
+  in the game: it comes into #minecraft as <player> text; a player
+  joining or leaving the game shows too. `/mc players`, `/mc time`,
+  `/mc weather` (with an Environment Detector), `/mc tell <player> hi`
+  (a whisper). `/ns verify <your player>`: a code is whispered to you
+  in the game; `/ns confirm <code>`, then `/whois` shows "is the
+  Minecraft player ...". Untried: which of AP 0.8's ways of calling the
+  chat box answers (the options table or the old arguments), and the
+  event names for join and leave (both are listened for).
+- **A real client and server through the gateway** (0.35.0). From the
+  VM: `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. From B,
+  with the network reaching out: `irc irc.libera.chat` (plain 6667),
+  /join a channel; `/set network.<name>.sasl_user` and `sasl_pass` for
+  SASL.
+- **Scripts** (0.35.0). `/script list`; `/script load slap`, `/slap bob`;
+  `/script load hilightwin` (a hilight buffer gathers hilights);
+  `/script load autorejoin`, get kicked: back in 3 s; a script of your
+  own in /.irc/scripts (`help irc-scripts`' hello example);
+  `/script autorun slap`, restart irc: loaded at the start.
+- **Reconnecting** (0.35.0). Stop ircd while B is in channels: B says
+  disconnected and counts 30 s; start ircd: B is back in its channels.
+- **readline's editor** (0.35.0): ccsh's prompt is unchanged (Ctrl+A/E,
+  Ctrl+R, Tab completion, history), since read() is now built on it.
+
 ## The mod
 
 - **The Network Tester and the gateway's new dialog** (ccnix-mod 0.19.0).

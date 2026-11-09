@@ -45,7 +45,7 @@ def check():
     import locals as cclocals
     load = lua().eval("function(s, n) local f, e = load(s, '@' .. n); return e end")
     bad = 0
-    dirs = ["bin", "lib", "turtle", "pc", "deploy", "sim", os.path.join("sim", "lib")]
+    dirs = ["bin", "lib", os.path.join("lib", "ircscripts"), "turtle", "pc", "deploy", "sim", os.path.join("sim", "lib")]
     for path in sorted(sum((glob.glob(os.path.join(ROOT, d, "*.lua")) for d in dirs), [])):
         src = open(path, encoding="utf-8").read()
         name = os.path.relpath(path, ROOT)

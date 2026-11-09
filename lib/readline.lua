@@ -61,6 +61,28 @@
 --                         background job's output goes where they were;
 --                         the editor then writes them again below it
 --                         (as zsh does)
+--
+-- An editor, for a program with more to do than wait for the line (an
+-- IRC client's input row, drawn under what comes in meanwhile):
+--
+--   local ed = readline.editor{ term = t, x = 1, y = h, width = w,
+--       prompt = "[#ccnix] ", history = lines,
+--       ctrl = { n = fn }, meta = { ["1"] = fn }, keys = { [keys.tab] = fn } }
+--   local why = ed:event(table.unpack(ev))   -- each event; nil, or why the line is done
+--   ed:draw()                                -- the prompt and line on row y
+--   local line = ed:take()                   -- the line, and a fresh empty one
+--
+-- It has the same keys as read(); ctrl, meta (Alt or Esc and the key)
+-- and keys (by key code) add bindings or replace them: each is
+-- fn(ed), returning nil to go on or why the line is done (any string:
+-- event() returns it).  Ctrl and Alt bindings take letters and digits.
+-- The prompt is drawn on row y from x, and the line scrolls sideways in
+-- what's left of width.  ed.line and ed.pos are the line and how many
+-- characters are before the cursor; ed:set(line [, pos]) replaces it,
+-- ed:insert(text) types at the cursor, ed:cursor() is where the cursor
+-- belongs (to put it back after drawing elsewhere), ed.prompt can be
+-- changed (then draw).  Ctrl+L and Ctrl+C are a program's to bind:
+-- unbound, Ctrl+L does nothing and Ctrl+C returns "interrupt".
 
 local R = {}
 
@@ -153,10 +175,28 @@ local function lead(e)
     return "(" .. (e.search.failed and "failed " or "") .. "search)`" .. e.search.query .. "': "
 end
 
+-- An editor's prompt, on its row from its x: where the line then starts.
+local function drawRegionPrompt(e)
+    local t = e.term
+    local prompt = (e.prompt or ""):sub(1, math.max(0, e.width - 2))
+    t.setCursorPos(e.left, e.y)
+    if prompt ~= "" then
+        if e.promptColour and t.isColour() then t.setTextColour(e.promptColour) end
+        t.write(prompt)
+    end
+    t.setTextColour(e.colour or colours.white)
+    e.x = e.left + #prompt
+end
+
 -- Draw the line from e.x, scrolled so the cursor shows, the completion
 -- after it in grey, and put the cursor there.
 local function draw(e)
+    local term = e.term or term
     local w = term.getSize()
+    if e.region then
+        drawRegionPrompt(e)
+        w = e.left + e.width - 1
+    end
     local before = lead(e)
     local x = math.min(e.x + #before, w)
     local room = math.max(1, w - x + 1)    -- the columns the line has
@@ -178,7 +218,7 @@ local function draw(e)
         local part = comp:sub(1, left)
         term.write(part)
         left = left - #part
-        setColour(e.colour or colours.white)
+        term.setTextColour(e.colour or colours.white)
     end
     if left > 0 then term.write(string.rep(" ", left)) end
     e.restX, e.restY = x + e.pos - e.scroll, e.y
@@ -376,6 +416,7 @@ local CTRL = {
     n = function(e) historyTo(e, e.at + 1) end,
     r = function(e) searchStart(e) end,
     l = function(e)
+        if e.region then return end         -- (an editor's program draws the screen)
         term.clear()
         term.setCursorPos(1, 1)
         writePrompt(e)
@@ -412,15 +453,26 @@ local function plainKeys()
     return t
 end
 
--- The letter of each letter key's code.
+-- The letter of each letter key's code, and the digit of each digit key's
+-- (for a program's Alt+1...).
+local DIGIT_KEYS = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" }
 local function letterKeys()
     local t = {}
     for i = 1, #LETTERS do
         local l = LETTERS:sub(i, i)
         if keys[l] then t[keys[l]] = l end
     end
+    for i, name in ipairs(DIGIT_KEYS) do
+        if keys[name] then t[keys[name]] = tostring(i - 1) end
+    end
     return t
 end
+
+-- What a Ctrl+key, Alt+key or plain key is bound to: the program's
+-- binding, else the editor's own.
+local function ctrlBinding(e, letter) return (e.ctrlBinds and e.ctrlBinds[letter]) or CTRL[letter] end
+local function metaBinding(e, letter) return (e.metaBinds and e.metaBinds[letter]) or META[letter] end
+local function keyBinding(e, code) return (e.keyBinds and e.keyBinds[code]) or e.plain[code] end
 
 local function isKey(code, a, b) return code ~= nil and (code == keys[a] or code == keys[b]) end
 
@@ -440,8 +492,8 @@ local function searchKey(e, code, letter)
         end
         return true
     end
-    local bound = (ctrl and letter and CTRL[letter]) or ((e.alt or e.meta) and letter and META[letter])
-        or e.plain[code]
+    local bound = (ctrl and letter and ctrlBinding(e, letter)) or ((e.alt or e.meta) and letter and metaBinding(e, letter))
+        or keyBinding(e, code)
     if not bound then return true end
     searchEnd(e, true)
     return false
@@ -461,17 +513,17 @@ local function onKey(e, code)
         if letter then
             e.swallow = letter                  -- (its char, if one comes, isn't typed)
             e.meta = false
-            local fn = CTRL[letter]
+            local fn = ctrlBinding(e, letter)
             return fn and fn(e)
         end
         if code == keys.leftBracket then e.swallow = "["; e.meta = true; return end
     elseif (e.alt and not e.ctrl) or e.meta then
         e.meta = false
-        local fn = letter and META[letter]
+        local fn = letter and metaBinding(e, letter)
         if fn then e.swallow = letter; return fn(e) end
         if code == keys.backspace then cut(e, wordBack(e.line, e.pos), e.pos); return end
     end
-    local fn = e.plain[code]
+    local fn = keyBinding(e, code)
     if fn then return fn(e) end
 end
 
@@ -492,18 +544,56 @@ end
 --------------------------------------------------------------------------
 -- Reading a line
 --------------------------------------------------------------------------
-function R.read(opts)
-    opts = opts or {}
+-- A new editor's state, from read()'s or editor()'s opts.
+local function newState(opts)
     local e = {
         line = "", pos = 0, scroll = 0, ci = 1,
         prompt = opts.prompt, promptColour = opts.promptColour,
-        colour = opts.colour or (term.getTextColour and term.getTextColour()) or colours.white,
         history = opts.history or {}, complete = opts.complete,
         letters = letterKeys(), plain = plainKeys(),
-        ctrl = false, alt = false, meta = false, swallow = pending,
+        ctrlBinds = opts.ctrl, metaBinds = opts.meta, keyBinds = opts.keys,
+        ctrl = false, alt = false, meta = false,
     }
-    pending = nil
     e.at = #e.history + 1
+    return e
+end
+
+-- One event: why the line is done, or nil.
+local function onEvent(e, name, a)
+    if name == "key" then
+        return onKey(e, a)
+    elseif name == "key_up" then
+        if isKey(a, "leftCtrl", "rightCtrl") then e.ctrl = false
+        elseif isKey(a, "leftAlt", "rightAlt") then e.alt = false end
+    elseif name == "char" then
+        onChar(e, a)
+    elseif name == "paste" then
+        e.swallow, e.meta = nil, false
+        local text = firstLine(a)
+        if e.search then
+            e.search.query = e.search.query .. text
+            searchFrom(e, e.search.found or #e.history)
+        else
+            insert(e, text)
+        end
+    elseif name == "terminate" then
+        return "terminate"
+    end
+end
+
+-- The line as it ends: no completion, no search, the cursor at its end.
+local function finish(e)
+    if e.search then searchEnd(e, true) end
+    e.comps = nil
+    e.pos = #e.line
+end
+
+function R.read(opts)
+    opts = opts or {}
+    local e = newState(opts)
+    e.colour = opts.colour or (term.getTextColour and term.getTextColour()) or colours.white
+    e.swallow = pending
+    pending = nil
     writePrompt(e)
     setColour(e.colour)
     changed(e)
@@ -515,36 +605,14 @@ function R.read(opts)
     local why
     while not why do
         local ev = table.pack(os.pullEventRaw())
-        local name = ev[1]
         if e.cleared then reprompt(e) end
-        if name == "key" then
-            why = onKey(e, ev[2])
-        elseif name == "key_up" then
-            if isKey(ev[2], "leftCtrl", "rightCtrl") then e.ctrl = false
-            elseif isKey(ev[2], "leftAlt", "rightAlt") then e.alt = false end
-        elseif name == "char" then
-            onChar(e, ev[2])
-        elseif name == "paste" then
-            e.swallow, e.meta = nil, false
-            local text = firstLine(ev[2])
-            if e.search then
-                e.search.query = e.search.query .. text
-                searchFrom(e, e.search.found or #e.history)
-            else
-                insert(e, text)
-            end
-        elseif name == "terminate" then
-            why = "terminate"
-        end
+        why = onEvent(e, ev[1], ev[2])
         if not why then draw(e) end
     end
 
     showing = outer
     if e.cleared then reprompt(e) end
-    -- the line as it ends: no completion, no search, the cursor at its end
-    if e.search then searchEnd(e, true) end
-    e.comps = nil
-    e.pos = #e.line
+    finish(e)
     draw(e)
     term.setCursorBlink(false)
     pending = e.swallow                     -- (Ctrl+C's or Ctrl+D's char may come yet)
@@ -552,6 +620,56 @@ function R.read(opts)
     if why == "enter" or why == "interrupt" then print() end
     if why == "enter" then return e.line end
     return nil, why
+end
+
+--------------------------------------------------------------------------
+-- An editor: a line edited an event at a time (see the top)
+--------------------------------------------------------------------------
+local Editor = {}
+Editor.__index = Editor
+
+function R.editor(opts)
+    opts = opts or {}
+    local e = newState(opts)
+    e.term = opts.term or term.current()
+    local w = e.term.getSize()
+    e.region = true
+    e.left, e.y = opts.x or 1, opts.y or 1
+    e.width = opts.width or (w - e.left + 1)
+    e.colour = opts.colour or colours.white
+    e.x = e.left
+    changed(e)
+    return setmetatable(e, Editor)
+end
+
+function Editor:event(name, a) return onEvent(self, name, a) end
+function Editor:draw() draw(self) end
+function Editor:cursor() return self.restX or self.left, self.y end
+
+-- Move it: a new row, x and width (the screen was resized, say).
+function Editor:place(x, y, width)
+    self.left, self.y, self.width = x, y, width
+end
+
+function Editor:set(line, pos)
+    self.line = line
+    self.pos = math.max(0, math.min(#line, pos or #line))
+    changed(self)
+end
+
+function Editor:insert(text) insert(self, text) end
+
+-- The line typed, and a fresh one; the history position starts again
+-- after the newest line (add the taken one to the history first if it
+-- should be there).
+function Editor:take()
+    finish(self)
+    local line = self.line
+    self.line, self.pos, self.scroll = "", 0, 0
+    self.typed = nil
+    self.at = #self.history + 1
+    changed(self)
+    return line
 end
 
 return R
