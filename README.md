@@ -1889,7 +1889,7 @@ Chest sides are CC's `"front"`, `"top"` and `"bottom"`: `T.dropSide`,
 Items are named or picked by a test: `T.selectItem(what)`,
 `T.countItem(what)` and `T.findSlot(what)` take a name or a
 `function(name, item)`; `T.containerCounts(side)` gives everything a chest
-holds; `T.findTool("_pickaxe$")` finds the equipped or carried tool.
+holds; `T.findTool("_pickaxe")` finds the equipped or carried tool whose name ends so.
 `T.hasFuel(n)` is the "unlimited or at least n" check, `T.setDir(d)` fixes
 a heading a program has worked out, `T.lookAround()` turns on the spot to
 see all four sides, and `T.sortedKeys(t)` gives a table's keys in a set
