@@ -175,6 +175,8 @@
 -- command runs, _G.POSIX_SH is set (echo leaves > to the shell then).
 
 local args = { ... }
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
+local scan = require("scan")
 
 -- What a command gets when nothing is redirected: this shell's own.
 local real = {
@@ -253,7 +255,7 @@ local function envApi(env)
             return env[name]
         end,
         setenv = function(name, value)
-            if type(name) ~= "string" or not name:match("^[^=]+$") then error("bad argument #1 (a name expected)", 2) end
+            if type(name) ~= "string" or name == "" or name:find("=", 1, true) then error("bad argument #1 (a name expected)", 2) end
             env[name] = value ~= nil and tostring(value) or nil
         end,
         environ = function() return copy(env) end,
@@ -296,7 +298,12 @@ local function stream(out, onClose)
         flush()
         out(s)
         local _, nl = s:gsub("\n", "")
-        if nl > 0 then y = y + nl; base = #s:match("[^\n]*$") else base = base + #s end
+        if nl > 0 then
+            local _, lastLine = scan.cutLast(s, "\n")   -- (what's after the last newline)
+            y, base = y + nl, #lastLine
+        else
+            base = base + #s
+        end
         x = base + 1
         return nl
     end
@@ -337,7 +344,7 @@ local function stream(out, onClose)
     t.setBackgroundColor, t.getBackgroundColor = t.setBackgroundColour, t.getBackgroundColour
     for k, v in pairs(term.native()) do
         if type(v) == "function" and t[k] == nil then
-            t[k] = (k:match("^get") or k:match("^is")) and function(...) return real.term[k](...) end
+            t[k] = (scan.startsWith(k, "get") or scan.startsWith(k, "is")) and function(...) return real.term[k](...) end
                 or function() end
         end
     end
@@ -428,7 +435,17 @@ local function isDigit(c) return c ~= "" and c >= "0" and c <= "9" end
 local function isLetter(c) return c ~= "" and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) end
 local function isNameStart(c) return c == "_" or isLetter(c) end
 local function isNameChar(c) return isNameStart(c) or isDigit(c) end
--- $? $# $@ $* $$ $!: the one-character special parameters
+-- true if s is a name: a letter or _, then letters, digits and _
+local function isName(s) return isNameStart(s:sub(1, 1)) and scan.all(s, isNameChar) end
+-- name=value: the name and the value, or nil if s isn't a name, = and
+-- anything
+local function assignment(s)
+    local name, value = scan.cut(s, "=")
+    if value and isName(name) then return name, value end
+end
+-- true if s is one or more digits
+local function allDigits(s) return s ~= "" and scan.all(s, scan.isDigit) end
+-- $? $#$@ $* $$ $!: the one-character special parameters
 local SPECIAL_PARAMS = { ["?"] = true, ["#"] = true, ["@"] = true, ["*"] = true, ["$"] = true, ["!"] = true, ["-"] = true }
 -- the operators of ${name<op>word}: with a colon, an empty value counts
 -- as unset too
@@ -523,18 +540,31 @@ local function lex(src)
             if src:sub(e, e) == "\\" then e = e + 1 end
             e = e + 1
         end
-        part({ t = "cmd", src = (src:sub(i + 1, e - 1):gsub("\\([`\\$])", "%1")), q = q })
+        -- inside `...`, \` \\ and \$ stand for ` \ and $; other \ pairs stay
+        local text, k = {}, i + 1
+        while k < e do
+            local c, nxt = src:sub(k, k), src:sub(k + 1, k + 1)
+            if c == "\\" and k + 1 < e and (nxt == "`" or nxt == "\\" or nxt == "$") then
+                text[#text + 1] = nxt
+                k = k + 2
+            else
+                text[#text + 1] = c
+                k = k + 1
+            end
+        end
+        part({ t = "cmd", src = table.concat(text), q = q })
         return e + 1
     end
     -- the "..." whose opening quote is at i; returns where it ends
     function doubleQuoted()
         lit("", true)                                   -- "" is still a word
+        local escapable = scan.oneOf('$`"\\\n')        -- (what \ quotes inside "...")
         i = i + 1
         while true do
             local d = src:sub(i, i)
             if d == "" then bad('unterminated "', true)
             elseif d == '"' then return i + 1
-            elseif d == "\\" and src:sub(i + 1, i + 1):match('[%$`"\\\n]') then
+            elseif d == "\\" and escapable(src:sub(i + 1, i + 1)) then
                 if src:sub(i + 1, i + 1) ~= "\n" then lit(src:sub(i + 1, i + 1), true) end
                 i = i + 2
             elseif d == "$" then i = dollar(true)
@@ -606,8 +636,9 @@ local function lex(src)
                 or OPS2[src:sub(i, i + 1)] and src:sub(i, i + 1) or OPS1[c] and c
             if op then
                 local fd
-                if op:find("^[<>]") and parts and #parts == 1 and parts[1].t == "lit" and not parts[1].q
-                    and parts[1].s:match("^%d$") then
+                local first = op:sub(1, 1)
+                if (first == "<" or first == ">") and parts and #parts == 1 and parts[1].t == "lit" and not parts[1].q
+                    and scan.isDigit(parts[1].s) then
                     fd, parts = tonumber(parts[1].s), nil
                 end
                 finish()
@@ -685,7 +716,7 @@ local function parse(src)
             local t = toks[i]
             if t.parts then
                 local p1, name, rest = t.parts[1], nil, nil
-                if #cmd.words == 0 and p1.t == "lit" and not p1.q then name, rest = p1.s:match("^([%a_][%w_]*)=(.*)$") end
+                if #cmd.words == 0 and p1.t == "lit" and not p1.q then name, rest = assignment(p1.s) end
                 if name then
                     local value = { { t = "lit", s = rest, q = false } }
                     for k = 2, #t.parts do value[#value + 1] = t.parts[k] end
@@ -705,7 +736,7 @@ local function parse(src)
     end
     local function name(what)
         local n = plain(toks[i])
-        if not n or not n:match("^[%a_][%w_]*$") then
+        if not n or not isName(n) then
             if not toks[i] then bad("unexpected end of line", true) end
             bad(what .. ": bad name " .. (n or "here"))
         end
@@ -792,7 +823,7 @@ local function parse(src)
             end
             i = i + 1
             return redirects(cmd)
-        elseif w == "function" or (w and w:match("^[%a_][%w_]*$") and toks[i + 1] and toks[i + 1].op == "("
+        elseif w == "function" or (w and isName(w) and toks[i + 1] and toks[i + 1].op == "("
                 and toks[i + 2] and toks[i + 2].op == ")") then
             if w == "function" then i = i + 1 end
             local n = name("function")
@@ -944,7 +975,10 @@ local function substitute(src)
         P.defaultOut = buf
         runSource(src)
     end)
-    return (buf.text():gsub("\n+$", ""))
+    local text = buf.text()
+    local e = #text
+    while text:sub(e, e) == "\n" do e = e - 1 end
+    return text:sub(1, e)
 end
 
 -- A message for fd 2 (a stream, or the screen).
@@ -966,7 +1000,8 @@ local function fields(parts, whole)
     local function new() cur = { chars = {}, magic = {}, keep = false } end
     local function add(s, q)
         if q then cur.keep = true end
-        for ch in s:gmatch(".") do
+        for k = 1, #s do
+            local ch = s:sub(k, k)
             cur.chars[#cur.chars + 1] = ch
             cur.magic[#cur.magic + 1] = not q
             cur.keep = true
@@ -985,13 +1020,14 @@ local function fields(parts, whole)
         elseif whole == "pattern" then
             add(v, false)
         else
-            local k = 1
+            -- field (blank+ field)*, the blanks space, tab and newline
+            local isBlank = scan.oneOf(" \t\n")
+            local sc = scan.new(v)
             while true do
-                local a, b = v:find("[ \t\n]+", k)
-                add(v:sub(k, (a or 0) - 1), false)
-                if not a then break end
+                add(sc:readWhile(function(c) return not isBlank(c) end), false)
+                if sc:atEnd() then break end
+                sc:readWhile(isBlank)
                 cut()
-                k = b + 1
             end
         end
     end
@@ -1069,39 +1105,77 @@ local function fields(parts, whole)
     return out
 end
 
--- A Lua pattern for one path segment of a glob, or nil if it has no
--- wildcards.
-local function globPattern(chars, magic)
-    local pat, wild, k = { "^" }, false, 1
+-- A glob (one path segment, or a case pattern) as a function that says
+-- whether a whole string matches it; nil if it has no wildcards.  chars
+-- are its characters, magic[k] true where chars[k] is unquoted.
+--   glob:  item*
+--   item:  "*" (any run) | "?" (any one) | class | a character as it is
+--   class: "[" ("!" | "^")? "]"? member* "]"   (no closing ]: "[" is itself)
+--   member: c "-" c (a range, by byte) | c
+local function globMatcher(chars, magic)
+    -- the glob as items: { any = true }, { one = true }, { lit = c }, or
+    -- { ranges = { { lo, hi }... }, neg = true/false } for a class
+    local items, wild, k = {}, false, 1
     while k <= #chars do
         local c = chars[k]
-        if magic[k] and c == "*" then pat[#pat + 1] = ".*"; wild = true
-        elseif magic[k] and c == "?" then pat[#pat + 1] = "."; wild = true
+        if magic[k] and c == "*" then items[#items + 1] = { any = true }; wild = true
+        elseif magic[k] and c == "?" then items[#items + 1] = { one = true }; wild = true
         elseif magic[k] and c == "[" then
             local j = k + 1
             local neg = chars[j] == "!" or chars[j] == "^"
             if neg then j = j + 1 end
-            local e = chars[j] == "]" and j + 1 or j
+            local e = chars[j] == "]" and j + 1 or j        -- (a ] first is a member)
             while chars[e] and chars[e] ~= "]" do e = e + 1 end
             if chars[e] then
-                local cls = { neg and "[^" or "[" }
-                for m = j, e - 1 do
-                    local d = chars[m]
-                    cls[#cls + 1] = (d == "-" and m > j and m < e - 1) and "-" or d:match("%w") and d or "%" .. d
+                local ranges, m = {}, j
+                while m < e do
+                    if chars[m + 1] == "-" and m + 2 < e then
+                        ranges[#ranges + 1] = { chars[m]:byte(), chars[m + 2]:byte() }
+                        m = m + 3
+                    else
+                        ranges[#ranges + 1] = { chars[m]:byte(), chars[m]:byte() }
+                        m = m + 1
+                    end
                 end
-                pat[#pat + 1] = table.concat(cls) .. "]"
+                items[#items + 1] = { ranges = ranges, neg = neg }
                 wild = true
                 k = e
             else
-                pat[#pat + 1] = "%["
+                items[#items + 1] = { lit = "[" }
             end
         else
-            pat[#pat + 1] = c:match("%w") and c or "%" .. c
+            items[#items + 1] = { lit = c }
         end
         k = k + 1
     end
     if not wild then return nil end
-    return table.concat(pat) .. "$"
+
+    -- true if item (not a *) takes the one character ch
+    local function takes(item, ch)
+        if item.lit then return ch == item.lit end
+        if item.one then return true end
+        local b, inside = ch:byte(), false
+        for _, r in ipairs(item.ranges) do
+            if b >= r[1] and b <= r[2] then inside = true; break end
+        end
+        return inside ~= item.neg
+    end
+    return function(s)
+        -- true if items n.. match s from position i to its end
+        local function from(n, i)
+            while items[n] and not items[n].any do
+                local ch = s:sub(i, i)
+                if ch == "" or not takes(items[n], ch) then return false end
+                n, i = n + 1, i + 1
+            end
+            if not items[n] then return i > #s end
+            for rest = #s + 1, i, -1 do                  -- a *: the longest run first
+                if from(n + 1, rest) then return true end
+            end
+            return false
+        end
+        return from(1, 1)
+    end
 end
 
 -- The paths a field matches as a glob, sorted; nil if it isn't one or
@@ -1121,7 +1195,7 @@ local function glob(f)
     local any = false
     for _, s in ipairs(segs) do
         s.name = table.concat(s.chars)
-        s.pat = globPattern(s.chars, s.magic)
+        s.pat = globMatcher(s.chars, s.magic)
         any = any or s.pat ~= nil
     end
     if not any then return nil end
@@ -1149,7 +1223,7 @@ local function glob(f)
                         if pool and not pool.isMember then pool = nil end   -- (an older jbod.lua's)
                         local wildFirst = s.magic[1] and (s.chars[1] == "*" or s.chars[1] == "?" or s.chars[1] == "[")
                         for _, n in ipairs(fs.list(e.path)) do
-                            if n:match(s.pat) and (n:sub(1, 1) ~= "." or s.name:sub(1, 1) == ".")
+                            if s.pat(n) and (n:sub(1, 1) ~= "." or s.name:sub(1, 1) == ".")
                                     and not (pool and wildFirst and pool.isMember(fs.combine(e.path, n))) then
                                 nxt[#nxt + 1] = { shown = e.shown .. sep .. n, path = fs.combine(e.path, n) }
                             end
@@ -1345,15 +1419,16 @@ local function findJob(spec, pids)
     local cur, prev = marks()
     if spec == nil or spec == "%" or spec == "%%" or spec == "%+" then return cur end
     if spec == "%-" then return prev end
-    local n = spec:match("^%%(%d+)$") or not pids and spec:match("^(%d+)$")
+    local afterPercent = scan.startsWith(spec, "%") and spec:sub(2) or nil     -- (what follows a %)
+    local n = (afterPercent and allDigits(afterPercent) and afterPercent) or (not pids and allDigits(spec) and spec)
     for _, j in ipairs(jobs) do if n and j.id == tonumber(n) then return j end end
-    n = spec:match("^(%d+)$")
+    n = allDigits(spec) and spec
     for _, j in ipairs(jobs) do if n and j.pid == tonumber(n) then return j end end
-    local pre = spec:match("^%%(.+)$")
+    local pre = afterPercent ~= "" and afterPercent
     for _, j in ipairs(jobs) do if pre and j.text:sub(1, #pre) == pre then return j end end
 end
 
-local function isJobSpec(s) return s:sub(1, 1) == "%" or s:match("^%d+$") ~= nil end
+local function isJobSpec(s) return s:sub(1, 1) == "%" or allDigits(s) end
 
 -- Signal sig to j's processes: its group, or (no job control) each one.
 local function signalProcs(j, sig)
@@ -1628,7 +1703,8 @@ end
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 -- A word as set -x shows it: quoted if it needs to be to read back in
 local function traced(s)
-    if s ~= "" and not s:find("[^%w_%-%./:=,+@%%]") then return s end
+    local isSafe = scan.oneOf("_-./:=,+@%")
+    if s ~= "" and scan.all(s, function(c) return scan.isAlnum(c) or isSafe(c) end) then return s end
     return quote(s)
 end
 function builtins.export(a, b)
@@ -1646,8 +1722,8 @@ function builtins.export(a, b)
     end
     local st = 0
     for j = k, #a do
-        local name, v = a[j]:match("^([%a_][%w_]*)=(.*)$")
-        name = name or a[j]:match("^[%a_][%w_]*$")
+        local name, v = assignment(a[j])
+        name = name or (isName(a[j]) and a[j]) or nil
         if not name then
             b.err("export: " .. a[j] .. ": not a valid name")
             st = 1
@@ -1718,16 +1794,18 @@ function builtins.kill(a, b)
     -- (init's) gets the signal itself, and init says if it's unknown
     local k, sig = 2, "TERM"
     if a[2] == "-s" then sig, k = a[3], 4
-    elseif a[2] and a[2]:match("^%-.") and a[2] ~= "--" then sig, k = a[2]:sub(2), 3 end
+    elseif a[2] and #a[2] > 1 and scan.startsWith(a[2], "-") and a[2] ~= "--" then sig, k = a[2]:sub(2), 3 end
     if a[k] == "--" then k = k + 1 end
     if not sig or not a[k] then b.err("kill: usage: kill [-s signal | -signal] %job|pid..."); return 2 end
-    local name = sig:upper():gsub("^SIG", "")
+    local name = sig:upper()
+    if scan.startsWith(name, "SIG") then name = name:sub(4) end
     name = SIGNUMS[name] or name
     local st = 0
     for j = k, #a do
         local job = findJob(a[j], true)
         local proc = rawget(_G, "proc")
-        if not job and proc and a[j]:match("^%-?%d+$") then
+        local number = scan.startsWith(a[j], "-") and a[j]:sub(2) or a[j]      -- (-n: a process group)
+        if not job and proc and allDigits(number) then
             -- not a job of ours: a process (init's), or -n a process group
             local ok, err = proc.kill(tonumber(a[j]), sig)
             if not ok then b.err("kill: " .. a[j] .. ": " .. err); st = 1 end
@@ -1787,7 +1865,7 @@ function builtins.set(a, b)
             break
         elseif rest == "o" then
             local name = a[k + 1]
-            if not name or name:match("^[-+]") then
+            if not name or name:sub(1, 1) == "-" or name:sub(1, 1) == "+" then
                 for _, o in ipairs(OPTIONS) do
                     local on = P.opts[o[1]] and true or false
                     b.out(sign == "-" and string.format("%-15s %s\n", o[2], on and "on" or "off")
@@ -1807,7 +1885,8 @@ function builtins.set(a, b)
                 k = k + 2
             end
         else
-            for c in rest:gmatch(".") do
+            for at = 1, #rest do
+                local c = rest:sub(at, at)
                 if letterOf(({ e = "errexit", f = "noglob", u = "nounset", x = "xtrace" })[c] or "") then
                     P.opts[c] = sign == "-" or nil
                 elseif NOT_YET[c] then
@@ -1833,14 +1912,20 @@ function builtins.read(a, b)
         for _, nm in ipairs(names) do setVar(nm, "") end
         return 1
     end
-    local rest = line:match("^[ \t]*(.-)[ \t]*$")
+    -- the line without spaces and tabs at its ends; then each name but the
+    -- last takes a word (up to a blank) and the blanks after it, the last
+    -- one what's left
+    local isBlank = scan.oneOf(" \t")
+    local from, to = 1, #line
+    while from <= to and isBlank(line:sub(from, from)) do from = from + 1 end
+    while to >= from and isBlank(line:sub(to, to)) do to = to - 1 end
+    local sc = scan.new(line:sub(from, to))
     for k, nm in ipairs(names) do
         if k == #names then
-            setVar(nm, rest)
+            setVar(nm, sc:readRest())
         else
-            local w, r = rest:match("^(%S*)[ \t]*(.*)$")
-            setVar(nm, w)
-            rest = r
+            setVar(nm, sc:readWhile(function(c) return not scan.isSpace(c) end))
+            sc:readWhile(isBlank)
         end
     end
     return 0
@@ -1880,8 +1965,8 @@ end
 builtins["local"] = function(a, b)
     if not P.locals then b.err("local: only in a function"); return 1 end
     for k = 2, #a do
-        local name, v = a[k]:match("^([%a_][%w_]*)=(.*)$")
-        name = name or a[k]:match("^[%a_][%w_]*$")
+        local name, v = assignment(a[k])
+        name = name or (isName(a[k]) and a[k]) or nil
         if not name then b.err("local: " .. a[k] .. ": not a valid name"); return 1 end
         if not P.locals[name] then P.locals[name] = { value = P.vars[name], exported = P.exported[name] } end
         P.vars[name] = v
@@ -2076,8 +2161,8 @@ local function compound(cmd)
         for _, item in ipairs(cmd.items) do
             for _, p in ipairs(item.patterns) do
                 local f = fields(p, "pattern")
-                local pat = globPattern(f.chars, f.magic)
-                if (pat and subject:match(pat)) or (not pat and table.concat(f.chars) == subject) then
+                local matches = globMatcher(f.chars, f.magic)
+                if (matches and matches(subject)) or (not pat and table.concat(f.chars) == subject) then
                     P.status = 0
                     runList(item.body)
                     return P.status
@@ -2351,24 +2436,32 @@ local function complete(line)
         elseif c == "'" or c == '"' then q = c
         elseif c == "|" or c == ";" or c == "&" then start = k + 1 end
     end
-    local tail = line:sub(start):gsub("^%s+", "")
+    local tailScan = scan.new(line, start)
+    tailScan:skipSpaces()
+    local tail = tailScan:rest()
     if tail == "" then return nil end
     local got = shell.complete and shell.complete(tail)
     if got and #got > 0 then return got end
     -- an argument the program has no completion of its own for: a file
-    -- or directory name, as POSIX shells complete (not a glob or $X)
-    local word = tail:match("[^%s<>]*$")
+    -- or directory name, as POSIX shells complete (not a glob or $X).
+    -- The word is the end of the line back to a blank, < or >.
+    local function inWord(c) return c ~= "<" and c ~= ">" and not scan.isSpace(c) end
+    local from = #tail
+    while from >= 1 and inWord(tail:sub(from, from)) do from = from - 1 end
+    local word = tail:sub(from + 1)
     if word == tail or not fs.complete then return got end
-    word = word:gsub("^['\"]", "")
-    if word:find("[%*%?%[%$`]") then return got end
+    if word:sub(1, 1) == "'" or word:sub(1, 1) == '"' then word = word:sub(2) end
+    local magic = scan.oneOf("*?[$`")
+    for k = 1, #word do
+        if magic(word:sub(k, k)) then return got end
+    end
     return fs.complete(word, shell.dir(), true, true)
 end
 
 -- The line editor: lib/readline (its keys are in the header above), or
 -- read() if it can't be loaded.  opts as readline.read's; the line, or
 -- nil and why ("eof", "interrupt", "terminate").
-package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
-local editor                         -- readline once loaded; false if it couldn't be
+local editor                        -- readline once loaded; false if it couldn't be
 local function editLine(opts)
     if editor == nil then
         local ok, m = pcall(require, "readline")
@@ -2409,12 +2502,24 @@ local function promptText()
     local ps1 = P.vars.PS1
     if ps1 == nil then return (label and (label .. ":") or "") .. "/" .. shell.dir() .. "$ " end
     local dir = "/" .. shell.dir()
+    local _, lastPart = scan.cutLast(dir, "/")
     local esc = {
         h = label or tostring(os.getComputerID()), H = label or tostring(os.getComputerID()),
-        w = dir, W = dir == "/" and "/" or dir:match("([^/]+)$"), i = tostring(os.getComputerID()),
+        w = dir, W = dir == "/" and "/" or (lastPart ~= "" and lastPart or nil), i = tostring(os.getComputerID()),
         ["$"] = "$", n = "\n", ["\\"] = "\\",
     }
-    return (ps1:gsub("\\(.)", function(c) return esc[c] or ("\\" .. c) end))
+    -- \c is esc[c] (or stays \c); a \ at the very end stays
+    local sc, out = scan.new(ps1), {}
+    while not sc:atEnd() do
+        local c = sc:advance()
+        if c == "\\" and not sc:atEnd() then
+            local e = sc:advance()
+            out[#out + 1] = esc[e] or ("\\" .. e)
+        else
+            out[#out + 1] = c
+        end
+    end
+    return table.concat(out)
 end
 
 -- History: the lines typed at the prompt, the last $HISTSIZE of them
@@ -2437,7 +2542,9 @@ local function histTrim()
     local path, max = histFile(), histSize()
     local lines = {}
     if not path then return lines end
-    for l in (readFile("/" .. path) or ""):gmatch("[^\n]+") do lines[#lines + 1] = l end
+    for _, l in ipairs(scan.split(readFile("/" .. path) or "", "\n", true)) do
+        if l ~= "" then lines[#lines + 1] = l end
+    end
     if #lines > max then
         lines = { table.unpack(lines, #lines - max + 1) }
         local f = fs.open(path, "wb")
@@ -2451,7 +2558,7 @@ end
 
 -- line, typed at the prompt, added to the history and its file.
 local function remember(hist, line)
-    if not line:match("%S") or hist[#hist] == line then return end
+    if scan.all(line, scan.isSpace) or hist[#hist] == line then return end
     local max = histSize()
     if max == 0 then return end
     hist[#hist + 1] = line
@@ -2525,7 +2632,7 @@ local function interactive()
                 local j = run(newJob(function() runList(got.list); return P.status end, mainP, got.line))
                 if j.state == "stopped" then P.status = 148 end
             end
-            if got.line:match("%S") and not P.exiting then warned = false end
+            if not scan.all(got.line, scan.isSpace) and not P.exiting then warned = false end
         end
     end
     histTrim()

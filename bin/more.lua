@@ -19,12 +19,28 @@ local cu = require("cu").init("more", "more [-cs] [-u] [file...]")
 local pager = require("pager")
 local opts, files = cu.getopt({ ... }, "csu")
 
+-- s with each run of blank lines made one: three or more newlines in a
+-- row become two, and at the very start two or more become one
+local function squeeze(s)
+    local out, i = {}, 1
+    while i <= #s do
+        local nl = s:find("\n", i, true)
+        if not nl then out[#out + 1] = s:sub(i); break end
+        out[#out + 1] = s:sub(i, nl - 1)
+        local run = 1
+        while s:sub(nl + run, nl + run) == "\n" do run = run + 1 end
+        local keep = math.min(run, 2)
+        if nl == 1 and run >= 2 then keep = 1 end
+        out[#out + 1] = ("\n"):rep(keep)
+        i = nl + run
+    end
+    return table.concat(out)
+end
+
 -- the text of one input, squeezed with -s
 local function text(h)
     local s = cu.readAll(h)
-    if opts.s then
-        s = s:gsub("\n\n\n+", "\n\n"):gsub("^\n\n+", "\n")
-    end
+    if opts.s then s = squeeze(s) end
     return s
 end
 

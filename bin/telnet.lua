@@ -31,6 +31,7 @@ local cu = require("cu").init("telnet", "telnet host [port]")
 local net = require("net")
 local netdb = require("netdb")
 local T = require("telnet")
+local scan = require("scan")
 local args = { ... }
 if not args[1] or #args > 2 then cu.usageError() end
 local host = args[1]
@@ -216,12 +217,14 @@ local ok, e = pcall(parallel.waitForAny,
             elseif name == "paste" then
                 if screen.paste then send("\27[200~" .. T.escape(ev[2]) .. "\27[201~")
                 else
-                    for text, nl in ev[2]:gmatch("([^\n]*)(\n?)") do
-                        if text ~= "" then typed((text:gsub("\r$", ""))) end
-                        if nl ~= "" then enter() end
+                    -- each line typed (a CR at its end dropped), Enter after each newline
+                    local lines = scan.split(ev[2], "\n", true)
+                    for k, text in ipairs(lines) do
+                        if text ~= "" then typed(scan.endsWith(text, "\r") and text:sub(1, -2) or text) end
+                        if k < #lines then enter() end
                     end
                 end
-            elseif name:match("^mouse_") and name ~= "mouse_move" then
+            elseif scan.startsWith(name, "mouse_") and name ~= "mouse_move" then
                 if screen.mouse then send(T.mouseBytes(name, ev[2], ev[3], ev[4])) end
             elseif name == "proc_cont" and proc and ev[2] == proc.self() then
                 win.redraw()                        -- (back from Ctrl+] z: the shell drew over it)

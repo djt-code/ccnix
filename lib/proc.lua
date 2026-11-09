@@ -97,6 +97,8 @@
 -- The module's P.serviceDef, serviceNames and serviceStatus read the
 -- settings' services without init (service.lua).
 
+local scan = require("scan")
+
 local P = {}
 
 local USER = { char = true, key = true, key_up = true, paste = true, terminate = true,
@@ -116,7 +118,8 @@ local rawResume = coroutine.resume      -- (while a process runs, coroutine.resu
 -- A signal as its name: "TERM", "SIGTERM", "term", "15" and 15 are all
 -- "TERM"; 0 and "0" are 0; nil for one that isn't known.
 function P.signal(s)
-    s = tostring(s):upper():gsub("^SIG", "")
+    s = tostring(s):upper()
+    if scan.startsWith(s, "SIG") then s = s:sub(4) end
     if s == "0" then return 0 end
     if P.SIGNALS[s] then return s end
     for name, n in pairs(P.SIGNALS) do if tostring(n) == s then return name end end
@@ -126,6 +129,20 @@ local function copy(t)
     local c = {}
     for k, v in pairs(t) do c[k] = v end
     return c
+end
+
+-- s without the blanks at its end
+local function trimEnd(s)
+    local e = #s
+    while e >= 1 and scan.isSpace(s:sub(e, e)) do e = e - 1 end
+    return s:sub(1, e)
+end
+
+-- A command line's program name: its first word, after the last / in it
+local function programName(cmd)
+    local word = scan.new(cmd):readWhile(function(c) return not scan.isSpace(c) end)
+    local _, name = scan.cutLast(word, "/")
+    return name or word
 end
 
 -- The lines of text s (without their newlines).
@@ -172,7 +189,7 @@ local function envApi(env)
             return env[name]
         end,
         setenv = function(name, value)
-            if type(name) ~= "string" or not name:match("^[^=]+$") then error("bad argument #1 (a name expected)", 2) end
+            if type(name) ~= "string" or name == "" or name:find("=", 1, true) then error("bad argument #1 (a name expected)", 2) end
             env[name] = value ~= nil and tostring(value) or nil
         end,
         environ = function() return copy(env) end,
@@ -195,7 +212,9 @@ function P.serviceNames(settingsT, known)
     settingsT = settingsT or settings
     local names, seen = {}, {}
     for _, key in ipairs(settingsT.getNames()) do
-        local n = key:match("^service%.(.+)%.cmd$")
+        -- service.<name>.cmd, the name not empty
+        local n = #key > #"service..cmd" and scan.startsWith(key, "service.") and scan.endsWith(key, ".cmd")
+            and key:sub(#"service." + 1, -#".cmd" - 1)
         if n and not seen[n] then seen[n] = true; names[#names + 1] = n end
     end
     for n in pairs(known or {}) do
@@ -218,7 +237,7 @@ function P.serviceStatus(settingsT, K)
         if svc.term and svc.term.getLine then
             local _, h = svc.term.getSize()
             for y = 1, h do
-                local l = svc.term.getLine(y):gsub("%s+$", "")
+                local l = trimEnd(svc.term.getLine(y))
                 if l ~= "" then lines[#lines + 1] = l end
             end
         end
@@ -596,7 +615,7 @@ function P.new(o)
         end
         local p = {
             pid = pid, ppid = parent and parent.pid or 1, co = co, state = "new",
-            name = spec.name or (spec.cmd and spec.cmd:match("^%S+"):match("([^/]*)$")) or "shell",
+            name = spec.name or (spec.cmd and programName(spec.cmd)) or "shell",
             cmd = spec.cmd or spec.name or "shell",
             term = spec.term or K.newTerm(), tty = tty, env = env, envApi = envApi(env),
             started = now(), cpu = 0, service = spec.service, onExit = spec.onExit, isCmd = spec.fn == nil,
@@ -828,11 +847,14 @@ function P.new(o)
     function K.logLine(p, line)
         local err = p.logerr
         p.logerr = nil
-        line = line:gsub("%s+$", "")
-        if not line:find("%S") then return end
+        line = trimEnd(line)
+        if line == "" then return end
         local sev = err and 3 or 6
-        local n, rest = line:match("^<([0-7])>(.*)$")
-        if n then sev, line = tonumber(n), rest end
+        -- "<n>" first, n 0-7: the line's severity (syslog's way)
+        local n = line:sub(2, 2)
+        if line:sub(1, 1) == "<" and line:sub(3, 3) == ">" and scan.oneOf("01234567")(n) then
+            sev, line = tonumber(n), line:sub(4)
+        end
         K.log({ fac = 3, sev = sev, app = p.service or p.name, pid = p.pid, msg = line })
     end
 
@@ -845,8 +867,8 @@ function P.new(o)
         if (p.stderr or 0) > 0 then p.logerr = true end
         local buf = (p.logbuf or "") .. tostring(s)
         while true do
-            local line, rest = buf:match("^([^\n]*)\n(.*)$")
-            if not line then break end
+            local line, rest = scan.cut(buf, "\n")
+            if not rest then break end
             buf = rest
             K.logLine(p, line)
             if (p.stderr or 0) > 0 and buf ~= "" then p.logerr = true end
