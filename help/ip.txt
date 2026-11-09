@@ -31,6 +31,8 @@ ip: set up and look at the network (lib/net.lua)
       which sources a router passes on (BCP 38): loose (the default) any it has a route back to, strict only those whose route back leaves by the interface the packet came in on, off all.  A packet from a source that can't be (0.x, 127.x, 224.x and up, the network's broadcast address, this computer's own) is dropped whatever it's set to.  On a router whose default route covers everything, loose stops only those: strict is the one that keeps a network's hosts from forging another's addresses
   ip host [<name> <addr>]
       names for addresses (ping router)
+  ip host del <name>
+      forget one
   ip dns [<primary> [<secondary>] | off]
       the DNS servers names are looked up at after the hosts (lib/netdb); none: the hosts alone
   ip dns cache

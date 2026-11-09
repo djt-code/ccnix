@@ -1318,13 +1318,14 @@ header of `lib/net.lua` lists the mapping. Only string payloads can cross:
 UDP datagrams carrying tables stay in ComputerCraft.
 The ccnix mod, ccnix-mod ([mod/](mod/), a submodule), is that bridge. It
 adds a Network Gateway block for CC cables, with an address on its network
-(`10.0.0.1/24`). Routers on the cable route at it. Behind it, one of two
+(`10.1.0.1/24`, the exchange, inside the CC networks' `10.1.0.0/16`, so one
+route on a LAN reaches it all). Routers on the cable route at it. Behind it, one of two
 modes, the server admin's choice:
 - **NAT** (the default): the server process carries CC computers' TCP and
   UDP as its own connections, with nothing to set up. Ping and traceroute
   stop at the gateway ("administratively prohibited"); private addresses and port 25
   are refused; the outside gets in only through port forwards
-  (`/ccnix forward`); `ip dns 10.0.0.1` asks the server's resolver.
+  (`/ccnix forward`); `ip dns 10.1.0.1` asks the server's resolver.
 - **TUN**: a TUN device on the server (Linux) carries their packets as
   real IPv4: a real machine can `telnet` to a CC computer, and CC computers
   reach whatever the server reaches.

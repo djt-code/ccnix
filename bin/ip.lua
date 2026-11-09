@@ -47,6 +47,7 @@
 --                                    network's hosts from forging another's
 --                                    addresses
 --   ip host [<name> <addr>]          names for addresses (ping router)
+--   ip host del <name>               forget one
 --   ip dns [<primary> [<secondary>] | off]
 --                                    the DNS servers names are looked up at
 --                                    after the hosts (lib/netdb); none: the
@@ -115,7 +116,7 @@ local COMMANDS = {
       what = "the ARP cache" },
     { "forward", 1, args = "[on|off]", what = "route between interfaces (a router)" },
     { "rpfilter", 2, args = "[strict|loose|off]", what = "which sources a router passes on (BCP 38)" },
-    { "host", 1, args = "[<name> <addr>]", what = "names for addresses" },
+    { "host", 1, args = "[<name> <addr> | del <name>]", what = "names for addresses" },
     { "dns", 2, args = "[<primary> [<secondary>] | off | cache | flush]", what = "the DNS servers" },
     { "help", 2, args = "", what = "this list" },
 }
@@ -123,6 +124,7 @@ local SHOW = { { "show", 1, "list", "ls" } }
 local ADDR_SUBS = { SHOW[1], { "add", 1 }, { "delete", 1 } }
 local ROUTE_SUBS = { SHOW[1], { "add", 1 }, { "delete", 1 }, { "get", 1 } }
 local NEIGH_SUBS = ADDR_SUBS
+local HOST_SUBS = { { "delete", 1 } }
 local DNS_WORDS = { { "off", 2 }, { "cache", 1 }, { "flush", 1 } }
 local ONOFF = { { "on", 2 }, { "off", 2 } }
 local RPMODES = { { "strict", 1 }, { "loose", 1 }, { "off", 1 } }
@@ -549,15 +551,21 @@ elseif cmd == "rpfilter" then
     out("rpfilter " .. net.rpfilter(settings.get("net.rpfilter")))
 elseif cmd == "host" then
     local hosts = net.config().hosts
-    if args[2] and not args[3] then badWords(cmd, "give a name and its address") end
     noMore(4)
-    if args[2] then
+    -- del and a name (a second word that isn't an address), or a name and its address
+    if args[3] and not net.parseIP(args[3]) and pick(args[2], HOST_SUBS) == "delete" then
+        if not hosts[args[3]] then cu.fail("no host " .. args[3] .. " (ip host lists them)"); return cu.exit() end
+        hosts[args[3]] = nil
+    elseif args[2] then
+        if not args[3] then badWords(cmd, "give a name and its address, or del and a name") end
         if not net.parseIP(args[3]) then badWords(cmd, "bad address " .. args[3]) end
         hosts[args[2]] = args[3]
+    end
+    if args[2] then
         local t = {}
         for k, v in pairs(hosts) do t[#t + 1] = k .. "=" .. v end
         table.sort(t)
-        settings.set("net.hosts", table.concat(t, ", "))
+        if #t == 0 then settings.unset("net.hosts") else settings.set("net.hosts", table.concat(t, ", ")) end
         save()
     end
     local names = {}

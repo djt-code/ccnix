@@ -56,6 +56,17 @@ W:run("ip", "route", "del", "10.0.9.0/24")
 check("ip route add/del: kept in settings", STORE["net.routes"] == "default via 10.0.1.1", tostring(STORE["net.routes"]))
 W:run("ip", "host", "b", "10.0.2.5")
 check("ip host: a name kept", tostring(STORE["net.hosts"]):find("b=10.0.2.5") ~= nil)
+W:run("ip", "host", "gone", "10.0.2.6")
+r = W:run("ip", "host", "del", "gone")
+r2 = W:run("ip", "host", "del", "gone")
+check("ip host del: the one name forgotten, the rest kept; again: no such host, status 1",
+    r.status == 0 and STORE["net.hosts"] == "b=10.0.2.5" and not r.out:find("gone")
+        and r2.status == 1 and r2.errText:find("no host gone"), show(r.out) .. show(r2.errText))
+W:run("ip", "host", "del", "10.0.2.7")
+r = W:run("ip", "host", "del", "10.0.2.7")
+check("ip host del <addr>: a host named del (an address is the set form)",
+    tostring(STORE["net.hosts"]):find("del=10.0.2.7") ~= nil and r.status == 0, show(r.errText))
+W:run("ip", "host", "d", "del")
 r = W:run("ip", "link")
 check("ip link: the modems, wired or wireless, their MACs, and what's set on them",
     r.out:find("back%s+wired%s+02:cc:00:00:01:05 back back.20")

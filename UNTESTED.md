@@ -104,6 +104,11 @@ section.
 
 ## Network
 
+- **`ip host del`** (0.34.0). `ip host gone 10.1.2.9`, `ping gone` (the
+  address), `ip host del gone`: the list leaves it out, `ping gone` can't
+  find it, and `ip host del gone` again says "no host gone" with status 1.
+  Deleting the last one leaves `sysctl net.hosts` unset.
+
 - **ping, the rest** (0.29.0). Ctrl+T on a `ping` running inside a
   background job brought to the front (`fg`); `ping -c 0 -q`; `ping -s
   65507` through the gateway, in NAT mode (the gateway's own address) and
@@ -219,6 +224,15 @@ section.
   <drive>`; labels it didn't set left alone.
 
 ## The mod
+
+- **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
+  address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
+  route reaches every CC computer. On the dev server, after redeploying:
+  `ip -br addr show ccnix0` on the host shows 10.1.0.1/24 alone (the old
+  10.0.0.1 gone); routers' back addresses moved to 10.1.0.x with `default
+  via 10.1.0.1`; `/ccnix route add 10.1.0.0/16 via 10.1.0.2` is accepted
+  (a route around the exchange) and `10.1.0.0/25 via 10.1.0.2` refused;
+  a computer straight on the exchange (no router) reaches the internet.
 
 - **`/ccnix rom update` asks before the reload** (ccnix-mod 0.16.0): it only
   pulls, then warns that loading pauses the server (with the last reload's
