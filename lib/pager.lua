@@ -30,6 +30,8 @@
 --   0 / $                 the left edge / the end of the widest line
 --   q                     back to the shell (what's on screen stays)
 
+local scan = require("scan")
+
 local P = {}
 
 local HSTEP = 8            -- columns per sideways step
@@ -37,9 +39,8 @@ local WHEEL = 3            -- lines per notch of the mouse wheel
 
 -- The text as a list of lines: no carriage returns, tabs as 4 spaces.
 function P.lines(text)
-    local out = {}
     text = text:gsub("\r", ""):gsub("\t", "    ")
-    for l in (text .. "\n"):gmatch("([^\n]*)\n") do out[#out + 1] = l end
+    local out = scan.split(text, "\n", true)
     if out[#out] == "" and #out > 1 then out[#out] = nil end    -- a final newline isn't a line
     return out
 end
@@ -74,8 +75,10 @@ function P.wrap(lines, w)
         local pos, n, added = 1, #text, false
         while n - pos + 1 > w do
             local chunk = text:sub(pos, pos + w)
-            local cut = chunk:match("^.*() ")
-            if cut and cut > 1 and chunk:sub(1, cut - 1):find("%S") then
+            -- break at the chunk's last space, if there's text before it
+            local before, after = scan.cutLast(chunk, " ")
+            if after and not scan.all(before, scan.isSpace) then
+                local cut = #before + 1                         -- (where the space is)
                 row(pos, pos + cut - 2)
                 pos = pos + cut
                 while text:sub(pos, pos) == " " do pos = pos + 1 end

@@ -31,7 +31,7 @@ if args[1] == "-s" then
     sig = args[2] and P.signal(args[2])
     if not sig then cu.usageError("unknown signal " .. tostring(args[2])) end
     i = 3
-elseif args[1] and args[1]:match("^%-.") and args[1] ~= "--" then
+elseif args[1] and #args[1] > 1 and args[1]:sub(1, 1) == "-" and args[1] ~= "--" then     -- -signal
     sig = P.signal(args[1]:sub(2))
     if not sig then cu.usageError("unknown signal " .. args[1]:sub(2)) end
     i = 2

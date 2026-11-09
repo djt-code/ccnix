@@ -24,6 +24,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("service",
     "service [status [name] | start|stop|restart|enable|disable|remove name | add name command...]")
 local P = require("proc")               -- the module: the settings' services, when init isn't running
+local scan = require("scan")
 local args = { ... }
 local action, name = args[1] or "list", args[2]
 local proc = rawget(_G, "proc")
@@ -84,9 +85,10 @@ if action == "add" then
     -- the words as the CraftOS shell will split them again: one with a
     -- space (ccsh's 'cat /nope') goes in double quotes, so it stays one
     local words = {}
+    local function solid(c) return not scan.isSpace(c) end
     for k = 3, #args do
         local a = args[k]
-        words[#words + 1] = (a == "" or a:find("%s")) and ('"' .. a .. '"') or a
+        words[#words + 1] = (a == "" or not scan.all(a, solid)) and ('"' .. a .. '"') or a
     end
     settings.set(key(name, "cmd"), table.concat(words, " "))
     settings.save()

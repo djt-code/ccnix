@@ -16,6 +16,8 @@
 -- Characters: CC's 32-126 are ASCII, 160-255 Latin-1 (sent as UTF-8),
 -- 128-159 its 2x3 block graphics (sent as Unicode's sextants, U+1FB00).
 
+local scan = require("scan")
+
 local T = {}
 T.IAC, T.DONT, T.DO, T.WONT, T.WILL, T.SB, T.SE = 255, 254, 253, 252, 251, 250, 240
 T.IP, T.AYT, T.NOP = 244, 246, 241
@@ -118,7 +120,11 @@ for p = 0, 63 do
 end
 
 -- CC text as UTF-8.
-function T.toUTF8(s) return (s:gsub(".", function(ch) return OUT[ch:byte()] end)) end
+function T.toUTF8(s)
+    local out = {}
+    for i = 1, #s do out[i] = OUT[s:byte(i)] end
+    return table.concat(out)
+end
 
 -- CC's palette, and the xterm-256 colour nearest each (all different).
 T.XTERM = { [0] = 255, 215, 176, 111, 185, 112, 218, 239, 246, 67, 134, 62, 95, 71, 167, 233 }
@@ -219,7 +225,7 @@ function T.decoder(emit, keysT)
     end
     local function char(ch)
         local lower = ch:lower()
-        local name = (lower:match("^%a$") and lower) or (ch:match("^%d$") and DIGITS[tonumber(ch)]) or PUNCT[ch]
+        local name = (scan.isAlpha(lower) and lower) or (scan.isDigit(ch) and DIGITS[tonumber(ch)]) or PUNCT[ch]
         local code = name and keysT[name]
         if code then emit("key", code, false) end
         emit("char", ch)
@@ -228,11 +234,14 @@ function T.decoder(emit, keysT)
     local function csi(params, final)
         if final == "~" then
             if params == "200" then paste = {}; return end
-            press(TILDE_KEYS[params:match("^%d+")])
+            press(TILDE_KEYS[scan.new(params):readWhile(scan.isDigit)])    -- (the number before any ;)
         elseif params:sub(1, 1) == "<" and (final == "M" or final == "m") then
-            local b, x, y = params:match("^<(%d+);(%d+);(%d+)$")
-            b, x, y = tonumber(b), tonumber(x), tonumber(y)
-            if not b then return end
+            -- an SGR mouse report: "<" button ";" x ";" y, all three numbers
+            local sc = scan.new(params, 2)
+            local b = sc:readNumber()
+            local x = sc:accept(";") and sc:readNumber()
+            local y = sc:accept(";") and sc:readNumber()
+            if not (b and x and y and sc:atEnd()) then return end
             if b >= 64 then emit("mouse_scroll", b % 2 == 0 and -1 or 1, x, y)
             elseif b >= 32 then emit("mouse_drag", b % 4 + 1, x, y)
             else emit(final == "M" and "mouse_click" or "mouse_up", (b % 4 == 1 and 3) or (b % 4 == 2 and 2) or 1, x, y) end
@@ -353,7 +362,7 @@ function T.terminal(win, colour)
     end
     local function sgr(params)
         local p, i = {}, 1
-        for v in (params .. ";"):gmatch("([^;]*);") do p[#p + 1] = tonumber(v) or 0 end
+        for _, v in ipairs(scan.split(params, ";", true)) do p[#p + 1] = tonumber(v) or 0 end
         if #p == 0 then p[1] = 0 end
         while i <= #p do
             local v = p[i]
@@ -389,8 +398,11 @@ function T.terminal(win, colour)
     local function csi(params, final)
         local priv = params:sub(1, 1) == "?"
         if priv then params = params:sub(2) end
-        local a, b = params:match("^(%d*);?(%d*)")
-        local n1, n2 = tonumber(a), tonumber(b)
+        -- the first two numbers: digits, an optional ";", digits (either may be missing)
+        local sc = scan.new(params)
+        local n1 = sc:readNumber()
+        sc:accept(";")
+        local n2 = sc:readNumber()
         if final == "H" or final == "f" then y, x = n1 or 1, n2 or 1
         elseif final == "A" then y = y - (n1 or 1)
         elseif final == "B" then y = y + (n1 or 1)
@@ -411,7 +423,15 @@ function T.terminal(win, colour)
             if m == 0 then clearLine(x, w) elseif m == 1 then clearLine(1, x) else clearLine(1, w) end
         elseif final == "m" then sgr(params)
         elseif (final == "h" or final == "l") and priv then
-            for v in params:gmatch("%d+") do
+            -- each run of digits in the parameters (the modes, between ;s)
+            local modes = {}
+            local sc = scan.new(params)
+            while not sc:atEnd() do
+                sc:readWhile(function(c) return not scan.isDigit(c) end)
+                local digits = sc:readWhile(scan.isDigit)
+                if digits ~= "" then modes[#modes + 1] = digits end
+            end
+            for _, v in ipairs(modes) do
                 if v == "25" then t.cursor = final == "h"
                 elseif v == "1000" or v == "1002" or v == "1006" then t.mouse = final == "h"
                 elseif v == "2004" then t.paste = final == "h" end
@@ -547,7 +567,7 @@ function T.keyBytes(code, ctrl, keysT)
     keysT = keysT or keys
     local name = keysT.getName and keysT.getName(code)
     if not name then return nil end
-    if ctrl and #name == 1 and name:match("%a") then return string.char(name:byte() - 96) end
+    if ctrl and scan.isAlpha(name) then return string.char(name:byte() - 96) end
     local SEQ = { enter = "\r", numPadEnter = "\r", backspace = "\127", tab = "\t",
         up = "\27[A", down = "\27[B", right = "\27[C", left = "\27[D", home = "\27[H", ["end"] = "\27[F",
         insert = "\27[2~", delete = "\27[3~", pageUp = "\27[5~", pageDown = "\27[6~" }

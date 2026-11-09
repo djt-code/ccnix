@@ -34,6 +34,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
 local net = require("net")
 local T = require("telnet")
+local scan = require("scan")
 
 local function fail(msg)
     printError("telnetd: " .. msg)
@@ -99,7 +100,8 @@ local function startSession(s)
         ptys = ptys + 1
         s.term = proc.newTerm(s.w, s.h, true)
         local ccsh = ccnix and ccnix.find("bin/ccsh.lua") or (fs.exists(repo .. "/bin/ccsh.lua") and repo .. "/bin/ccsh.lua")
-        local cmd = settings.get("ccsh.login") and ccsh and ccsh:gsub("%.lua$", "") or nil
+        if ccsh and scan.endsWith(ccsh, ".lua") then ccsh = ccsh:sub(1, -5) end    -- (run without its .lua)
+        local cmd = settings.get("ccsh.login") and ccsh or nil
         s.tty = "pts/" .. ptys
         s.pid = proc.spawn({ cmd = cmd, term = s.term, tty = s.tty, session = true })
     end
@@ -148,7 +150,7 @@ local function typed(s, data)
     end
     -- what came after the password, typed ahead
     local rest = data:sub(i)
-    if s.lastCR then rest = rest:gsub("^[\n%z]", "") end
+    if s.lastCR and (rest:sub(1, 1) == "\n" or rest:sub(1, 1) == "\0") then rest = rest:sub(2) end   -- (the LF or NUL after a CR)
     if s.state == "live" and rest ~= "" then s.decode(rest) end
 end
 

@@ -14,6 +14,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("env", "env [-i] [-u name]... [name=value]... [command [arg...]]")
+local scan = require("scan")
 local args = { ... }
 if not (os.environ and os.setenv) then
     cu.fail("no environment here: run it under ccsh", 125)
@@ -23,9 +24,12 @@ end
 local opts, operands, order = cu.getopt(args, "iu:", 125)
 local drop = {}
 for _, o in ipairs(order) do if o[1] == "u" then drop[#drop + 1] = o[2] end end
+-- the name=value operands first (a name: not empty, before the first =)
 local set, i = {}, 1
-while operands[i] and operands[i]:match("^[^=]+=") do
-    set[#set + 1] = { operands[i]:match("^([^=]+)=(.*)$") }
+while operands[i] do
+    local name, value = scan.cut(operands[i], "=")
+    if not value or name == "" then break end
+    set[#set + 1] = { name, value }
     i = i + 1
 end
 
