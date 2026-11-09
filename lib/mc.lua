@@ -29,6 +29,8 @@
 -- sends it.  A chat message starting with $ is hidden in the game (AP's
 -- rule), and isn't an event here.
 
+local scan = require("scan")
+
 local M = {}
 
 local function findPeripheral(...)
@@ -59,7 +61,7 @@ local function namesFromList(out)
     local colon = text:find(":", 1, true)
     local names = {}
     if not colon then return names end
-    for name in text:sub(colon + 1):gmatch("[^,%s]+") do names[#names + 1] = name end
+    for _, name in ipairs(scan.split(text:sub(colon + 1), ",")) do names[#names + 1] = name end
     return names
 end
 

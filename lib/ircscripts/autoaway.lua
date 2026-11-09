@@ -22,7 +22,7 @@ end
 
 irc.signal_add("send text", typed)
 irc.signal_add("send command", function(line)
-    local cmd = line:lower():match("^/(%S+)")
+    local cmd = (irc.words(line:lower())[1] or ""):sub(2)
     if cmd ~= "away" and cmd ~= "back" then typed() end
 end)
 

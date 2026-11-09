@@ -36,6 +36,7 @@
 --   srv:find(nick)  srv:channel(name)  srv:fold(name)
 
 local irc = require("irc")
+local scan = require("scan")
 
 local D = {}
 D.VERSION = "ccnix-ircd-1.0"
@@ -323,7 +324,14 @@ end
 function CMD.USER(srv, c, m)
     if c.registered then return srv:numeric(c, "462", "You may not reregister") end
     if #m.params < 4 then return srv:numeric(c, "461", "USER", "Not enough parameters") end
-    c.user = m.params[1]:gsub("[^%w%-%._]", ""):sub(1, 10)
+    -- the user name: its letters, digits, - . and _, ten at most
+    local userChar = scan.oneOf("-._")
+    local kept = {}
+    for i = 1, #m.params[1] do
+        local ch = m.params[1]:sub(i, i)
+        if scan.isAlnum(ch) or userChar(ch) then kept[#kept + 1] = ch end
+    end
+    c.user = table.concat(kept):sub(1, 10)
     if c.user == "" then c.user = "user" end
     c.real = m.params[4]
     tryRegister(srv, c)
@@ -453,9 +461,9 @@ function CMD.JOIN(srv, c, m)
         return
     end
     local keys = {}
-    for k in (m.params[2] or ""):gmatch("[^,]+") do keys[#keys + 1] = k end
+    for _, k in ipairs(scan.split(m.params[2] or "", ",")) do keys[#keys + 1] = k end
     local i = 0
-    for name in list:gmatch("[^,]+") do
+    for _, name in ipairs(scan.split(list, ",")) do
         i = i + 1
         local chan = srv:channel(name)
         local invited = chan and chan.invited[srv:fold(c.nick)]
@@ -489,7 +497,7 @@ end
 
 function CMD.PART(srv, c, m)
     if not m.params[1] then return srv:numeric(c, "461", "PART", "Not enough parameters") end
-    for name in m.params[1]:gmatch("[^,]+") do
+    for _, name in ipairs(scan.split(m.params[1], ",")) do
         local chan = srv:channel(name)
         if not chan then srv:numeric(c, "403", name, "No such channel")
         elseif not member(srv, chan, c) then srv:numeric(c, "442", name, "You're not on that channel")
@@ -529,7 +537,7 @@ function CMD.NAMES(srv, c, m)
         end
         return
     end
-    for name in m.params[1]:gmatch("[^,]+") do
+    for _, name in ipairs(scan.split(m.params[1], ",")) do
         local chan = srv:channel(name)
         if chan and (not chan.modes.s or member(srv, chan, c)) then srv:sendNames(c, chan)
         else srv:numeric(c, "366", name, "End of /NAMES list.") end
@@ -541,7 +549,7 @@ function CMD.LIST(srv, c, m)
     local want
     if m.params[1] then
         want = {}
-        for name in m.params[1]:gmatch("[^,]+") do want[srv:fold(name)] = true end
+        for _, name in ipairs(scan.split(m.params[1], ",")) do want[srv:fold(name)] = true end
     end
     local names = {}
     for key in pairs(srv.channels) do names[#names + 1] = key end
@@ -606,7 +614,7 @@ local function applyChannelMode(srv, c, chan, adding, letter, arg)
         mem[field] = adding or nil
         return who.nick
     elseif letter == "b" then
-        if not arg:find("[!@]") then arg = arg .. "!*@*" end
+        if not irc.containsAny(arg, "!@") then arg = arg .. "!*@*" end
         for i, mask in ipairs(chan.bans) do
             if irc.casefold(mask) == irc.casefold(arg) then
                 if adding then return nil end
@@ -755,7 +763,7 @@ local function message(srv, c, m, notice)
         return
     end
     c.idleSince = srv.time()
-    for target in m.params[1]:gmatch("[^,]+") do
+    for _, target in ipairs(scan.split(m.params[1], ",")) do
         if irc.isChannel(target, "#&") then
             local chan = srv:channel(target)
             local why = chan and cantSend(srv, chan, c)
@@ -807,7 +815,7 @@ end
 function CMD.WHOIS(srv, c, m)
     local list = m.params[2] or m.params[1]     -- (WHOIS server nick: the server is this one)
     if not list then return srv:numeric(c, "431", "No nickname given") end
-    for nick in list:gmatch("[^,]+") do
+    for _, nick in ipairs(scan.split(list, ",")) do
         local who = srv:find(nick)
         if not who then
             srv:numeric(c, "401", nick, "No such nick/channel")
@@ -864,7 +872,7 @@ end
 function CMD.ISON(srv, c, m)
     local on = {}
     for _, p in ipairs(m.params) do
-        for nick in p:gmatch("%S+") do
+        for _, nick in ipairs(scan.words(p)) do
             local who = srv:find(nick)
             if who then on[#on + 1] = who.nick end
         end

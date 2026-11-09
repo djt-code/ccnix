@@ -69,15 +69,17 @@ end
 local function readTags(sc)
     local tags = {}
     local text = sc:readWhile(function(c) return c ~= " " end)
-    for item in text:gmatch("[^;]+") do
-        local eq = item:find("=", 1, true)
-        if eq then tags[item:sub(1, eq - 1)] = unescapeTag(item:sub(eq + 1))
-        else tags[item] = true end
+    for _, item in ipairs(scan.split(text, ";")) do
+        local key, value = scan.cut(item, "=")
+        tags[key] = value and unescapeTag(value) or true
     end
     return tags
 end
 
 local function notSpace(c) return c ~= " " end
+
+-- CR and LF as spaces: a param can't hold a line break.
+local function oneLine(s) return (tostring(s):gsub("\r", " "):gsub("\n", " ")) end
 
 -- nick!user@host (or a server's name, with neither ! nor @).
 function I.splitSource(source)
@@ -135,7 +137,7 @@ function I.build(command, ...)
     for i = 1, n do
         local p = params[i]
         if p == nil then break end
-        p = tostring(p):gsub("[\r\n]", " ")
+        p = oneLine(p)
         local last = (i == n) or params[i + 1] == nil
         if last and (p == "" or p:find(" ", 1, true) or p:sub(1, 1) == ":") then
             p = ":" .. p
@@ -151,7 +153,7 @@ function I.buildTrailing(command, ...)
     local n = select("#", ...)
     if n == 0 then return command end
     local params = { ... }
-    local last = tostring(params[n]):gsub("[\r\n]", " ")
+    local last = oneLine(params[n])
     local head = n > 1 and I.build(command, table.unpack(params, 1, n - 1)) or command
     if n > 1 and head:find(" :", 1, true) then        -- (a middle param can't hold " :"; built as it is then)
         return I.build(command, ...)
@@ -184,7 +186,35 @@ local FOLD = {
 
 function I.casefold(s, mapping)
     local extra = FOLD[mapping or "rfc1459"] or FOLD.rfc1459
-    return (s:lower():gsub("[%[%]\\~]", function(c) return extra[c] end))
+    local lower = s:lower()
+    local out = {}
+    for i = 1, #lower do
+        local c = lower:sub(i, i)
+        out[i] = extra[c] or c
+    end
+    return table.concat(out)
+end
+
+-- Does s hold any one of the characters in chars?
+function I.containsAny(s, chars)
+    for i = 1, #chars do
+        if s:find(chars:sub(i, i), 1, true) then return true end
+    end
+    return false
+end
+
+-- The text after the first n words (and the blanks after them), as it
+-- is: afterWords("TELL steve hi there", 2) is "hi there"; nil if there
+-- aren't n words and something after.
+function I.afterWords(s, n)
+    local sc = scan.new(s)
+    sc:skipSpaces()
+    for _ = 1, n do
+        if sc:readWhile(function(c) return not scan.isSpace(c) end) == "" then return nil end
+        sc:skipSpaces()
+    end
+    local rest = sc:readRest()
+    return rest ~= "" and rest or nil
 end
 
 function I.isChannel(name, types)
@@ -205,7 +235,7 @@ end
 -- A channel's name: # or & then no space, comma or BEL, at most 50.
 function I.validChannel(name, types)
     if not I.isChannel(name, types) or #name < 2 or #name > 50 then return false end
-    return not name:find("[ ,\7]")
+    return not I.containsAny(name, " ,\7")
 end
 
 -- Does the mask (* any run, ? any one character) match s?  Both folded.
@@ -353,8 +383,16 @@ end
 
 local function isContinuation(b) return b and b >= 0x80 and b <= 0xBF end
 
+-- Is any byte of s past ASCII?
+local function hasHighBytes(s)
+    for i = 1, #s do
+        if s:byte(i) >= 128 then return true end
+    end
+    return false
+end
+
 function I.fromUTF8(s)
-    if not s:find("[\128-\255]") then return s end
+    if not hasHighBytes(s) then return s end
     local out, i, n = {}, 1, #s
     while i <= n do
         local b = s:byte(i)
@@ -380,11 +418,13 @@ function I.fromUTF8(s)
 end
 
 function I.toUTF8(s)
-    if not s:find("[\128-\255]") then return s end
-    return (s:gsub("[\128-\255]", function(c)
-        local b = c:byte()
-        return string.char(0xC0 + math.floor(b / 64), 0x80 + b % 64)
-    end))
+    if not hasHighBytes(s) then return s end
+    local out = {}
+    for i = 1, #s do
+        local b = s:byte(i)
+        out[i] = b < 128 and string.char(b) or string.char(0xC0 + math.floor(b / 64), 0x80 + b % 64)
+    end
+    return table.concat(out)
 end
 
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"

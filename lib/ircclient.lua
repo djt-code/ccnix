@@ -35,6 +35,7 @@
 -- text"/"send command" too.
 
 local irc = require("irc")
+local scan = require("scan")
 
 local C = {}
 C.VERSION = "1.0"
@@ -92,21 +93,39 @@ local COMMANDS = {}             -- the built-in /commands: name -> { fn, usage, 
 --------------------------------------------------------------------------
 -- Small things
 --------------------------------------------------------------------------
-local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+local trim = scan.trim
 
--- The first word and the rest.
+-- The first word and the rest (the blanks between left out).
 local function splitWord(s)
-    s = s:gsub("^%s+", "")
-    local sp = s:find(" ", 1, true)
-    if not sp then return s, "" end
-    return s:sub(1, sp - 1), (s:sub(sp + 1):gsub("^%s+", ""))
+    local sc = scan.new(s)
+    sc:skipSpaces()
+    local word = sc:readWhile(function(c) return not scan.isSpace(c) end)
+    sc:skipSpaces()
+    return word, sc:readRest()
 end
 
-local function words(s)
-    local out = {}
-    for w in (s or ""):gmatch("%S+") do out[#out + 1] = w end
-    return out
+local function words(s) return scan.words(s or "") end
+
+-- s without a / in front (a command's name typed with one).
+local function noSlash(s) return scan.startsWith(s, "/") and s:sub(2) or s end
+
+-- A file's name without .lua: the script it holds (nil if it isn't one).
+local function scriptName(file)
+    if #file > 4 and scan.endsWith(file, ".lua") then return file:sub(1, -5) end
+    return nil
 end
+
+-- A setting's name for a network: network.<name>.<key>, the network's
+-- name and key, or nil.
+local function networkKey(name)
+    local parts = scan.split(name, ".", true)
+    if #parts ~= 3 or parts[1] ~= "network" or parts[2] == "" or parts[3] == "" then return nil end
+    if not scan.all(parts[3], scan.isNameChar) then return nil end
+    return parts[2], parts[3]
+end
+
+-- A numeric reply's command: three digits.
+local function isNumeric(command) return #command == 3 and scan.all(command, scan.isDigit) end
 
 -- mIRC colour n around text.
 -- (it ends with \15, plain: a "\3" end would take digits after it as a colour)
@@ -122,7 +141,9 @@ end
 local function home()
     local getenv = os.getenv
     local h = getenv and getenv("HOME")
-    return ((h and h ~= "") and h or "/"):gsub("/$", "") .. "/.irc"
+    local dir = (h and h ~= "") and h or "/"
+    if scan.endsWith(dir, "/") then dir = dir:sub(1, -2) end
+    return dir .. "/.irc"
 end
 
 --------------------------------------------------------------------------
@@ -153,7 +174,14 @@ end
 
 function Client:defaultNick()
     local label = os.getComputerLabel and os.getComputerLabel()
-    local nick = label and label:gsub("[^%w%-_%[%]\\`^{|}]", "") or ""
+    -- the label's letters, digits and the other characters a nick may have
+    local nickChar = scan.oneOf("-_[]\\`^{|}")
+    local kept = {}
+    for i = 1, label and #label or 0 do
+        local c = label:sub(i, i)
+        if scan.isAlnum(c) or nickChar(c) then kept[#kept + 1] = c end
+    end
+    local nick = table.concat(kept)
     if nick == "" or not irc.validNick(nick) then nick = "cc" .. (os.getComputerID and os.getComputerID() or 0) end
     return nick
 end
@@ -194,7 +222,7 @@ end
 -- nil and why.  network.<name>.<key>, alias.<name> are free-form.
 function Client:set(name, text)
     local d = self.settingDefs[name]
-    if not d and not name:find("^network%.[^.]+%.[%w_]+$") then return nil, "no setting " .. name end
+    if not d and not networkKey(name) then return nil, "no setting " .. name end
     if text == nil then
         self.values[name] = nil
     else
@@ -217,14 +245,14 @@ function Client:loadConfig()
     if not h then return end
     local text = h.readAll() or ""
     h.close()
-    for raw in text:gmatch("[^\n]+") do
+    for _, raw in ipairs(scan.lines(text)) do
         local line = trim(raw)
         local eq = line:find(" = ", 1, true)
         if line ~= "" and line:sub(1, 1) ~= "#" and eq then
             local key, value = line:sub(1, eq - 1), line:sub(eq + 3)
-            if key:find("^alias%.") then
+            if scan.startsWith(key, "alias.") then
                 self.aliases[key:sub(7)] = value ~= "" and value or nil
-            elseif key:find("^ignore%.") then
+            elseif scan.startsWith(key, "ignore.") then
                 self.ignores[#self.ignores + 1] = { mask = key:sub(8), levels = value }
             else
                 local d = self.settingDefs[key]
@@ -596,10 +624,15 @@ function Server:message(target, text, command)
     local room = 400 - #target
     local pieces = {}
     while #text > room do
-        local cut = text:sub(1, room):match("^.*() ") or room + 1
+        -- cut at the last space that fits (one too early in the piece: at the room)
+        local cut = room + 1
+        for k = room, 1, -1 do
+            if text:sub(k, k) == " " then cut = k; break end
+        end
         if cut < room / 2 then cut = room + 1 end
         pieces[#pieces + 1] = text:sub(1, cut - 1)
-        text = text:sub(cut):gsub("^ ", "")
+        text = text:sub(cut)
+        if scan.startsWith(text, " ") then text = text:sub(2) end
     end
     pieces[#pieces + 1] = text
     for _, p in ipairs(pieces) do self:send(irc.build(command, target, p)) end
@@ -707,7 +740,7 @@ function Server:handle(line)
     local h = EVENTS[m.command]
     if h then
         h(self, m)
-    elseif m.command:match("^%d%d%d$") then
+    elseif isNumeric(m.command) then
         EVENTS.numeric(self, m)
     else
         client:print(self.buffer, line, { level = "crap" })
@@ -739,7 +772,7 @@ function Server:isHilight(text)
             local i, j = plain:find(word, from, true)
             if not i then return false end
             local before, after = plain:sub(i - 1, i - 1), plain:sub(j + 1, j + 1)
-            if not before:match("[%w_]") and not after:match("[%w_]") then return true end
+            if not scan.isNameChar(before) and not scan.isNameChar(after) then return true end
             from = i + 1
         end
     end
@@ -758,7 +791,7 @@ end
 function Client:ignored(nick, address, level)
     local full = (nick or "") .. "!" .. (address or "")
     for _, ig in ipairs(self.ignores) do
-        local mask = ig.mask:find("[!@]") and ig.mask or (ig.mask .. "!*")
+        local mask = irc.containsAny(ig.mask, "!@") and ig.mask or (ig.mask .. "!*")
         if irc.match(mask, full) and (ig.levels == "all" or (" " .. ig.levels .. " "):find(" " .. level .. " ", 1, true)) then
             return true
         end
@@ -785,8 +818,8 @@ EVENTS.CAP = function(s, m)
         s.capOffered = (s.capOffered or "") .. " " .. (m.params[#m.params] or "")
         if m.params[3] == "*" then return end
         local want = {}
-        for cap in s.capOffered:gmatch("%S+") do
-            local name = cap:match("^[^=]+")
+        for _, cap in ipairs(scan.words(s.capOffered)) do
+            local name = scan.cut(cap, "=")
             if name == "multi-prefix" or name == "away-notify" or (name == "sasl" and user and pass) then
                 want[#want + 1] = name
             end
@@ -826,9 +859,9 @@ EVENTS["001"] = function(s, m)
     s.pingAt = client.clock()
     client:print(s.buffer, m.params[2] or "", { prefix = "--", prefixColour = 12 })
     client:emit("server connected", s)
-    for cmd in (s:net("commands") or ""):gmatch("[^;]+") do client:command("/" .. trim(cmd), s.buffer) end
+    for _, cmd in ipairs(scan.split(s:net("commands") or "", ";")) do client:command("/" .. cmd, s.buffer) end
     local chans = {}
-    for chan in (s:net("autojoin") or ""):gmatch("[^,%s]+") do chans[#chans + 1] = chan end
+    for _, chan in ipairs(scan.split(s:net("autojoin") or "", ",")) do chans[#chans + 1] = chan end
     for _, b in ipairs(client.buffers) do      -- (back after a lost connection: the channels it was in)
         if b.server == s and b.kind == "channel" and b.wanted then chans[#chans + 1] = b.name end
     end
@@ -842,8 +875,12 @@ EVENTS["005"] = function(s, m)
         local key, value = eq and tok:sub(1, eq - 1) or tok, eq and tok:sub(eq + 1) or true
         s.isupport[key:upper()] = value
         if key:upper() == "PREFIX" and type(value) == "string" then
-            local modes, symbols = value:match("^%((.-)%)(.*)$")
-            if modes then s.prefixModes, s.prefixSymbols = modes, symbols end
+            -- PREFIX=(modes)symbols: (ov)@+
+            local sc = scan.new(value)
+            if sc:accept("(") then
+                local modes, closed = sc:readUntil(")")
+                if closed then s.prefixModes, s.prefixSymbols = modes, sc:readRest() end
+            end
         end
         if key:upper() == "NETWORK" then s.network = value end
     end
@@ -1056,7 +1093,7 @@ EVENTS.NOTICE = function(s, m) privmsg(s, m, true) end
 local function modeTakesArg(s, letter, adding)
     if s.prefixModes:find(letter, 1, true) then return true end
     local groups = {}
-    for g in ((s.isupport.CHANMODES or "b,k,l,imnst") .. ","):gmatch("([^,]*),") do groups[#groups + 1] = g end
+    for _, g in ipairs(scan.split(s.isupport.CHANMODES or "b,k,l,imnst", ",", true)) do groups[#groups + 1] = g end
     if (groups[1] or ""):find(letter, 1, true) or (groups[2] or ""):find(letter, 1, true) then return true end
     if (groups[3] or ""):find(letter, 1, true) then return adding end
     return false
@@ -1112,10 +1149,10 @@ EVENTS["353"] = function(s, m)
         return s.client:note(s.client.current, "Names " .. (m.params[3] or "") .. ": " .. (m.params[4] or ""))
     end
     if b.namesDone ~= false then b.nicks, b.namesDone = {}, false end
-    for entry in (m.params[4] or ""):gmatch("%S+") do
+    for _, entry in ipairs(scan.words(m.params[4] or "")) do
         local i = 1
         while i <= #entry and s.prefixSymbols:find(entry:sub(i, i), 1, true) do i = i + 1 end
-        local nick = entry:sub(i):match("^[^!]+")
+        local nick = scan.cut(entry:sub(i), "!")    -- (userhost-in-names: nick!user@host)
         b:setNick(nick, entry:sub(1, i - 1))
     end
 end
@@ -1226,9 +1263,16 @@ end
 EVENTS["321"] = function() end
 EVENTS["323"] = function(s) s.client:note(s.listBuffer or s.buffer, "End of the list"); s.listBuffer = nil end
 
+-- WHO's last param, "hops realname": the real name.
+local function realName(text)
+    local hops, rest = scan.cut(text, " ")
+    if rest and hops ~= "" and scan.all(hops, scan.isDigit) then return rest end
+    return text
+end
+
 EVENTS["352"] = function(s, m)
     s.client:note(s.client.current, string.format("%-12s %-12s %-3s %s@%s (%s)", m.params[2] or "", m.params[6] or "",
-        m.params[7] or "", m.params[3] or "", m.params[4] or "", (m.params[8] or ""):gsub("^%d+ ", "")))
+        m.params[7] or "", m.params[3] or "", m.params[4] or "", realName(m.params[8] or "")))
 end
 EVENTS["315"] = function() end
 
@@ -1261,7 +1305,7 @@ function Client:expandAlias(exp, args, buffer)
         local ch = exp:sub(i, i)
         if ch == "$" then
             local nxt = exp:sub(i + 1, i + 1)
-            if nxt:match("%d") then
+            if scan.isDigit(nxt) then
                 local n = tonumber(nxt)
                 if exp:sub(i + 2, i + 2) == "-" then
                     out[#out + 1] = table.concat(w, " ", n + 1)
@@ -1311,7 +1355,7 @@ function Client:command(line, buffer, depth)
     local alias = self.aliases[name]
     if alias then
         local cmds = {}
-        for part in alias:gmatch("[^;]+") do cmds[#cmds + 1] = trim(part) end
+        for _, part in ipairs(scan.split(alias, ";")) do cmds[#cmds + 1] = part end
         for _, part in ipairs(cmds) do
             local expanded = self:expandAlias(part, args, buffer)
             self:command("/" .. expanded, buffer, depth + 1)
@@ -1373,7 +1417,8 @@ local function channelArg(server, buffer, args)
 end
 
 COMMANDS.help = { function(args, _, buffer, client)
-    local name = args:match("^/?(%S+)")
+    local name = words(args)[1]
+    if name then name = noSlash(name) end
     if name then
         name = name:lower()
         local cmd = client.commands[name]
@@ -1410,8 +1455,9 @@ local function serverFor(client, target, port)
         local p = tonumber(client.values["network." .. target .. ".port"] or "") or 6667
         return client:newServer(target, address, p)
     end
-    local host, p = target:match("^(.-):(%d+)$")
-    host = host or target
+    -- host:port, or a host alone
+    local host, p = scan.cutLast(target, ":")
+    if not (p and p ~= "" and scan.all(p, scan.isDigit)) then host, p = target, nil end
     p = tonumber(port or p or "") or 6667
     return client:findServer(host) or client:newServer(host, host, p)
 end
@@ -1453,7 +1499,8 @@ end, "[message]", "leave every server, and irc" }
 function Client:networks()
     local names, seen = {}, {}
     for k in pairs(self.values) do
-        local n = k:match("^network%.([^.]+)%.address$")
+        local n, key = networkKey(k)
+        if key ~= "address" then n = nil end
         if n and not seen[n] then seen[n] = true; names[#names + 1] = n end
     end
     table.sort(names)
@@ -1496,7 +1543,7 @@ COMMANDS.join = { function(args, server, buffer, client)
     local chans, key = splitWord(args)
     if chans == "" then return client:err(buffer, "/join #channel [key]") end
     local list = {}
-    for name in chans:gmatch("[^,]+") do
+    for _, name in ipairs(scan.split(chans, ",")) do
         local c = server:isChannel(name) and name or ("#" .. name)
         list[#list + 1] = c
         local b = client:findBuffer(server, c)
@@ -1562,7 +1609,7 @@ COMMANDS.ctcp = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
     local w = words(args)
     if not w[2] then return client:err(buffer, "/ctcp <nick> <command> [args]") end
-    local rest = args:match("^%S+%s+%S+%s*(.*)$") or ""
+    local rest = irc.afterWords(args, 2) or ""
     if w[2]:upper() == "PING" and rest == "" then rest = tostring(math.floor(client.clock() * 1000)) end
     server:send(irc.build("PRIVMSG", w[1], irc.ctcpQuote(w[2], rest)))
     client:note(buffer, "CTCP " .. w[2]:upper() .. " to " .. w[1])
@@ -1667,7 +1714,7 @@ end, "[#channel] <nick> [reason]", "throw someone out of a channel" }
 
 -- The ban mask for a nick in the channel (*!*@host), or what's given.
 local function banMask(buffer, server, who)
-    if who:find("[!@*]") then return who end
+    if irc.containsAny(who, "!@*") then return who end
     local host = buffer.hosts and buffer.hosts[server:fold(who)]
     return host and ("*!*@" .. host) or (who .. "!*@*")
 end
@@ -1797,14 +1844,14 @@ COMMANDS.alias = { function(args, _, buffer, client)
         for _, n in ipairs(names) do client:note(buffer, colour(14, "/" .. n) .. " = /" .. client.aliases[n]) end
         return
     end
-    name = name:lower():gsub("^/", "")
+    name = noSlash(name:lower())
     if exp == "" then return client:note(buffer, "/" .. name .. " = " .. (client.aliases[name] or "(none)")) end
-    client.aliases[name] = exp:gsub("^/", "")
+    client.aliases[name] = noSlash(exp)
     client:saveConfig()
     client:note(buffer, "/" .. name .. " = /" .. client.aliases[name])
 end, "[name [expansion]]", "a command of your own: $0 $1- $* $N $C; ; between commands" }
 COMMANDS.unalias = { function(args, _, buffer, client)
-    local name = (words(args)[1] or ""):lower():gsub("^/", "")
+    local name = noSlash((words(args)[1] or ""):lower())
     if not client.aliases[name] then return client:err(buffer, "no alias " .. name) end
     client.aliases[name] = nil
     client:saveConfig()
@@ -1899,7 +1946,7 @@ function Client:availableScripts()
     for _, d in ipairs(dirs) do
         if fs.exists(d) and fs.isDir(d) then
             for _, f in ipairs(fs.list(d)) do
-                local n = f:match("^(.+)%.lua$")
+                local n = scriptName(f)
                 if n and not seen[n] then seen[n] = true; out[#out + 1] = n end
             end
         end
@@ -1976,6 +2023,7 @@ function Client:scriptApi(sc)
     function api.switch(buffer) client:switch(buffer) end
     api.strip, api.colour, api.parse, api.build = irc.strip, C.colour, irc.parse, irc.build
     api.casefold, api.match, api.nick_colour = irc.casefold, irc.match, C.nickColour
+    api.words, api.split, api.trim = scan.words, scan.split, scan.trim
     return api
 end
 
@@ -2034,7 +2082,7 @@ function Client:start()
     local names = {}
     if fs.exists(auto) and fs.isDir(auto) then
         for _, f in ipairs(fs.list(auto)) do
-            local n = f:match("^(.+)%.lua$")
+            local n = scriptName(f)
             if n then names[#names + 1] = n end
         end
     end

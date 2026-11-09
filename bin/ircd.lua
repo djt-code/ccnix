@@ -66,6 +66,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("ircd", "ircd [-p port]")
 local net = require("net")
 local irc = require("irc")
+local scan = require("scan")
 local ircd = require("ircd")
 local ircserv = require("ircserv")
 local mcLib = require("mc")
@@ -77,14 +78,22 @@ if not port or port < 1 or port > 65535 or port % 1 ~= 0 then cu.usageError("bad
 
 local syslog = require("log").new("ircd", settings.get("ircd.facility") or "daemon", { perror = true })
 local label = os.getComputerLabel and os.getComputerLabel()
-local defaultName = label and ("irc." .. label:lower():gsub("[^%w%-]", "-")) or "irc.ccnix"
+-- irc.<the label>, its characters other than letters, digits and - as -
+local function hostPart(s)
+    local out = {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        out[i] = (scan.isAlnum(c) or c == "-") and c or "-"
+    end
+    return table.concat(out)
+end
+local defaultName = label and ("irc." .. hostPart(label:lower())) or "irc.ccnix"
 
 local function readLines(path)
     if not fs.exists(path) then return nil end
     local h = fs.open(path, "r")
     if not h then return nil end
-    local out = {}
-    for line in (h.readAll() or ""):gmatch("([^\n]*)\n?") do out[#out + 1] = line end
+    local out = scan.lines(h.readAll() or "")
     h.close()
     while out[#out] == "" do out[#out] = nil end
     return out

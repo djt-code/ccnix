@@ -37,6 +37,7 @@
 -- Detector.
 
 local irc = require("irc")
+local scan = require("scan")
 
 local S = {}
 S.ENFORCE = 60              -- seconds to identify for a registered nick
@@ -74,11 +75,7 @@ function S.hash(password, salt)
     return string.format("%08x", h)
 end
 
-local function words(text)
-    local out = {}
-    for w in (text or ""):gmatch("%S+") do out[#out + 1] = w end
-    return out
-end
+local function words(text) return scan.words(text or "") end
 
 --------------------------------------------------------------------------
 -- Attaching
@@ -341,7 +338,7 @@ function S.attach(srv, opts)
         tell(MC, c, wx and ("The weather: " .. wx .. ".") or ("Can't tell: " .. (why or "no game")))
     end
     MS.TELL = function(c, w, text)
-        local msg = text:match("^%S+%s+%S+%s+(.+)$")
+        local msg = irc.afterWords(text, 2)
         if not msg then return tell(MC, c, "Syntax: TELL <player> <text>") end
         local ok, why = ask("tell", w[2], irc.strip(msg), c.nick)
         tell(MC, c, ok and ("Told " .. w[2] .. ".") or ("Can't: " .. (why or "no game")))
