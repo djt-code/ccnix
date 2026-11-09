@@ -31,6 +31,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("find", "find [-H|-L] [path...] [expression]")
+local scan = require("scan")
 local args = { ... }
 local i = 1
 while args[i] == "-H" or args[i] == "-L" do i = i + 1 end     -- no links in CraftOS
@@ -45,52 +46,99 @@ if #paths == 0 then paths = { "." } end
 local function bad(msg) cu.usageError(msg, 1) end
 
 --------------------------------------------------------------------------
--- globs: a POSIX pattern to an anchored Lua pattern
+-- globs: a POSIX pattern read into a list of steps, then matched against
+-- a whole name.  A step is "*" (any run of characters, "/" too) or a test
+-- on one character: ? any, [set], or the character itself.
 --------------------------------------------------------------------------
-local CLASS = { alpha = "%a", digit = "%d", alnum = "%w", upper = "%u", lower = "%l",
-                space = "%s", punct = "%p", xdigit = "%x", cntrl = "%c" }
+local CLASS = { alpha = scan.isAlpha, digit = scan.isDigit, alnum = scan.isAlnum, upper = scan.isUpper,
+                lower = scan.isLower, space = scan.isSpace, punct = scan.isPunct, xdigit = scan.isHexDigit,
+                cntrl = function(c) return c:byte() < 32 or c:byte() == 127 end }
 
-local function esc(c) return c:match("%w") and c or "%" .. c end
+local function anyChar() return true end
+local function noChar() return false end
+local function literal(ch) return function(c) return c == ch end end
+local function byteRange(lo, hi) return function(c) return c:byte() >= lo and c:byte() <= hi end end
 
-local function glob(pat)
-    local out, j = { "^" }, 1
+-- "[:" letters ":]" at k in pat: the class's name, or nil
+local function className(pat, k)
+    local sc = scan.new(pat, k)
+    if not sc:accept("[:") then return nil end
+    local name = sc:readWhile(scan.isAlpha)
+    if name == "" or not sc:accept(":]") then return nil end
+    return name
+end
+
+-- a bracket expression starting at j (the "["): its test and the index of
+-- its "]", or nil if no "]" ends it (the "[" is then a plain character).
+-- set: ("!" | "^")? item item*  "]", where an item is [:class:], c-c (a
+-- range) or a character, and a "]" first in the set is a character.
+local function bracket(pat, j)
+    local k = j + 1
+    local neg = pat:sub(k, k) == "!" or pat:sub(k, k) == "^"
+    if neg then k = k + 1 end
+    local tests, first = {}, true
+    while k <= #pat and (first or pat:sub(k, k) ~= "]") do
+        local cls = className(pat, k)
+        local c, dash, hi = pat:sub(k, k), pat:sub(k + 1, k + 1), pat:sub(k + 2, k + 2)
+        if cls and CLASS[cls] then
+            tests[#tests + 1] = CLASS[cls]; k = k + #cls + 4
+        elseif dash == "-" and hi ~= "" and hi ~= "]" then
+            if c:byte() <= hi:byte() then tests[#tests + 1] = byteRange(c:byte(), hi:byte()) end
+            k = k + 3
+        else
+            tests[#tests + 1] = literal(c); k = k + 1
+        end
+        first = false
+    end
+    if k > #pat then return nil end
+    if #tests == 0 then return neg and anyChar or noChar, k end     -- an empty range such as [z-a]
+    return function(ch)
+        local inSet = false
+        for _, test in ipairs(tests) do
+            if test(ch) then inSet = true; break end
+        end
+        return inSet ~= neg
+    end, k
+end
+
+-- the steps of a glob: "*" for a star, else a test on one character
+local function readGlob(pat)
+    local steps, j = {}, 1
     while j <= #pat do
         local c = pat:sub(j, j)
-        if c == "*" then out[#out + 1] = ".*"
-        elseif c == "?" then out[#out + 1] = "."
-        elseif c == "\\" and j < #pat then j = j + 1; out[#out + 1] = esc(pat:sub(j, j))
+        if c == "*" then steps[#steps + 1] = "*"
+        elseif c == "?" then steps[#steps + 1] = anyChar
+        elseif c == "\\" and j < #pat then j = j + 1; steps[#steps + 1] = literal(pat:sub(j, j))
         elseif c == "[" then
-            -- find the closing "]"; one right after "[" or "[!" is literal
-            local k = j + 1
-            local neg = pat:sub(k, k) == "!" or pat:sub(k, k) == "^"
-            if neg then k = k + 1 end
-            local set = {}
-            local first = true
-            while k <= #pat and (first or pat:sub(k, k) ~= "]") do
-                local cls = pat:match("^%[:(%a+):%]", k)
-                local d, hi = pat:sub(k, k), pat:match("^%-([^%]])", k + 1)
-                if cls and CLASS[cls] then
-                    set[#set + 1] = CLASS[cls]; k = k + #cls + 4
-                elseif hi then
-                    -- a range: list its characters, as Lua ranges can't hold escapes
-                    for b = d:byte(), hi:byte() do set[#set + 1] = esc(string.char(b)) end
-                    k = k + 3
-                else
-                    set[#set + 1] = esc(d); k = k + 1
-                end
-                first = false
-            end
-            if k > #pat then out[#out + 1] = "%["      -- no "]": a plain "["
-            elseif #set == 0 then                       -- an empty range such as [z-a]
-                out[#out + 1] = neg and "." or "[^%s%S]"; j = k
-            else
-                out[#out + 1] = "[" .. (neg and "^" or "") .. table.concat(set) .. "]"
-                j = k
-            end
-        else out[#out + 1] = esc(c) end
+            local test, close = bracket(pat, j)
+            steps[#steps + 1] = test or literal("[")
+            j = close or j
+        else steps[#steps + 1] = literal(c) end
         j = j + 1
     end
-    return table.concat(out) .. "$"
+    return steps
+end
+
+-- do steps k on match s from i to its end?  (a star tries every length)
+local function matchSteps(steps, k, s, i)
+    while k <= #steps do
+        local step = steps[k]
+        if step == "*" then
+            for at = i, #s + 1 do
+                if matchSteps(steps, k + 1, s, at) then return true end
+            end
+            return false
+        end
+        if i > #s or not step(s:sub(i, i)) then return false end
+        i, k = i + 1, k + 1
+    end
+    return i > #s
+end
+
+-- glob pat as a test on a whole name
+local function glob(pat)
+    local steps = readGlob(pat)
+    return function(s) return matchSteps(steps, 1, s, 1) end
 end
 
 --------------------------------------------------------------------------
@@ -101,8 +149,19 @@ local minDepth, maxDepth = 0, math.huge
 local batches = {}      -- -exec ... + commands: { cmd, paths }
 
 -- "+n", "-n" or "n" to a test on a number
+-- number: ("+" | "-")? digit+ letter?; the sign, the digits and the
+-- letter ("" when left out), or nil
+local function readNumber(s)
+    local sc, sign = scan.new(s), ""
+    if sc:accept("+") then sign = "+" elseif sc:accept("-") then sign = "-" end
+    local n = sc:readWhile(scan.isDigit)
+    local suf = scan.isAlpha(sc:peek()) and sc:advance() or ""
+    if n == "" or not sc:atEnd() then return nil end
+    return sign, n, suf
+end
+
 local function compare(s, what, suffix)
-    local sign, n, suf = (s or ""):match("^([+-]?)(%d+)(%a?)$")
+    local sign, n, suf = readNumber(s or "")
     if not n or (suf ~= "" and suf ~= suffix) then bad(what .. ": bad number -- " .. tostring(s)) end
     n = tonumber(n)
     local f
@@ -145,12 +204,12 @@ end
 
 local primary = {}
 function primary.name()
-    local pat = glob(nextArg("-name"))
-    return function(e) return e.name:find(pat) ~= nil end
+    local matches = glob(nextArg("-name"))
+    return function(e) return matches(e.name) end
 end
 function primary.path()
-    local pat = glob(nextArg("-path"))
-    return function(e) return e.path:find(pat) ~= nil end
+    local matches = glob(nextArg("-path"))
+    return function(e) return matches(e.path) end
 end
 primary["type"] = function()
     local c = nextArg("-type")
@@ -212,7 +271,8 @@ function primary.ok()
         for k, w in ipairs(words) do t[k] = w == "{}" and e.path or w end
         io.stderr:write("< " .. table.concat(t, " ") .. " > ? ")
         local answer = cu.readLine(io.input()) or ""
-        return answer:match("^[yY]") ~= nil and run(words, e.path)
+        local first = answer:sub(1, 1)
+        return (first == "y" or first == "Y") and run(words, e.path)
     end
 end
 
@@ -279,8 +339,11 @@ local function visit(p, path, depth, drive)
     seen = seen + 1
     if seen % 200 == 0 then os.queueEvent("find"); os.pullEvent("find") end
     local e = { p = p, path = path, depth = depth, dir = fs.isDir(p) }
-    local trimmed = path:gsub("/+$", "")
-    e.name = trimmed == "" and "/" or trimmed:match("[^/]*$")
+    local to = #path
+    while to > 0 and path:sub(to, to) == "/" do to = to - 1 end     -- (the slashes at the end dropped)
+    local trimmed = path:sub(1, to)
+    local _, last = scan.cutLast(trimmed, "/")
+    e.name = trimmed == "" and "/" or last or trimmed
     local test = depth >= minDepth and depth <= maxDepth
     if test and not depthFirst then expr(e) end
     -- -xdev: a mount point (/rom, a disk) is tested but not gone into

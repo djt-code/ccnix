@@ -28,6 +28,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("xargs", "xargs [-prtx] [-E eofstr | -0] "
     .. "[-I replstr | -L number | -n number] [-s size] [utility [argument...]]")
+local scan = require("scan")
 local opts, ops, order = cu.getopt({ ... }, "prtx0E:I:L:n:s:")
 local mode, count, repl = nil, nil, nil     -- "I", "L" or "n" (the last one given)
 for _, o in ipairs(order) do
@@ -59,12 +60,20 @@ local function breathe()
     end
 end
 
+local isBlank = scan.oneOf(" \t")
+local isSpecial = scan.oneOf(" \t'\"\\")     -- (a blank, a quote or a backslash)
+local function notSpecial(c) return not isSpecial(c) end
+
 -- Split one input line into arguments.  In line mode (-I, -L) the whole
 -- line is one argument; cont is true when -L's line ends in a blank.
 local function split(line)
     local args, parts, q, i, trail = {}, nil, nil, 1, 0
     local function add(s) parts = parts or {}; parts[#parts + 1] = s end
-    if mode == "I" then line = line:gsub("^[ \t]+", "") end
+    if mode == "I" then     -- (the blanks before the line dropped)
+        local sc = scan.new(line)
+        sc:readWhile(isBlank)
+        line = sc:rest()
+    end
     while i <= #line do
         if q then
             local j = line:find(q, i, true)
@@ -72,7 +81,10 @@ local function split(line)
             add(line:sub(i, j - 1))
             q, i, trail = nil, j + 1, 0
         else
-            local j = line:find("[ \t'\"\\]", i) or #line + 1
+            -- up to the next blank, quote or backslash (or the end)
+            local sc = scan.new(line, i)
+            sc:readWhile(notSpecial)
+            local j = sc:pos()
             if j > i then add(line:sub(i, j - 1)); trail = 0 end
             local c = line:sub(j, j)
             if c == "'" or c == '"' then
@@ -158,7 +170,8 @@ local function run(args)
     if opts.p then
         io.stderr:write(line .. " ?...")
         local answer = cu.readLine(io.stdin)
-        if not (answer and answer:match("^%s*[yY]")) then return end
+        local first = answer and scan.trim(answer):sub(1, 1)      -- (blanks before it are allowed)
+        if not (first == "y" or first == "Y") then return end
     elseif opts.t then
         printError(line)
     end

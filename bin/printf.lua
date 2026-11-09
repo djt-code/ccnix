@@ -16,12 +16,21 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("printf", "printf format [argument...]")
+local scan = require("scan")
 local args = { ... }
 if args[1] == "--" then table.remove(args, 1) end
 if #args == 0 then cu.usageError() end
 local format = table.remove(args, 1)
 
 local ESC = { a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v", ["\\"] = "\\" }
+local isOctal = scan.oneOf("01234567")
+
+-- up to three octal digits at s's index at ("" if none come)
+local function readOctal(s, at)
+    local sc, digits = scan.new(s, at), ""
+    while #digits < 3 and isOctal(sc:peek()) do digits = digits .. sc:advance() end
+    return digits
+end
 
 -- Expand the backslash escapes in s.  For %b (isB) octal is \0ddd and \c
 -- stops; returns the text and whether \c was met.
@@ -32,7 +41,14 @@ local function escapes(s, isB)
         if not b then out[#out + 1] = s:sub(p); break end
         out[#out + 1] = s:sub(p, b - 1)
         local c = s:sub(b + 1, b + 1)
-        local oct = s:match(isB and "^0([0-7]?[0-7]?[0-7]?)" or "^[0-7][0-7]?[0-7]?", b + 1)
+        -- octal: for %b "0" and up to three digits, else one to three digits
+        local oct
+        if isB then
+            if c == "0" then oct = readOctal(s, b + 2) end
+        else
+            oct = readOctal(s, b + 1)
+            if oct == "" then oct = nil end
+        end
         if oct then
             out[#out + 1] = string.char((tonumber(oct ~= "" and oct or "0", 8) or 0) % 256)
             p = b + 1 + #oct + (isB and 1 or 0)
@@ -49,28 +65,60 @@ local function escapes(s, isB)
     return table.concat(out), false
 end
 
+-- The digits of a whole number at the start of body: "0x" and hex digits
+-- (base 16), "0" and octal digits (base 8, the 0 counted in), or decimal
+-- digits.  The digits, the base, and how long a prefix came before them;
+-- nil if body starts with none of these.
+local function leadingInteger(body)
+    local sc = scan.new(body)
+    if sc:accept("0x") or sc:accept("0X") then
+        local hex = sc:readWhile(scan.isHexDigit)
+        if hex ~= "" then return hex, 16, 2 end
+    end
+    sc:setPos(1)
+    if sc:at("0") then return sc:readWhile(isOctal), 8, 0 end
+    local digits = sc:readWhile(scan.isDigit)
+    if digits ~= "" then return digits, 10, 0 end
+    return nil
+end
+
+-- The longest start of s that reads as a decimal number: sign? digit*
+-- ("." digit*)? (("e" | "E") sign? digit+)?
+local function decimalPrefix(s)
+    local sc = scan.new(s)
+    local _ = sc:accept("+") or sc:accept("-")
+    sc:readWhile(scan.isDigit)
+    if sc:accept(".") then sc:readWhile(scan.isDigit) end
+    local mantissaEnd = sc:pos()
+    if sc:accept("e") or sc:accept("E") then
+        local _ = sc:accept("+") or sc:accept("-")
+        if sc:readWhile(scan.isDigit) == "" then sc:setPos(mantissaEnd) end    -- (no exponent after all)
+    end
+    return s:sub(1, sc:pos() - 1)
+end
+
 -- The numeric value of argument a (nil: missing, 0); `int` takes whole
 -- numbers only.  A bad one is reported and gives what could be read of it.
 local function num(a, int)
     if a == nil or a == "" then return 0 end
-    local q = a:match("^['\"](.)")
-    if q then return q:byte() end
-    local s = a:match("^%s*(.-)$")
+    -- 'c or "c: the code of c
+    if (a:sub(1, 1) == "'" or a:sub(1, 1) == '"') and #a > 1 then return a:byte(2) end
+    local sc = scan.new(a)
+    sc:skipSpaces()
+    local s = sc:rest()
     local n
     if int then
         -- 0x hex, 0 octal or decimal; all of s must be used ("09" is not)
-        local sign, body = s:match("^([+-]?)(.*)$")
-        local d, base, pre = body:match("^0[xX](%x+)"), 16, 2
-        if not d then d, base, pre = body:match("^0[0-7]*"), 8, 0 end
-        if not d then d, base = body:match("^%d+"), 10 end
+        local sign, body = "", s
+        if scan.startsWith(s, "+") or scan.startsWith(s, "-") then sign, body = s:sub(1, 1), s:sub(2) end
+        local d, base, pre = leadingInteger(body)
         n = d and tonumber(d, base)
         if n and sign == "-" then n = -n end
         if n and #sign + pre + #d == #s then return n end
     else
         n = tonumber(s)
         if n then return n end
-        local pre = s:match("^[+-]?%d*%.?%d*[eE][+-]?%d+") or s:match("^[+-]?%d*%.?%d*")
-        n = tonumber(pre)
+        n = tonumber(decimalPrefix(s))
     end
     cu.fail(a .. (n and ": not completely converted" or ": expected numeric value"))
     return n or 0
@@ -129,6 +177,22 @@ end
 -- Write the format once, taking arguments from args[ai...].  Returns the
 -- next argument's index, and true when output must stop (%b's \c, or a
 -- bad conversion).
+local isFlag = scan.oneOf("-+ #0")
+local isIntConversion = scan.oneOf("diouxX")
+local isFloatConversion = scan.oneOf("eEfFgG")
+
+-- a conversion at pc: "%" flags* width ("."? precision) and its letter
+-- (flags - + space # 0, width and precision digits, any of them left out,
+-- the letter too at the end of the format).  The five parts as text.
+local function readConversion(pc)
+    local sc = scan.new(format, pc + 1)
+    local flags = sc:readWhile(isFlag)
+    local width = sc:readWhile(scan.isDigit)
+    local dot = sc:accept(".") and "." or ""
+    local prec = sc:readWhile(scan.isDigit)
+    return flags, width, dot, prec, sc:advance()
+end
+
 local function once(ai)
     local p, out = 1, {}
     local function emit(s) out[#out + 1] = s end
@@ -139,7 +203,7 @@ local function once(ai)
         local s, stop = escapes(text, false)
         emit(s)
         if not pc then break end
-        local flags, width, dot, prec, conv = format:match("^%%([-+ #0]*)(%d*)(%.?)(%d*)(.?)", pc)
+        local flags, width, dot, prec, conv = readConversion(pc)
         local whole = format:sub(pc, pc + #flags + #width + #dot + #prec + #conv)
         p = pc + #whole
         if conv == "%" then emit("%")
@@ -151,10 +215,10 @@ local function once(ai)
             if dot ~= "" then a = a:sub(1, tonumber(prec) or 0) end
             emit(pad(a, flags, width))
             if stop then io.write(table.concat(out)); return ai, true end
-        elseif conv:match("^[diouxX]$") then
+        elseif isIntConversion(conv) then
             emit(integer(conv, flags, width, dot ~= "" and (prec ~= "" and prec or "0") or "",
                 num(nextArg(), true)))
-        elseif conv:match("^[eEfFgG]$") then
+        elseif isFloatConversion(conv) then
             local v = num(nextArg(), false)
             if conv == "F" then conv = "f" end
             -- Lua refuses some specs C takes (a width over 99, repeated flags)

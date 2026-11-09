@@ -37,6 +37,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("syslogd", "syslogd")
 local L = require("log")
 local D = require("syslogd")
+local scan = require("scan")
 local okNet, net = pcall(require, "net")
 if not okNet then net = nil end
 
@@ -127,7 +128,7 @@ print("syslogd: " .. started)
 engine.note("info", started)                        -- (in the log, as rsyslogd's own start is)
 for _, p in ipairs(problems) do
     print("syslogd: " .. p)
-    engine.note("err", (p:find("^line ") and D.CONF .. ": " or "") .. p)
+    engine.note("err", (scan.startsWith(p, "line ") and D.CONF .. ": " or "") .. p)
 end
 
 local tick = os.startTimer(5)

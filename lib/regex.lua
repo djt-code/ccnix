@@ -15,23 +15,27 @@
 -- list of strings (false for a group that took no part).  Matching is by
 -- bytes in the C locale.
 
+local scan = require("scan")
+
 local regex = {}
 local byte, char = string.byte, string.char
 
--- The [:class:] names, as tests on a one-character string.
+-- The [:class:] names, as tests on a one-character string (ASCII, as in
+-- the C locale).
+local function isGraph(c) return scan.isAlnum(c) or scan.isPunct(c) end
 local CLASS = {
-    alpha = function(c) return c:match("%a") end,
-    digit = function(c) return c:match("%d") end,
-    alnum = function(c) return c:match("%w") end,
-    upper = function(c) return c:match("%u") end,
-    lower = function(c) return c:match("%l") end,
-    space = function(c) return c:match("%s") end,
+    alpha = scan.isAlpha,
+    digit = scan.isDigit,
+    alnum = scan.isAlnum,
+    upper = scan.isUpper,
+    lower = scan.isLower,
+    space = scan.isSpace,
     blank = function(c) return c == " " or c == "\t" end,
-    punct = function(c) return c:match("%p") end,
-    cntrl = function(c) return c:match("%c") end,
-    xdigit = function(c) return c:match("%x") end,
-    graph = function(c) return c:match("[%w%p]") end,
-    print = function(c) return c:match("[%w%p ]") end,
+    punct = scan.isPunct,
+    cntrl = function(c) return byte(c) < 32 or byte(c) == 127 end,
+    xdigit = scan.isHexDigit,
+    graph = isGraph,
+    print = function(c) return isGraph(c) or c == " " end,
 }
 
 --------------------------------------------------------------------------
@@ -47,6 +51,8 @@ local function parse(pat, ere, icase)
     local pos, len, groups, closed = 1, #pat, 0, {}
     local function peek(k) return pat:sub(pos + (k or 0), pos + (k or 0)) end
     local function fail(msg) error(msg, 0) end
+    -- the decimal digits from pos on ("" if none), not stepped over
+    local function digitsHere() return scan.new(pat, pos):readWhile(scan.isDigit) end
 
     -- a one-character set, both cases of a letter when icase
     local function setOf(set)
@@ -115,15 +121,15 @@ local function parse(pat, ere, icase)
 
     -- {m}, {m,} or {m,n}; pos is just past the "{" (or "\{")
     local function interval()
-        local m = pat:match("^%d+", pos)
-        if not m then fail("invalid interval") end
+        local m = digitsHere()
+        if m == "" then fail("invalid interval") end
         pos = pos + #m
         local lo, hi = tonumber(m), tonumber(m)
         if peek() == "," then
             pos = pos + 1
-            local n = pat:match("^%d+", pos)
-            hi = n and tonumber(n)
-            pos = pos + (n and #n or 0)
+            local n = digitsHere()
+            hi = tonumber(n)        -- (nil when there are none: no limit)
+            pos = pos + #n
         end
         local close = ere and "}" or "\\}"
         if pat:sub(pos, pos + #close - 1) ~= close then fail("braces not balanced") end
@@ -169,7 +175,7 @@ local function parse(pat, ere, icase)
             return { t = "group", n = n, node }
         end
         if not ere and (d == ")" or d == "{" or d == "}") then fail("unmatched \\" .. d) end
-        if d:match("%d") and d ~= "0" then
+        if scan.isDigit(d) and d ~= "0" then
             if not closed[tonumber(d)] then fail("invalid back reference") end
             return { t = "ref", n = tonumber(d) }
         end
@@ -197,7 +203,7 @@ local function parse(pat, ere, icase)
                 if c == "*" then pos = pos + 1; lo = 0
                 elseif ere and c == "+" then pos = pos + 1; lo = 1
                 elseif ere and c == "?" then pos = pos + 1; lo, hi = 0, 1
-                elseif ere and c == "{" and d:match("%d") then pos = pos + 1; lo, hi = interval()
+                elseif ere and c == "{" and scan.isDigit(d) then pos = pos + 1; lo, hi = interval()
                 elseif not ere and c == "\\" and d == "{" then pos = pos + 2; lo, hi = interval()
                 else break end
                 a = { t = "rep", a, min = lo, max = hi }

@@ -15,6 +15,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("cut", "cut -b list [-n] | -c list | -f list [-d delim] [-s] [file...]")
+local scan = require("scan")
 local opts, files = cu.getopt({ ... }, "b:c:d:f:ns")
 
 local n = (opts.b and 1 or 0) + (opts.c and 1 or 0) + (opts.f and 1 or 0)
@@ -23,12 +24,40 @@ if not opts.f and (opts.d or opts.s) then cu.usageError("-d and -s need -f") end
 local delim = opts.d or "\t"
 if #delim ~= 1 then cu.usageError("the delimiter must be one character") end
 
+local isListSep = scan.oneOf(", \t")
+local function notListSep(c) return not isListSep(c) end
+
+-- the parts of a list: what's between commas and blanks, empty ones left out
+local function listParts(spec)
+    local parts, sc = {}, scan.new(spec)
+    sc:readWhile(isListSep)
+    while not sc:atEnd() do
+        parts[#parts + 1] = sc:readWhile(notListSep)
+        sc:readWhile(isListSep)
+    end
+    return parts
+end
+
+-- a part: digits? "-" digits?, or digits alone (n is n-n); its two ends as
+-- text, "" where one is left out, or nil if it's neither
+local function readRange(part)
+    local sc = scan.new(part)
+    local a = sc:readWhile(scan.isDigit)
+    if sc:atEnd() then
+        if a == "" then return nil end
+        return a, a
+    end
+    if not sc:accept("-") then return nil end
+    local b = sc:readWhile(scan.isDigit)
+    if not sc:atEnd() then return nil end
+    return a, b
+end
+
 -- the list as ranges { from, to } (to = huge for "n-")
 local ranges = {}
 local spec = opts.b or opts.c or opts.f
-for part in spec:gmatch("[^, \t]+") do
-    local a, b = part:match("^(%d*)%-(%d*)$")
-    if not a then a = part:match("^%d+$"); b = a end
+for _, part in ipairs(listParts(spec)) do
+    local a, b = readRange(part)
     if not a or a .. b == "" then cu.usageError("bad list: " .. spec) end
     a, b = tonumber(a ~= "" and a or "1"), tonumber(b ~= "" and b or nil) or math.huge
     if a < 1 or b < a then cu.usageError("bad list: " .. spec) end
@@ -52,7 +81,7 @@ for l in cu.lines(files) do
             if not opts.s then io.write(l, "\n") end
         else
             local i = 0
-            for f in (l .. delim):gmatch("(.-)" .. delim:gsub("%p", "%%%0")) do
+            for _, f in ipairs(scan.split(l, delim, true)) do
                 i = i + 1
                 if wanted(i) then t[#t + 1] = f end
             end

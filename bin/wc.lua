@@ -26,10 +26,25 @@ local function report(n, name)
     io.write(table.concat(t, " "), "\n")
 end
 
+-- the words in s: runs of characters that aren't blanks (space, \t \n
+-- \v \f \r, bytes 32 and 9 to 13)
+local function countWords(s)
+    local words, inWord = 0, false
+    for i = 1, #s do
+        local b = s:byte(i)
+        local blank = b == 32 or (b >= 9 and b <= 13)
+        if not blank and not inWord then words = words + 1 end
+        inWord = not blank
+        -- a big file takes a while: yield now and then, or CC stops us
+        if i % 65536 == 0 then os.queueEvent("wc"); os.pullEvent("wc") end
+    end
+    return words
+end
+
 cu.each(files, function(h, name)
     local s = cu.readAll(h)
-    -- gsub counts its matches in one call, with no Lua loop to time out
-    local n = { select(2, s:gsub("\n", "")), select(2, s:gsub("[^ \t\n\r\v\f]+", "")), #s }
+    -- (gsub of a plain "\n" counts the newlines in one call)
+    local n = { select(2, s:gsub("\n", "")), countWords(s), #s }
     for i = 1, 3 do total[i] = total[i] + n[i] end
     report(n, #files > 0 and name or nil)
 end)

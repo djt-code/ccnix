@@ -19,25 +19,31 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("od", "od [-v] [-A base] [-j skip] [-N count] [-t type]... [-bcdosx] [file...]")
+local scan = require("scan")
 local opts, files, order = cu.getopt({ ... }, "vA:j:N:t:bcdosx")
 
 -- A -j or -N number: decimal, 0x hex or 0 octal, with an optional
 -- multiplier suffix when `mult` is allowed.
 local MULT = { b = 512, k = 1024, m = 1048576 }
+local isOctal = scan.oneOf("01234567")
 local function number(s, mult)
-    local body, suf = s:match("^(.-)([bkm]?)$")
-    if s:match("^0[xX]") then body, suf = s, "" end    -- "b" is a hex digit there
+    -- the body, then b, k or m (none after 0x: "b" is a hex digit there)
+    local hex = scan.startsWith(s, "0x") or scan.startsWith(s, "0X")
+    local body, suf = s, ""
+    if not hex and MULT[s:sub(-1)] then body, suf = s:sub(1, -2), s:sub(-1) end
     if suf ~= "" and not mult then return nil end
+    -- the body: "0x" hex digits, "0" octal digits, or decimal digits
     local n
-    if body:match("^0[xX]%x+$") then n = tonumber(body:sub(3), 16)
-    elseif body:match("^0") then n = body:match("^0[0-7]*$") and tonumber(body, 8)
-    elseif body:match("^%d+$") then n = tonumber(body) end
+    if hex and #body > 2 and scan.all(body:sub(3), scan.isHexDigit) then n = tonumber(body:sub(3), 16)
+    elseif scan.startsWith(body, "0") then n = scan.all(body, isOctal) and tonumber(body, 8) or nil
+    elseif body ~= "" and scan.all(body, scan.isDigit) then n = tonumber(body) end
     return n and n * (MULT[suf] or 1)
 end
 
 -- the output types, in order: { letter, size }
 local SIZES = { C = 1, S = 2, I = 4, L = 8 }
 local SHORT = { b = "o1", c = "c", d = "u2", o = "o2", s = "d2", x = "x2" }
+local isSized = scan.oneOf("doux")     -- (the types that take a size)
 local types = {}
 for _, o in ipairs(order) do
     local spec = o[1] == "t" and o[2] or SHORT[o[1]]
@@ -49,10 +55,10 @@ for _, o in ipairs(order) do
             p = p + 1
             if c == "a" or c == "c" then
                 types[#types + 1] = { c, 1 }
-            elseif c:match("[doux]") then
+            elseif isSized(c) then
                 local size = 4
-                local digits = spec:match("^%d+", p)
-                if digits then size = tonumber(digits); p = p + #digits
+                local digits = scan.new(spec, p):readWhile(scan.isDigit)
+                if digits ~= "" then size = tonumber(digits); p = p + #digits
                 elseif SIZES[spec:sub(p, p)] then size = SIZES[spec:sub(p, p)]; p = p + 1 end
                 if size ~= 1 and size ~= 2 and size ~= 4 and size ~= 8 then
                     cu.usageError("invalid type size in " .. spec)

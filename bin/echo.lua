@@ -20,6 +20,9 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("echo", "echo [string...] [> file | >> file]")
+local scan = require("scan")
+
+local isOctal = scan.oneOf("01234567")
 
 local ESC = { a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v", ["\\"] = "\\" }
 
@@ -28,7 +31,10 @@ local args = { ... }
 local i = 1
 while i <= #args do
     local a = args[i]
-    local op, rest = a:match("^(>>?)(.*)$")
+    -- a redirect: ">" or ">>", then the file name or nothing (it's the next word)
+    local op, rest = nil, nil
+    if scan.startsWith(a, ">>") then op, rest = ">>", a:sub(3)
+    elseif scan.startsWith(a, ">") then op, rest = ">", a:sub(2) end
     if op and not _G.POSIX_SH then
         mode = op == ">>" and "ab" or "wb"
         if rest ~= "" then out = rest
@@ -51,7 +57,9 @@ while p <= #s do
     local c = s:sub(b + 1, b + 1)
     if c == "c" then stop = true; break
     elseif c == "0" then
-        local oct = s:match("^[0-7]?[0-7]?[0-7]?", b + 2)
+        -- \0 then up to three octal digits
+        local sc, oct = scan.new(s, b + 2), ""
+        while #oct < 3 and isOctal(sc:peek()) do oct = oct .. sc:advance() end
         text[#text + 1] = string.char(tonumber(oct ~= "" and oct or "0", 8) % 256)
         p = b + 2 + #oct
     elseif ESC[c] then
