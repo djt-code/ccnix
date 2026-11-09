@@ -25,6 +25,7 @@
 -- A message goes to every rule that matches.
 
 local L = require("log")
+local scan = require("scan")
 local D = {}
 
 D.CONF = "/etc/syslog.conf"
@@ -45,19 +46,56 @@ D.PORT = 514
 function D.size(v)
     if type(v) == "number" then return v >= 0 and math.floor(v) or nil end
     if type(v) ~= "string" then return nil end
-    local n, unit = v:upper():match("^%s*(%d+%.?%d*)%s*([KM]?)I?B?%s*$")
-    n = tonumber(n)
+    -- size: digit+ ("." digit*)? ("K" | "M")? "I"? "B"?, blanks around
+    -- them allowed, any case
+    local sc = scan.new(v:upper())
+    sc:skipSpaces()
+    local n = sc:readWhile(scan.isDigit)
+    if n == "" then return nil end
+    if sc:accept(".") then n = n .. "." .. sc:readWhile(scan.isDigit) end
+    sc:skipSpaces()
+    local unit = (sc:accept("K") and "K") or (sc:accept("M") and "M") or ""
+    sc:accept("I")
+    sc:accept("B")
+    sc:skipSpaces()
+    n = sc:atEnd() and tonumber(n)
     if not n then return nil end
     return math.floor(n * (unit == "M" and 1048576 or unit == "K" and 1024 or 1))
 end
 
+local function notSpace(c) return not scan.isSpace(c) end
+local function isFacilityChar(c) return c ~= "." and not scan.isSpace(c) end
+
+-- the pieces of s between each sep, the empty ones left out (not trimmed)
+local function pieces(s, sep)
+    local out = {}
+    for _, piece in ipairs(scan.split(s, sep, true)) do
+        if piece ~= "" then out[#out + 1] = piece end
+    end
+    return out
+end
+
+-- a selector: facilities "." severity, the facilities anything but "."
+-- and blanks, the severity non-blanks (blanks around it allowed).  The
+-- two, or nil
+local function readSelector(part)
+    local sc = scan.new(part)
+    sc:skipSpaces()
+    local facs = sc:readWhile(isFacilityChar)
+    if facs == "" or not sc:accept(".") then return nil end
+    local lvl = sc:readWhile(notSpace)
+    sc:skipSpaces()
+    if lvl == "" or not sc:atEnd() then return nil end
+    return facs, lvl
+end
+
 local function parseSelectors(s)
     local sels = {}
-    for part in s:gmatch("[^;]+") do
-        local facs, lvl = part:match("^%s*([^%.%s]+)%.(%S+)%s*$")
+    for _, part in ipairs(pieces(s, ";")) do
+        local facs, lvl = readSelector(part)
         if not facs then return nil, "bad selector \"" .. part .. "\"" end
         local sel = { facs = {} }
-        for f in facs:gmatch("[^,]+") do
+        for _, f in ipairs(pieces(facs, ",")) do
             if f == "*" then sel.all = true
             else
                 local n = L.facility(f)
@@ -68,7 +106,10 @@ local function parseSelectors(s)
         if lvl == "none" then sel.none = true
         elseif lvl == "*" then sel.sev = 7
         else
-            local op, name = lvl:match("^([!=]*)(.*)$")
+            -- the severity: "!" and "=" before its name
+            local sc = scan.new(lvl)
+            local op = sc:readWhile(scan.oneOf("!="))
+            local name = sc:rest()
             local n = L.severity(name == "*" and 7 or name)
             if not n or #op > 2 then return nil, "unknown severity \"" .. lvl .. "\"" end
             sel.sev, sel.eq, sel.neg = n, op:find("=", 1, true) ~= nil, op:find("!", 1, true) ~= nil
@@ -81,36 +122,81 @@ end
 local function parseAction(a)
     if a == "*" or a == "/dev/console" then return { kind = "console" } end
     if a:sub(1, 1) == "@" then
-        local host, port = a:sub(2):match("^([^:]+):(%d+)$")
-        host = host or a:sub(2)
+        -- @host or @host:port, the port digits
+        local host, port = scan.cut(a:sub(2), ":")
+        if not (port and host ~= "" and port ~= "" and scan.all(port, scan.isDigit)) then
+            host, port = a:sub(2), nil
+        end
         port = tonumber(port) or D.PORT
         if host == "" or port < 1 or port > 65535 then return nil, "bad forward \"" .. a .. "\"" end
         return { kind = "forward", host = host, port = port }
     end
-    local path = a:match("^%-?(/.+)$")
-    if path then return { kind = "file", path = path } end
+    -- "-"? then a path from the root
+    local path = scan.startsWith(a, "-") and a:sub(2) or a
+    if scan.startsWith(path, "/") and #path > 1 then return { kind = "file", path = path } end
     return nil, "unknown action \"" .. a .. "\" (a /file, /dev/console, * or @host)"
 end
+
+-- line with its comment taken off: from a "#" at the start, or from the
+-- blanks before a "#"
+local function stripComment(line)
+    if scan.startsWith(line, "#") then return "" end
+    for k = 2, #line do
+        if line:sub(k, k) == "#" and scan.isSpace(line:sub(k - 1, k - 1)) then
+            local to = k - 1
+            while to > 0 and scan.isSpace(line:sub(to, to)) do to = to - 1 end
+            return line:sub(1, to)
+        end
+    end
+    return line
+end
+
+-- "!" (or "#!") then the programs: what comes after it, or nil
+local function blockOf(line)
+    local sc = scan.new(line)
+    sc:accept("#")
+    if not sc:accept("!") then return nil end
+    return sc:rest()
+end
+
+-- a rule: selectors, blanks, action (each non-blanks); the two, or nil
+local function readRule(line)
+    local sc = scan.new(line)
+    local sel = sc:readWhile(notSpace)
+    if sel == "" or sc:skipSpaces() == 0 then return nil end
+    local act = sc:readWhile(notSpace)
+    if act == "" or not sc:atEnd() then return nil end
+    return sel, act
+end
+
+local function isProgSep(c) return c == "," or scan.isSpace(c) end
+local function notProgSep(c) return not isProgSep(c) end
 
 -- syslog.conf's text as rules: { sels, action, progs }; and its problems,
 -- "line n: why" (the line is left out).
 function D.parse(text)
     local rules, problems, progs, n = {}, {}, nil, 0
-    for raw in (tostring(text) .. "\n"):gmatch("(.-)\r?\n") do
+    for _, raw in ipairs(scan.lines(tostring(text))) do
         n = n + 1
-        local line = raw:match("^%s*(.-)%s*$")
-        local block = line:match("^#?!(.*)$")
+        local line = scan.trim(raw)
+        local block = blockOf(line)
         if block then
-            block = block:match("^%s*(.-)%s*$")
+            block = scan.trim(block)
             if block == "*" or block == "" then progs = nil
             else
+                -- the programs, "," or blanks between them
                 progs = {}
-                for p in block:gmatch("[^,%s]+") do progs[p] = true end
+                local sc = scan.new(block)
+                while not sc:atEnd() do
+                    sc:readWhile(isProgSep)
+                    local p = sc:readWhile(notProgSep)
+                    if p ~= "" then progs[p] = true end
+                end
             end
         else
-            line = line:gsub("^#.*", ""):gsub("%s+#.*$", "")
+            line = stripComment(line)
             if line ~= "" then
-                local sel, act = line:match("^(%S+)%s+(%S+)$")
+                local sel, act = readRule(line)
                 local sels, a, why
                 if not sel then why = "want \"selectors action\""
                 else

@@ -32,6 +32,8 @@
 -- log file), encode() and decode() (RFC 5424 on the wire; RFC 3164
 -- understood coming in).
 
+local scan = require("scan")
+
 local L = {}
 
 L.SEVERITIES = { "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug" }
@@ -95,11 +97,17 @@ function L.line(rec)
     return (rec.stamp or L.stamp(rec.time)) .. " " .. tostring(rec.host or L.hostname()) .. " " .. tag .. ": " .. tostring(rec.msg or "")
 end
 
--- RFC 5424's header fields are printable ASCII with no spaces, or "-".
+-- RFC 5424's header fields are printable ASCII with no spaces (! to ~),
+-- or "-"; anything else becomes "_".
 local function field(s, max)
     if s == nil or s == "" then return "-" end
-    s = tostring(s):gsub("[^\33-\126]", "_")
-    return s:sub(1, max)
+    s = tostring(s)
+    local out = {}
+    for i = 1, #s do
+        local b = s:byte(i)
+        out[i] = (b >= 33 and b <= 126) and s:sub(i, i) or "_"
+    end
+    return table.concat(out):sub(1, max)
 end
 
 L.MAX = 2048        -- the most of a datagram (RFC 5426 asks receivers for 2048)
@@ -115,18 +123,80 @@ end
 
 local function dash(s) if s ~= "-" then return s end end
 
+local function notSpace(c) return not scan.isSpace(c) end
+
+-- "<" PRI ">" with PRI one to three digits: PRI and the scanner after it,
+-- or nil
+local function readPri(s)
+    local sc = scan.new(s)
+    if not sc:accept("<") then return nil end
+    local digits = sc:readWhile(scan.isDigit)
+    if digits == "" or #digits > 3 or not sc:accept(">") then return nil end
+    return digits, sc
+end
+
+-- RFC 5424 after the PRI: "1" then five fields (TIMESTAMP HOSTNAME
+-- APP-NAME PROCID MSGID: non-blanks), each after one space, then a space
+-- and the rest (structured data and the message).  The six, or nil.
+local function read5424(rest)
+    local sc = scan.new(rest)
+    if not sc:accept("1 ") then return nil end
+    local f = {}
+    for i = 1, 5 do
+        f[i] = sc:readWhile(notSpace)
+        if f[i] == "" or not sc:accept(" ") then return nil end
+    end
+    return f[1], f[2], f[3], f[4], f[5], sc:rest()
+end
+
+-- RFC 3164's timestamp, "Mmm dd hh:mm:ss " (the day's first digit can be
+-- a space): what comes after it, or nil
+local function after3164Stamp(rest)
+    local sc = scan.new(rest)
+    local function letter() return scan.isAlpha(sc:peek()) and sc:advance() end
+    local function digit() return scan.isDigit(sc:peek()) and sc:advance() end
+    if not (letter() and letter() and letter() and sc:accept(" ")) then return nil end
+    if not ((sc:accept(" ") or digit()) and digit() and sc:accept(" ")) then return nil end
+    for i = 1, 3 do
+        if not (digit() and digit() and sc:accept(i < 3 and ":" or " ")) then return nil end
+    end
+    return sc:rest()
+end
+
+-- RFC 3164's tag: name ("[" pid "]")? ":" " "? msg, the name anything but
+-- "[", ":" and blanks, pid digits.  The name, pid (nil if none) and msg,
+-- or nil
+local function isTagChar(c) return c ~= "[" and c ~= ":" and not scan.isSpace(c) end
+local function readTag(rest)
+    local sc = scan.new(rest)
+    local tag = sc:readWhile(isTagChar)
+    if tag == "" then return nil end
+    local pid
+    if sc:accept("[") then
+        pid = sc:readWhile(scan.isDigit)
+        if pid == "" or not sc:accept("]") then return nil end
+    end
+    if not sc:accept(":") then return nil end
+    sc:accept(" ")
+    return tag, pid, sc:rest()
+end
+
 -- A datagram as a message (RFC 5424, or RFC 3164's "<PRI>Mmm dd hh:mm:ss
 -- host tag[pid]: msg"); one with no PRI is user.notice, as RFC 3164 says.
 -- A 5424 timestamp is kept as it came (rec.stamp); otherwise the time is
 -- now.  host is nil when it didn't say.
 function L.decode(s)
-    s = tostring(s):gsub("[\r\n]+$", "")
+    s = tostring(s)
+    local to = #s       -- (the line ends at the end dropped)
+    while to > 0 and (s:sub(to, to) == "\r" or s:sub(to, to) == "\n") do to = to - 1 end
+    s = s:sub(1, to)
     local rec = { fac = 1, sev = 5, time = os.epoch("utc") }
-    local pri, rest = s:match("^<(%d%d?%d?)>(.*)$")
+    local pri, after = readPri(s)
     if not pri or tonumber(pri) > 191 then rec.msg = s; return rec end
+    local rest = after:rest()
     pri = tonumber(pri)
     rec.fac, rec.sev = math.floor(pri / 8), pri % 8
-    local ts, host, app, pid, _, sd = rest:match("^1 (%S+) (%S+) (%S+) (%S+) (%S+) (.*)$")
+    local ts, host, app, pid, _, sd = read5424(rest)
     if ts then
         rec.stamp, rec.host, rec.app, rec.pid = dash(ts), dash(host), dash(app), dash(pid)
         local msg
@@ -146,16 +216,19 @@ function L.decode(s)
             end
             msg = sd:sub(i)
         end
-        rec.msg = msg:gsub("^ ", ""):gsub("^\239\187\191", "")
+        if scan.startsWith(msg, " ") then msg = msg:sub(2) end
+        if scan.startsWith(msg, "\239\187\191") then msg = msg:sub(4) end     -- (a UTF-8 BOM)
+        rec.msg = msg
         return rec
     end
-    local after = rest:match("^%a%a%a [ %d]%d %d%d:%d%d:%d%d (.*)$")
-    if after then
-        local h, tagged = after:match("^(%S+) (.*)$")
-        if h then rec.host, rest = h, tagged else rest = after end
+    local stamped = after3164Stamp(rest)
+    if stamped then
+        -- then the host: non-blanks and a space
+        local sc = scan.new(stamped)
+        local h = sc:readWhile(notSpace)
+        if h ~= "" and sc:accept(" ") then rec.host, rest = h, sc:rest() else rest = stamped end
     end
-    local tag, p, msg = rest:match("^([^%[:%s]+)%[(%d+)%]: ?(.*)$")
-    if not tag then tag, msg = rest:match("^([^%[:%s]+): ?(.*)$") end
+    local tag, p, msg = readTag(rest)
     if tag then rec.app, rec.pid, rec.msg = tag, p, msg else rec.msg = rest end
     return rec
 end
@@ -185,7 +258,10 @@ local function programName()
     local sh = shell
     if type(sh) == "table" and sh.getRunningProgram then
         local p = sh.getRunningProgram()
-        if p then return (fs.getName(p):gsub("%.lua$", "")) end
+        if p then
+            local name = fs.getName(p)
+            return scan.endsWith(name, ".lua") and name:sub(1, -5) or name
+        end
     end
     return "lua"
 end
@@ -213,8 +289,8 @@ function L.new(app, facility, opts)
         local msg = select("#", ...) > 0 and string.format(fmt, ...) or tostring(fmt)
         local proc = rawget(_G, "proc")
         local pid = opts.pid ~= false and proc and proc.self and proc.self() or nil
-        for l in (msg .. "\n"):gmatch("(.-)\r?\n") do
-            if l:find("%S") then
+        for _, l in ipairs(scan.lines(msg)) do
+            if not scan.all(l, scan.isSpace) then       -- (blank lines aren't logged)
                 if opts.perror then
                     local show = (opts.perror == "stderr" or n <= 3) and printError or print
                     local s = opts.perror == "stderr" and l or os.date("%H:%M ") .. l
