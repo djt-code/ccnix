@@ -31,6 +31,8 @@
 -- with ordinary files (and parts) on it.  Files written straight onto a
 -- member's own mount (/disk2/...) are in the pool too.
 
+local scan = require("scan")
+
 local J = {}
 
 local MARK = ".jbod"              -- at each member's root
@@ -55,6 +57,8 @@ end
 -- "!s") and the two numbers: "notes!sbig.txt.2-3".
 local function escaped(rel) return (rel:gsub("!", "!!"):gsub("/", "!s")) end
 local function partName(rel, n, of) return escaped(rel) .. "." .. n .. "-" .. of end
+-- digits, one at least (the numbers in a part's name)
+local function isNumber(s) return s ~= nil and s ~= "" and scan.all(s, scan.isDigit) end
 
 -- A pool over the drives `opts.drives()` gives, using `base` (the real fs
 -- functions) for its members' files.  opts.clock: seconds now (os.clock);
@@ -135,8 +139,8 @@ function J.new(base, opts)
     -- Paths are relative to the pool's root ("" is the root).  Nothing
     -- starting .jbod at the root is part of it.
     local function hidden(rel)
-        local top = rel:match("^([^/]+)")
-        return top ~= nil and hiddenTop(top)
+        local top = scan.cut(rel, "/")                 -- its first folder (or name)
+        return top ~= "" and hiddenTop(top)
     end
 
     -- The member holding the file at rel (its first part), or nil.
@@ -167,8 +171,9 @@ function J.new(base, opts)
             if base.isDir(dir) then
                 for _, name in ipairs(base.list(dir)) do
                     if name:sub(1, #prefix) == prefix then
-                        local n, total = name:sub(#prefix + 1):match("^(%d+)%-(%d+)$")
-                        if n then
+                        -- after the prefix: "n-total", two numbers
+                        local n, total = scan.cut(name:sub(#prefix + 1), "-")
+                        if isNumber(n) and isNumber(total) then
                             byN[tonumber(n)] = base.combine(dir, name)
                             of = math.max(of, tonumber(total))
                         end
@@ -295,7 +300,7 @@ function J.new(base, opts)
             local line
             if e then line = data:sub(pos, keep and e or e - 1); pos = e + 1
             else line = data:sub(pos); pos = #data + 1 end
-            if not keep then line = line:gsub("\r$", "") end
+            if not keep and scan.endsWith(line, "\r") then line = line:sub(1, -2) end
             return line
         end
         function h.readAll()
@@ -443,7 +448,7 @@ function J.new(base, opts)
     end
 
     function F.open(rel, mode)
-        local binary = mode:find("b") ~= nil
+        local binary = mode:find("b", 1, true) ~= nil
         local kind = mode:sub(1, 1)
         if kind == "r" then
             if isDir(rel) then return nil, full(rel) .. ": No such file" end
@@ -472,10 +477,24 @@ function J.new(base, opts)
     return P
 end
 
--- fs.find's patterns: "*" any run of characters within a name, "?" one.
+-- fs.find's patterns: "*" any run of characters within a name, "?" any
+-- one, anything else itself; the whole name must match.  A "*" tries
+-- each length of run, shortest first, until the rest matches.
 local function globMatch(pattern, name)
-    local lua = "^" .. pattern:gsub("[%^%$%(%)%%%.%[%]%+%-]", "%%%0"):gsub("%*", ".*"):gsub("%?", ".") .. "$"
-    return name:match(lua) ~= nil
+    local function matchFrom(p, n)              -- pattern from p on against name from n on
+        if p > #pattern then return n > #name end
+        local c = pattern:sub(p, p)
+        if c == "*" then
+            for k = n, #name + 1 do
+                if matchFrom(p + 1, k) then return true end
+            end
+            return false
+        end
+        if n > #name then return false end
+        if c == "?" or c == name:sub(n, n) then return matchFrom(p + 1, n + 1) end
+        return false
+    end
+    return matchFrom(1, 1)
 end
 
 --------------------------------------------------------------------------
@@ -644,7 +663,9 @@ function J.install(fsTable, opts)
         function fsTable.find(pattern)
             local out = origFind(pattern)
             local parts = {}
-            for part in base.combine(pattern):gmatch("[^/]+") do parts[#parts + 1] = part end
+            for _, part in ipairs(scan.split(base.combine(pattern), "/", true)) do  -- (names kept as they are)
+                if part ~= "" then parts[#parts + 1] = part end
+            end
             if #parts == 0 or not globMatch(parts[1], mount) then return out end
             local function walk(rel, i)
                 if i > #parts then out[#out + 1] = base.combine(mount, rel); return end

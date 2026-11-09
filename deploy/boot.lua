@@ -84,12 +84,26 @@ local lib = {}
 for _, d in ipairs({ "lib", "turtle" }) do               -- (turtlelib is in turtle/)
     for _, r in ipairs(roots) do lib[#lib + 1] = r .. "/" .. d .. "/?.lua;" end
 end
+-- the first word of text, between blanks (space, tab, newline...); nil if
+-- there's none.  (boot runs before lib/ is on the path: no lib/scan here)
+local function firstWord(text)
+    local function blank(i)
+        local b = text:byte(i)
+        return b == 32 or (b >= 9 and b <= 13)
+    end
+    local from = 1
+    while from <= #text and blank(from) do from = from + 1 end
+    local to = from
+    while to <= #text and not blank(to) do to = to + 1 end
+    if to == from then return nil end
+    return text:sub(from, to - 1)
+end
 -- the version this boot uses (`ccnix version` tells it from what the next would)
 local version
 local vf = find("deploy/version")
 if vf then
     local h = fs.open(vf, "r")
-    version = h and (h.readAll() or ""):match("^%s*(%S+)")
+    version = h and firstWord(h.readAll() or "")
     if h then h.close() end
 end
 _G.ccnix = { find = find, lib = table.concat(lib), version = version or "unversioned",

@@ -31,6 +31,19 @@ local function die(msg)
     error("", 0)
 end
 
+-- s without the blanks (space, tab, newline...: bytes 9 to 13 and 32) at
+-- either end.  (Here rather than lib/scan's: diskclone runs on its own.)
+local function trim(s)
+    local function blank(i)
+        local b = s:byte(i)
+        return b == 32 or (b >= 9 and b <= 13)
+    end
+    local from, to = 1, #s
+    while from <= to and blank(from) do from = from + 1 end
+    while to >= from and blank(to) do to = to - 1 end
+    return s:sub(from, to)
+end
+
 -- Bytes `path` will take on a disk, counted the way CC counts free space.
 local function sizeOf(path)
     if not fs.isDir(path) then return math.max(fs.getSize(path), MIN_FILE) end
@@ -73,7 +86,7 @@ if not fs.exists(labelPath) or fs.isDir(labelPath) then
     die(SRC .. " has no LABEL file; its first line is the disk label")
 end
 local f = fs.open(labelPath, "r")
-local LABEL = (f.readLine() or ""):match("^%s*(.-)%s*$")
+local LABEL = trim(f.readLine() or "")
 f.close()
 if LABEL == "" then die("The first line of " .. labelPath .. " is empty") end
 
@@ -124,7 +137,8 @@ local function ejectDisk()
 end
 
 -- Write the disk in the drive.  Returns "written", or "skipped"/"failed"
--- and a reason.  Leaves the disk in the drive.
+-- and a reason (and true if it failed for the directory being too big
+-- for the disk).  Leaves the disk in the drive.
 local function writeDisk()
     if not disk.hasData(DRIVE) then return "skipped", "not a floppy disk" end
     local mount = disk.getMountPath(DRIVE)
@@ -138,7 +152,7 @@ local function writeDisk()
     end
     local free = fs.getFreeSpace(mount)
     if free < NEED then
-        return "failed", string.format("needs %d bytes, disk has %d free", NEED, free)
+        return "failed", string.format("needs %d bytes, disk has %d free", NEED, free), true
     end
     for _, name in ipairs(ENTRIES) do
         local ok, err = pcall(fs.copy, fs.combine(SRC, name), fs.combine(mount, name))
@@ -170,11 +184,11 @@ local ok, err = pcall(function()
             end
         end
         local n = counts.written + counts.skipped + counts.failed + 1
-        local result, why = writeDisk()
+        local result, why, tooBig = writeDisk()
         counts[result] = counts[result] + 1
         print(string.format("Disk %d: %s%s", n, result, why and (" - " .. why) or ""))
         ejectDisk()
-        if why and why:find("^needs %d+ bytes") then
+        if tooBig then
             print("The directory doesn't fit on a floppy; stopping.")
             break
         end

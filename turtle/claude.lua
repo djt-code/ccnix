@@ -104,7 +104,7 @@ local goal = table.concat(args, " ")
 local function readKey()
     if not fs.exists(KEY_FILE) then return nil end
     local f = fs.open(KEY_FILE, "r")
-    local key = (f.readLine() or ""):match("^%s*(.-)%s*$")
+    local key = T.trim(f.readLine() or "")
     f.close()
     return key ~= "" and key or nil
 end
@@ -171,10 +171,12 @@ local function blit(colour) return pager and pager.blitOf(colour) or "0" end
 -- pager to show in colour.
 local function keep(text, fg)
     local pos = 1
-    for l in (text .. "\n"):gmatch("([^\n]*)\n") do
-        local lfg = fg and fg:sub(pos, pos + #l - 1)
-        if lfg and lfg:find("[^0]") then shown[#shown + 1] = { l, lfg } else shown[#shown + 1] = l end
-        pos = pos + #l + 1
+    while pos <= #text + 1 do            -- a line a time, the one after the last newline too
+        local nl = text:find("\n", pos, true) or #text + 1
+        local l = text:sub(pos, nl - 1)
+        local lfg = fg and fg:sub(pos, nl - 1)
+        if lfg and lfg ~= string.rep("0", #lfg) then shown[#shown + 1] = { l, lfg } else shown[#shown + 1] = l end
+        pos = nl + 1
     end
     if #shown > SCROLLBACK + 500 then
         local cut, t = #shown - SCROLLBACK, {}
@@ -198,7 +200,10 @@ end
 local KEYWORDS = {}
 local KEYWORD_LIST = "and break do else elseif end false for function goto if in local nil not or "
     .. "repeat return then true until while"
-for w in KEYWORD_LIST:gmatch("%a+") do KEYWORDS[w] = true end
+for _, w in ipairs(T.words(KEYWORD_LIST)) do KEYWORDS[w] = true end
+
+local function isNameStart(c) return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_" end
+local function isNameChar(c) return isNameStart(c) or (c >= "0" and c <= "9") end
 
 -- `code` as runs of { colour, text }.
 local function luaRuns(code)
@@ -207,10 +212,25 @@ local function luaRuns(code)
         local last = runs[#runs]
         if last and last[1] == colour then last[2] = last[2] .. s else runs[#runs + 1] = { colour, s } end
     end
+    -- a long bracket's opening at j, [[ or [=[ ...: its ='s ("" for [[), or nil
+    local function longOpenAt(j)
+        if code:sub(j, j) ~= "[" then return nil end
+        local k = j + 1
+        while code:sub(k, k) == "=" do k = k + 1 end
+        if code:sub(k, k) ~= "[" then return nil end
+        return code:sub(j + 1, k - 1)
+    end
+    -- from j on, while test holds for the characters: where that stops
+    local function runEnd(j, test)
+        while j <= n and test(code:sub(j, j)) do j = j + 1 end
+        return j
+    end
+    -- what ends a run of plain text: a name, a string, a comment or a long bracket's start
+    local function isPlain(ch) return not (isNameChar(ch) or ch == '"' or ch == "'" or ch == "-" or ch == "[") end
     while i <= n do
         local c = code:sub(i, i)
-        local long = code:match("^%-%-%[(=*)%[", i)
-        local longStr = code:match("^%[(=*)%[", i)
+        local long = code:sub(i, i + 1) == "--" and longOpenAt(i + 2) or nil
+        local longStr = longOpenAt(i)
         if long or longStr then          -- a long comment or string, to its ]]
             local eq = long or longStr
             local close = "]" .. eq .. "]"
@@ -233,12 +253,13 @@ local function luaRuns(code)
             j = math.min(j, n)
             add("red", code:sub(i, j))
             i = j + 1
-        elseif c:match("[%a_]") then
-            local word = code:match("^[%w_]+", i)
+        elseif isNameStart(c) then
+            local word = code:sub(i, runEnd(i, isNameChar) - 1)
             add(KEYWORDS[word] and "yellow" or "white", word)
             i = i + #word
         else
-            local s = code:match("^[^%w_\"'%-%[]+", i) or c
+            local e = runEnd(i, isPlain)
+            local s = e > i and code:sub(i, e - 1) or c       -- (a lone - or [ is plain too)
             add("white", s)
             i = i + #s
         end
@@ -456,7 +477,12 @@ local function ccRequire(name)
         error("require: only CraftOS's modules here: " .. table.concat(names, ", "), 2)
     end
     if loadedMods[name] == nil then
-        local path = "/rom/modules/main/" .. name:gsub("%.", "/") .. ".lua"
+        local file = {}                                  -- cc.image.nft -> cc/image/nft
+        for j = 1, #name do
+            local ch = name:sub(j, j)
+            file[j] = ch == "." and "/" or ch
+        end
+        local path = "/rom/modules/main/" .. table.concat(file) .. ".lua"
         local chunk, err = loadfile(path, "t", modWorld)
         if not chunk then error("require: " .. tostring(err), 2) end
         local m = chunk(name, path)
@@ -530,7 +556,7 @@ local function runTool(name, input)
         log("lua:\n" .. code)
         if CONFIRM then
             local a = ask("Run it? [y/N] ")
-            if not a:lower():find("^y") then
+            if a:lower():sub(1, 1) ~= "y" then
                 say("orange", "--- not run")
                 return "The user declined to run this code.", true
             end
@@ -541,7 +567,12 @@ local function runTool(name, input)
         local ok, out, isErr = pcall(runLua, code)
         if COLOUR then term.setTextColour(colours.white) end
         if not ok then error(out, 0) end        -- Terminated
-        if isErr then say("red", (out:match("error: [^\n]*") or out)) end
+        if isErr then
+            -- the line from "error: " on, else all of it
+            local from = out:find("error: ", 1, true)
+            local nl = from and out:find("\n", from, true)
+            say("red", from and out:sub(from, nl and nl - 1 or -1) or out)
+        end
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
     elseif name == "status" then
@@ -585,11 +616,28 @@ local HEADERS = {
     ["anthropic-beta"] = "server-side-fallback-2026-07-01",
 }
 
+-- The events' data in a streamed reply: what follows each "data: ", up to
+-- the end of its line.
+local function eventData(text)
+    local out, pos = {}, 1
+    while true do
+        local from = text:find("data: ", pos, true)
+        if not from then return out end
+        local start = from + #"data: "
+        local nl = text:find("\n", start, true) or #text + 1
+        local line = text:sub(start, nl - 1)
+        local cr = line:find("\r", 1, true)          -- (a CR ends it too)
+        if cr then line = line:sub(1, cr - 1) end
+        out[#out + 1] = line
+        pos = start + #line
+    end
+end
+
 -- The message from a streamed reply's events, or nil and the error the
 -- stream ended with ({ type = ..., message = ... }).
 local function fromEvents(text)
     local msg, parts = nil, {}
-    for data in text:gmatch("data: ([^\r\n]*)") do
+    for _, data in ipairs(eventData(text)) do
         local e = textutils.unserialiseJSON(data)
         local t = e and e.type
         if t == "message_start" then

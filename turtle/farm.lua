@@ -212,15 +212,17 @@ end
 function loadMap()
     if not fs.exists(MAP_FILE) then return false end
     local f = fs.open(MAP_FILE, "r")
-    local w, l = (f.readLine() or ""):match("(-?%d+) (-?%d+)")
-    if not w then f.close(); return false end
-    WIDTH, LENGTH = tonumber(w), tonumber(l)
+    -- the first line: "width length"
+    local size = T.words(f.readLine() or "")
+    if not (T.isInteger(size[1]) and T.isInteger(size[2])) then f.close(); return false end
+    WIDTH, LENGTH = tonumber(size[1]), tonumber(size[2])
     tiles, crops = {}, {}
+    -- then a line a tile: "key kind", and its crop if it has one
     for line in f.readLine do
-        local k, t, c = line:match("^(%S+) (%S+) ?(%S*)")
-        if k then
-            tiles[k] = t
-            if c ~= "" and CROPS[c] then crops[k] = c end
+        local w = T.words(line)
+        if w[2] then
+            tiles[w[1]] = w[2]
+            if w[3] and CROPS[w[3]] then crops[w[1]] = w[3] end
         end
     end
     f.close()
@@ -574,7 +576,7 @@ function dumpAtHome()
         T.dumpDownWait(keepPolicy)               -- a full chest: wait for room
         if fuelGoal > 0 then T.refuelFrom(CHEST_SIDE, fuelGoal) end
         for _, seed in ipairs(SEEDS) do
-            restockItem(seed, seedTarget(seed), (seed:gsub("^minecraft:", ""):gsub("_", " ")))
+            restockItem(seed, seedTarget(seed), (T.dropPrefix(seed, "minecraft:"):gsub("_", " ")))
         end
         restockItem(DIRT, dirtNeeded(), "Dirt")
         restockBuckets()
@@ -1494,7 +1496,7 @@ function farmPass(harvest, lanes, grow)
     end
     for _, seed in ipairs(T.sortedKeys(bare)) do
         print(string.format("Out of %s: %d tiles left bare. Put some in the chest.",
-            (seed:gsub("^minecraft:", ""):gsub("_", " ")), bare[seed]))
+            (T.dropPrefix(seed, "minecraft:"):gsub("_", " ")), bare[seed]))
     end
     return damaged
 end

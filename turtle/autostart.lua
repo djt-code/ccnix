@@ -55,7 +55,12 @@ local function plan()
         if not f then return { { "mine" } } end
         local text = f.readAll() or ""
         f.close()
-        local spacing, state = text:match("^%S+ %S+ %S+ (%d+) %d+ (%a+)")
+        -- mine.job: "width height length spacing homes state"
+        local w = T.words(text)
+        local spacing, state
+        if #w >= 6 and T.isDigits(w[4]) and T.isDigits(w[5]) and T.isLetters(w[6]) then
+            spacing, state = w[4], w[6]
+        end
         if state == "done" or state == "stopped" then
             return nil, "the tunnel " .. (state == "done" and "is finished" or "stopped itself")
                 .. ": `mine --resume`, or `mine --new` for another"

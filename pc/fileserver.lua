@@ -26,6 +26,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside pc/
 local jbod = require("jbod")
+local scan = require("scan")
 
 local MOUNT = "jbod"
 local args = { ... }
@@ -35,8 +36,10 @@ local args = { ... }
 local SIDES = { top = true, bottom = true, left = true, right = true, front = true, back = true }
 local function ours(label)
     if label == nil or label == "" or label == "jbod" then return true end
-    local where = label:match(" (%S+)$")
-    return where ~= nil and (where:match("^drive_%d+$") ~= nil or SIDES[where] == true)
+    local _, where = scan.cutLast(label, " ")         -- the last word: the drive
+    if where == nil then return false end
+    local n = scan.startsWith(where, "drive_") and where:sub(#"drive_" + 1)
+    return (n and n ~= "" and scan.all(n, scan.isDigit)) or SIDES[where] == true
 end
 local function label(name)
     local host = os.getComputerLabel() or ("computer " .. os.getComputerID())
@@ -86,8 +89,12 @@ elseif cmd == "add" and args[2] then
     if ok then print(args[2] .. (why and (": " .. why) or " is in the pool now."))
     else printError("fileserver: " .. why); _G.POSIX_STATUS = 1; error("", 0) end
 elseif cmd == "startup" then
-    local line = ccnix and 'shell.run("fileserver mount")'
-        or string.format('shell.run("%s mount")', "/" .. shell.getRunningProgram():gsub("%.lua$", ""))
+    local line = 'shell.run("fileserver mount")'
+    if not ccnix then                                   -- this program by its path, less .lua
+        local prog = shell.getRunningProgram()
+        if scan.endsWith(prog, ".lua") then prog = prog:sub(1, -#".lua" - 1) end
+        line = string.format('shell.run("%s mount")', "/" .. prog)
+    end
     local target = fs.isDir("/startup") and "/startup/10-fileserver.lua" or "/startup.lua"
     local text = ""
     if fs.exists(target) then
