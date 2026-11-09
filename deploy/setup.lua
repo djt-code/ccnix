@@ -113,7 +113,7 @@ local APPS = {
             "help/irc-scripts.txt", NET },
     ircd = { "bin/ircd.lua", IRC, "lib/ircd.lua", "lib/ircserv.lua", "lib/mc.lua", NET, INIT },
 }
-local ALWAYS = { "bin/git.lua", "lib/pager.lua", "deploy/", "help/ccnix.txt", "help/setup.txt" }
+local ALWAYS = { "bin/git.lua", "lib/pager.lua", "lib/scan.lua", "deploy/", "help/ccnix.txt", "help/setup.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
 
 local cloneArgs, apps = {}, {}
