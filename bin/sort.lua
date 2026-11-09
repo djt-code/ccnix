@@ -149,7 +149,7 @@ end
 
 local function keyText(l, k)
     local f = fields(l)
-    if k.sf > #f then return "" end
+    if k.sf > #f then return k.mods.n and 0 or "" end      -- (a line too short for the key: empty, 0 for -n)
     local s = at(l, f, k.sf, k.sc, k.bs)
     local e = #l
     if k.ef and k.ef <= #f then e = k.ec == 0 and f[k.ef][2] or math.min(at(l, f, k.ef, k.ec, k.be), f[k.ef][2]) end

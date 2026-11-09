@@ -5,6 +5,22 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## Everything: parsing without patterns (0.36.1)
+
+- **A regression pass.** Every program's parsing moved from Lua patterns
+  to lib/scan (or, for git, setup, boot and the turtle programs, small
+  helpers of their own). The sims pass and each part was compared with
+  the old code on edge cases, but nothing has run in game. Worth a
+  quick pass: a ccsh line with a pipe, quotes, globs (`ls *.lua`,
+  `[a-c]*`), `$(...)` and a `for` loop; `ip addr`, `ip route`, `ping`
+  a name, `host`; `curl` a page from httpd (a Lua page, a query); `git
+  pull` / `ccnix update`; a syslog line in /var/log; `sort -n`, `cut
+  -d: -f1`, `printf "%5.2f
+" 3.14159`, `seq 1 3`, `find . -name
+  "*.lua"`; `telnet` in (keys, mouse, paste); a farm or mine run
+  (tool names, its saved job read back after a reboot); setup's
+  migration from an old /cc-turtles, if one is left anywhere.
+
 ## Editors
 
 - **Ctrl+C in `vi`, the rest** (0.29.1). On a `:` line it drops the line;
