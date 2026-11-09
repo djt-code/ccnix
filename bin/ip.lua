@@ -79,13 +79,23 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("ip", nil)
 local net = require("net")
+local scan = require("scan")
 local args = { ... }
 
 -- options, before the command: -d[etails] (one or two dashes, any cut)
 local details = false
-while type(args[1]) == "string" and args[1]:find("^%-%-?%a") do
+-- an option: "-" or "--", then a name starting with a letter; the name, or nil
+local function optionName(a)
+    if type(a) ~= "string" then return nil end
+    local sc = scan.new(a)
+    if not sc:accept("-") then return nil end
+    sc:accept("-")
+    if not scan.isAlpha(sc:peek()) then return nil end
+    return sc:rest()
+end
+while optionName(args[1]) do
     local o = table.remove(args, 1)
-    local name = o:gsub("^%-%-?", ""):lower()
+    local name = optionName(o):lower()
     if ("details"):sub(1, #name) == name then details = true
     else
         cu.err('no option "' .. o .. '"')
@@ -271,7 +281,7 @@ if args[1] ~= nil then
     local why
     cmd, why = pick(args[1], COMMANDS)
     if not cmd then
-        cu.err((why:gsub('^no "', 'no command "', 1)))
+        cu.err(scan.startsWith(why, 'no "') and ('no command "' .. why:sub(#'no "' + 1)) or why)
         printError("commands: " .. shortForms(COMMANDS))
         printError("ip help says what each does")
         return cu.exit(2)
@@ -343,7 +353,7 @@ elseif cmd == "address" then
         if not (iface and cidr) then badWords(cmd, "add takes an interface and its address") end
         noMore(5)
         if not net.link(iface) then badWords(cmd, "bad VLAN in " .. iface .. " (1-4094)") end
-        if not net.parseCIDR(cidr) or not cidr:find("/") then badWords(cmd, "give the address with its prefix: 10.0.1.5/24") end
+        if not net.parseCIDR(cidr) or not cidr:find("/", 1, true) then badWords(cmd, "give the address with its prefix: 10.0.1.5/24") end
         settings.set("net.if." .. iface, cidr)
         save()
         if S then

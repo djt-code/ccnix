@@ -44,6 +44,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("curl", "curl [-fiILOsSv] [-X method] [-d data] [-H header] [-A agent] [-u user:pass] [-o file] [-m secs] url")
 local httpc = require("httpc")
+local scan = require("scan")
 
 local LONG = { request = "X", data = "d", header = "H", ["user-agent"] = "A", user = "u", location = "L",
                include = "i", head = "I", output = "o", ["remote-name"] = "O", fail = "f", ["max-time"] = "m",
@@ -62,8 +63,8 @@ do
             for k = i + 1, #args do urls[#urls + 1] = args[k] end
             break
         elseif a:sub(1, 2) == "--" then
-            local name, value = a:sub(3):match("^([^=]+)=(.*)$")
-            name = name or a:sub(3)
+            local name, value = scan.cut(a:sub(3), "=")     -- (--name or --name=value)
+            if name == "" then name, value = a:sub(3), nil end
             local c = LONG[name]
             if not c then cu.usageError("option --" .. name .. ": is unknown") end
             if TAKES[c] and not value then
@@ -120,19 +121,31 @@ if opts.d then
         if d:sub(1, 1) == "@" then
             local h = cu.open(d:sub(2) == "" and "-" or d:sub(2))
             if not h then return fail(26, "can't read " .. d:sub(2)) end
-            d = cu.readAll(h):gsub("[\r\n]", "")
+            local kept, text = {}, cu.readAll(h)            -- (the file without its CR and LF characters)
+            for k = 1, #text do
+                local c = text:sub(k, k)
+                if c ~= "\r" and c ~= "\n" then kept[#kept + 1] = c end
+            end
+            d = table.concat(kept)
             cu.close(h)
         end
         parts[#parts + 1] = d
     end
     body = table.concat(parts, "&")
     local typed = false
-    for _, line in ipairs(headers) do if line:lower():match("^%s*content%-type%s*[:;]") then typed = true end end
+    for _, line in ipairs(headers) do
+        local sc = scan.new(line:lower())               -- (blanks, "content-type", blanks, ":" or ";")
+        sc:skipSpaces()
+        if sc:accept("content-type") then
+            sc:skipSpaces()
+            if sc:peek() == ":" or sc:peek() == ";" then typed = true end
+        end
+    end
     if not typed then headers[#headers + 1] = "Content-Type: application/x-www-form-urlencoded" end
 end
 local method = last("X") or (opts.I and "HEAD") or (body and "POST") or "GET"
 local user = last("u")
-if user and not user:find(":") then
+if user and not user:find(":", 1, true) then
     io.write("Enter host password for user '" .. user .. "': ")
     user = user .. ":" .. (read("*") or "")
 end
@@ -145,7 +158,10 @@ local screen = cu.isTerminal()
 local outName = last("o")
 if opts.O and not outName then
     local u = httpc.parseURL(url)
-    outName = u and u.path:match("^[^?]*"):match("([^/]*)$")
+    if u then
+        local folder, name = scan.cutLast((scan.cut(u.path, "?")), "/")    -- (the path's last part, before any ?query)
+        outName = name or folder
+    end
     if not outName or outName == "" then return fail(23, "remote file name has no length") end
 end
 local out

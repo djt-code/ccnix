@@ -76,15 +76,55 @@ local function page(lines)
     else textutils.pagedPrint(table.concat(lines, "\n")) end
 end
 
-local function encodeSegment(s)
-    return (s:gsub("[^%w%-%._~]", function(c)
-        return string.format("%%%02X", c:byte())
-    end))
+-- Text, a character at a time (this file stands alone, as the bootstrap
+-- copy, so these are its own rather than lib/scan's).
+local function inRange(c, lo, hi) return #c == 1 and c:byte() >= lo:byte() and c:byte() <= hi:byte() end
+local function isDigit(c) return inRange(c, "0", "9") end
+local function isAlnum(c) return isDigit(c) or inRange(c, "a", "z") or inRange(c, "A", "Z") end
+local function startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
+local function endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
+
+-- the text before the first sep (plain) and after it; s and nil if none
+local function cut(s, sep)
+    local at = s:find(sep, 1, true)
+    if not at then return s, nil end
+    return s:sub(1, at - 1), s:sub(at + #sep)
 end
 
-local function encodePath(path)
+-- the run of digits in s from i on ("" if none)
+local function digitsAt(s, i)
+    local j = i
+    while isDigit(s:sub(j, j)) do j = j + 1 end
+    return s:sub(i, j - 1)
+end
+
+-- s without the "/"s at its start (and, if both, its end)
+local function stripSlashes(s, both)
+    while startsWith(s, "/") do s = s:sub(2) end
+    while both and endsWith(s, "/") do s = s:sub(1, -2) end
+    return s
+end
+
+-- a path segment as it goes in a URL: letters, digits and -._~ as they
+-- are, anything else %XX
+local function encodeSegment(s)
     local out = {}
-    for seg in path:gmatch("[^/]+") do out[#out + 1] = encodeSegment(seg) end
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        if isAlnum(c) or c == "-" or c == "." or c == "_" or c == "~" then out[i] = c
+        else out[i] = string.format("%%%02X", c:byte()) end
+    end
+    return table.concat(out)
+end
+
+-- each segment of path (between "/"s, the empty ones left out) encoded
+local function encodePath(path)
+    local out, rest = {}, path
+    while rest do
+        local seg
+        seg, rest = cut(rest, "/")
+        if seg ~= "" then out[#out + 1] = encodeSegment(seg) end
+    end
     return table.concat(out, "/")
 end
 
@@ -93,16 +133,30 @@ local tojson = textutils.serialiseJSON or textutils.serializeJSON
 
 -- Seconds since 1970 for an ISO 8601 time ("2026-10-29T21:04:05Z",
 -- "...+02:00"), or nil
+-- time: digits "-" digits "-" digits "T" digits ":" digits ":" digits
+-- ["." digits] [zone]; zone: ("+" | "-") 2 digits [":"] 2 digits (else
+-- taken as UTC)
 local function isoTime(s)
-    local y, mo, d, h, mi, se, rest = tostring(s):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%.?%d*(.*)$")
-    if not y then return nil end
-    y, mo, d = tonumber(y), tonumber(mo), tonumber(d)
+    s = tostring(s)
+    local n, at = {}, 1
+    for k, sep in ipairs({ "-", "-", "T", ":", ":", "" }) do
+        local digits = digitsAt(s, at)
+        if digits == "" or s:sub(at + #digits, at + #digits + #sep - 1) ~= sep then return nil end
+        n[k] = tonumber(digits)
+        at = at + #digits + #sep
+    end
+    if s:sub(at, at) == "." then at = at + 1 end
+    local rest = s:sub(at + #digitsAt(s, at))            -- (past the fraction of a second)
+    local y, mo, d = n[1], n[2], n[3]
     if mo <= 2 then y, mo = y - 1, mo + 12 end            -- (days from 1970, the civil calendar)
     local days = 365 * y + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400)
         + math.floor((153 * (mo - 3) + 2) / 5) + d - 719469
-    local t = days * 86400 + tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(se)
-    local sign, oh, om = rest:match("^([+-])(%d%d):?(%d%d)$")
-    if sign then t = t - (sign == "+" and 1 or -1) * (tonumber(oh) * 3600 + tonumber(om) * 60) end
+    local t = days * 86400 + n[4] * 3600 + n[5] * 60 + n[6]
+    local sign, hhmm = rest:sub(1, 1), rest:sub(2)
+    if #hhmm == 5 and hhmm:sub(3, 3) == ":" then hhmm = hhmm:sub(1, 2) .. hhmm:sub(4) end
+    if (sign == "+" or sign == "-") and #hhmm == 4 and #digitsAt(hhmm, 1) == 4 then
+        t = t - (sign == "+" and 1 or -1) * (tonumber(hhmm:sub(1, 2)) * 3600 + tonumber(hhmm:sub(3, 4)) * 60)
+    end
     return t
 end
 
@@ -191,10 +245,30 @@ end
 --------------------------------------------------------------------------
 -- Remote adapters: Forgejo/Gitea (default) and GitHub
 --------------------------------------------------------------------------
+-- repo URL: ("http" | "https") "://" host "/" owner "/" repo, then
+-- anything after a "/", "?" or "#": scheme, host, owner, repo; nil if not one
+local function parseRepoURL(url)
+    local scheme = (startsWith(url, "https://") and "https") or (startsWith(url, "http://") and "http")
+    if not scheme then return nil end
+    local host, rest = cut(url:sub(#scheme + #"://" + 1), "/")
+    if host == "" or not rest then return nil end
+    local owner
+    owner, rest = cut(rest, "/")
+    if owner == "" or not rest then return nil end
+    local stop = #rest + 1                                -- (the repo ends at a / ? or #)
+    for _, mark in ipairs({ "/", "?", "#" }) do
+        local found = rest:find(mark, 1, true)
+        if found and found < stop then stop = found end
+    end
+    local repo = rest:sub(1, stop - 1)
+    if repo == "" then return nil end
+    return scheme, host, owner, repo
+end
+
 local function makeRemote(url, token)
-    local scheme, host, owner, repo = url:match("^(https?)://([^/]+)/([^/]+)/([^/?#]+)")
+    local scheme, host, owner, repo = parseRepoURL(url)
     if not repo then die("Can't parse repo URL: " .. url) end
-    repo = repo:gsub("%.git$", "")
+    if endsWith(repo, ".git") then repo = repo:sub(1, -5) end
     local R = { url = scheme .. "://" .. host .. "/" .. owner .. "/" .. repo,
                 host = host, owner = owner, repo = repo, headers = {} }
 
@@ -405,11 +479,11 @@ local function parseArgs(list)
         elseif a == "--token" then opts.token = list[i + 1]; i = i + 1
         elseif a == "--skip" then
             opts.skip = opts.skip or {}
-            opts.skip[#opts.skip + 1] = (list[i + 1] or ""):gsub("^/+", ""):gsub("/+$", "")
+            opts.skip[#opts.skip + 1] = stripSlashes(list[i + 1] or "", true)
             i = i + 1
         elseif a == "--only" then
             opts.only = opts.only or {}
-            opts.only[#opts.only + 1] = ((list[i + 1] or ""):gsub("^/+", ""))
+            opts.only[#opts.only + 1] = stripSlashes(list[i + 1] or "")
             i = i + 1
         elseif a == "--all" then opts.all = true
         elseif a == "--lower" then opts.lower = list[i + 1]; i = i + 1
@@ -519,7 +593,7 @@ local function cmdLog(pos, opts)
     local lines = {}
     for _, c in ipairs(commits) do
         local marker = (c.sha == state.commit) and "*" or " "
-        local subject = c.message:match("^[^\n]*")
+        local subject = cut(c.message, "\n")              -- (the first line)
         lines[#lines + 1] = string.format("%s%s %s", marker, c.sha:sub(1, 7), subject)
         lines[#lines + 1] = string.format("   %s  %s", c.author, c.date:sub(1, 10))
     end

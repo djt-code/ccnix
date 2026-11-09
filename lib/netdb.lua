@@ -72,6 +72,7 @@
 -- tests and tools.
 
 local net = require("net")
+local scan = require("scan")
 local D = {}
 
 local TIMEOUT, ROUNDS = 2, 2    -- seconds a server has to answer; times round them all
@@ -100,7 +101,12 @@ function D.hstrerror(code) return H_TEXT[code] or "Resolver internal error" end
 local PROTO = { stream = "tcp", dgram = "udp", raw = "icmp" }
 
 local function has(flags, f) return math.floor((flags or 0) / f) % 2 == 1 end
-local function lower(name) return (tostring(name):lower():gsub("%.$", "")) end
+-- name without one "." at its end (a fully qualified name's root)
+local function dropDot(name)
+    if scan.endsWith(name, ".") then return name:sub(1, -2) end
+    return name
+end
+local function lower(name) return dropDot(tostring(name):lower()) end
 
 --------------------------------------------------------------------------
 -- Services: a few of /etc/services
@@ -113,7 +119,7 @@ local SERVICES = {          -- name, port, protocols, aliases
 }
 
 local function servent(s, proto)
-    for p in s[3]:gmatch("%S+") do
+    for _, p in ipairs(scan.words(s[3])) do
         if proto == nil or p == proto then return { name = s[1], aliases = s[4] or {}, port = s[2], proto = p } end
     end
 end
@@ -149,10 +155,10 @@ local function u16(n) return string.char(math.floor(n / 256) % 256, n % 256) end
 
 -- A name as labels, or nil if it can't be one.
 local function encodeName(name)
-    name = tostring(name):gsub("%.$", "")
+    name = dropDot(tostring(name))
     if #name == 0 or #name > 253 then return nil end
     local out = {}
-    for label in (name .. "."):gmatch("([^.]*)%.") do
+    for _, label in ipairs(scan.split(name, ".", true)) do
         if #label == 0 or #label > 63 then return nil end
         out[#out + 1] = string.char(#label) .. label
     end
@@ -375,14 +381,14 @@ local function reverse(ip)
     for n, a in pairs(hosts) do if net.parseIP(a) == net.parseIP(ip) then names[#names + 1] = n end end
     table.sort(names)
     if names[1] then return names[1] end
-    local a, b, c, d = ip:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-    local qname = d .. "." .. c .. "." .. b .. "." .. a .. ".in-addr.arpa"
+    local o = scan.split(ip, ".", true)      -- (ip is as net.ipString writes it)
+    local qname = o[4] .. "." .. o[3] .. "." .. o[2] .. "." .. o[1] .. ".in-addr.arpa"
     local m, why, kind = query(qname, "PTR")
     if not m then return nil, why, H_OF[kind] end
     if m.rcode == 3 then return nil, "NXDOMAIN", D.HOST_NOT_FOUND end
     local found = follow(m, qname, "PTR")
     if not found[1] then return nil, "no PTR record", D.NO_DATA end
-    return (found[1]:gsub("%.$", ""))
+    return dropDot(found[1])
 end
 
 --------------------------------------------------------------------------
@@ -462,7 +468,8 @@ function D.getnameinfo(addr, port, flags)
     if not has(flags, D.NI_NUMERICHOST) then
         local name, why, code = reverse(host)
         if name then
-            host = has(flags, D.NI_NOFQDN) and name:match("^[^.]+") or name
+            local first = scan.cut(name, ".")         -- (the name's first label)
+            host = has(flags, D.NI_NOFQDN) and first ~= "" and first or name
         elseif has(flags, D.NI_NAMEREQD) then
             return gaiFail(code == D.TRY_AGAIN and D.EAI_AGAIN or D.EAI_NONAME, code == D.TRY_AGAIN and why or nil)
         end

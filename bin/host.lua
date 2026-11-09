@@ -21,14 +21,15 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("host", "host [-v] [-t type] name [server]")
 local net = require("net")
 local netdb = require("netdb")
+local scan = require("scan")
 local opts, operands = cu.getopt({ ... }, "vt:")
 if #operands < 1 or #operands > 2 then cu.usageError() end
 local name, server = operands[1], operands[2]
 if server and not net.parseIP(server) then cu.usageError("bad server address " .. server) end
 local qtype = opts.t and opts.t:upper()
 if net.parseIP(name) then
-    local a, b, c, d = net.ipString(net.parseIP(name)):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-    name = d .. "." .. c .. "." .. b .. "." .. a .. ".in-addr.arpa"
+    local o = scan.split(net.ipString(net.parseIP(name)), ".", true)     -- (its four numbers)
+    name = o[4] .. "." .. o[3] .. "." .. o[2] .. "." .. o[1] .. ".in-addr.arpa"
     qtype = qtype or "PTR"
 end
 qtype = qtype or "A"
