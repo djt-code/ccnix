@@ -225,6 +225,18 @@ section.
 
 ## The mod
 
+- **The Network Tester and the gateway's new dialog** (ccnix-mod 0.19.0).
+  Craft the tester in Survival (iron, glass pane, iron / iron, redstone,
+  iron / cable in the middle): it shows in the recipe book's equipment
+  tab. Right-click a gateway empty-handed: the action bar says it takes a
+  tester; with the tester (main hand, or off hand with the main empty) the
+  dialog opens: a grey container panel, a green lamp and Working (amber
+  Standing by on a spare block). With `ping` running through it the frame
+  counts climb each second with a rate beside them; the pointer over MACs
+  heard lists them all. Type in the VLANs box and wait: the refresh leaves
+  the text alone; Enter saves ("Saved" in green). Walk away (8 blocks) or
+  break the block: it closes. An old client is refused by the new server.
+
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
   route reaches every CC computer. On the dev server, after redeploying:
