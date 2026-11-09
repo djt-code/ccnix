@@ -1,0 +1,43 @@
+screen: windows that stay when you go: detach, and pick them up again later
+
+  screen [-S name] [command...]
+      a new session: its first window runs command (else a shell)
+  screen -ls
+      the sessions: their windows, attached or detached
+  screen -r [name]
+      back to a detached session (the only one, if no name)
+  screen -d -r [name]
+      the same, detaching it from wherever it's shown first
+  screen -x [name]
+      show a session that's shown elsewhere as well
+
+As GNU screen and tmux do, for ccnix: a session is a few windows, each a shell (ccsh if ccsh.login is on) that init runs on a terminal of its own, so it keeps running when you detach, or when the telnet connection you started it from drops.  Telnet in again (or go to the console) and `screen -r` puts you back where you were, programs still running, screens as they are.  It needs init (`help init`).
+
+The command key is Ctrl+A, then:
+  c       a new window             n, space
+      the next window
+  p       the window before        0-9
+      window 0-9
+  "  w    the windows, listed      A
+      name this window
+  k       kill this window (y to be sure)
+  d       detach (screen -r brings
+      it back)
+  [       the scrollback: PgUp/PgDn, Up/Down, the wheel; q or Esc leaves
+  a       a Ctrl+A for the window (readline's start of the line)
+  t       a Ctrl+T for the window (to stop what runs there)
+  l       draw it again
+      ?          these keys
+Ctrl+T itself detaches, and so does the terminal hanging up. Shift+PgUp is the scrollback too.  The status bar at the bottom shows the windows (* the one shown, - the one before), the session's name and the time.  A window whose command ends closes; the session ends with its last window.  Ctrl+C and Ctrl+Z go to the window.
+
+Settings: screen.prefix (the command key's letter: a; b for tmux's), screen.status (false: no status bar).
+
+  telnet lab
+      (on the computer, log in)
+  screen -S work
+      a session called work
+  irc lab
+      (Ctrl+A c: another window, a shell)
+  ...Ctrl+A d, or the connection drops...
+  telnet lab; screen -r work
+      back in, irc still connected

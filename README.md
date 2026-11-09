@@ -44,6 +44,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | Network (`bin/ip.lua`, `bin/ping.lua`, `bin/traceroute.lua`, `bin/nc.lua`, `bin/host.lua`, `bin/tcpdump.lua`, `lib/net.lua`, `lib/netdb.lua`) | A small network stack over modems, in layers: frames on a modem channel (VLANs: one channel each), ARP, IP with routing and ICMP, UDP and TCP, and names (the host database, then DNS: getaddrinfo and friends). `ip` sets it up, `ping` and `traceroute` diagnose it, `tcpdump` shows the frames on the wire, `nc` makes TCP connections (and `nc -u` sends datagrams), `host` asks DNS. See [Network](#network). |
 | Telnet (`bin/telnet.lua`, `bin/telnetd.lua`, `lib/telnet.lua`) | Another computer's shell, or its console (the miner's screen), over the network, in real Telnet with ANSI, so any telnet client works too. See [Telnet](#telnet). |
 | IRC (`bin/irc.lua`, `bin/ircd.lua`, `lib/irc.lua`, `lib/ircclient.lua`, `lib/ircui.lua`, `lib/ircd.lua`, `lib/ircserv.lua`, `lib/mc.lua`) | `irc`, a full-screen IRC client (BitchX's looks, weechat's buffers, irssi's Lua scripts), and `ircd`, a small IRC server run as a service, with NickServ, ChanServ and MC: `#minecraft` is the game's chat, through an Advanced Peripherals Chat Box. Real IRC clients and servers work with them, through the mod's gateway. See [IRC](#irc). |
+| `bin/screen.lua`, `lib/screen.lua` | Sessions of windows that keep running when you detach or your telnet connection drops; `screen -r` picks one up again, from the console or another connection. GNU screen's keys (Ctrl+A). See [screen](#screen). |
 | Processes (`bin/init.lua`, `bin/ps.lua`, `bin/kill.lua`, `bin/service.lua`, `lib/proc.lua`, `lib/procrun.lua`) | `init` runs every program as a process (an ID, its own terminal and environment) and keeps services running in the background, on any computer or turtle. `ps` lists the processes, `kill` signals them, `service` starts, stops and sets up services. See [Processes and services](#processes-and-services). |
 | The system log (`bin/syslogd.lua`, `bin/logger.lua`, `lib/log.lua`, `lib/syslogd.lua`) | `syslogd` files what's logged in `/var/log` by `/etc/syslog.conf`'s rules, shows the worst on the console and forwards to a syslog server (RFC 5424 over UDP). Programs log through `lib/log` (C's `syslog(3)`), scripts with `logger`, and init logs what services print. See [The system log](#the-system-log). |
 | `pc/router.lua` | Runs on a computer with an interface on each of several networks (modems, or VLANs on one): forwards between them, and shows a live status screen. |
@@ -174,6 +175,7 @@ just those, with what they need and their help:
 | `telnetd` | the [telnet](#telnet) server as a service, with `init` and the network (then `sysctl telnetd.password=...`) |
 | `irc` | the [IRC](#irc) client, its scripts, and the network |
 | `ircd` | the [IRC](#irc) server as a service, with `init` and the network: NickServ, ChanServ, MC and `#minecraft` |
+| `screen` | [screen](#screen): windows that stay when you detach or the telnet connection drops, with `init` |
 
 `git`, `deploy/`, the pager and the help index always come. Options: `--autostart <app>` (a turtle
 runs it at every boot, see [Autostart](#autostart); on a computer,
@@ -1455,6 +1457,9 @@ arrows and the rest, Ctrl+letters, pastes and the mouse. The client
 (`telnet`) is that terminal on a CC screen, with greys for colours on a
 basic computer.
 
+To keep what you were doing when the connection drops, run it inside
+[screen](#screen) on the far side: `screen -r` picks it up again next time.
+
 Settings: `telnetd.password` (typed at `Password:`; it crosses the
 network as typed, as with any telnet); `telnetd.open` (`true`: no
 password); `telnetd.attach` (`console`, or unset for a shell each);
@@ -1569,6 +1574,39 @@ It's configured with `sysctl`, then `service restart ircd`:
 empty for none), `ircd.data` (where the services keep their nicks and
 channels, `/etc/ircd.db`), `ircd.facility` (`daemon`). What it does goes
 to [the system log](#the-system-log) under `ircd`.
+
+## screen
+
+```
+screen [-S name] [command...]   a new session (its first window: command, else a shell)
+screen -ls                      the sessions: windows, attached or detached
+screen -r [name]                back to a detached one     screen -d -r: take it from where it's shown
+screen -x [name]                show it here as well as where it's shown
+```
+
+`screen` is GNU screen's idea (and tmux's) for ccnix. A session is a few
+windows, each a shell (ccsh, if `ccsh.login` is on) that
+[init](#processes-and-services) runs as a process in a session of its own,
+on a terminal and tty of its own (`scr/work.0`; `ps` shows them). The
+windows don't belong to the terminal you started them from. So when you
+detach (Ctrl+A d), or the telnet connection you were on drops (a hangup
+detaches it), they carry on: a long `ping`, an `irc` connection, a
+miner's log on `tail -f`. Telnet in again, or go to the console, and
+`screen -r` puts you back with the screens as they are. Several displays
+can show one session at once (`-x`), and `-d -r` takes it from a display
+that's still attached (a connection that's gone but not yet noticed).
+
+The command key is Ctrl+A, then: `c` a new window, `n` (or space) and `p`
+the next and previous, `0`-`9` a window by number, `"` the list, `A` name
+the window, `k` kill it (`y` to be sure), `d` detach, `[` (or Shift+PgUp)
+the scrollback (the last 500 rows of each window), `a` a Ctrl+A for the
+window (readline's start of the line), `t` a Ctrl+T for it, `l` redraw,
+`?` the keys. Ctrl+T itself detaches. Ctrl+C and Ctrl+Z go to the
+window. The status bar shows the windows (`*` the one shown, `-` the one
+before), titled by what runs in each, the session's name and the time.
+A window closes when its command ends, and the session with its last
+window. `sysctl screen.prefix=b` makes it Ctrl+B, as tmux has it;
+`screen.status=false` drops the status bar.
 
 ## Processes and services
 

@@ -29,6 +29,8 @@
 --   ircd                               the IRC server as a service, with
 --                                      init and the network: NickServ,
 --                                      ChanServ, #minecraft (`help ircd`)
+--   screen                             windows that stay when you detach
+--                                      (or telnet drops): screen -r; with init
 -- git and deploy/ always come; so do the help files of what you pick.
 --
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
@@ -112,6 +114,7 @@ local APPS = {
     irc = { "bin/irc.lua", IRC, "lib/ircclient.lua", "lib/ircui.lua", "lib/readline.lua", "lib/ircscripts/",
             "help/irc-scripts.txt", NET },
     ircd = { "bin/ircd.lua", IRC, "lib/ircd.lua", "lib/ircserv.lua", "lib/mc.lua", NET, INIT },
+    screen = { "bin/screen.lua", "lib/screen.lua", "lib/readline.lua", INIT },
 }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", "lib/scan.lua", "deploy/", "help/ccnix.txt", "help/setup.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
@@ -166,7 +169,7 @@ for _, a in ipairs(apps) do
     if a == "ccsh" then login = true end
     if a == "net" or a == "telnet" or a == "telnetd" or a == "httpd" or a == "irc" or a == "ircd" then netBoot = true end
     if a == "router" then netBoot, router = true, true end
-    if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" then initBoot = true end
+    if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" or a == "screen" then initBoot = true end
 end
 
 -- The paths the named apps need, with their help files, as --only options

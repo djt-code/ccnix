@@ -223,6 +223,25 @@ section.
 - **Disk labels** (0.18.1): each pooled disk labelled `<computer label>
   <drive>`; labels it didn't set left alone.
 
+## screen
+
+- **screen over telnet** (0.36.0). On A with init: `telnet A` from B,
+  `screen -S work`, then `ping 10.1.0.1` (it runs on). Ctrl+A c, `irc
+  ...`; Ctrl+A 0 and 1 go back and forth; the status bar shows
+  `0-ping  1*irc` style titles. Ctrl+A d: "[detached from work]". `screen
+  -ls`: work, 2 windows, detached. `screen -r`: both windows as they were.
+- **A dropped connection** (0.36.0). Inside screen on a telnet session,
+  close B's telnet (Ctrl+] q, or break the cable). Telnet in again:
+  `screen -ls` shows work detached (or attached until the hangup lands:
+  `screen -d -r work` takes it), and `screen -r` brings it back with the
+  programs still running.
+- **The rest of screen** (0.36.0). Ctrl+A A names a window; Ctrl+A k then
+  y kills one; Ctrl+A [ and Shift+PgUp scroll back through a window's
+  past; Ctrl+A a gives ccsh its Ctrl+A; Ctrl+C stops a ping in a window
+  (not screen); `screen -x` from the console while B has it: both
+  show it, both type into it; a different-sized screen resizes the
+  windows. `sysctl screen.prefix=b`, then Ctrl+B is the key.
+
 ## IRC
 
 - **ircd as a service** (0.35.0). On A: `setup ircd`, reboot: `service`

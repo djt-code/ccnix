@@ -55,6 +55,7 @@ Anywhere (bin/):
   pwd: print the working directory (POSIX pwd)
   rm: remove files (POSIX rm)
   rmdir: remove empty directories (POSIX rmdir)
+  screen: windows that stay when you go: detach, and pick them up again later
   seq: print a sequence of numbers (as GNU's seq; not in POSIX)
   service: background services, kept running by init
   sleep: wait a while (POSIX sleep)
