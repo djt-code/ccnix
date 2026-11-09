@@ -157,3 +157,21 @@ sc:skipSpaces()
 local q = sc:readQuoted("'")
 check("the header's example", key == "width" and num == 12 and q == "it's" and sc:atEnd(),
     show(key) .. " " .. show(num) .. " " .. show(q))
+
+-- the whole-string helpers
+local function list(t) return "{" .. table.concat(t, "|") .. "}" end
+same("trim", scan.trim("  a b \t\r\n"), "a b")
+same("trim: all blanks", scan.trim("   "), "")
+same("split: trimmed, empties dropped", list(scan.split(" #a, #b,, ", ",")), "{#a|#b}")
+same("split, keep: as they are", list(scan.split("a,,b ", ",", true)), "{a||b }")
+same("split: a separator longer than one character, not a pattern", list(scan.split("a.-b.-c", ".-")), "{a|b|c}")
+local before, after = scan.cut("host:6667:x", ":")
+same("cut: at the first", before .. "|" .. after, "host|6667:x")
+local b2, a2 = scan.cutLast("host:6667:x", ":")
+same("cutLast: at the last", b2 .. "|" .. a2, "host:6667|x")
+local b3, a3 = scan.cut("nosep", ":")
+check("cut: no separator: s and nil", b3 == "nosep" and a3 == nil)
+check("startsWith, endsWith", scan.startsWith("network.lab", "network.") and not scan.startsWith("net", "network")
+    and scan.endsWith("x.lua", ".lua") and scan.endsWith("x", "") and not scan.endsWith("lua", ".lua"))
+same("lines: LF, CR LF, a last line without one", list(scan.lines("a\r\nb\n\nc")), "{a|b||c}")
+same("lines: a newline at the end starts no line", list(scan.lines("a\nb\n")), "{a|b}")

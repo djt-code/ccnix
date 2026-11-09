@@ -1914,6 +1914,14 @@ saying what grammar it reads, and errors give the column. Plain-text
 finds are still fine; `lib/regex` is for the regexes users type (`grep`,
 vi's `/` and `:s`). The header of `lib/scan.lua` lists the API.
 
+The everyday shapes have named helpers there too, so they need no pattern
+either: `scan.trim`, `scan.split(s, ",")` (a list, trimmed),
+`scan.cut(s, "=")` (before and after the first `=`; `cutLast` the last),
+`scan.startsWith`, `scan.endsWith`, `scan.lines`, `scan.words`. A grammar
+bigger than that gets a scanner function of its own, named for what it
+reads; there's no parser generator, as each little language here is small
+and different, and a grammar DSL would be one more notation to read.
+
 ## Simulators
 
 `sim/` holds offline simulators: each sets a scenario up in a mock world

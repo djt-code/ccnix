@@ -63,10 +63,24 @@
 --   scan.isPunct     printable, not a letter, digit or space: ! " # $ ...
 --   scan.oneOf(chars)    a test: true for any one of the characters in chars
 --
--- And on whole strings:
+-- And on whole strings, for the shapes that come up everywhere (use these
+-- before reaching for a pattern):
 --   scan.all(s, test)    true if test holds for every character of s
 --                        (true for "")
 --   scan.words(s)        the words of s between blanks, as a list
+--   scan.trim(s)         s without the blanks at either end
+--   scan.split(s, sep)   the pieces of s between each sep (a plain string,
+--                        not a pattern), each trimmed, the empty ones
+--                        left out: scan.split("#a, #b,", ",") is
+--                        { "#a", "#b" }.  scan.split(s, sep, true) keeps
+--                        them as they are, empty ones and blanks too.
+--   scan.cut(s, sep)     the text before the first sep and after it:
+--                        scan.cut("host:6667", ":") is "host", "6667";
+--                        s and nil when there's no sep
+--   scan.cutLast(s, sep) the same at the last sep
+--   scan.startsWith(s, prefix), scan.endsWith(s, suffix)
+--   scan.lines(s)        s's lines (after LF or CR LF; a last line
+--                        without one too), as a list
 
 local scan = {}
 
@@ -120,6 +134,59 @@ function scan.words(s)
         out[#out + 1] = sc:readWhile(function(c) return not scan.isSpace(c) end)
         sc:skipSpaces()
     end
+    return out
+end
+
+function scan.trim(s)
+    local from, to = 1, #s
+    while from <= to and scan.isSpace(s:sub(from, from)) do from = from + 1 end
+    while to >= from and scan.isSpace(s:sub(to, to)) do to = to - 1 end
+    return s:sub(from, to)
+end
+
+function scan.split(s, sep, keep)
+    local out, from = {}, 1
+    local function piece(text)
+        if keep then out[#out + 1] = text; return end
+        text = scan.trim(text)
+        if text ~= "" then out[#out + 1] = text end
+    end
+    while true do
+        local at = s:find(sep, from, true)
+        if not at then break end
+        piece(s:sub(from, at - 1))
+        from = at + #sep
+    end
+    piece(s:sub(from))
+    return out
+end
+
+function scan.cut(s, sep)
+    local at = s:find(sep, 1, true)
+    if not at then return s, nil end
+    return s:sub(1, at - 1), s:sub(at + #sep)
+end
+
+function scan.cutLast(s, sep)
+    local at, from = nil, 1
+    while true do
+        local found = s:find(sep, from, true)
+        if not found then break end
+        at, from = found, found + 1
+    end
+    if not at then return s, nil end
+    return s:sub(1, at - 1), s:sub(at + #sep)
+end
+
+function scan.startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
+function scan.endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
+
+function scan.lines(s)
+    local out = {}
+    for _, piece in ipairs(scan.split(s, "\n", true)) do
+        out[#out + 1] = scan.endsWith(piece, "\r") and piece:sub(1, -2) or piece
+    end
+    if out[#out] == "" then out[#out] = nil end     -- (the newline at the end ends a line; it doesn't start one)
     return out
 end
 
