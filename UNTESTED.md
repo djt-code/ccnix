@@ -40,7 +40,14 @@ section.
     ways; vi `:r` of an empty file (adds nothing, as vim); a Lua page
     using `text` and `fileio`; jbod on the fileserver (reads through the
     disk under the pool).
+  - **coreutils, second pass:** a long `sort`, `grep -r`, `find /` and
+    `wc` on a big file don't get "Too long without yielding" (cu.breathe
+    now yields once a second); `od -j 0x10 -N 8` and `od -d`; `printf "%x
+    %o %#08X\n" -1 8 255`; `touch` a file; `df` (its columns);
+    `mkdir`/`rmdir`/`tee` errors without the path in front.
   - **behaviour that changed on purpose:** WHOIS idle reads "5m 3s";
+    `head -n x`, `uniq -f x`, `strings -n x`, `xargs -s 0` say "bad -n x"
+    (and so on);
     curl and git refuse an unknown or misused `--option`; httpd listing
     links percent-encode `!$&'()*+,;=:@`; a syslog line's trailing blanks
     are dropped.
