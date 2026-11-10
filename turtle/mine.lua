@@ -196,6 +196,8 @@ local _ENV = setmetatable({}, { __index = _ENV })
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 T = require("turtlelib")
+scan = require("scan")
+text = require("text")
 
 JOB_FILE = T.dataPath("mine.job")
 PROGRESS_FILE = T.dataPath("mine.seg")
@@ -264,9 +266,9 @@ FLUID = { [LAVA] = true, [WATER] = true }
 ORE_EXTRA = { ["minecraft:ancient_debris"] = true }
 
 function isOre(data)
-    if T.endsWith(data.name, "_ore") or ORE_EXTRA[data.name] then return true end
+    if text.endsWith(data.name, "_ore") or ORE_EXTRA[data.name] then return true end
     for tag in pairs(data.tags or {}) do
-        if tag == "c:ores" or tag == "forge:ores" or T.endsWith(tag, "_ores") then return true end
+        if tag == "c:ores" or tag == "forge:ores" or text.endsWith(tag, "_ores") then return true end
     end
     return false
 end
@@ -274,7 +276,7 @@ end
 -- Blocks never to dig: storage, spawners and ComputerCraft blocks.
 function protected(name)
     return name:find("chest", 1, true) or name:find("barrel", 1, true) or name:find("shulker", 1, true)
-        or name:find("spawner", 1, true) or T.startsWith(name, "computercraft:")
+        or name:find("spawner", 1, true) or text.startsWith(name, "computercraft:")
 end
 
 -- Bulk items go in a home's bulk chest; everything else is a valuable.
@@ -358,10 +360,10 @@ TORCH_BLOCKS = { ["minecraft:torch"] = true, ["minecraft:wall_torch"] = true,
 CRAFTING_TABLE, STICK = "minecraft:crafting_table", "minecraft:stick"
 COAL = { ["minecraft:coal"] = true, ["minecraft:charcoal"] = true }   -- what torches are lit with
 function isLog(name)
-    return T.endsWith(name, "_log") or T.endsWith(name, "_wood") or T.endsWith(name, "_stem")
-        or T.endsWith(name, "_hyphae")
+    return text.endsWith(name, "_log") or text.endsWith(name, "_wood") or text.endsWith(name, "_stem")
+        or text.endsWith(name, "_hyphae")
 end
-function isPlanks(name) return T.endsWith(name, "_planks") end
+function isPlanks(name) return text.endsWith(name, "_planks") end
 function isWood(name) return isLog(name) or isPlanks(name) or name == STICK end
 -- The Advanced Peripherals Geo Scanner: kept on board, never unloaded.
 function isScanner(name) return name:find("geo_scanner", 1, true) ~= nil end
@@ -560,11 +562,11 @@ function loadProgress()
     local f = fs.open(PROGRESS_FILE, "r")
     -- "home lane z lanes", as saveProgress writes it (files from before
     -- the lane count have the first three)
-    local w = T.words(f.readAll() or "")
+    local w = text.words(f.readAll() or "")
     f.close()
-    if not (T.isDigits(w[1]) and T.isDigits(w[2]) and T.isInteger(w[3])) then return nil end
+    if not (scan.isUnsigned(w[1]) and scan.isUnsigned(w[2]) and scan.isInteger(w[3])) then return nil end
     return { k = tonumber(w[1]), lane = tonumber(w[2]), z = tonumber(w[3]),
-             lanes = T.isDigits(w[4]) and tonumber(w[4]) or nil }
+             lanes = scan.isUnsigned(w[4]) and tonumber(w[4]) or nil }
 end
 
 function clearProgress()
@@ -575,10 +577,10 @@ function loadJob()
     if not fs.exists(JOB_FILE) then return nil end
     local f = fs.open(JOB_FILE, "r")
     -- "width height length spacing homes state", as saveJob writes it
-    local w = T.words(f.readAll() or "")
+    local w = text.words(f.readAll() or "")
     f.close()
-    if not (T.isInteger(w[1]) and T.isInteger(w[2]) and T.isInteger(w[3]) and T.isDigits(w[4])
-            and T.isDigits(w[5]) and T.isLetters(w[6])) then
+    if not (scan.isInteger(w[1]) and scan.isInteger(w[2]) and scan.isInteger(w[3]) and scan.isUnsigned(w[4])
+            and scan.isUnsigned(w[5]) and scan.isName(w[6])) then
         return nil
     end
     local l = tonumber(w[3])
@@ -2031,7 +2033,7 @@ function relative(blocks)
     if not far then return blocks end
     local me
     for _, e in ipairs(blocks) do
-        if T.startsWith(e.name, "computercraft:turtle") then
+        if text.startsWith(e.name, "computercraft:turtle") then
             if me then return nil, "scan gives world coordinates, and there's more than one turtle in range" end
             me = e
         end

@@ -3,7 +3,7 @@
 -- T.restockFrom with a mixed chest: taking water buckets that sit behind
 -- other stacks, without leaving junk behind.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local T = require("turtlelib")
 

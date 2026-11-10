@@ -4,7 +4,7 @@
 -- `farm clone`.  Reports moves, buckets scooped and poured, and any lane
 -- tile that didn't end up a water source.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 

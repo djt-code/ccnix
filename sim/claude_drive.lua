@@ -6,7 +6,7 @@
 -- checked without a network or a token spent.  The world is the mine's
 -- rock.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local Mine = require("mineworld")
 local P = Mine.P

@@ -25,7 +25,7 @@
 -- `--resume` from there; bedrock; running short of fuel; `mine reset` from inside a vein; and a
 -- tunnel to the left and down.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local Mine = require("mineworld")
 local run = Mine.runner(PROJ)
 local P = Mine.P

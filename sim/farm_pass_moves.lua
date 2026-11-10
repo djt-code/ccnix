@@ -3,7 +3,7 @@
 -- Movement benchmark: learn a 9x8 farm, then count the moves of one
 -- plain farming pass.  ALONGX=1 turns the lanes along x instead of z.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 

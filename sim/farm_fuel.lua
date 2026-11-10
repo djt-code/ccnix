@@ -10,7 +10,7 @@
 -- 5 min apart, where a wait for fuel longer than that starts the pass
 -- over and a short one carries on.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run0 = F.runner(PROJ)
 

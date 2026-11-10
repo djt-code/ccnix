@@ -8,7 +8,7 @@
 -- cases face the turtle other than its saved heading, which it must work
 -- out from the farm, as must a farming run started at home facing wrong.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 local P = F.P

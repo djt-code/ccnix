@@ -16,8 +16,8 @@
 --     serpentine plan generation
 --   * chest-below helpers: dump with a keep policy, count, restock,
 --     merge part stacks
---   * reading item names and saved files without Lua patterns
---     (T.startsWith, T.endsWith, T.words, T.isInteger ...)
+--   * reading item names and saved files with lib/scan and lib/text,
+--     not Lua patterns
 --
 -- Programs configure it by setting fields on T.cfg and T.diggable before
 -- moving.  Everything is relative to where the turtle starts: (0,0,0)
@@ -25,70 +25,10 @@
 
 local T = {}
 
---------------------------------------------------------------------------
--- Reading names and the saved files: a few of lib/scan's helpers, kept
--- here so turtlelib needs nothing beside it (a turtle may have turtle/
--- and no lib/).  Plain comparisons, no Lua patterns.
---------------------------------------------------------------------------
-function T.startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
-function T.endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
-
--- s without prefix, if it starts with it: dropPrefix("minecraft:wheat", "minecraft:") is "wheat"
-function T.dropPrefix(s, prefix)
-    if T.startsWith(s, prefix) then return s:sub(#prefix + 1) end
-    return s
-end
-
--- the blanks Lua's %s knows: space, \t \n \v \f \r (bytes 9 to 13)
-local function isBlank(c)
-    local b = c:byte()
-    return b == 32 or (b ~= nil and b >= 9 and b <= 13)
-end
-
--- s without the blanks at either end
-function T.trim(s)
-    local from, to = 1, #s
-    while from <= to and isBlank(s:sub(from, from)) do from = from + 1 end
-    while to >= from and isBlank(s:sub(to, to)) do to = to - 1 end
-    return s:sub(from, to)
-end
-
--- the words of s between blanks, as a list
-function T.words(s)
-    local out, i = {}, 1
-    while i <= #s do
-        if isBlank(s:sub(i, i)) then
-            i = i + 1
-        else
-            local j = i
-            while j <= #s and not isBlank(s:sub(j, j)) do j = j + 1 end
-            out[#out + 1] = s:sub(i, j - 1)
-            i = j
-        end
-    end
-    return out
-end
-
--- true if every character of s (one at least) passes test
-local function allOf(s, test)
-    if s == nil or s == "" then return false end
-    for i = 1, #s do
-        if not test(s:sub(i, i)) then return false end
-    end
-    return true
-end
-local function isDigit(c) return c >= "0" and c <= "9" end
-local function isLetter(c) return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") end
-
--- digits only: "12"; false for "", nil, "-3" and "1.5"
-function T.isDigits(s) return allOf(s, isDigit) end
--- a whole number: digits, a - before them or not
-function T.isInteger(s)
-    if s ~= nil and s:sub(1, 1) == "-" then s = s:sub(2) end
-    return T.isDigits(s)
-end
--- letters only: "flat"
-function T.isLetters(s) return allOf(s, isLetter) end
+-- Reading names and the saved files: lib/scan and lib/text (ccnix's
+-- boot puts lib/ on the path beside turtle/)
+local scan = require("scan")
+local text = require("text")
 
 --------------------------------------------------------------------------
 -- Configuration (override from the program)
@@ -156,7 +96,7 @@ function T.dataPath(name)
     local path = fs.combine(dir, name)
     local old = fs.combine(fs.getDir(dir), name)
     if dir == "ccnix/turtle" and not fs.exists(old) then old = fs.combine("cc-turtles/turtle", name) end
-    if T.endsWith("/" .. dir, "/turtle") and not fs.exists(path) and fs.exists(old) then fs.move(old, path) end
+    if text.endsWith("/" .. dir, "/turtle") and not fs.exists(path) and fs.exists(old) then fs.move(old, path) end
     return path
 end
 
@@ -214,10 +154,10 @@ function T.loadPos()
     local line = f.readAll() or ""
     f.close()
     -- "x y z dir mode", as savePos writes it: three whole numbers, a digit, a word
-    local w = T.words(line)
+    local w = text.words(line)
     local x, y, z, d, mode = w[1], w[2], w[3], w[4], w[5]
-    if not (T.isInteger(x) and T.isInteger(y) and T.isInteger(z) and T.isDigits(d) and #d == 1
-            and T.isLetters(mode)) then
+    if not (scan.isInteger(x) and scan.isInteger(y) and scan.isInteger(z) and scan.isUnsigned(d) and #d == 1
+            and scan.isName(mode)) then
         return nil
     end
     return { x = tonumber(x), y = tonumber(y), z = tonumber(z), dir = tonumber(d), mode = mode }
@@ -392,7 +332,7 @@ local TOOL_SUFFIXES = { "_pickaxe", "_hoe", "_shovel", "_axe", "_sword" }
 function T.isTool(name)
     if not name then return false end
     for _, suffix in ipairs(TOOL_SUFFIXES) do
-        if T.endsWith(name, suffix) then return true end
+        if text.endsWith(name, suffix) then return true end
     end
     return false
 end
@@ -451,9 +391,9 @@ end
 function T.findTool(suffix)
     for _, side in ipairs({ "left", "right" }) do
         local name = T.equipped(side)
-        if name and T.endsWith(name, suffix) then return name end
+        if name and text.endsWith(name, suffix) then return name end
     end
-    local slot = T.findSlot(function(n) return T.endsWith(n, suffix) end)
+    local slot = T.findSlot(function(n) return text.endsWith(n, suffix) end)
     return slot and turtle.getItemDetail(slot).name or nil
 end
 
@@ -1172,7 +1112,7 @@ function T.inventoryLine(label)
     for s = 1, 16 do
         local it = turtle.getItemDetail(s)
         if it then
-            local name = T.dropPrefix(it.name, "minecraft:")
+            local name = (text.stripPrefix(it.name, "minecraft:") or it.name)
             if not counts[name] then order[#order + 1] = name; counts[name] = 0 end
             counts[name] = counts[name] + it.count
         end

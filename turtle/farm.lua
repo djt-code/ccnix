@@ -95,6 +95,8 @@ local _ENV = setmetatable({}, { __index = _ENV })
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 T = require("turtlelib")
+scan = require("scan")
+text = require("text")
 
 MAP_FILE = T.dataPath("farm.map")
 
@@ -213,13 +215,13 @@ function loadMap()
     if not fs.exists(MAP_FILE) then return false end
     local f = fs.open(MAP_FILE, "r")
     -- the first line: "width length"
-    local size = T.words(f.readLine() or "")
-    if not (T.isInteger(size[1]) and T.isInteger(size[2])) then f.close(); return false end
+    local size = text.words(f.readLine() or "")
+    if not (scan.isInteger(size[1]) and scan.isInteger(size[2])) then f.close(); return false end
     WIDTH, LENGTH = tonumber(size[1]), tonumber(size[2])
     tiles, crops = {}, {}
     -- then a line a tile: "key kind", and its crop if it has one
     for line in f.readLine do
-        local w = T.words(line)
+        local w = text.words(line)
         if w[2] then
             tiles[w[1]] = w[2]
             if w[3] and CROPS[w[3]] then crops[w[1]] = w[3] end
@@ -576,7 +578,7 @@ function dumpAtHome()
         T.dumpDownWait(keepPolicy)               -- a full chest: wait for room
         if fuelGoal > 0 then T.refuelFrom(CHEST_SIDE, fuelGoal) end
         for _, seed in ipairs(SEEDS) do
-            restockItem(seed, seedTarget(seed), (T.dropPrefix(seed, "minecraft:"):gsub("_", " ")))
+            restockItem(seed, seedTarget(seed), (text.replace(text.stripPrefix(seed, "minecraft:") or seed, "_", " ")))
         end
         restockItem(DIRT, dirtNeeded(), "Dirt")
         restockBuckets()
@@ -1496,7 +1498,7 @@ function farmPass(harvest, lanes, grow)
     end
     for _, seed in ipairs(T.sortedKeys(bare)) do
         print(string.format("Out of %s: %d tiles left bare. Put some in the chest.",
-            (T.dropPrefix(seed, "minecraft:"):gsub("_", " ")), bare[seed]))
+            (text.replace(text.stripPrefix(seed, "minecraft:") or seed, "_", " ")), bare[seed]))
     end
     return damaged
 end

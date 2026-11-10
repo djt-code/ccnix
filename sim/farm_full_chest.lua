@@ -4,7 +4,7 @@
 -- room for only a few stacks, then a chest that is already full.  Nothing
 -- should spill on the ground; the turtle waits for room instead.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 

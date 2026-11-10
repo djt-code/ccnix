@@ -3,7 +3,7 @@
 -- A mixed farm (wheat, carrots, potatoes, beetroot): learning the crop
 -- layout, a bare tile and a hole, and a wrong crop planted on a tile.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 

@@ -3,7 +3,7 @@
 -- A farm with a sugar cane strip: learning it, harvesting all but the
 -- bottom block, replanting a missing cane after its lane dried up.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 local LANE_X, CANE_X = 3, 4

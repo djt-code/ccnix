@@ -60,6 +60,8 @@
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")
+local scan = require("scan")
+local text = require("text")
 -- the pager is in lib/, beside turtle/; without it the output just scrolls
 if shell and shell.getRunningProgram then
     package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path
@@ -104,7 +106,7 @@ local goal = table.concat(args, " ")
 local function readKey()
     if not fs.exists(KEY_FILE) then return nil end
     local f = fs.open(KEY_FILE, "r")
-    local key = T.trim(f.readLine() or "")
+    local key = text.trim(f.readLine() or "")
     f.close()
     return key ~= "" and key or nil
 end
@@ -200,7 +202,7 @@ end
 local KEYWORDS = {}
 local KEYWORD_LIST = "and break do else elseif end false for function goto if in local nil not or "
     .. "repeat return then true until while"
-for _, w in ipairs(T.words(KEYWORD_LIST)) do KEYWORDS[w] = true end
+for _, w in ipairs(text.words(KEYWORD_LIST)) do KEYWORDS[w] = true end
 
 local function isNameStart(c) return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_" end
 local function isNameChar(c) return isNameStart(c) or (c >= "0" and c <= "9") end

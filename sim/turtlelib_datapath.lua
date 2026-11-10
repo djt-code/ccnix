@@ -6,7 +6,7 @@
 -- else is moved: not a file that's already in turtle/, and not files
 -- beside a program anywhere else.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local check = M.check
 

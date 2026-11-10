@@ -7,7 +7,7 @@
 -- follows the infinite-source rule: a dry lane tile between two sources
 -- comes back by itself; one at the lane's end doesn't.)
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 local LANE_X = 3

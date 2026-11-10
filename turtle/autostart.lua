@@ -33,6 +33,8 @@
 
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")
+local scan = require("scan")
+local text = require("text")
 
 local CHOICES = { mine = true, farm = true, mow = true, autocompost = true }
 local prog = settings.get("ccnix.autostart", "")
@@ -53,12 +55,12 @@ local function plan()
     if prog == "mine" then
         local f = fs.open(T.dataPath("mine.job"), "r")
         if not f then return { { "mine" } } end
-        local text = f.readAll() or ""
+        local job = f.readAll() or ""
         f.close()
         -- mine.job: "width height length spacing homes state"
-        local w = T.words(text)
+        local w = text.words(job)
         local spacing, state
-        if #w >= 6 and T.isDigits(w[4]) and T.isDigits(w[5]) and T.isLetters(w[6]) then
+        if #w >= 6 and scan.isUnsigned(w[4]) and scan.isUnsigned(w[5]) and scan.isName(w[6]) then
             spacing, state = w[4], w[6]
         end
         if state == "done" or state == "stopped" then

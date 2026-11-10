@@ -12,7 +12,7 @@
 -- size) and a Ctrl+T in the wait between passes; `mow reset` from a dip
 -- out on the lawn.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local Mine = require("mineworld")
 local P = Mine.P

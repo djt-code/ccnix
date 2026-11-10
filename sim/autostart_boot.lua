@@ -9,7 +9,7 @@
 -- again, and a finished one only on repeat.  A key in the 5 seconds
 -- cancels; a step that fails stops the rest.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local realPrint = print
 local check = M.check

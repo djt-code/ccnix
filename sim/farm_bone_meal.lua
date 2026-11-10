@@ -3,7 +3,7 @@
 -- Grow passes: with enough bone meal in the chest, the turtle bone-meals
 -- the whole farm, harvests and replants, and repeats while meal lasts.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local F = require("farmworld")
 local run = F.runner(PROJ)
 

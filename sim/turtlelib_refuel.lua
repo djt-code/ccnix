@@ -5,7 +5,7 @@
 -- turtle), but they're what chests and torches are crafted from, so only
 -- what T.fuel lists is burnt, or counted as fuel.
 local PROJ = ...
-package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local Mine = require("mineworld")
 local T = require("turtlelib")
 local check = Mine.check
