@@ -36,8 +36,8 @@ local function countWords(s)
         local blank = scan.isSpace(s:sub(i, i))
         if not blank and not inWord then words = words + 1 end
         inWord = not blank
-        -- a big file takes a while: yield now and then, or CC stops us
-        if i % 65536 == 0 then os.queueEvent("wc"); os.pullEvent("wc") end
+        -- a big file takes a while (cu.breathe each 64K bytes, not each one)
+        if i % 65536 == 0 then cu.breathe() end
     end
     return words
 end

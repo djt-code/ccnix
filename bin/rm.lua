@@ -32,15 +32,9 @@ local function yes(question)
     return first == "y" or first == "Y"
 end
 
--- fs.delete's message starts with the path and ": ": keep just the reason
-local function reason(e)
-    local _, rest = text.cut(e, ": ")
-    return rest or e
-end
-
 local function remove(shown, full)
     local ok, err = pcall(fs.delete, full)
-    if not ok then cu.fail(shown .. ": " .. reason(tostring(err)), 1); return false end
+    if not ok then cu.fail(shown .. ": " .. cu.reason(err), 1); return false end
     return true
 end
 

@@ -10,15 +10,10 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("strings", "strings [-a] [-t format] [-n number] [file...]")
-local convert = require("convert")
 local scan = require("scan")
 local opts, files = cu.getopt({ ... }, "an:t:")
 
-local min = 4
-if opts.n then
-    min = convert.toInteger(opts.n)
-    if not min or min < 1 then cu.usageError("invalid minimum string length: " .. opts.n) end
-end
+local min = cu.number(opts, "n", 4, 1, true)     -- (the shortest run written)
 local fmt = nil
 if opts.t then
     fmt = ({ d = "%d ", o = "%o ", x = "%x " })[opts.t]
@@ -45,8 +40,8 @@ cu.each(files, function(h)
             found(s, runStart, i - 1)
             runStart = nil
         end
-        -- a big file takes a while: yield now and then, or CC stops us
-        if i % 65536 == 0 then os.queueEvent("strings"); os.pullEvent("strings") end
+        -- a big file takes a while (cu.breathe each 64K bytes, not each one)
+        if i % 65536 == 0 then cu.breathe() end
     end
 end)
 return cu.exit()

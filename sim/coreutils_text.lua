@@ -128,7 +128,7 @@ check("uniq: missing file, status 1", r.status == 1 and r.err[1] == "uniq: nope:
 r = W:run("uniq", "a", "b", "c")
 check("uniq: three operands is a usage error", r.status == 2 and r.err[2]:find("^usage: uniq") ~= nil)
 r = W:run("uniq", "-f", "x", "u.txt")
-check("uniq: bad -f, status 2", r.status == 2)
+check("uniq: bad -f, status 2", r.status == 2 and r.err[1] == "uniq: bad -f x")
 
 --------------------------------------------------------------------------
 -- cut
@@ -220,7 +220,9 @@ check("uniq: unwritable output, path once, status 1", r.status == 1 and r.err[1]
     show(r.errText))
 out("wc: empty input", "0 0 0\n", "wc", { pipe = true, stdin = "" })
 -- a few thousand lines: every filter yields as it goes (each yield is a
--- queued event the program pulls straight back) and gets the right answer
+-- queued event the program pulls straight back) and gets the right answer.
+-- (cu.breathe yields once a second at most: here the clock runs half a
+-- second each time it's read)
 local big = {}
 for i = 1, 3000 do big[i] = tostring(3001 - i) end
 big = table.concat(big, "\n") .. "\n"
@@ -228,7 +230,10 @@ local function yields(label, want, ...)
     local args = { ... }
     local pulls = 0
     args[#args + 1] = { pipe = true, stdin = big, onPull = function() pulls = pulls + 1 end }
+    local realClock, tick = W.os.clock, 0
+    W.os.clock = function() tick = tick + 0.5; return tick end
     local res = W:run(table.unpack(args))
+    W.os.clock = realClock
     check(label, res.status == 0 and want(res.out) and pulls >= 1, "pulls " .. pulls .. " status " .. tostring(res.status))
 end
 yields("sort -n of 3000 lines yields", function(o) return o:sub(1, 8) == "1\n2\n3\n4\n" end, "sort", "-n")

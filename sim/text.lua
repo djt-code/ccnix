@@ -110,6 +110,24 @@ esc = scan.new([[\qx]])
 check("readEscape: not one: nil, nothing stepped over", convert.readEscape(esc) == nil and esc:pos() == 1)
 check("toNumber", convert.toNumber("1.5e3") == 1500 and convert.toNumber("-.5") == -0.5
     and convert.toNumber("0x10") == nil and convert.toNumber("inf") == nil and convert.toNumber(" 1") == nil)
+same("toBase: hex", convert.toBase(255, 16), "ff")
+same("toBase: octal, decimal, 0", convert.toBase(8, 8) .. " " .. convert.toBase(1234567, 10) .. " " .. convert.toBase(0, 2), "10 1234567 0")
+same("toBase: a negative is its 64-bit two's complement", convert.toBase(-1, 16), "ffffffffffffffff")
+same("toBase: past 2^53 with the high half", convert.toBase(4294967295, 10, 4294967295), "18446744073709551615")
+same("toBase: base 36", convert.toBase(35, 36), "z")
+local fsc = scan.new("x%-08.3fy")
+fsc:advance()
+local spec = convert.readFormatSpec(fsc)
+check("readFormatSpec: flags, width, precision, letter, text, stepped over", spec.flags == "-0" and spec.width == "8"
+    and spec.precision == "3" and spec.letter == "f" and spec.text == "%-08.3f" and fsc:peek() == "y")
+spec = convert.readFormatSpec(scan.new("%5.d"))
+local spec2 = convert.readFormatSpec(scan.new("%s"))
+local spec3 = convert.readFormatSpec(scan.new("%12"))
+check("readFormatSpec: a bare . is precision \"\"; none is nil; the letter \"\" at the end",
+    spec.precision == "" and spec.width == "5" and spec2.precision == nil and spec2.width == "" and spec3.letter == ""
+    and spec3.text == "%12")
+local nsc = scan.new("ab")
+check("readFormatSpec: no % next: nil, nothing stepped over", convert.readFormatSpec(nsc) == nil and nsc:pos() == 1)
 
 -- 7. sizes and times
 same("humanSize: bytes", convert.humanSize(1023), "1023")

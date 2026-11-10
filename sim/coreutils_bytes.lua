@@ -110,6 +110,16 @@ r = W:run("od", "-A", "z", "six.txt", { pipeOut = true })
 check("od -A z: usage error 2", r.status == 2)
 r = W:run("od", "-j", "08", "six.txt", { pipeOut = true })
 check("od -j 08: not octal, usage error 2", r.status == 2 and r.err[1] == "od: invalid skip: 08")
+W:file("hex.bin", string.rep("x", 11) .. "yz")
+r = W:run("od", "-j", "0xb", "-An", "-c", "hex.bin", { pipeOut = true })
+local r2 = W:run("od", "-j", "0x1k", "hex.bin", { pipeOut = true })
+local r3 = W:run("od", "-N", "1k", "hex.bin", { pipeOut = true })
+local r4 = W:run("od", "-j", "01b", "-An", "-c", "hex.bin", { pipeOut = true })
+check("od -j 0xb (b a hex digit), not 0x1k; -N takes no suffix; 01b is 512",
+    r.out == "   y   z\n" and r2.status == 2 and r2.err[1] == "od: invalid skip: 0x1k"
+    and r3.status == 2 and r3.err[1] == "od: invalid count: 1k"
+    and r4.status == 1 and r4.err[1] == "od: cannot skip past end of combined input",
+    show(r.out .. "~" .. r2.errText .. "~" .. r3.errText .. "~" .. r4.errText))
 r = W:run("od", "-t", "", "six.txt", { pipeOut = true })
 check("od -t '': usage error 2", r.status == 2 and r.err[1] == "od: empty type string")
 W:file("big.dat", string.rep("0123456789abcdefXYZ", 2000))
@@ -145,7 +155,7 @@ W:file("many.dat", string.rep("word\0", 5000))
 r = W:run("strings", "many.dat", { pipeOut = true })
 check("strings: 5000 runs, yielding as it goes", r.ok and r.out == string.rep("word\n", 5000))
 r = W:run("strings", "-n", "0", "bin.dat", { pipeOut = true })
-check("strings -n 0: usage error 2", r.status == 2)
+check("strings -n 0: usage error 2", r.status == 2 and r.err[1] == "strings: bad -n 0")
 r = W:run("strings", "-t", "q", "bin.dat", { pipeOut = true })
 check("strings -t q: usage error 2", r.status == 2)
 

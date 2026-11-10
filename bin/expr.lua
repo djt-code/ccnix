@@ -22,6 +22,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("expr", "expr operand...")
 local scan = require("scan")
+local text = require("text")
 local convert = require("convert")
 local args = { ... }
 if args[1] == "--" and #args > 1 then table.remove(args, 1) end
@@ -69,7 +70,7 @@ end
 local function match(s, re)
     local ok, regex = pcall(require, "regex")
     if not ok then cu.err("the : operator needs regex.lua"); cu.exit(3) end
-    local r, err = regex.compile(re:sub(1, 1) == "^" and re or "^" .. re)
+    local r, err = regex.compile(text.startsWith(re, "^") and re or "^" .. re)
     if not r then bad(re .. ": " .. err) end
     local st, stop, caps = r:find(s)
     if r.ngroups > 0 then return st and caps[1] or "" end

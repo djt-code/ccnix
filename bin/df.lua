@@ -19,10 +19,8 @@ local opts, files = cu.getopt({ ... }, "kP")
 local unit = opts.k and 1024 or 512
 
 -- bytes taken by the files at or under p, yielding now and then
-local seen = 0
 local function used(p)
-    seen = seen + 1
-    if seen % 200 == 0 then os.queueEvent("df"); os.pullEvent("df") end
+    cu.breathe()
     if not fs.isDir(p) then return fs.getSize(p) end
     local n = 0
     for _, name in ipairs(fs.list(p)) do n = n + used(fs.combine(p, name)) end
@@ -71,14 +69,7 @@ end
 
 -- columns: the name and mount point left-aligned, the numbers right
 table.insert(rows, 1, { "Drive", unit .. "-blk", "Used", "Avail", "Use%", "Mount" })
-local width = {}
-for _, r in ipairs(rows) do
-    for i, s in ipairs(r) do width[i] = math.max(width[i] or 0, #s) end
-end
-for _, r in ipairs(rows) do
-    local out = { text.padRight(r[1], width[1]) }
-    for i = 2, 5 do out[i] = text.padLeft(r[i], width[i]) end
-    out[6] = r[6]
-    io.write(text.join(out, " "), "\n")
+for _, line in ipairs(text.columns(rows, { [2] = true, [3] = true, [4] = true, [5] = true })) do
+    io.write(line, "\n")
 end
 return cu.exit()

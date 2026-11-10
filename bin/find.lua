@@ -41,7 +41,7 @@ local i = 1
 while args[i] == "-H" or args[i] == "-L" do i = i + 1 end     -- no links in CraftOS
 if args[i] == "--" then i = i + 1 end
 local paths = {}
-while args[i] and not (args[i]:sub(1, 1) == "-" and #args[i] > 1) and args[i] ~= "!" and args[i] ~= "(" do
+while args[i] and not (text.startsWith(args[i], "-") and #args[i] > 1) and args[i] ~= "!" and args[i] ~= "(" do
     paths[#paths + 1] = args[i]
     i = i + 1
 end
@@ -78,7 +78,7 @@ local function compare(s, what, suffix)
     return signed and signed(n) or function(x) return x == n end, unit ~= ""
 end
 
-local function mtime(p) return fs.attributes(p).modified end
+local function mtime(p) return cu.mtime(p) or 0 end
 local started = os.epoch("utc")     -- -mtime counts days back from here
 
 local function nextArg(what)
@@ -103,11 +103,13 @@ local function command(what)
     return words, plus
 end
 
-local function run(words, found)
+-- an -exec/-ok command's words with each "{}" made the path found
+local function withPath(words, found)
     local t = {}
     for k, w in ipairs(words) do t[k] = w == "{}" and found or w end
-    return shell.execute(table.unpack(t))
+    return t
 end
+local function run(words, found) return shell.execute(table.unpack(withPath(words, found))) end
 
 local primary = {}
 function primary.name()
@@ -179,9 +181,7 @@ function primary.ok()
     hasAction = true
     local words = command("-ok")
     return function(e)
-        local t = {}
-        for k, w in ipairs(words) do t[k] = w == "{}" and e.path or w end
-        io.stderr:write("< " .. table.concat(t, " ") .. " > ? ")
+        io.stderr:write("< " .. table.concat(withPath(words, e.path), " ") .. " > ? ")
         local answer = cu.readLine(io.input()) or ""
         local first = answer:sub(1, 1)
         return (first == "y" or first == "Y") and run(words, e.path)
@@ -246,12 +246,9 @@ end
 --------------------------------------------------------------------------
 -- the walk
 --------------------------------------------------------------------------
-local seen = 0
 -- p the entry on disk, shown the path it is printed as
 local function visit(p, shown, depth, drive)
-    -- yield now and then, or a big tree trips "Too long without yielding"
-    seen = seen + 1
-    if seen % 200 == 0 then os.queueEvent("find"); os.pullEvent("find") end
+    cu.breathe()        -- (a big tree takes a while)
     local e = { p = p, path = shown, depth = depth, dir = fs.isDir(p), name = path.basename(shown) }
     local test = depth >= minDepth and depth <= maxDepth
     if test and not depthFirst then expr(e) end

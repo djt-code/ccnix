@@ -34,7 +34,7 @@ for _, shown in ipairs(dirs) do
         elseif fs.isReadOnly(path) then cu.fail(shown .. ": Permission denied")
         else
             local ok, err = pcall(fs.makeDir, path)
-            if not ok then cu.fail(shown .. ": " .. tostring(err)) end
+            if not ok then cu.fail(shown .. ": " .. cu.reason(err)) end
         end
     end
 end

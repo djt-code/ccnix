@@ -80,7 +80,7 @@ local function parse(s, second)
         elseif s:sub(i, i) == "[" and s:sub(j, j) == "*" and repeatCount(s, j + 1) then
             local num = repeatCount(s, j + 1)
             if not second then cu.usageError("[c*n] belongs in string2", 1) end
-            local count = tonumber(num, text.startsWith(num, "0") and 8 or 10) or 0
+            local count = convert.toInteger(num, text.startsWith(num, "0") and 8 or 10) or 0
             if count == 0 and not fill then fill = #t + 1; t[#t + 1] = { c } end
             for _ = 1, count do t[#t + 1] = c end
             i = j + #num + 2
@@ -132,11 +132,8 @@ end
 
 local last = nil    -- the last character written, for -s across lines
 local h = io.input()
-local done = 0      -- bytes since the last yield
 for l in function() return cu.readLine(h, true) end do
-    -- yield now and then so a big input can't run "too long without yielding"
-    done = done + #l + 20
-    if done > 50000 then done = 0; os.queueEvent("tr_yield"); os.pullEvent("tr_yield") end
+    cu.breathe()        -- (a big input takes a while)
     local t = {}
     for k = 1, #l do
         local c = l:sub(k, k)

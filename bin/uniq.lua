@@ -14,33 +14,22 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("uniq", "uniq [-c|-d|-u] [-f fields] [-s chars] [input [output]]")
-local convert = require("convert")
 local scan = require("scan")
-local text = require("text")
 local opts, ops = cu.getopt({ ... }, "cdf:s:u")
 if #ops > 2 then cu.usageError("too many operands") end
-local nf, ns = convert.toInteger(opts.f or "0"), convert.toInteger(opts.s or "0")
-if not nf or nf < 0 then cu.usageError("bad field count: " .. opts.f) end
-if not ns or ns < 0 then cu.usageError("bad character count: " .. opts.s) end
+local nf, ns = cu.number(opts, "f", 0, 0, true), cu.number(opts, "s", 0, 0, true)
 
-local isBlank = scan.oneOf(" \t")
-local function notBlank(c) return not isBlank(c) end
+local notBlank = scan.isNot(scan.isTabOrSpace)
 
 -- the part of a line that is compared: past nf fields (blanks, then
 -- non-blanks), then ns characters more
 local function key(l)
     local sc = scan.new(l)
     for _ = 1, nf do
-        sc:readWhile(isBlank)
+        sc:readWhile(scan.isTabOrSpace)
         sc:readWhile(notBlank)
     end
     return l:sub(sc:pos() + ns)
-end
-
--- io.open's message starts with the path and ": ": keep just the reason
-local function reason(e)
-    local _, rest = text.cut(e, ":")
-    return rest and text.stripPrefix(rest, " ") or e
 end
 
 local h = cu.open(ops[1] or "-")
@@ -49,7 +38,7 @@ local out = io.output()
 if ops[2] then
     local e
     out, e = io.open(shell.resolve(ops[2]), "wb")
-    if not out then cu.close(h); cu.fail(ops[2] .. ": " .. reason(tostring(e))); return cu.exit() end
+    if not out then cu.close(h); cu.fail(ops[2] .. ": " .. cu.reason(e)); return cu.exit() end
 end
 
 local function emit(l, n)
@@ -59,11 +48,8 @@ local function emit(l, n)
 end
 
 local prev, pkey, n = nil, nil, 0
-local done = 0     -- lines since the last yield
 for l in function() return cu.readLine(h) end do
-    -- yield now and then so a big file can't run "too long without yielding"
-    done = done + 1
-    if done % 1000 == 0 then os.queueEvent("uniq_yield"); os.pullEvent("uniq_yield") end
+    cu.breathe()        -- (a big file takes a while)
     local k = key(l)
     if prev and k == pkey then
         n = n + 1

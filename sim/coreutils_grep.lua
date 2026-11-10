@@ -131,7 +131,7 @@ for i = 1, 3000 do big[i] = ("line %04d of a fairly ordinary file\n"):format(i) 
 W:file("big.txt", table.concat(big))
 local clock, yields = W.os.clock, 0
 W.os.clock = function() W.clock = W.clock + 0.5; return W.clock end
-r = g("-c", "-E", "[0-9]+7 of", "big.txt", { pipe = true, onPull = function(_, f) if f == "grep" then yields = yields + 1 end end })
+r = g("-c", "-E", "[0-9]+7 of", "big.txt", { pipe = true, onPull = function(_, f) if f == "cu_breathe" then yields = yields + 1 end end })
 W.os.clock = clock
 check("3000 lines: the count, yielding as it goes", r.out == "300\n" and r.status == 0 and yields > 0 and #W.T.events == 0,
     show(r.out) .. " yields " .. yields .. " " .. show(r.errText))

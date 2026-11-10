@@ -71,7 +71,6 @@ end
 local mode = opts.q and "q" or opts.l and "l" or opts.c and "c"
 local multi, found = #files > 1, false
 if opts.s then cu.err = function() end end   -- unreadable files: quietly
-local lastYield = os.clock()
 cu.each(files, function(h, name)
     local label = name == "-" and "(standard input)" or name
     local prefix = multi and label .. ":" or ""
@@ -80,10 +79,7 @@ cu.each(files, function(h, name)
         n = n + 1
         -- a big file takes a while: yield now and then, or CC stops us
         -- (the keyboard yields by itself)
-        if n % 100 == 0 and h ~= io.stdin and os.clock() - lastYield > 1 then
-            os.queueEvent("grep"); os.pullEvent("grep")
-            lastYield = os.clock()
-        end
+        if h ~= io.stdin then cu.breathe() end
         if selected(line) then
             count, found = count + 1, true
             if mode == "q" then return false end

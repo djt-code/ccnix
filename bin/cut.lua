@@ -26,7 +26,7 @@ local delim = opts.d or "\t"
 if #delim ~= 1 then cu.usageError("the delimiter must be one character") end
 
 local isListSep = scan.oneOf(", \t")
-local function notListSep(c) return not isListSep(c) end
+local notListSep = scan.isNot(isListSep)
 
 -- the parts of a list: what's between commas and blanks, empty ones left out
 local function listParts(spec)
@@ -71,11 +71,8 @@ local function wanted(i)
     return false
 end
 
-local done = 0     -- lines since the last yield
 for l in cu.lines(files) do
-    -- yield now and then so a big file can't run "too long without yielding"
-    done = done + 1
-    if done % 1000 == 0 then os.queueEvent("cut_yield"); os.pullEvent("cut_yield") end
+    cu.breathe()        -- (a big file takes a while)
     local t = {}
     if opts.f then
         if not text.contains(l, delim) then

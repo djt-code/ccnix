@@ -66,8 +66,9 @@ elseif #ops == 2 then first, p1 = number(ops[1]); last = number(ops[2])
 else first, p1 = number(ops[1]); step, p2 = number(ops[2]); last = number(ops[3]) end
 if step == 0 then cu.fail("invalid Zero increment value: '" .. ops[2] .. "'"); return cu.exit() end
 
-local isFlag = scan.oneOf("-+ #0")
-local isFloatConversion = scan.oneOf("eEfgG")
+-- the conversion letters -f takes (the floating-point ones; not F, which
+-- printf turns into f before string.format sees it and seq doesn't)
+local FLOAT_LETTERS = { e = true, E = true, f = true, g = true, G = true }
 
 -- format with each %% taken out (read left to right, as printf does)
 local function withoutPercents(format)
@@ -78,22 +79,14 @@ local function withoutPercents(format)
     return table.concat(out)
 end
 
--- does a % in format start a conversion: % flags* digit* ("." digit*)? and
--- one of e E f g G?
-local function isConversion(sc)
-    if not sc:accept("%") then return false end
-    sc:readWhile(isFlag)
-    sc:readWhile(scan.isDigit)
-    if sc:accept(".") then sc:readWhile(scan.isDigit) end
-    return isFloatConversion(sc:peek())
-end
-
--- one % in it (after the %% are out), starting a floating-point conversion?
+-- one % in it (after the %% are out), starting a floating-point conversion
+-- (% flags width .precision and one of e E f g G)?
 local function oneFloatConversion(format)
     local probe = withoutPercents(format)
-    local at = probe:find("%", 1, true)
-    if not at or probe:find("%", at + 1, true) then return false end
-    return isConversion(scan.new(probe, at))
+    local at = text.find(probe, "%")
+    if not at or text.find(probe, "%", at + 1) then return false end
+    local spec = convert.readFormatSpec(scan.new(probe, at))
+    return FLOAT_LETTERS[spec.letter] == true
 end
 
 local format = opts.f
@@ -133,7 +126,7 @@ while true do
     if n > 0 then io.write(sep) end
     io.write(padded(v))
     n = n + 1
-    if n % 1000 == 0 then os.queueEvent("seq"); os.pullEvent("seq") end
+    cu.breathe()
 end
 if n > 0 then io.write("\n") end
 return cu.exit()

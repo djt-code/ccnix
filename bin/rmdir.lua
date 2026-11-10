@@ -21,7 +21,7 @@ local function rmdir(shown)
     if full == "" or fs.isReadOnly(full) then cu.fail(shown .. ": Permission denied"); return false end
     if #fs.list(full) > 0 then cu.fail(shown .. ": Directory not empty"); return false end
     local ok, err = pcall(fs.delete, full)
-    if not ok then cu.fail(shown .. ": " .. tostring(err)); return false end
+    if not ok then cu.fail(shown .. ": " .. cu.reason(err)); return false end
     return true
 end
 

@@ -16,15 +16,13 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("kill", "kill [-s signal | -signal] [--] pid|-pgid... | kill -l")
 local P = require("proc")              -- the module, for the signal names; the running init is _G.proc
+local tables = require("tables")
 local text = require("text")
 local convert = require("convert")
 local args = { ... }
 
 if args[1] == "-l" then
-    local names = {}
-    for name in pairs(P.SIGNALS) do names[#names + 1] = name end
-    table.sort(names)
-    io.write(table.concat(names, " ") .. "\n")
+    io.write(table.concat(tables.sortedKeys(P.SIGNALS), " ") .. "\n")
     return cu.exit()
 end
 

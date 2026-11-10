@@ -24,34 +24,26 @@ if args[1] == "--" then table.remove(args, 1) end
 if #args == 0 then cu.usageError() end
 local format = table.remove(args, 1)
 
--- The digits of a whole number at the start of body: "0x" and hex digits
--- (base 16), "0" and octal digits (base 8, the 0 counted in), or decimal
--- digits.  The digits, the base, and how long a prefix came before them;
--- nil if body starts with none of these.
-local function leadingInteger(body)
-    local digits, base, written = scan.new(body):readCInteger()
-    if not digits then return nil end
-    return digits, base, #written - #digits
-end
-
 -- The numeric value of argument a (nil: missing, 0); `int` takes whole
 -- numbers only.  A bad one is reported and gives what could be read of it.
+local isQuote = scan.oneOf("'\"")
 local function num(a, int)
     if a == nil or a == "" then return 0 end
     -- 'c or "c: the code of c
-    if (a:sub(1, 1) == "'" or a:sub(1, 1) == '"') and #a > 1 then return a:byte(2) end
+    if isQuote(a:sub(1, 1)) and #a > 1 then return a:byte(2) end
     local sc = scan.new(a)
     sc:skipSpaces()
     local s = sc:rest()
     local n
     if int then
-        -- 0x hex, 0 octal or decimal; all of s must be used ("09" is not)
-        local sign, body = "", s
-        if text.startsWith(s, "+") or text.startsWith(s, "-") then sign, body = s:sub(1, 1), s:sub(2) end
-        local d, base, pre = leadingInteger(body)
-        n = d and convert.toInteger(d, base)
-        if n and sign == "-" then n = -n end
-        if n and #sign + pre + #d == #s then return n end
+        -- a sign, then 0x hex, 0 octal or decimal; all of s must be used
+        -- ("09" is not)
+        local negative = sc:accept("-")
+        if not negative then sc:accept("+") end
+        local digits, base = sc:readCInteger()
+        n = digits and convert.toInteger(digits, base)
+        if n and negative then n = -n end
+        if n and sc:atEnd() then return n end
     else
         n = tonumber(s)                 -- (C's strtod takes 0x hex too)
         if n then return n end
@@ -68,79 +60,56 @@ local function pad(s, flags, width)
     return text.padLeft(s, width)
 end
 
+-- each integer conversion's base (d i u: 10)
+local INTEGER_BASE = { o = 8, x = 16, X = 16 }
+
 -- An integer conversion done by hand, so that it means the same in
 -- CraftOS and elsewhere: digits, precision, sign, # prefix, zero fill.
 local function integer(conv, flags, width, prec, n)
     n = n < 0 and math.ceil(n) or math.floor(n)
     local neg = n < 0 and (conv == "d" or conv == "i")
     local m = neg and -n or n
-    -- the value as two 32-bit halves; a negative unsigned one becomes its
-    -- 64-bit two's complement
-    local hi = math.floor(m / 2 ^ 32)
-    local lo = m - hi * 2 ^ 32
-    if hi < 0 then hi = hi + 2 ^ 32 end
-    local b = (conv == "o" and 8) or ((conv == "x" or conv == "X") and 16) or 10
-    local t = {}
-    repeat
-        local r = hi % b
-        hi = math.floor(hi / b)
-        local v = r * 2 ^ 32 + lo
-        lo = math.floor(v / b)
-        r = math.floor(v % b)
-        t[#t + 1] = ("0123456789abcdef"):sub(r + 1, r + 1)
-    until hi == 0 and lo == 0
-    local d = string.reverse(table.concat(t))
+    -- (a negative unsigned one is its 64-bit two's complement)
+    local d = convert.toBase(m, INTEGER_BASE[conv] or 10)
     if conv == "X" then d = d:upper() end
     m = (m == 0) and 0 or 1
     if prec ~= "" then
         local p = tonumber(prec) or 0
         if p == 0 and m == 0 then d = "" end
-        d = string.rep("0", p - #d) .. d
+        d = text.padLeft(d, p, "0")
     end
     local pre = neg and "-" or text.contains(flags, "+") and (conv == "d" or conv == "i") and "+"
         or text.contains(flags, " ") and (conv == "d" or conv == "i") and " " or ""
     if text.contains(flags, "#") then
-        if conv == "o" and d:sub(1, 1) ~= "0" then d = "0" .. d
+        if conv == "o" and not text.startsWith(d, "0") then d = "0" .. d
         elseif (conv == "x" or conv == "X") and m ~= 0 then pre = pre .. "0" .. conv end
     end
     width = tonumber(width) or 0
     if text.contains(flags, "0") and not text.contains(flags, "-") and prec == "" then
-        d = string.rep("0", width - #pre - #d) .. d
+        d = text.padLeft(d, width - #pre, "0")
     end
     return pad(pre .. d, flags, width)
 end
 
--- Write the format once, taking arguments from args[ai...].  Returns the
--- next argument's index, and true when output must stop (%b's \c, or a
--- bad conversion).
-local isFlag = scan.oneOf("-+ #0")
 local isIntConversion = scan.oneOf("diouxX")
 local isFloatConversion = scan.oneOf("eEfFgG")
 
--- a conversion at pc: "%" flags* width ("."? precision) and its letter
--- (flags - + space # 0, width and precision digits, any of them left out,
--- the letter too at the end of the format).  The five parts as text.
-local function readConversion(pc)
-    local sc = scan.new(format, pc + 1)
-    local flags = sc:readWhile(isFlag)
-    local width = sc:readWhile(scan.isDigit)
-    local dot = sc:accept(".") and "." or ""
-    local prec = sc:readWhile(scan.isDigit)
-    return flags, width, dot, prec, sc:advance()
-end
-
+-- Write the format once, taking arguments from args[ai...].  Returns the
+-- next argument's index, and true when output must stop (%b's \c, or a
+-- bad conversion).
 local function once(ai)
     local p, out = 1, {}
     local function emit(s) out[#out + 1] = s end
     local function nextArg() ai = ai + 1; return args[ai - 1] end
     while p <= #format do
-        local pc = format:find("%", p, true)
+        local pc = text.find(format, "%", p)
         local literal = format:sub(p, (pc or #format + 1) - 1)
         local s, stop = convert.unescape(literal)       -- (the format's escapes: \ooo octal, no \c)
         emit(s)
         if not pc then break end
-        local flags, width, dot, prec, conv = readConversion(pc)
-        local whole = format:sub(pc, pc + #flags + #width + #dot + #prec + #conv)
+        -- "%" flags width .precision letter (the letter "" at the end)
+        local spec = convert.readFormatSpec(scan.new(format, pc))
+        local flags, width, prec, conv, whole = spec.flags, spec.width, spec.precision, spec.letter, spec.text
         p = pc + #whole
         if conv == "%" then emit("%")
         elseif conv == "s" or conv == "b" or conv == "c" then
@@ -148,17 +117,17 @@ local function once(ai)
             if conv == "b" then
                 a, stop = convert.unescape(a, true)     -- (%b's: \0ooo octal, \c stops)
             elseif conv == "c" then a = a:sub(1, 1) end
-            if dot ~= "" then a = a:sub(1, tonumber(prec) or 0) end
+            if prec then a = a:sub(1, tonumber(prec) or 0) end
             emit(pad(a, flags, width))
             if stop then io.write(table.concat(out)); return ai, true end
         elseif isIntConversion(conv) then
-            emit(integer(conv, flags, width, dot ~= "" and (prec ~= "" and prec or "0") or "",
+            emit(integer(conv, flags, width, prec and (prec ~= "" and prec or "0") or "",
                 num(nextArg(), true)))
         elseif isFloatConversion(conv) then
             local v = num(nextArg(), false)
             if conv == "F" then conv = "f" end
             -- Lua refuses some specs C takes (a width over 99, repeated flags)
-            local ok, s = pcall(string.format, "%" .. flags .. width .. dot .. prec .. conv, v)
+            local ok, s = pcall(string.format, "%" .. flags .. width .. (prec and "." .. prec or "") .. conv, v)
             if not ok then
                 io.write(table.concat(out))
                 cu.fail(whole .. ": invalid conversion")

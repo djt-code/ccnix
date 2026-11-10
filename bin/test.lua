@@ -38,8 +38,7 @@ local function try(f, p)
 end
 local function isFile(p) return try(fs.exists, p) and not try(fs.isDir, p) end
 local function mtime(p)
-    local a = try(fs.attributes, p)
-    if a then return a.modified or a.modification end
+    if p ~= "" then return cu.mtime(shell.resolve(p)) end
 end
 -- an integer operand (scan.isInteger's shape) as a number, or an error
 local function integer(s) return convert.toInteger(s) or bad(s .. ": integer expression expected") end

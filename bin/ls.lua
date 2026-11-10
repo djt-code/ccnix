@@ -38,11 +38,10 @@ local mark = opts.F or opts.p
 local function entry(name, full)
     local ok, a = pcall(fs.attributes, full)
     if not ok or not a then
-        a = { size = 0, isDir = fs.isDir(full), isReadOnly = fs.isReadOnly(full), modified = 0 }
+        a = { size = 0, isDir = fs.isDir(full), isReadOnly = fs.isReadOnly(full) }
     end
-    local m = a.modified or a.modification or 0
     return { name = name, path = full, dir = a.isDir, ro = a.isReadOnly, size = a.isDir and 0 or a.size,
-             time = m }
+             time = cu.mtime(full) or 0 }
 end
 
 local function sorted(list)
@@ -151,7 +150,6 @@ end
 
 -- What's in directory `dir` (shown as `label`), and its subdirectories
 -- after it with -R.
-local listed = 0
 local function listDir(dir, label, header)
     if header then io.write(label, ":\n") end
     local ok, names = pcall(fs.list, dir)
@@ -164,8 +162,7 @@ local function listDir(dir, label, header)
     for _, n in ipairs(names) do
         local p = fs.combine(dir, n)
         if opts.a or opts.A or not cu.hidden(p) then list[#list + 1] = entry(n, p) end
-        listed = listed + 1
-        if listed % 200 == 0 then os.queueEvent("ls"); os.pullEvent("ls") end   -- (long trees)
+        cu.breathe()        -- (long trees)
     end
     show(sorted(list), true)
     if opts.R then

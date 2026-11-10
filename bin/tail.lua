@@ -60,10 +60,10 @@ local function part(s)
     return at and s:sub(at) or ""
 end
 
--- The lines of s last first (a last line without a newline gets one).
+-- The lines of s last first (a last line without a newline gets one; a CR
+-- before a newline stays in its line).
 local function reverse(s)
-    local t, r = text.split(s, "\n", true), {}
-    if t[#t] == "" then t[#t] = nil end     -- (after the last newline: not a line)
+    local t, r = text.lines(s, true), {}
     for i = #t, 1, -1 do r[#r + 1] = t[i] .. "\n" end
     return table.concat(r)
 end

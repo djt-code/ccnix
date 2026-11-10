@@ -22,6 +22,21 @@
 --                       is below, equal to or above b, exactly at any
 --                       length (past 2^53 too, where Lua's numbers lose
 --                       digits); nil if either isn't an integer
+--   convert.toBase(n, base [, high])  whole number n as its digits in base
+--                       (2-36, lower case letters): toBase(255, 16) is
+--                       "ff".  A negative n is its 64-bit two's complement,
+--                       as C's %x and %o write one.  With high, the number
+--                       is high * 2^32 + n (each 0 to 2^32 - 1), so all 64
+--                       bits are exact where a Lua number in CC keeps 53.
+--   convert.readFormatSpec(sc)  one printf conversion at scanner sc (at its
+--                       "%"): "%" flags* width ("." precision)? letter,
+--                       stepped over.  A table { flags (some of - + space
+--                       # 0, as written), width (its digits, "" if none),
+--                       precision (the digits after the ".", "" for a "."
+--                       alone, nil with no "."), letter ("" at the end of
+--                       the text), text (all of it, from the "%") }; nil
+--                       (nothing stepped over) if no "%" is next.  Which
+--                       letters mean something is up to the caller.
 --
 -- Sizes and times:
 --   convert.humanSize(bytes)   1023, 1.5K, 23K, 4.0M ...: one decimal below
@@ -121,6 +136,40 @@ end
 function convert.toNumber(s)
     if not scan.isNumber(s) then return nil end
     return (scan.new(s):readFloat())
+end
+
+-- The digits of hi * 2^32 + lo, by long division on the two halves: each
+-- step's partial value stays below 36 * 2^32, so it's exact as a double.
+local DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+function convert.toBase(n, base, high)
+    local hi, lo = high, n
+    if not hi then
+        hi = math.floor(n / 2 ^ 32)
+        lo = n - hi * 2 ^ 32
+        if hi < 0 then hi = hi + 2 ^ 32 end     -- (negative: two's complement)
+    end
+    local out = {}
+    repeat
+        local r = hi % base
+        hi = math.floor(hi / base)
+        local v = r * 2 ^ 32 + lo
+        lo = math.floor(v / base)
+        r = math.floor(v % base)
+        out[#out + 1] = DIGITS:sub(r + 1, r + 1)
+    until hi == 0 and lo == 0
+    return string.reverse(table.concat(out))
+end
+
+-- printf's flags: left-justify, sign, space for a sign, alternate form, zeros
+local isFormatFlag = scan.oneOf("-+ #0")
+
+function convert.readFormatSpec(sc)
+    if not sc:accept("%") then return nil end
+    local spec = { flags = sc:readWhile(isFormatFlag), width = sc:readWhile(scan.isDigit) }
+    if sc:accept(".") then spec.precision = sc:readWhile(scan.isDigit) end
+    spec.letter = sc:advance()
+    spec.text = "%" .. spec.flags .. spec.width .. (spec.precision and "." .. spec.precision or "") .. spec.letter
+    return spec
 end
 
 --------------------------------------------------------------------------

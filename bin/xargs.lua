@@ -46,25 +46,14 @@ for _, o in ipairs(order) do
         end
     end
 end
-local size = opts.s and convert.toInteger(opts.s)
-if opts.s and (not size or size < 1) then cu.usageError("invalid size '" .. opts.s .. "'") end
+local size = cu.number(opts, "s", nil, 1, true)
 local eof = not opts["0"] and opts.E ~= "" and opts.E or nil
 local lineMode = (mode == "I" or mode == "L") and not opts["0"]
 local cmd = ops[1] or "echo"
 local base = { table.unpack(ops, 2) }
 
--- Yield now and then, so long runs don't stop with "Too long without yielding".
-local last = os.clock()
-local function breathe()
-    if os.clock() - last >= 2 then
-        os.queueEvent("xargs"); os.pullEvent("xargs")
-        last = os.clock()
-    end
-end
-
-local isBlank = scan.oneOf(" \t")
-local isSpecial = scan.oneOf(" \t'\"\\")     -- (a blank, a quote or a backslash)
-local function notSpecial(c) return not isSpecial(c) end
+-- (anything but a blank, a quote or a backslash)
+local notSpecial = scan.isNot(scan.oneOf(" \t'\"\\"))
 
 -- Split one input line into arguments.  In line mode (-I, -L) the whole
 -- line is one argument; cont is true when -L's line ends in a blank.
@@ -73,12 +62,12 @@ local function split(line)
     local function add(s) parts = parts or {}; parts[#parts + 1] = s end
     if mode == "I" then     -- (the blanks before the line dropped)
         local sc = scan.new(line)
-        sc:readWhile(isBlank)
+        sc:readWhile(scan.isTabOrSpace)
         line = sc:rest()
     end
     while i <= #line do
         if q then
-            local j = line:find(q, i, true)
+            local j = text.find(line, q, i)
             if not j then break end
             add(line:sub(i, j - 1))
             q, i, trail = nil, j + 1, 0
@@ -120,7 +109,7 @@ end
 local input, queue, qi, done, carry = io.input(), {}, 1, false, nil
 local function fill()
     while queue[qi] == nil and not done do
-        breathe()
+        cu.breathe()
         queue, qi = {}, 1
         if opts["0"] then
             -- each argument ends at a NUL (the last one may not have one)
@@ -172,7 +161,7 @@ local function run(args)
         cu.exit()
     end
     if status ~= 0 then cu.status = math.max(cu.status, 1) end
-    breathe()
+    cu.breathe()
 end
 
 local function tooLong()
