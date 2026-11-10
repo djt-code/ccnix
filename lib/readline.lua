@@ -84,6 +84,9 @@
 -- changed (then draw).  Ctrl+L and Ctrl+C are a program's to bind:
 -- unbound, Ctrl+L does nothing and Ctrl+C returns "interrupt".
 
+local scan = require("scan")
+local text = require("text")
+
 local R = {}
 
 R.killed = ""                   -- what was cut last, for Ctrl+Y
@@ -95,14 +98,8 @@ local LETTERS = "abcdefghijklmnopqrstuvwxyz"
 --------------------------------------------------------------------------
 -- Characters and words
 --------------------------------------------------------------------------
-local function isSpace(c) return c == " " or c == "\t" end
-
--- A letter or a digit: what Alt+B, Alt+F and Alt+D take as a word.
-local function isWordChar(c)
-    local b = c:byte()
-    if not b then return false end
-    return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
-end
+-- (A word for Alt+B, Alt+F and Alt+D: letters and digits, scan.isAlnum;
+-- Ctrl+W's: what isn't a blank, scan.isSpace.)
 
 -- The character at position i (1-based) of s, "" past either end.
 local function at(s, i) return s:sub(i, i) end
@@ -111,31 +108,29 @@ local function at(s, i) return s:sub(i, i) end
 -- word, then over the word.  (pos counts the characters before the
 -- cursor, 0 to #line.)
 local function wordBack(line, pos)
-    while pos > 0 and not isWordChar(at(line, pos)) do pos = pos - 1 end
-    while pos > 0 and isWordChar(at(line, pos)) do pos = pos - 1 end
+    while pos > 0 and not scan.isAlnum(at(line, pos)) do pos = pos - 1 end
+    while pos > 0 and scan.isAlnum(at(line, pos)) do pos = pos - 1 end
     return pos
 end
 
 -- Where a word forward from pos ends.
 local function wordForward(line, pos)
-    while pos < #line and not isWordChar(at(line, pos + 1)) do pos = pos + 1 end
-    while pos < #line and isWordChar(at(line, pos + 1)) do pos = pos + 1 end
+    while pos < #line and not scan.isAlnum(at(line, pos + 1)) do pos = pos + 1 end
+    while pos < #line and scan.isAlnum(at(line, pos + 1)) do pos = pos + 1 end
     return pos
 end
 
 -- Ctrl+W's word: back over spaces, then over what isn't a space.
 local function spacedWordBack(line, pos)
-    while pos > 0 and isSpace(at(line, pos)) do pos = pos - 1 end
-    while pos > 0 and not isSpace(at(line, pos)) do pos = pos - 1 end
+    while pos > 0 and scan.isSpace(at(line, pos)) do pos = pos - 1 end
+    while pos > 0 and not scan.isSpace(at(line, pos)) do pos = pos - 1 end
     return pos
 end
 
 -- A paste's text, as typed: up to its first line break.
-local function firstLine(text)
-    local cut = text:find("\n", 1, true)
-    if cut then text = text:sub(1, cut - 1) end
-    if at(text, #text) == "\r" then text = text:sub(1, -2) end
-    return text
+local function firstLine(s)
+    local first = text.cut(s, "\n")
+    return text.stripSuffix(first, "\r") or first
 end
 
 --------------------------------------------------------------------------
@@ -157,7 +152,7 @@ local function writePrompt(e)
         if e.promptColour and term.isColour() then term.setTextColour(e.promptColour) end
         write(e.prompt)
         setColour(e.colour)
-        for _ in e.prompt:gmatch("\n") do rows = rows + 1 end
+        rows = rows + text.count(e.prompt, "\n")
     end
     e.x, e.y = term.getCursorPos()
     local w = term.getSize()
@@ -295,10 +290,10 @@ local function moveTo(e, pos)
     changed(e)
 end
 
-local function insert(e, text)
-    if text == "" then return end
-    e.line = e.line:sub(1, e.pos) .. text .. e.line:sub(e.pos + 1)
-    e.pos = e.pos + #text
+local function insert(e, s)
+    if s == "" then return end
+    e.line = e.line:sub(1, e.pos) .. s .. e.line:sub(e.pos + 1)
+    e.pos = e.pos + #s
     changed(e)
 end
 
@@ -352,7 +347,7 @@ local function searchFrom(e, i)
     local s = e.search
     if s.query == "" then s.failed = false; return end
     for k = math.min(i, #e.history), 1, -1 do
-        local found = e.history[k]:find(s.query, 1, true)
+        local found = text.find(e.history[k], s.query)
         if found then
             s.found, s.failed = k, false
             e.line, e.pos = e.history[k], found - 1
@@ -569,12 +564,12 @@ local function onEvent(e, name, a)
         onChar(e, a)
     elseif name == "paste" then
         e.swallow, e.meta = nil, false
-        local text = firstLine(a)
+        local pasted = firstLine(a)
         if e.search then
-            e.search.query = e.search.query .. text
+            e.search.query = e.search.query .. pasted
             searchFrom(e, e.search.found or #e.history)
         else
-            insert(e, text)
+            insert(e, pasted)
         end
     elseif name == "terminate" then
         return "terminate"

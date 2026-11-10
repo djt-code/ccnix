@@ -46,55 +46,36 @@ local cu = require("cu").init("curl", "curl [-fiILOsSv] [-X method] [-d data] [-
 local httpc = require("httpc")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
+local getopt = require("getopt")
 
+local SPEC = "X:d:H:A:u:o:m:LiIOfsSvh"
 local LONG = { request = "X", data = "d", header = "H", ["user-agent"] = "A", user = "u", location = "L",
                include = "i", head = "I", output = "o", ["remote-name"] = "O", fail = "f", ["max-time"] = "m",
                silent = "s", ["show-error"] = "S", verbose = "v", help = "h" }
-local TAKES = { X = true, d = true, H = true, A = true, u = true, o = true, m = true }
-local FLAGS = { L = true, i = true, I = true, O = true, f = true, s = true, S = true, v = true, h = true }
 
--- the options (each a list of its values, in order) and the URLs
+-- the options (each a list of its values, in order) and the URLs.  As
+-- curl, options may come after a URL too: getopt reads up to the first
+-- URL, which is kept, then on from the arg after it; after "--" all are
+-- URLs.
 local opts, urls = {}, {}
 do
-    local args, i = { ... }, 1
-    local function add(c, v) opts[c] = opts[c] or {}; table.insert(opts[c], v) end
-    while i <= #args do
-        local a = args[i]
-        if a == "--" then
-            for k = i + 1, #args do urls[#urls + 1] = args[k] end
-            break
-        elseif a:sub(1, 2) == "--" then
-            local name, value = text.cut(a:sub(3), "=")     -- (--name or --name=value)
-            if name == "" then name, value = a:sub(3), nil end
-            local c = LONG[name]
-            if not c then cu.usageError("option --" .. name .. ": is unknown") end
-            if TAKES[c] and not value then
-                i = i + 1
-                value = args[i]
-                if value == nil then cu.usageError("option --" .. name .. ": requires parameter") end
-            end
-            add(c, TAKES[c] and value or true)
-        elseif a:sub(1, 1) == "-" and #a > 1 then
-            local j = 2
-            while j <= #a do
-                local c = a:sub(j, j)
-                if TAKES[c] then
-                    local v = a:sub(j + 1)
-                    if v == "" then
-                        i = i + 1
-                        v = args[i]
-                        if v == nil then cu.usageError("option -" .. c .. ": requires parameter") end
-                    end
-                    add(c, v)
-                    break
-                elseif FLAGS[c] then add(c, true)
-                else cu.usageError("option -" .. c .. ": is unknown") end
-                j = j + 1
-            end
-        else
-            urls[#urls + 1] = a
+    local args = { ... }
+    while #args > 0 do
+        local given, rest, order = getopt.parse(args, SPEC, LONG)
+        if not given then cu.usageError(rest) end
+        for _, o in ipairs(order) do
+            opts[o[1]] = opts[o[1]] or {}
+            table.insert(opts[o[1]], o[2])
         end
-        i = i + 1
+        local used = #args - #rest                  -- (the args the options took, a "--" too)
+        local last = order[#order]
+        if used > 0 and args[used] == "--" and not (last and last[2] == "--") then   -- (all URLs from here)
+            for _, u in ipairs(rest) do urls[#urls + 1] = u end
+            break
+        end
+        if rest[1] then urls[#urls + 1] = table.remove(rest, 1) end
+        args = rest
     end
 end
 local function last(c) return opts[c] and opts[c][#opts[c]] end
@@ -119,15 +100,12 @@ local body
 if opts.d then
     local parts = {}
     for _, d in ipairs(opts.d) do
-        if d:sub(1, 1) == "@" then
-            local h = cu.open(d:sub(2) == "" and "-" or d:sub(2))
-            if not h then return fail(26, "can't read " .. d:sub(2)) end
-            local kept, text = {}, cu.readAll(h)            -- (the file without its CR and LF characters)
-            for k = 1, #text do
-                local c = text:sub(k, k)
-                if c ~= "\r" and c ~= "\n" then kept[#kept + 1] = c end
-            end
-            d = table.concat(kept)
+        local file = text.stripPrefix(d, "@")
+        if file then
+            local h = cu.open(file == "" and "-" or file)
+            if not h then return fail(26, "can't read " .. file) end
+            d = cu.readAll(h)                               -- (the file without its CR and LF characters)
+            d = text.replace(text.replace(d, "\r", ""), "\n", "")
             cu.close(h)
         end
         parts[#parts + 1] = d
@@ -146,11 +124,11 @@ if opts.d then
 end
 local method = last("X") or (opts.I and "HEAD") or (body and "POST") or "GET"
 local user = last("u")
-if user and not user:find(":", 1, true) then
+if user and not text.contains(user, ":") then
     io.write("Enter host password for user '" .. user .. "': ")
     user = user .. ":" .. (read("*") or "")
 end
-local timeout = last("m") and tonumber(last("m"))
+local timeout = last("m") and convert.toNumber(last("m"))
 if last("m") and not timeout then cu.usageError("bad -m " .. last("m")) end
 
 -- where the body goes
@@ -171,7 +149,7 @@ if outName then
     if not out then return fail(23, "can't write " .. outName) end
 end
 local function emit(s)
-    if out then out:write(s) else io.write(screen and s:gsub("\r\n", "\n") or s) end
+    if out then out:write(s) else io.write(screen and (text.replace(s, "\r\n", "\n")) or s) end
 end
 
 local failing
@@ -186,8 +164,8 @@ local resp, why, kind = httpc.request({
         end
     end,
     sink = function(s) if not failing then emit(s) end end,
-    debug = opts.v and function(k, text)
-        printError((k == "out" and "> " or k == "in" and "< " or "* ") .. text)
+    debug = opts.v and function(k, line)
+        printError((k == "out" and "> " or k == "in" and "< " or "* ") .. line)
     end or nil,
 })
 if out then out:close() end

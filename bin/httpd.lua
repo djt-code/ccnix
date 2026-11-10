@@ -51,11 +51,14 @@ local cu = require("cu").init("httpd", "httpd [-L] [-p port] [root]")
 local net = require("net")
 local httpd = require("httpd")
 local text = require("text")
+local convert = require("convert")
+local path = require("path")
 
 local opts, operands = cu.getopt({ ... }, "Lp:")
 if #operands > 1 then cu.usageError() end
 local root = operands[1] and shell.resolve(operands[1]) or settings.get("httpd.root") or "/www"
-local port = tonumber(opts.p or settings.get("httpd.port") or 80)
+local port
+if opts.p then port = convert.toInteger(opts.p) else port = tonumber(settings.get("httpd.port") or 80) end
 if not port or port < 1 or port > 65535 or port % 1 ~= 0 then cu.usageError("bad port " .. tostring(opts.p or settings.get("httpd.port"))) end
 local listing = not opts.L and settings.get("httpd.listing") ~= false
 local index = {}
@@ -69,7 +72,8 @@ if not fs.isDir(root) then cu.fail("no folder " .. root .. ": make it, or sysctl
 -- each request, and what failed, to the system log (and this screen)
 local syslog = require("log").new("httpd", settings.get("httpd.facility") or "local7", { perror = true })
 local function log(s)
-    if text.startsWith(s, "error: ") then syslog.err(s:sub(#"error: " + 1)) else syslog.info(s) end
+    local err = text.stripPrefix(s, "error: ")
+    if err then syslog.err(err) else syslog.info(s) end
 end
 local srv = httpd.new({ port = port, log = log })
 -- the script root: in the document root, it answers at its own path there;
@@ -78,9 +82,9 @@ local cgi = settings.get("httpd.cgi")
 if cgi == nil then cgi = "cgi" end
 local pages
 if cgi ~= "" and cgi ~= false then
-    local dir = tostring(cgi):sub(1, 1) == "/" and fs.combine(tostring(cgi), "") or fs.combine(root, tostring(cgi))
+    local dir = path.isAbsolute(tostring(cgi)) and fs.combine(tostring(cgi), "") or fs.combine(root, tostring(cgi))
     local top = fs.combine(root, "")
-    local under = top == "" and dir or (dir:sub(1, #top + 1) == top .. "/" and dir:sub(#top + 2))
+    local under = top == "" and dir or text.stripPrefix(dir, top .. "/")
     pages = "/" .. (under or fs.getName(dir))
     srv:use(httpd.lua({ dir = dir, prefix = pages, debug = settings.get("httpd.debug") == true, log = log }))
     pages = pages .. "/ runs /" .. dir .. (fs.isDir(dir) and "" or " (not there yet)")

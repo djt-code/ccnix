@@ -99,6 +99,7 @@
 
 local scan = require("scan")
 local text = require("text")
+local path = require("path")
 
 local P = {}
 
@@ -120,7 +121,7 @@ local rawResume = coroutine.resume      -- (while a process runs, coroutine.resu
 -- "TERM"; 0 and "0" are 0; nil for one that isn't known.
 function P.signal(s)
     s = tostring(s):upper()
-    if text.startsWith(s, "SIG") then s = s:sub(4) end
+    s = text.stripPrefix(s, "SIG") or s
     if s == "0" then return 0 end
     if P.SIGNALS[s] then return s end
     for name, n in pairs(P.SIGNALS) do if tostring(n) == s then return name end end
@@ -132,30 +133,9 @@ local function copy(t)
     return c
 end
 
--- s without the blanks at its end
-local function trimEnd(s)
-    local e = #s
-    while e >= 1 and scan.isSpace(s:sub(e, e)) do e = e - 1 end
-    return s:sub(1, e)
-end
-
--- A command line's program name: its first word, after the last / in it
+-- A command line's program name: its first word's last name
 local function programName(cmd)
-    local word = scan.new(cmd):readWhile(function(c) return not scan.isSpace(c) end)
-    local _, name = text.cutLast(word, "/")
-    return name or word
-end
-
--- The lines of text s (without their newlines).
-local function splitLines(s)
-    local out, pos = {}, 1
-    while pos <= #s do
-        local nl = s:find("\n", pos, true)
-        if not nl then out[#out + 1] = s:sub(pos); break end
-        out[#out + 1] = s:sub(pos, nl - 1)
-        pos = nl + 1
-    end
-    return out
+    return path.basename(text.words(cmd)[1] or "")
 end
 
 -- An error as its message and the coroutine it happened in: CC:T's
@@ -171,13 +151,14 @@ end
 -- The traceback of coroutine co, which failed with msg: its lines after
 -- the message, tabs as two spaces, at most P.TRACE of them.
 local function traceOf(co, msg)
-    local ok, text = pcall(debug.traceback, co, msg)
-    if not ok or type(text) ~= "string" then return {} end
-    if text:sub(1, #msg) == msg then text = text:sub(#msg + 2) end      -- (the message, and its newline)
+    local ok, trace = pcall(debug.traceback, co, msg)
+    if not ok or type(trace) ~= "string" then return {} end
+    local after = text.stripPrefix(trace, msg)
+    if after then trace = after:sub(2) end                      -- (the message, and its newline)
     local out = {}
-    for _, line in ipairs(splitLines(text)) do
+    for _, line in ipairs(text.lines(trace)) do
         if #out == P.TRACE then out[#out + 1] = "  ..."; break end
-        out[#out + 1] = (line:gsub("\t", "  "))
+        out[#out + 1] = (text.replace(line, "\t", "  "))
     end
     return out
 end
@@ -190,7 +171,7 @@ local function envApi(env)
             return env[name]
         end,
         setenv = function(name, value)
-            if type(name) ~= "string" or name == "" or name:find("=", 1, true) then error("bad argument #1 (a name expected)", 2) end
+            if type(name) ~= "string" or name == "" or text.contains(name, "=") then error("bad argument #1 (a name expected)", 2) end
             env[name] = value ~= nil and tostring(value) or nil
         end,
         environ = function() return copy(env) end,
@@ -214,9 +195,9 @@ function P.serviceNames(settingsT, known)
     local names, seen = {}, {}
     for _, key in ipairs(settingsT.getNames()) do
         -- service.<name>.cmd, the name not empty
-        local n = #key > #"service..cmd" and text.startsWith(key, "service.") and text.endsWith(key, ".cmd")
-            and key:sub(#"service." + 1, -#".cmd" - 1)
-        if n and not seen[n] then seen[n] = true; names[#names + 1] = n end
+        local inner = text.stripPrefix(key, "service.")
+        local n = inner and text.stripSuffix(inner, ".cmd")
+        if n and n ~= "" and not seen[n] then seen[n] = true; names[#names + 1] = n end
     end
     for n in pairs(known or {}) do
         if not seen[n] then seen[n] = true; names[#names + 1] = n end
@@ -238,7 +219,7 @@ function P.serviceStatus(settingsT, K)
         if svc.term and svc.term.getLine then
             local _, h = svc.term.getSize()
             for y = 1, h do
-                local l = trimEnd(svc.term.getLine(y))
+                local l = text.trimEnd((svc.term.getLine(y)))
                 if l ~= "" then lines[#lines + 1] = l end
             end
         end
@@ -340,21 +321,20 @@ function P.new(o)
         local w, h = win.getSize()
         for r = 1, h - 1 do
             local i = #hist + r - sb.back
-            local text, tf, tb
-            if i <= #hist then text, tf, tb = hist[i][1], hist[i][2], hist[i][3]
-            else text, tf, tb = win.getLine(i - #hist) end
-            if #text ~= w then
-                text = (text .. (" "):rep(w)):sub(1, w)
-                tf, tb = (tf .. ("0"):rep(w)):sub(1, w), (tb .. ("f"):rep(w)):sub(1, w)
+            local line, tf, tb
+            if i <= #hist then line, tf, tb = hist[i][1], hist[i][2], hist[i][3]
+            else line, tf, tb = win.getLine(i - #hist) end
+            if #line ~= w then
+                line, tf, tb = text.padRight(line, w), text.padRight(tf, w, "0"), text.padRight(tb, w, "f")
             end
             out.setCursorPos(1, r)
-            out.blit(text, tf, tb)
+            out.blit(line, tf, tb)
         end
         out.setCursorPos(1, h)
         out.setBackgroundColour(32768)          -- (black)
         out.setTextColour(16)                   -- (yellow)
         out.clearLine()
-        out.write(("scrollback: " .. sb.back .. " up; Shift+PgUp/PgDn; a key: back"):sub(1, w))
+        out.write(text.truncate("scrollback: " .. sb.back .. " up; Shift+PgUp/PgDn; a key: back", w))
         out.setCursorBlink(false)
     end
 
@@ -624,7 +604,7 @@ function P.new(o)
             sid = session and pid or parent.sid,
             pgid = (session or spec.pgid == true) and pid or tonumber(spec.pgid) or parent.pgid,
         }
-        if p.name:sub(-4) == ".lua" then p.name = p.name:sub(1, -5) end
+        p.name = text.stripSuffix(p.name, ".lua") or p.name
         local held = K.ttys[tty]
         if session and tty ~= "?" and not (held and K.procs[held.sid]) then   -- (one a live session holds stays its)
             K.ttys[tty] = { sid = pid, fg = pid }
@@ -848,12 +828,12 @@ function P.new(o)
     function K.logLine(p, line)
         local err = p.logerr
         p.logerr = nil
-        line = trimEnd(line)
+        line = text.trimEnd(line)
         if line == "" then return end
         local sev = err and 3 or 6
         -- "<n>" first, n 0-7: the line's severity (syslog's way)
         local n = line:sub(2, 2)
-        if line:sub(1, 1) == "<" and line:sub(3, 3) == ">" and scan.oneOf("01234567")(n) then
+        if text.startsWith(line, "<") and line:sub(3, 3) == ">" and scan.isOctalDigit(n) then
             sev, line = tonumber(n), line:sub(4)
         end
         K.log({ fac = 3, sev = sev, app = p.service or p.name, pid = p.pid, msg = line })
@@ -966,7 +946,7 @@ function P.new(o)
         local okH, host = pcall(hostname)
         put("init panicked at " .. (L and L.stamp(now()) or tostring(now())) .. " on " .. (okH and tostring(host) or "?"))
         put("error: " .. tostring(err))
-        for _, line in ipairs(splitLines(tostring(trace or ""))) do put(line) end
+        for _, line in ipairs(text.lines(tostring(trace or ""))) do put(line) end
         put("")
         put("processes:")
         put("  PID  PPID  PGID TTY    STAT   TIME CMD")
@@ -1016,7 +996,7 @@ function P.new(o)
         local inRow = 1
         local h = fsT.exists(countFile) and fsT.open(countFile, "r")
         if h then
-            local saved = splitLines(h.readAll() or "")
+            local saved = text.lines(h.readAll() or "")
             h.close()
             local n, at = tonumber(saved[1] or ""), tonumber(saved[2] or "")
             if n and at and now - at < P.PANIC_WINDOW then inRow = n + 1 end
@@ -1036,12 +1016,12 @@ function P.new(o)
     function K.lastPanic()
         if not (fsT and fsT.exists(P.PANIC)) then return nil end
         local h = fsT.open(P.PANIC, "r")
-        local text = h and h.readAll() or ""
+        local report = h and h.readAll() or ""
         if h then h.close() end
         local errLine = "?"
-        local prefix = "error: "
-        for _, line in ipairs(splitLines(text)) do
-            if line:sub(1, #prefix) == prefix then errLine = line:sub(#prefix + 1); break end
+        for _, line in ipairs(text.lines(report)) do
+            local said = text.stripPrefix(line, "error: ")
+            if said then errLine = said; break end
         end
         local old = P.PANIC .. ".1"
         if fsT.exists(old) then fsT.delete(old) end

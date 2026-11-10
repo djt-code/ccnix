@@ -73,6 +73,7 @@
 
 local net = require("net")
 local text = require("text")
+local convert = require("convert")
 local D = {}
 
 local TIMEOUT, ROUNDS = 2, 2    -- seconds a server has to answer; times round them all
@@ -102,10 +103,7 @@ local PROTO = { stream = "tcp", dgram = "udp", raw = "icmp" }
 
 local function has(flags, f) return math.floor((flags or 0) / f) % 2 == 1 end
 -- name without one "." at its end (a fully qualified name's root)
-local function dropDot(name)
-    if text.endsWith(name, ".") then return name:sub(1, -2) end
-    return name
-end
+local function dropDot(name) return text.stripSuffix(name, ".") or name end
 local function lower(name) return dropDot(tostring(name):lower()) end
 
 --------------------------------------------------------------------------
@@ -415,7 +413,7 @@ function D.getaddrinfo(node, service, hints)
 
     local ports = {}            -- by socket type
     if service ~= nil then
-        local n = tonumber(service)
+        local n = type(service) == "number" and service or convert.toInteger(service)
         local kept = {}
         for _, t in ipairs(types) do
             local port = n

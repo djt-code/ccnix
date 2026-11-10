@@ -16,6 +16,8 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("kill", "kill [-s signal | -signal] [--] pid|-pgid... | kill -l")
 local P = require("proc")              -- the module, for the signal names; the running init is _G.proc
+local text = require("text")
+local convert = require("convert")
 local args = { ... }
 
 if args[1] == "-l" then
@@ -26,14 +28,17 @@ if args[1] == "-l" then
     return cu.exit()
 end
 
+-- (read by hand, not getopt: -9 and -KILL are signals, and a -pgid can
+-- follow -s TERM without a --)
 local sig, i = "TERM", 1
+local named = args[1] and args[1] ~= "--" and text.stripPrefix(args[1], "-")    -- -signal
 if args[1] == "-s" then
     sig = args[2] and P.signal(args[2])
     if not sig then cu.usageError("unknown signal " .. tostring(args[2])) end
     i = 3
-elseif args[1] and #args[1] > 1 and args[1]:sub(1, 1) == "-" and args[1] ~= "--" then     -- -signal
-    sig = P.signal(args[1]:sub(2))
-    if not sig then cu.usageError("unknown signal " .. args[1]:sub(2)) end
+elseif named and named ~= "" then
+    sig = P.signal(named)
+    if not sig then cu.usageError("unknown signal " .. named) end
     i = 2
 end
 if args[i] == "--" then i = i + 1 end
@@ -45,7 +50,7 @@ if not proc then
     return cu.exit()
 end
 for k = i, #args do
-    local pid = cu.int(args[k])
+    local pid = convert.toInteger(args[k])
     if not pid or pid == 0 then
         cu.fail(args[k] .. ": not a process ID")
     else

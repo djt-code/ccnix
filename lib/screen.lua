@@ -71,9 +71,9 @@ Session.__index = Session
 -- else the CraftOS shell (nil).
 local function loginShell()
     if not (settings and settings.get("ccsh.login")) then return nil end
-    local path = ccnix and ccnix.find and ccnix.find("bin/ccsh.lua")
-    if not path then return nil end
-    return text.endsWith(path, ".lua") and path:sub(1, -5) or path
+    local ccsh = ccnix and ccnix.find and ccnix.find("bin/ccsh.lua")
+    if not ccsh then return nil end
+    return text.stripSuffix(ccsh, ".lua") or ccsh
 end
 
 function M.newSession(proc, opts)
@@ -96,8 +96,8 @@ local function keepHistory(win)
     local scroll = t.scroll
     t.scroll = function(n)
         for row = 1, math.min(n, select(2, t.getSize())) do
-            local text, fg, bg = t.getLine(row)
-            win.hist[#win.hist + 1] = { text, fg, bg }
+            local line, fg, bg = t.getLine(row)
+            win.hist[#win.hist + 1] = { line, fg, bg }
             if #win.hist > M.HISTORY then table.remove(win.hist, 1) end
         end
         return scroll(n)
@@ -263,19 +263,19 @@ function Display:statusText()
     local right = "[" .. s.name .. "] " .. (os.date and os.date("%H:%M") or "") .. " "
     local room = self.w - #right
     if #left > room then left = left:sub(1, math.max(0, room - 1)) .. ">" end
-    return left .. (" "):rep(math.max(0, room - #left)) .. right
+    if #left < room then left = text.padRight(left, room) end
+    return left .. right
 end
 
 function Display:drawStatus()
     if not self.status then return end
-    local text = self:statusText()
-    text = (text .. (" "):rep(self.w)):sub(1, self.w)
+    local line = text.padRight(self:statusText(), self.w)
     local fg, bg = ("f"):rep(self.w), ("d"):rep(self.w)
     -- the current window's name, white behind it
     local s = self.s
     if not (self.msg and self.clock() < self.msgUntil) and s.current then
         local key = s.current.n .. "*"
-        local at = text:find(key, 1, true)
+        local at = text.find(line, key)
         if at then
             local len = #key + #s:title(s.current)
             bg = bg:sub(1, at - 1) .. ("0"):rep(len) .. bg:sub(at + len)
@@ -283,7 +283,7 @@ function Display:drawStatus()
         end
     end
     self.t.setCursorPos(1, self.h)
-    self.t.blit(text, fg, bg)
+    self.t.blit(line, fg, bg)
 end
 
 -- Rows from the window's scrollback and screen, `back` rows up.
@@ -294,16 +294,14 @@ function Display:drawBack()
     self.back = math.max(0, math.min(self.back, #hist))
     for r = 1, rows do
         local i = #hist + r - self.back
-        local text, fg, bg
-        if i <= #hist then text, fg, bg = hist[i][1], hist[i][2], hist[i][3]
-        else text, fg, bg = win.term.getLine(i - #hist) end
-        if #text ~= self.w then
-            text = (text .. (" "):rep(self.w)):sub(1, self.w)
-            fg = (fg .. ("0"):rep(self.w)):sub(1, self.w)
-            bg = (bg .. ("f"):rep(self.w)):sub(1, self.w)
+        local line, fg, bg
+        if i <= #hist then line, fg, bg = hist[i][1], hist[i][2], hist[i][3]
+        else line, fg, bg = win.term.getLine(i - #hist) end
+        if #line ~= self.w then
+            line, fg, bg = text.padRight(line, self.w), text.padRight(fg, self.w, "0"), text.padRight(bg, self.w, "f")
         end
         self.t.setCursorPos(1, r)
-        self.t.blit(text, fg, bg)
+        self.t.blit(line, fg, bg)
     end
     self.last = {}
 end
@@ -315,7 +313,7 @@ function Display:drawHelp()
     t.clear()
     for i, line in ipairs(HELP) do
         t.setCursorPos(1, i)
-        t.write(line:sub(1, self.w))
+        t.write(text.truncate(line, self.w))
     end
     self.last = {}
 end
@@ -339,12 +337,12 @@ function Display:draw()
     if self.shown ~= win then self.shown, self.last = win, {} end
     local rows = self.status and h - 1 or h
     for r = 1, rows do
-        local text, fg, bg = win.term.getLine(r)
+        local line, fg, bg = win.term.getLine(r)
         local prev = self.last[r]
-        if text and not (prev and prev[1] == text and prev[2] == fg and prev[3] == bg) then
+        if line and not (prev and prev[1] == line and prev[2] == fg and prev[3] == bg) then
             t.setCursorPos(1, r)
-            t.blit(text, fg, bg)
-            self.last[r] = { text, fg, bg }
+            t.blit(line, fg, bg)
+            self.last[r] = { line, fg, bg }
         end
     end
     self:drawStatus()

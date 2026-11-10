@@ -23,6 +23,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside pc/
 local net = require("net")
+local text = require("text")
 local args = { ... }
 
 shell.run("ip", "forward", "on")
@@ -44,12 +45,12 @@ if not S then
 end
 S.forward = true
 
-local function line(y, text, colour)
+local function line(y, s, colour)
     local w = term.getSize()
     term.setCursorPos(1, y)
     term.clearLine()
     if colour and term.isColour() then term.setTextColour(colour) end
-    term.write(text:sub(1, w))
+    term.write(text.truncate(s, w))
     term.setTextColour(colours.white)
 end
 

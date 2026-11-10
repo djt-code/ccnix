@@ -97,7 +97,7 @@ end
 while optionName(args[1]) do
     local o = table.remove(args, 1)
     local name = optionName(o):lower()
-    if ("details"):sub(1, #name) == name then details = true
+    if text.startsWith("details", name) then details = true
     else
         cu.err('no option "' .. o .. '"')
         printError("usage: ip [-d[etails]] [<command> ...]  (ip help lists the commands)")
@@ -169,7 +169,7 @@ local function pick(s, list)
     for _, w in ipairs(list) do
         for k = 1, #w do
             local name = k == 1 and w[1] or w[k + 1]
-            if type(name) == "string" and name:sub(1, #s) == s then
+            if type(name) == "string" and text.startsWith(name, s) then
                 if #s >= w[2] then found[#found + 1] = w else short[#short + 1] = w end
                 break
             end
@@ -282,7 +282,8 @@ if args[1] ~= nil then
     local why
     cmd, why = pick(args[1], COMMANDS)
     if not cmd then
-        cu.err(text.startsWith(why, 'no "') and ('no command "' .. why:sub(#'no "' + 1)) or why)
+        local unknown = text.stripPrefix(why, 'no "')
+        cu.err(unknown and ('no command "' .. unknown) or why)
         printError("commands: " .. shortForms(COMMANDS))
         printError("ip help says what each does")
         return cu.exit(2)
@@ -354,7 +355,7 @@ elseif cmd == "address" then
         if not (iface and cidr) then badWords(cmd, "add takes an interface and its address") end
         noMore(5)
         if not net.link(iface) then badWords(cmd, "bad VLAN in " .. iface .. " (1-4094)") end
-        if not net.parseCIDR(cidr) or not cidr:find("/", 1, true) then badWords(cmd, "give the address with its prefix: 10.0.1.5/24") end
+        if not net.parseCIDR(cidr) or not text.contains(cidr, "/") then badWords(cmd, "give the address with its prefix: 10.0.1.5/24") end
         settings.set("net.if." .. iface, cidr)
         save()
         if S then

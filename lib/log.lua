@@ -188,9 +188,7 @@ end
 -- now.  host is nil when it didn't say.
 function L.decode(s)
     s = tostring(s)
-    local to = #s       -- (the line ends at the end dropped)
-    while to > 0 and (s:sub(to, to) == "\r" or s:sub(to, to) == "\n") do to = to - 1 end
-    s = s:sub(1, to)
+    s = text.trimEnd(s)     -- (the line end dropped, and any blanks before it)
     local rec = { fac = 1, sev = 5, time = os.epoch("utc") }
     local pri, after = readPri(s)
     if not pri or tonumber(pri) > 191 then rec.msg = s; return rec end
@@ -200,10 +198,8 @@ function L.decode(s)
     local ts, host, app, pid, _, sd = read5424(rest)
     if ts then
         rec.stamp, rec.host, rec.app, rec.pid = dash(ts), dash(host), dash(app), dash(pid)
-        local msg
-        if sd:sub(1, 1) == "-" then
-            msg = sd:sub(2)
-        else
+        local msg = text.stripPrefix(sd, "-")       -- (no structured data)
+        if not msg then
             -- structured data: [id k="v" ...] elements, \] escaped inside
             local i = 1
             while sd:sub(i, i) == "[" do
@@ -217,8 +213,8 @@ function L.decode(s)
             end
             msg = sd:sub(i)
         end
-        if text.startsWith(msg, " ") then msg = msg:sub(2) end
-        if text.startsWith(msg, "\239\187\191") then msg = msg:sub(4) end     -- (a UTF-8 BOM)
+        msg = text.stripPrefix(msg, " ") or msg
+        msg = text.stripPrefix(msg, "\239\187\191") or msg      -- (a UTF-8 BOM)
         rec.msg = msg
         return rec
     end
@@ -244,12 +240,12 @@ local function fallback(rec)
     if not fallbackEngine then
         local ok, D = pcall(require, "syslogd")
         if not ok or type(D) ~= "table" then return end
-        local text = D.DEFAULT
+        local conf = D.DEFAULT
         if fs.exists(D.CONF) and not fs.isDir(D.CONF) then
             local h = fs.open(D.CONF, "r")
-            if h then text = h.readAll() or ""; h.close() end
+            if h then conf = h.readAll() or ""; h.close() end
         end
-        fallbackEngine = D.new({ rules = (D.parse(text)), fs = fs, files = true,
+        fallbackEngine = D.new({ rules = (D.parse(conf)), fs = fs, files = true,
             maxSize = D.size(settings.get("syslog.maxSize")), keep = tonumber(settings.get("syslog.keep")) })
     end
     pcall(fallbackEngine.route, rec)
@@ -261,7 +257,7 @@ local function programName()
         local p = sh.getRunningProgram()
         if p then
             local name = fs.getName(p)
-            return text.endsWith(name, ".lua") and name:sub(1, -5) or name
+            return text.stripSuffix(name, ".lua") or name
         end
     end
     return "lua"
@@ -291,7 +287,7 @@ function L.new(app, facility, opts)
         local proc = rawget(_G, "proc")
         local pid = opts.pid ~= false and proc and proc.self and proc.self() or nil
         for _, l in ipairs(text.lines(msg)) do
-            if not scan.all(l, scan.isSpace) then       -- (blank lines aren't logged)
+            if not scan.isBlank(l) then                 -- (blank lines aren't logged)
                 if opts.perror then
                     local show = (opts.perror == "stderr" or n <= 3) and printError or print
                     local s = opts.perror == "stderr" and l or os.date("%H:%M ") .. l

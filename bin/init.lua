@@ -58,7 +58,7 @@ local text = require("text")
 -- a program of the repo's (path without .lua): ccnix's, or the one beside this
 local function program(path)
     local found = ccnix and ccnix.find(path .. ".lua")
-    if found then return text.endsWith(found, ".lua") and found:sub(1, -5) or found end
+    if found then return text.stripSuffix(found, ".lua") or found end
     return fs.exists(repo .. "/" .. path .. ".lua") and repo .. "/" .. path or nil
 end
 

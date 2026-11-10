@@ -49,37 +49,11 @@
 local net = require("net")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 
 local H = {}
 H.AGENT = "ccnix-httpc"
 H.MAX_REDIRECTS = 50
-
-local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-function H.base64(s)
-    local out = {}
-    for i = 1, #s, 3 do
-        local a, b, c = s:byte(i, i + 2)
-        local n = a * 65536 + (b or 0) * 256 + (c or 0)
-        local function digit(k) local d = math.floor(n / 64 ^ k) % 64 + 1 return B64:sub(d, d) end
-        out[#out + 1] = digit(3) .. digit(2) .. (b and digit(1) or "=") .. (c and digit(0) or "=")
-    end
-    return table.concat(out)
-end
-
--- %XX (two hex digits) made into the byte; any other % stays as it is
-local function unescape(s)
-    local sc, out = scan.new(s), {}
-    while not sc:atEnd() do
-        if sc:at("%") and scan.isHexDigit(sc:peek(2)) and scan.isHexDigit(sc:peek(3)) then
-            sc:advance()
-            out[#out + 1] = string.char(tonumber(sc:advance(2), 16))
-        else
-            out[#out + 1] = sc:advance()
-        end
-    end
-    return table.concat(out)
-end
 
 -- scheme "://" rest, the scheme a letter then letters, digits and +.-:
 -- the scheme and the rest; nil if url doesn't start with one.
@@ -105,22 +79,24 @@ function H.parseURL(url)
     if scheme ~= "http" then return nil, 'protocol "' .. scheme .. '" not supported (HTTP only)', "protocol" end
     local sc = scan.new(rest)
     local authority = sc:readWhile(function(c) return c ~= "/" and c ~= "?" end)
-    local path = sc:rest()
-    if path == "" or path:sub(1, 1) == "?" then path = "/" .. path end
+    local target = sc:rest()                       -- (the path and query)
+    if target == "" or text.startsWith(target, "?") then target = "/" .. target end
     local user, hostport = text.cutLast(authority, "@")
     if not hostport then user, hostport = nil, authority end
     local host, port = text.cutLast(hostport, ":")
-    if not port or not scan.all(port, scan.isDigit) then host, port = hostport, nil end
+    if not port or not scan.all(port, scan.isDigit) then host, port = hostport, nil end   -- ("" too: host:)
     if host == "" or not scan.all(host, isHostChar) then return nil, "bad host in " .. url, "url" end
     port = (port == nil or port == "") and 80 or tonumber(port)
     if port < 1 or port > 65535 then return nil, "bad port in " .. url, "url" end
-    return { host = host:lower(), port = port, path = path, user = user and unescape(user),
-             url = "http://" .. host:lower() .. (port ~= 80 and (":" .. port) or "") .. path }
+    return { host = host:lower(), port = port, path = target, user = user and convert.urlDecode(user),
+             url = "http://" .. host:lower() .. (port ~= 80 and (":" .. port) or "") .. target }
 end
 
--- A path with its . and .. segments worked out.
-local function dots(path)
-    local before, query = text.cut(path, "?")
+-- A path with its . and .. segments worked out, as RFC 3986's
+-- remove_dot_segments does ("/a/b/.." is "/a/": lib/path's normalize
+-- would drop that last slash, so not that).
+local function dots(target)
+    local before, query = text.cut(target, "?")
     local q = query and ("?" .. query) or ""
     local segs, out = text.split(before, "/", true), {}
     for i = 2, #segs do                            -- (segs[1] is before the leading /)
@@ -137,12 +113,12 @@ function H.resolve(base, loc)
     if schemeOf(loc) then return loc end
     local b = H.parseURL(base)
     local origin = "http://" .. b.host .. (b.port ~= 80 and (":" .. b.port) or "")
-    if loc:sub(1, 2) == "//" then return "http:" .. loc end
-    if loc:sub(1, 1) == "/" then return origin .. dots(loc) end
-    local path = text.cut(b.path, "?")
+    if text.startsWith(loc, "//") then return "http:" .. loc end
+    if text.startsWith(loc, "/") then return origin .. dots(loc) end
+    local basePath = text.cut(b.path, "?")
     if loc == "" then return origin .. b.path end
-    if loc:sub(1, 1) == "?" then return origin .. path .. loc end
-    local folder = text.cutLast(path, "/") .. "/"     -- (the path up to its last /; it starts with one)
+    if text.startsWith(loc, "?") then return origin .. basePath .. loc end
+    local folder = text.cutLast(basePath, "/") .. "/"     -- (the path up to its last /; it starts with one)
     return origin .. dots(folder .. loc)
 end
 
@@ -159,12 +135,10 @@ local function reader(conn, deadline)
     end
     function R.line()
         while true do
-            local i = R.buf:find("\n", 1, true)
-            if i then
-                local l = R.buf:sub(1, i - 1)
-                if text.endsWith(l, "\r") then l = l:sub(1, -2) end
-                R.buf = R.buf:sub(i + 1)
-                return l
+            local l, rest = text.cut(R.buf, "\n")
+            if rest then
+                R.buf = rest
+                return text.stripSuffix(l, "\r") or l
             end
             if #R.buf > 16384 then return nil, "a header line past 16 KiB" end
             local ok, e = more()
@@ -216,7 +190,7 @@ local function requestHeaders(u, opts, auth, body)
         else list[#list + 1] = { name, value } end
     end
     set("Host", u.host .. (u.port ~= 80 and (":" .. u.port) or ""))
-    if auth then set("Authorization", "Basic " .. H.base64(auth)) end
+    if auth then set("Authorization", "Basic " .. convert.toBase64(auth)) end
     set("User-Agent", opts.agent or H.AGENT)
     set("Accept", "*/*")
     for k, v in pairs(opts.headers or {}) do
@@ -316,16 +290,17 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
 
     local parts = {}
     local sink = opts.sink or function(s) parts[#parts + 1] = s end
-    local te, len = resp.headers["transfer-encoding"], tonumber(resp.headers["content-length"] or "")
+    local te, length = resp.headers["transfer-encoding"], resp.headers["content-length"]
+    local len = scan.isUnsigned(length) and tonumber(length)
     if method == "HEAD" or resp.status == 204 or resp.status == 304 or resp.status < 200 then
         -- (no body)
-    elseif te and te:lower():find("chunked", 1, true) then
+    elseif te and text.contains(te:lower(), "chunked") then
         while true do
             local l, e = R.line()
             if not l then return bail(failed(e, "reading a chunk")) end
             local size = scan.new(l)                -- (a chunk's size: blanks, hex digits, anything)
             size:skipSpaces()
-            local n = tonumber(size:readWhile(scan.isHexDigit), 16)
+            local n = convert.toInteger(size:readWhile(scan.isHexDigit), 16)
             if not n then return bail(nil, "a bad chunk size: " .. l:sub(1, 20), "read") end
             if n == 0 then
                 repeat l, e = R.line() until not l or l == ""
