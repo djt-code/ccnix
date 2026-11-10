@@ -15,6 +15,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("uniq", "uniq [-c|-d|-u] [-f fields] [-s chars] [input [output]]")
 local scan = require("scan")
+local text = require("text")
 local opts, ops = cu.getopt({ ... }, "cdf:s:u")
 if #ops > 2 then cu.usageError("too many operands") end
 local nf, ns = cu.int(opts.f or "0"), cu.int(opts.s or "0")
@@ -37,8 +38,8 @@ end
 
 -- io.open's message starts with the path and ": ": keep just the reason
 local function reason(e)
-    local _, rest = scan.cut(e, ":")
-    if rest and scan.startsWith(rest, " ") then return rest:sub(2) end
+    local _, rest = text.cut(e, ":")
+    if rest and text.startsWith(rest, " ") then return rest:sub(2) end
     return e
 end
 

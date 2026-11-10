@@ -33,6 +33,7 @@
 -- understood coming in).
 
 local scan = require("scan")
+local text = require("text")
 
 local L = {}
 
@@ -216,8 +217,8 @@ function L.decode(s)
             end
             msg = sd:sub(i)
         end
-        if scan.startsWith(msg, " ") then msg = msg:sub(2) end
-        if scan.startsWith(msg, "\239\187\191") then msg = msg:sub(4) end     -- (a UTF-8 BOM)
+        if text.startsWith(msg, " ") then msg = msg:sub(2) end
+        if text.startsWith(msg, "\239\187\191") then msg = msg:sub(4) end     -- (a UTF-8 BOM)
         rec.msg = msg
         return rec
     end
@@ -260,7 +261,7 @@ local function programName()
         local p = sh.getRunningProgram()
         if p then
             local name = fs.getName(p)
-            return scan.endsWith(name, ".lua") and name:sub(1, -5) or name
+            return text.endsWith(name, ".lua") and name:sub(1, -5) or name
         end
     end
     return "lua"
@@ -289,7 +290,7 @@ function L.new(app, facility, opts)
         local msg = select("#", ...) > 0 and string.format(fmt, ...) or tostring(fmt)
         local proc = rawget(_G, "proc")
         local pid = opts.pid ~= false and proc and proc.self and proc.self() or nil
-        for _, l in ipairs(scan.lines(msg)) do
+        for _, l in ipairs(text.lines(msg)) do
             if not scan.all(l, scan.isSpace) then       -- (blank lines aren't logged)
                 if opts.perror then
                     local show = (opts.perror == "stderr" or n <= 3) and printError or print

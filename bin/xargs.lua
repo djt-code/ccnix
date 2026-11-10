@@ -29,6 +29,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("xargs", "xargs [-prtx] [-E eofstr | -0] "
     .. "[-I replstr | -L number | -n number] [-s size] [utility [argument...]]")
 local scan = require("scan")
+local text = require("text")
 local opts, ops, order = cu.getopt({ ... }, "prtx0E:I:L:n:s:")
 local mode, count, repl = nil, nil, nil     -- "I", "L" or "n" (the last one given)
 for _, o in ipairs(order) do
@@ -170,7 +171,7 @@ local function run(args)
     if opts.p then
         io.stderr:write(line .. " ?...")
         local answer = cu.readLine(io.stdin)
-        local first = answer and scan.trim(answer):sub(1, 1)      -- (blanks before it are allowed)
+        local first = answer and text.trim(answer):sub(1, 1)      -- (blanks before it are allowed)
         if not (first == "y" or first == "Y") then return end
     elseif opts.t then
         printError(line)

@@ -25,6 +25,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("sort", "sort [-cCmu] [-o output] [-bdfinr] [-t char] [-k keydef]... [file...]")
 local scan = require("scan")
+local text = require("text")
 local opts, files, order = cu.getopt({ ... }, "bcCdfik:mno:rt:u")
 local sep = opts.t
 if sep and #sep ~= 1 then cu.usageError("the -t separator must be one character") end
@@ -221,8 +222,8 @@ if opts.o then
     local h, e = io.open(shell.resolve(opts.o), "wb")
     -- io.open's message starts with the path and ": ": keep just the reason
     local why = tostring(e)
-    local _, rest = scan.cut(why, ":")
-    if rest and scan.startsWith(rest, " ") then why = rest:sub(2) end
+    local _, rest = text.cut(why, ":")
+    if rest and text.startsWith(rest, " ") then why = rest:sub(2) end
     if not h then cu.fail(opts.o .. ": " .. why, 2); return cu.exit() end
     h:write(table.concat(out))
     h:close()

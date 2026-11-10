@@ -14,9 +14,19 @@
 -- A parser written with it reads like the grammar it reads: look at the
 -- next character, decide what it starts, step over it.  The little
 -- languages in ccnix (ex command lines in vi, the colourers in
--- lib/syntax) are read this way rather than with Lua patterns, so each
--- step has a name and a comment saying what it expects.  Lua patterns
--- still do for plain-text finds; lib/regex is for regexes the user types.
+-- lib/syntax, IRC lines, the shell) are read this way rather than with
+-- Lua patterns, so each step has a name and a comment saying what it
+-- expects.  lib/regex is for regexes the user types.
+--
+-- The text libraries, each on the one before:
+--   lib/scan     characters, the scanner, and what shape a string is
+--                (this file)
+--   lib/text     strings as wholes: trimming, splitting and joining,
+--                prefixes, replacing, padding and wrapping, case
+--   lib/convert  text to values and back: numbers, sizes, times, bytes
+--                (hex, base64, UTF-8), escapes, quoting
+--   lib/getopt   command-line options;  lib/glob  wildcards;
+--   lib/path     path strings
 --
 -- A scanner, from scan.new(text [, pos]), is a place in a string:
 --   sc:peek(k)          the k'th character ahead, 1 (the next one) if no k;
@@ -34,6 +44,15 @@
 --                       nothing stepped over) if no name starts here
 --   sc:readNumber()     decimal digits: the number and its text; nil if no
 --                       digit is next
+--   sc:readInteger()    a sign (+ or -, or none) then digits: the number
+--                       and its text; nil, nothing stepped over, if none
+--   sc:readFloat()      a decimal number: a sign, digits with a point
+--                       ("12", "1.5", ".5", "5."), then an exponent
+--                       ("e-3") or not; the number and its text, or nil
+--   sc:readTime()       a time of day, H:MM or H:MM:SS (hours 0-23, two
+--                       digits for minutes and seconds, each 0-59): the
+--                       hours, minutes, seconds (0 if left out) and text;
+--                       nil, nothing stepped over, if it isn't one
 --   sc:readQuoted(q)    a string in quotes q (" or '), stepped over: its
 --                       text with the escapes made into what they stand
 --                       for (\n \t \r, and \ before anything else is that
@@ -56,31 +75,31 @@
 -- anything else ("" and longer strings too).  ASCII only, as Lua's own
 -- %a %d ... are in the C locale:
 --   scan.isDigit     0-9                 scan.isHexDigit  0-9 a-f A-F
+--   scan.isOctalDigit 0-7
 --   scan.isUpper     A-Z                 scan.isLower     a-z
 --   scan.isAlpha     a letter            scan.isAlnum     a letter or digit
 --   scan.isNameStart a letter or _       scan.isNameChar  a letter, digit or _
 --   scan.isSpace     space, tab, newline, return, vertical tab, form feed
 --   scan.isPunct     printable, not a letter, digit or space: ! " # $ ...
+--   scan.isPrintable space to ~ (32-126)
+--   scan.isControl   the control characters: 0-31 and 127
 --   scan.oneOf(chars)    a test: true for any one of the characters in chars
 --
--- And on whole strings, for the shapes that come up everywhere (use these
--- before reaching for a pattern):
---   scan.all(s, test)    true if test holds for every character of s
---                        (true for "")
---   scan.words(s)        the words of s between blanks, as a list
---   scan.trim(s)         s without the blanks at either end
---   scan.split(s, sep)   the pieces of s between each sep (a plain string,
---                        not a pattern), each trimmed, the empty ones
---                        left out: scan.split("#a, #b,", ",") is
---                        { "#a", "#b" }.  scan.split(s, sep, true) keeps
---                        them as they are, empty ones and blanks too.
---   scan.cut(s, sep)     the text before the first sep and after it:
---                        scan.cut("host:6667", ":") is "host", "6667";
---                        s and nil when there's no sep
---   scan.cutLast(s, sep) the same at the last sep
---   scan.startsWith(s, prefix), scan.endsWith(s, suffix)
---   scan.lines(s)        s's lines (after LF or CR LF; a last line
---                        without one too), as a list
+-- What shape a whole string is, each true only when all of s is that
+-- thing (no blanks around it; false for anything not a string):
+--   scan.all(s, test)    test holds for every character of s (true for "")
+--   scan.isBlank(s)      s is "" or only blanks
+--   scan.isUnsigned(s)   digits: "0", "042"
+--   scan.isInteger(s)    a sign or none, then digits: "-3", "+7", "12"
+--   scan.isNumber(s)     a decimal number, as readFloat reads one: "-1.5",
+--                        "2e10", ".5" (not "0x10", "inf" or " 1", which
+--                        Lua's tonumber would take)
+--   scan.isNegative(s)   a number below zero ("-0" isn't)
+--   scan.isHex(s)        hex digits, at least one: "ff", "0A1"
+--   scan.isName(s)       a name: "x", "_tmp2"
+--   scan.isTime(s)       a time of day as readTime reads one: "9:05",
+--                        "23:59:59"
+-- Turning them into values is lib/convert's.
 
 local scan = {}
 
@@ -100,6 +119,7 @@ local function inRange(c, lo, hi)
 end
 
 function scan.isDigit(c) return inRange(c, "0", "9") end
+function scan.isOctalDigit(c) return inRange(c, "0", "7") end
 function scan.isUpper(c) return inRange(c, "A", "Z") end
 function scan.isLower(c) return inRange(c, "a", "z") end
 function scan.isAlpha(c) return scan.isUpper(c) or scan.isLower(c) end
@@ -114,80 +134,17 @@ function scan.isSpace(c) return c == " " or inRange(c, "\t", "\r") end
 -- the printable characters (! to ~) that aren't letters or digits
 function scan.isPunct(c) return inRange(c, "!", "~") and not scan.isAlnum(c) end
 
+function scan.isPrintable(c) return inRange(c, " ", "~") end
+
+function scan.isControl(c)
+    local b = byteOf(c)
+    return b ~= nil and (b < 32 or b == 127)
+end
+
 function scan.oneOf(chars)
     local set = {}
     for i = 1, #chars do set[chars:sub(i, i)] = true end
     return function(c) return set[c] == true end
-end
-
-function scan.all(s, test)
-    for i = 1, #s do
-        if not test(s:sub(i, i)) then return false end
-    end
-    return true
-end
-
-function scan.words(s)
-    local sc, out = scan.new(s), {}
-    sc:skipSpaces()
-    while not sc:atEnd() do
-        out[#out + 1] = sc:readWhile(function(c) return not scan.isSpace(c) end)
-        sc:skipSpaces()
-    end
-    return out
-end
-
-function scan.trim(s)
-    local from, to = 1, #s
-    while from <= to and scan.isSpace(s:sub(from, from)) do from = from + 1 end
-    while to >= from and scan.isSpace(s:sub(to, to)) do to = to - 1 end
-    return s:sub(from, to)
-end
-
-function scan.split(s, sep, keep)
-    local out, from = {}, 1
-    local function piece(text)
-        if keep then out[#out + 1] = text; return end
-        text = scan.trim(text)
-        if text ~= "" then out[#out + 1] = text end
-    end
-    while true do
-        local at = s:find(sep, from, true)
-        if not at then break end
-        piece(s:sub(from, at - 1))
-        from = at + #sep
-    end
-    piece(s:sub(from))
-    return out
-end
-
-function scan.cut(s, sep)
-    local at = s:find(sep, 1, true)
-    if not at then return s, nil end
-    return s:sub(1, at - 1), s:sub(at + #sep)
-end
-
-function scan.cutLast(s, sep)
-    local at, from = nil, 1
-    while true do
-        local found = s:find(sep, from, true)
-        if not found then break end
-        at, from = found, found + 1
-    end
-    if not at then return s, nil end
-    return s:sub(1, at - 1), s:sub(at + #sep)
-end
-
-function scan.startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
-function scan.endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
-
-function scan.lines(s)
-    local out = {}
-    for _, piece in ipairs(scan.split(s, "\n", true)) do
-        out[#out + 1] = scan.endsWith(piece, "\r") and piece:sub(1, -2) or piece
-    end
-    if out[#out] == "" then out[#out] = nil end     -- (the newline at the end ends a line; it doesn't start one)
-    return out
 end
 
 --------------------------------------------------------------------------
@@ -265,6 +222,60 @@ function Scanner:readNumber()
     return tonumber(digits), digits
 end
 
+-- the text sc stepped over since `from`, as a number and as it is
+local function since(sc, from)
+    local text = sc.text:sub(from, sc.i - 1)
+    local signless = text:sub(1, 1) == "+" and text:sub(2) or text
+    return tonumber(signless), text
+end
+
+-- integer: ("+" | "-")? digit+
+function Scanner:readInteger()
+    local from = self.i
+    local _ = self:accept("+") or self:accept("-")
+    if self:readWhile(scan.isDigit) == "" then self.i = from; return nil end
+    return since(self, from)
+end
+
+-- float: ("+" | "-")? (digit+ ("." digit*)? | "." digit+) (("e" | "E") ("+" | "-")? digit+)?
+function Scanner:readFloat()
+    local from = self.i
+    local _ = self:accept("+") or self:accept("-")
+    local whole = self:readWhile(scan.isDigit)
+    local fraction = self:accept(".") and self:readWhile(scan.isDigit) or ""
+    if whole == "" and fraction == "" then self.i = from; return nil end
+    local beforeExponent = self.i
+    if self:accept("e") or self:accept("E") then
+        local _ = self:accept("+") or self:accept("-")
+        if self:readWhile(scan.isDigit) == "" then self.i = beforeExponent end   -- ("2e" is 2, then "e")
+    end
+    return since(self, from)
+end
+
+-- time: digit digit? ":" digit digit (":" digit digit)?, hours 0-23,
+-- minutes and seconds 0-59
+function Scanner:readTime()
+    local from = self.i
+    local function twoDigits()
+        local d = self:peek(1) .. self:peek(2)
+        if not (scan.isDigit(self:peek(1)) and scan.isDigit(self:peek(2))) then return nil end
+        self:advance(2)
+        return tonumber(d)
+    end
+    local function fail() self.i = from; return nil end
+    local hours = self:readWhile(scan.isDigit)
+    if hours == "" or #hours > 2 or tonumber(hours) > 23 or not self:accept(":") then return fail() end
+    local minutes = twoDigits()
+    if not minutes or minutes > 59 then return fail() end
+    local seconds = 0
+    if self:at(":") and scan.isDigit(self:peek(2)) then
+        self:advance()
+        seconds = twoDigits()
+        if not seconds or seconds > 59 then return fail() end
+    end
+    return tonumber(hours), minutes, seconds, self.text:sub(from, self.i - 1)
+end
+
 local ESCAPES = { n = "\n", t = "\t", r = "\r" }
 
 -- quoted: q (any character but q or "\", or "\" then any character)* q
@@ -314,6 +325,36 @@ function Scanner:readRest()
     local s = self:rest()
     self.i = #self.text + 1
     return s
+end
+
+--------------------------------------------------------------------------
+-- The shape of a whole string
+--------------------------------------------------------------------------
+
+function scan.all(s, test)
+    for i = 1, #s do
+        if not test(s:sub(i, i)) then return false end
+    end
+    return true
+end
+
+-- Does `read` (a scanner method) read all of s?
+local function whole(s, read)
+    if type(s) ~= "string" then return false end
+    local sc = scan.new(s)
+    return read(sc) ~= nil and sc:atEnd()
+end
+
+function scan.isBlank(s) return type(s) == "string" and scan.all(s, scan.isSpace) end
+function scan.isUnsigned(s) return whole(s, Scanner.readNumber) end
+function scan.isInteger(s) return whole(s, Scanner.readInteger) end
+function scan.isNumber(s) return whole(s, Scanner.readFloat) end
+function scan.isNegative(s) return scan.isNumber(s) and scan.new(s):readFloat() < 0 end
+function scan.isName(s) return whole(s, Scanner.readName) end
+function scan.isTime(s) return whole(s, Scanner.readTime) end
+
+function scan.isHex(s)
+    return type(s) == "string" and s ~= "" and scan.all(s, scan.isHexDigit)
 end
 
 return scan

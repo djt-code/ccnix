@@ -37,6 +37,7 @@
 -- the session ends with its last window.
 
 local scan = require("scan")
+local text = require("text")
 local readline = require("readline")
 
 local M = {}
@@ -72,7 +73,7 @@ local function loginShell()
     if not (settings and settings.get("ccsh.login")) then return nil end
     local path = ccnix and ccnix.find and ccnix.find("bin/ccsh.lua")
     if not path then return nil end
-    return scan.endsWith(path, ".lua") and path:sub(1, -5) or path
+    return text.endsWith(path, ".lua") and path:sub(1, -5) or path
 end
 
 function M.newSession(proc, opts)
@@ -426,8 +427,8 @@ function Display:event(name, ...)
     if self.prompt then                                    -- naming a window
         local why = self.prompt:event(name, a)
         if why == "enter" then
-            local text = scan.trim(self.prompt.line)
-            s.current.name = text ~= "" and text or nil
+            local title = text.trim(self.prompt.line)
+            s.current.name = title ~= "" and title or nil
             self.prompt = nil
         elseif why then
             self.prompt = nil
@@ -485,9 +486,9 @@ function Display:event(name, ...)
     if name == "key" and (a == keys.leftShift or a == keys.rightShift) then self.shift = true end
     if name == "key_up" and (a == keys.leftShift or a == keys.rightShift) then self.shift = false end
     -- everything else is the window's
-    if name == "key" or name == "key_up" or name == "char" or name == "paste" or scan.startsWith(name, "mouse_") then
+    if name == "key" or name == "key_up" or name == "char" or name == "paste" or text.startsWith(name, "mouse_") then
         local rows = self.status and self.h - 1 or self.h
-        if scan.startsWith(name, "mouse_") and c and c > rows then return nil end   -- (on the status bar)
+        if text.startsWith(name, "mouse_") and c and c > rows then return nil end   -- (on the status bar)
         self.proc.input(s.current.tty, name, ...)
     end
     return nil

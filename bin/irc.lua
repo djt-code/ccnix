@@ -68,7 +68,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("irc", "irc [network | host[:port] [nick]]")
-local scan = require("scan")
+local text = require("text")
 local ircclient = require("ircclient")
 local ircui = require("ircui")
 
@@ -77,8 +77,8 @@ if #args > 3 then cu.usageError() end
 
 -- the scripts that come with it: lib/ircscripts in each of ccnix's lib/s
 local scriptDirs = {}
-for _, entry in ipairs(scan.split(package.path, ";")) do
-    if scan.endsWith(entry, "/lib/?.lua") then
+for _, entry in ipairs(text.split(package.path, ";")) do
+    if text.endsWith(entry, "/lib/?.lua") then
         local dir = entry:sub(1, -#"?.lua" - 1) .. "ircscripts"
         if fs.isDir(dir) then scriptDirs[#scriptDirs + 1] = dir end
     end

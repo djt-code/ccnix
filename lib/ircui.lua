@@ -36,7 +36,7 @@
 -- the line; the wheel scrolls the chat, or the nick list under it.
 
 local irc = require("irc")
-local scan = require("scan")
+local text = require("text")
 local readline = require("readline")
 local ircclient = require("ircclient")
 
@@ -541,7 +541,7 @@ function UI:event(name, a, b, c)
             return
         end
     elseif name == "paste" then
-        local lines = scan.lines(a)
+        local lines = text.lines(a)
         while lines[#lines] == "" do lines[#lines] = nil end
         if #lines > 1 then
             if #lines > 10 then

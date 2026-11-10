@@ -50,7 +50,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("httpd", "httpd [-L] [-p port] [root]")
 local net = require("net")
 local httpd = require("httpd")
-local scan = require("scan")
+local text = require("text")
 
 local opts, operands = cu.getopt({ ... }, "Lp:")
 if #operands > 1 then cu.usageError() end
@@ -59,8 +59,8 @@ local port = tonumber(opts.p or settings.get("httpd.port") or 80)
 if not port or port < 1 or port > 65535 or port % 1 ~= 0 then cu.usageError("bad port " .. tostring(opts.p or settings.get("httpd.port"))) end
 local listing = not opts.L and settings.get("httpd.listing") ~= false
 local index = {}
-for _, item in ipairs(scan.split(tostring(settings.get("httpd.index") or "index.html index.htm"), ",")) do
-    for _, name in ipairs(scan.words(item)) do index[#index + 1] = name end     -- (names between commas or blanks)
+for _, item in ipairs(text.split(tostring(settings.get("httpd.index") or "index.html index.htm"), ",")) do
+    for _, name in ipairs(text.words(item)) do index[#index + 1] = name end     -- (names between commas or blanks)
 end
 
 if not net.stack() then cu.fail("the network isn't up (`ip up`)"); return cu.exit() end
@@ -69,7 +69,7 @@ if not fs.isDir(root) then cu.fail("no folder " .. root .. ": make it, or sysctl
 -- each request, and what failed, to the system log (and this screen)
 local syslog = require("log").new("httpd", settings.get("httpd.facility") or "local7", { perror = true })
 local function log(s)
-    if scan.startsWith(s, "error: ") then syslog.err(s:sub(#"error: " + 1)) else syslog.info(s) end
+    if text.startsWith(s, "error: ") then syslog.err(s:sub(#"error: " + 1)) else syslog.info(s) end
 end
 local srv = httpd.new({ port = port, log = log })
 -- the script root: in the document root, it answers at its own path there;

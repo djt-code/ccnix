@@ -177,6 +177,7 @@
 local args = { ... }
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local scan = require("scan")
+local text = require("text")
 
 -- What a command gets when nothing is redirected: this shell's own.
 local real = {
@@ -299,7 +300,7 @@ local function stream(out, onClose)
         out(s)
         local _, nl = s:gsub("\n", "")
         if nl > 0 then
-            local _, lastLine = scan.cutLast(s, "\n")   -- (what's after the last newline)
+            local _, lastLine = text.cutLast(s, "\n")   -- (what's after the last newline)
             y, base = y + nl, #lastLine
         else
             base = base + #s
@@ -344,7 +345,7 @@ local function stream(out, onClose)
     t.setBackgroundColor, t.getBackgroundColor = t.setBackgroundColour, t.getBackgroundColour
     for k, v in pairs(term.native()) do
         if type(v) == "function" and t[k] == nil then
-            t[k] = (scan.startsWith(k, "get") or scan.startsWith(k, "is")) and function(...) return real.term[k](...) end
+            t[k] = (text.startsWith(k, "get") or text.startsWith(k, "is")) and function(...) return real.term[k](...) end
                 or function() end
         end
     end
@@ -440,7 +441,7 @@ local function isName(s) return isNameStart(s:sub(1, 1)) and scan.all(s, isNameC
 -- name=value: the name and the value, or nil if s isn't a name, = and
 -- anything
 local function assignment(s)
-    local name, value = scan.cut(s, "=")
+    local name, value = text.cut(s, "=")
     if value and isName(name) then return name, value end
 end
 -- true if s is one or more digits
@@ -1419,7 +1420,7 @@ local function findJob(spec, pids)
     local cur, prev = marks()
     if spec == nil or spec == "%" or spec == "%%" or spec == "%+" then return cur end
     if spec == "%-" then return prev end
-    local afterPercent = scan.startsWith(spec, "%") and spec:sub(2) or nil     -- (what follows a %)
+    local afterPercent = text.startsWith(spec, "%") and spec:sub(2) or nil     -- (what follows a %)
     local n = (afterPercent and allDigits(afterPercent) and afterPercent) or (not pids and allDigits(spec) and spec)
     for _, j in ipairs(jobs) do if n and j.id == tonumber(n) then return j end end
     n = allDigits(spec) and spec
@@ -1794,17 +1795,17 @@ function builtins.kill(a, b)
     -- (init's) gets the signal itself, and init says if it's unknown
     local k, sig = 2, "TERM"
     if a[2] == "-s" then sig, k = a[3], 4
-    elseif a[2] and #a[2] > 1 and scan.startsWith(a[2], "-") and a[2] ~= "--" then sig, k = a[2]:sub(2), 3 end
+    elseif a[2] and #a[2] > 1 and text.startsWith(a[2], "-") and a[2] ~= "--" then sig, k = a[2]:sub(2), 3 end
     if a[k] == "--" then k = k + 1 end
     if not sig or not a[k] then b.err("kill: usage: kill [-s signal | -signal] %job|pid..."); return 2 end
     local name = sig:upper()
-    if scan.startsWith(name, "SIG") then name = name:sub(4) end
+    if text.startsWith(name, "SIG") then name = name:sub(4) end
     name = SIGNUMS[name] or name
     local st = 0
     for j = k, #a do
         local job = findJob(a[j], true)
         local proc = rawget(_G, "proc")
-        local number = scan.startsWith(a[j], "-") and a[j]:sub(2) or a[j]      -- (-n: a process group)
+        local number = text.startsWith(a[j], "-") and a[j]:sub(2) or a[j]      -- (-n: a process group)
         if not job and proc and allDigits(number) then
             -- not a job of ours: a process (init's), or -n a process group
             local ok, err = proc.kill(tonumber(a[j]), sig)
@@ -2502,7 +2503,7 @@ local function promptText()
     local ps1 = P.vars.PS1
     if ps1 == nil then return (label and (label .. ":") or "") .. "/" .. shell.dir() .. "$ " end
     local dir = "/" .. shell.dir()
-    local _, lastPart = scan.cutLast(dir, "/")
+    local _, lastPart = text.cutLast(dir, "/")
     local esc = {
         h = label or tostring(os.getComputerID()), H = label or tostring(os.getComputerID()),
         w = dir, W = dir == "/" and "/" or (lastPart ~= "" and lastPart or nil), i = tostring(os.getComputerID()),
@@ -2542,7 +2543,7 @@ local function histTrim()
     local path, max = histFile(), histSize()
     local lines = {}
     if not path then return lines end
-    for _, l in ipairs(scan.split(readFile("/" .. path) or "", "\n", true)) do
+    for _, l in ipairs(text.split(readFile("/" .. path) or "", "\n", true)) do
         if l ~= "" then lines[#lines + 1] = l end
     end
     if #lines > max then

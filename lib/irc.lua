@@ -40,6 +40,7 @@
 -- toUTF8 goes back.  base64 is for SASL PLAIN.
 
 local scan = require("scan")
+local text = require("text")
 
 local I = {}
 
@@ -68,9 +69,9 @@ end
 -- tags = tag *( ";" tag ); tag = key [ "=" value ]
 local function readTags(sc)
     local tags = {}
-    local text = sc:readWhile(function(c) return c ~= " " end)
-    for _, item in ipairs(scan.split(text, ";")) do
-        local key, value = scan.cut(item, "=")
+    local raw = sc:readWhile(function(c) return c ~= " " end)
+    for _, item in ipairs(text.split(raw, ";")) do
+        local key, value = text.cut(item, "=")
         tags[key] = value and unescapeTag(value) or true
     end
     return tags

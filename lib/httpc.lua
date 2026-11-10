@@ -48,6 +48,7 @@
 
 local net = require("net")
 local scan = require("scan")
+local text = require("text")
 
 local H = {}
 H.AGENT = "ccnix-httpc"
@@ -97,7 +98,7 @@ end
 -- url: [scheme "://"] [user "@"] host [":" digits] [path] ["?" query] ["#" fragment]
 function H.parseURL(url)
     if type(url) ~= "string" or url == "" then return nil, "no URL", "url" end
-    url = scan.cut(url, "#")
+    url = text.cut(url, "#")
     local scheme, rest = schemeOf(url)
     if not scheme then scheme, rest = "http", url end
     scheme = scheme:lower()
@@ -106,9 +107,9 @@ function H.parseURL(url)
     local authority = sc:readWhile(function(c) return c ~= "/" and c ~= "?" end)
     local path = sc:rest()
     if path == "" or path:sub(1, 1) == "?" then path = "/" .. path end
-    local user, hostport = scan.cutLast(authority, "@")
+    local user, hostport = text.cutLast(authority, "@")
     if not hostport then user, hostport = nil, authority end
-    local host, port = scan.cutLast(hostport, ":")
+    local host, port = text.cutLast(hostport, ":")
     if not port or not scan.all(port, scan.isDigit) then host, port = hostport, nil end
     if host == "" or not scan.all(host, isHostChar) then return nil, "bad host in " .. url, "url" end
     port = (port == nil or port == "") and 80 or tonumber(port)
@@ -119,9 +120,9 @@ end
 
 -- A path with its . and .. segments worked out.
 local function dots(path)
-    local before, query = scan.cut(path, "?")
+    local before, query = text.cut(path, "?")
     local q = query and ("?" .. query) or ""
-    local segs, out = scan.split(before, "/", true), {}
+    local segs, out = text.split(before, "/", true), {}
     for i = 2, #segs do                            -- (segs[1] is before the leading /)
         local s = segs[i]
         if s == ".." then out[#out] = nil end
@@ -138,10 +139,10 @@ function H.resolve(base, loc)
     local origin = "http://" .. b.host .. (b.port ~= 80 and (":" .. b.port) or "")
     if loc:sub(1, 2) == "//" then return "http:" .. loc end
     if loc:sub(1, 1) == "/" then return origin .. dots(loc) end
-    local path = scan.cut(b.path, "?")
+    local path = text.cut(b.path, "?")
     if loc == "" then return origin .. b.path end
     if loc:sub(1, 1) == "?" then return origin .. path .. loc end
-    local folder = scan.cutLast(path, "/") .. "/"     -- (the path up to its last /; it starts with one)
+    local folder = text.cutLast(path, "/") .. "/"     -- (the path up to its last /; it starts with one)
     return origin .. dots(folder .. loc)
 end
 
@@ -161,7 +162,7 @@ local function reader(conn, deadline)
             local i = R.buf:find("\n", 1, true)
             if i then
                 local l = R.buf:sub(1, i - 1)
-                if scan.endsWith(l, "\r") then l = l:sub(1, -2) end
+                if text.endsWith(l, "\r") then l = l:sub(1, -2) end
                 R.buf = R.buf:sub(i + 1)
                 return l
             end
@@ -228,7 +229,7 @@ local function requestHeaders(u, opts, auth, body)
         sc:skipSpaces()
         local name = sc:readWhile(function(c) return c ~= ":" and c ~= ";" end)
         if name == "" or sc:atEnd() then return nil end
-        return name, sc:advance(), scan.trim(sc:rest())
+        return name, sc:advance(), text.trim(sc:rest())
     end
     for _, line in ipairs(opts.headers or {}) do
         local name, sep, value = headerLine(tostring(line))
@@ -255,7 +256,7 @@ local function statusLine(line)
     if sc:skipSpaces() == 0 then return nil end
     local code = sc:advance(3)
     if #code ~= 3 or not scan.all(code, scan.isDigit) then return nil end
-    return version, code, scan.trim(sc:rest())
+    return version, code, text.trim(sc:rest())
 end
 
 -- One request and its response, on a connection of its own.
@@ -300,9 +301,9 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
             debug("in", l)
             if l == "" then break end
             resp.lines[#resp.lines + 1] = l
-            local name, value = scan.cut(l, ":")        -- (name ":" value)
+            local name, value = text.cut(l, ":")        -- (name ":" value)
             if value and name ~= "" then
-                value = scan.trim(value)
+                value = text.trim(value)
                 name = name:lower()
                 resp.headers[name] = resp.headers[name] and (resp.headers[name] .. ", " .. value) or value
             end

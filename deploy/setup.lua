@@ -116,7 +116,7 @@ local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", 
               "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
 local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/procrun.lua", "lib/cu.lua",
                "bin/syslogd.lua", "bin/logger.lua", "lib/log.lua", "lib/syslogd.lua", "help/syslog.txt" }
-local IRC = { "lib/irc.lua", "lib/scan.lua" }
+local IRC = { "lib/irc.lua" }
 local APPS = {
     mine = { "turtle/mine.lua", TURTLE },
     farm = { "turtle/farm.lua", TURTLE },
@@ -138,7 +138,9 @@ local APPS = {
     ircd = { "bin/ircd.lua", IRC, "lib/ircd.lua", "lib/ircserv.lua", "lib/mc.lua", NET, INIT },
     screen = { "bin/screen.lua", "lib/screen.lua", "lib/readline.lua", INIT },
 }
-local ALWAYS = { "bin/git.lua", "lib/pager.lua", "lib/scan.lua", "deploy/", "help/ccnix.txt", "help/setup.txt" }
+-- (the text libraries, which nearly everything uses: see lib/scan's header)
+local TEXT = { "lib/scan.lua", "lib/text.lua", "lib/convert.lua", "lib/getopt.lua", "lib/glob.lua", "lib/path.lua" }
+local ALWAYS = { "bin/git.lua", "lib/pager.lua", TEXT, "deploy/", "help/ccnix.txt", "help/setup.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
 
 local cloneArgs, apps = {}, {}

@@ -80,6 +80,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("ip", nil)
 local net = require("net")
 local scan = require("scan")
+local text = require("text")
 local args = { ... }
 
 -- options, before the command: -d[etails] (one or two dashes, any cut)
@@ -281,7 +282,7 @@ if args[1] ~= nil then
     local why
     cmd, why = pick(args[1], COMMANDS)
     if not cmd then
-        cu.err(scan.startsWith(why, 'no "') and ('no command "' .. why:sub(#'no "' + 1)) or why)
+        cu.err(text.startsWith(why, 'no "') and ('no command "' .. why:sub(#'no "' + 1)) or why)
         printError("commands: " .. shortForms(COMMANDS))
         printError("ip help says what each does")
         return cu.exit(2)

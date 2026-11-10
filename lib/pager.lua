@@ -31,6 +31,7 @@
 --   q                     back to the shell (what's on screen stays)
 
 local scan = require("scan")
+local text = require("text")
 
 local P = {}
 
@@ -38,9 +39,9 @@ local HSTEP = 8            -- columns per sideways step
 local WHEEL = 3            -- lines per notch of the mouse wheel
 
 -- The text as a list of lines: no carriage returns, tabs as 4 spaces.
-function P.lines(text)
-    text = text:gsub("\r", ""):gsub("\t", "    ")
-    local out = scan.split(text, "\n", true)
+function P.lines(s)
+    s = s:gsub("\r", ""):gsub("\t", "    ")
+    local out = text.split(s, "\n", true)
     if out[#out] == "" and #out > 1 then out[#out] = nil end    -- a final newline isn't a line
     return out
 end
@@ -68,20 +69,20 @@ function P.wrap(lines, w)
     local rows, first = {}, {}
     for i, l in ipairs(lines) do
         first[i] = #rows + 1
-        local text, fg = textOf(l), type(l) == "table" and l[2] or nil
+        local body, fg = textOf(l), type(l) == "table" and l[2] or nil
         local function row(a, b)
-            rows[#rows + 1] = fg and { text:sub(a, b), fg:sub(a, b) } or text:sub(a, b)
+            rows[#rows + 1] = fg and { body:sub(a, b), fg:sub(a, b) } or body:sub(a, b)
         end
-        local pos, n, added = 1, #text, false
+        local pos, n, added = 1, #body, false
         while n - pos + 1 > w do
-            local chunk = text:sub(pos, pos + w)
+            local chunk = body:sub(pos, pos + w)
             -- break at the chunk's last space, if there's text before it
-            local before, after = scan.cutLast(chunk, " ")
+            local before, after = text.cutLast(chunk, " ")
             if after and not scan.all(before, scan.isSpace) then
                 local cut = #before + 1                         -- (where the space is)
                 row(pos, pos + cut - 2)
                 pos = pos + cut
-                while text:sub(pos, pos) == " " do pos = pos + 1 end
+                while body:sub(pos, pos) == " " do pos = pos + 1 end
             else
                 row(pos, pos + w - 1)
                 pos = pos + w

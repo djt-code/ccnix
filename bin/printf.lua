@@ -17,6 +17,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("printf", "printf format [argument...]")
 local scan = require("scan")
+local text = require("text")
 local args = { ... }
 if args[1] == "--" then table.remove(args, 1) end
 if #args == 0 then cu.usageError() end
@@ -110,7 +111,7 @@ local function num(a, int)
     if int then
         -- 0x hex, 0 octal or decimal; all of s must be used ("09" is not)
         local sign, body = "", s
-        if scan.startsWith(s, "+") or scan.startsWith(s, "-") then sign, body = s:sub(1, 1), s:sub(2) end
+        if text.startsWith(s, "+") or text.startsWith(s, "-") then sign, body = s:sub(1, 1), s:sub(2) end
         local d, base, pre = leadingInteger(body)
         n = d and tonumber(d, base)
         if n and sign == "-" then n = -n end

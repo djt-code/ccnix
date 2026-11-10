@@ -1952,13 +1952,27 @@ saying what grammar it reads, and errors give the column. Plain-text
 finds are still fine; `lib/regex` is for the regexes users type (`grep`,
 vi's `/` and `:s`). The header of `lib/scan.lua` lists the API.
 
-The everyday shapes have named helpers there too, so they need no pattern
-either: `scan.trim`, `scan.split(s, ",")` (a list, trimmed),
-`scan.cut(s, "=")` (before and after the first `=`; `cutLast` the last),
-`scan.startsWith`, `scan.endsWith`, `scan.lines`, `scan.words`. A grammar
-bigger than that gets a scanner function of its own, named for what it
-reads; there's no parser generator, as each little language here is small
-and different, and a grammar DSL would be one more notation to read.
+`lib/scan` also says what shape a whole string is: `scan.isBlank`,
+`isUnsigned`, `isInteger`, `isNumber` (a decimal, without the leniencies
+of Lua's `tonumber`: no `0x10`, `inf` or blanks), `isNegative`, `isHex`,
+`isName`, `isTime` (`H:MM[:SS]`). The everyday jobs on strings have
+libraries of their own on top of it, so they need no pattern either; each
+header lists its API:
+
+| Library | For |
+|---|---|
+| `lib/text` | blanks (`trim`, `squeeze`, `words`), pieces (`split(s, ",")`, a trimmed list; `join`; `cut(s, "=")` and `cutLast`; `lines`), ends and insides (`startsWith`, `stripPrefix`, `find` and `contains` as plain text, `count`, `replace`), widths (`padRight`, `padLeft`, `center`, `truncate`, `wrap`) and case (`equalFold`, `capitalize`, `swapCase`) |
+| `lib/convert` | strict readers (`toInteger(s, base)`, `toNumber`), `humanSize`, `duration`, `clock`, `timeOfDay`, bytes (`toHex`/`fromHex`, base64, UTF-8 to CC's Latin-1 and back), C escapes (`unescape`, `escape`), `urlEncode`/`urlDecode`, `html`, `shellQuote` |
+| `lib/getopt` | `getopt.parse(args, "vn:", { output = "o", ["max-time"] = "=" })`: POSIX short options and long ones |
+| `lib/glob` | `*` `?` `[...]` wildcards, with escapes, classes and case folding each optional (IRC masks have neither) |
+| `lib/path` | `basename`, `dirname` (POSIX's), `join`, `normalize`, `resolve`, `segments`, `extension` |
+
+A grammar bigger than that gets a scanner function of its own, named for
+what it reads; there's no parser generator, as each little language here
+is small and different, and a grammar DSL would be one more notation to
+read. These libraries are named for what they work on, and so are many
+variables: `sim/run.py --check` fails a file where a local `text` (or
+`path` ...) hides the library at a place that uses it.
 
 ## Simulators
 

@@ -45,6 +45,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("curl", "curl [-fiILOsSv] [-X method] [-d data] [-H header] [-A agent] [-u user:pass] [-o file] [-m secs] url")
 local httpc = require("httpc")
 local scan = require("scan")
+local text = require("text")
 
 local LONG = { request = "X", data = "d", header = "H", ["user-agent"] = "A", user = "u", location = "L",
                include = "i", head = "I", output = "o", ["remote-name"] = "O", fail = "f", ["max-time"] = "m",
@@ -63,7 +64,7 @@ do
             for k = i + 1, #args do urls[#urls + 1] = args[k] end
             break
         elseif a:sub(1, 2) == "--" then
-            local name, value = scan.cut(a:sub(3), "=")     -- (--name or --name=value)
+            local name, value = text.cut(a:sub(3), "=")     -- (--name or --name=value)
             if name == "" then name, value = a:sub(3), nil end
             local c = LONG[name]
             if not c then cu.usageError("option --" .. name .. ": is unknown") end
@@ -159,7 +160,7 @@ local outName = last("o")
 if opts.O and not outName then
     local u = httpc.parseURL(url)
     if u then
-        local folder, name = scan.cutLast((scan.cut(u.path, "?")), "/")    -- (the path's last part, before any ?query)
+        local folder, name = text.cutLast((text.cut(u.path, "?")), "/")    -- (the path's last part, before any ?query)
         outName = name or folder
     end
     if not outName or outName == "" then return fail(23, "remote file name has no length") end

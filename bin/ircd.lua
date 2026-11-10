@@ -67,6 +67,7 @@ local cu = require("cu").init("ircd", "ircd [-p port]")
 local net = require("net")
 local irc = require("irc")
 local scan = require("scan")
+local text = require("text")
 local ircd = require("ircd")
 local ircserv = require("ircserv")
 local mcLib = require("mc")
@@ -93,7 +94,7 @@ local function readLines(path)
     if not fs.exists(path) then return nil end
     local h = fs.open(path, "r")
     if not h then return nil end
-    local out = scan.lines(h.readAll() or "")
+    local out = text.lines(h.readAll() or "")
     h.close()
     while out[#out] == "" do out[#out] = nil end
     return out

@@ -22,7 +22,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("test", "test [expression]")
-local scan = require("scan")
+local text = require("text")
 local args = { ... }
 
 local function bad(msg) cu.err(msg); cu.exit(2) end
@@ -45,7 +45,7 @@ local function no() return false end
 -- an integer's sign ("+", "-" or "") and its digits without the leading zeros
 local function signAndDigits(s)
     local sign = ""
-    if scan.startsWith(s, "+") or scan.startsWith(s, "-") then sign, s = s:sub(1, 1), s:sub(2) end
+    if text.startsWith(s, "+") or text.startsWith(s, "-") then sign, s = s:sub(1, 1), s:sub(2) end
     local from = 1
     while s:sub(from, from) == "0" do from = from + 1 end
     return sign, s:sub(from)
@@ -75,7 +75,7 @@ local UNARY = {
     ["-x"] = function(p)
         if try(fs.isDir, p) then return true end
         local n = fs.getName(shell.resolve(p))
-        return isFile(p) and (scan.endsWith(n, ".lua") or not n:find(".", 1, true))
+        return isFile(p) and (text.endsWith(n, ".lua") or not n:find(".", 1, true))
     end,
     ["-n"] = function(s) return s ~= "" end,
     ["-z"] = function(s) return s == "" end,

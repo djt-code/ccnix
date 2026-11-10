@@ -50,6 +50,7 @@
 
 local net = require("net")
 local scan = require("scan")
+local text = require("text")
 
 local H = {}
 H.SERVER = "ccnix-httpd"
@@ -77,12 +78,12 @@ H.DEFAULT_TYPE = "application/octet-stream"
 -- Bits
 --------------------------------------------------------------------------
 -- s with every from in it (plain text) made to
-local function replace(s, from, to) return table.concat(scan.split(s, from, true), to) end
+local function replace(s, from, to) return table.concat(text.split(s, from, true), to) end
 
 -- s's pieces between each sep, the empty ones left out (not trimmed)
 local function pieces(s, sep)
     local out = {}
-    for _, piece in ipairs(scan.split(s, sep, true)) do
+    for _, piece in ipairs(text.split(s, sep, true)) do
         if piece ~= "" then out[#out + 1] = piece end
     end
     return out
@@ -132,7 +133,7 @@ function H.parseQuery(q)
     local args = {}
     -- query: pair ("&" pair)*; pair: name ["=" value]
     for _, pair in ipairs(pieces(q or "", "&")) do
-        local k, v = scan.cut(pair, "=")
+        local k, v = text.cut(pair, "=")
         args[H.unescape(replace(k, "+", " "))] = H.unescape(replace(v or "", "+", " "))
     end
     return args
@@ -207,14 +208,14 @@ local function headerLine(line)
     local sc = scan.new(line)
     local name = sc:readWhile(isTokenChar)
     if name == "" or not sc:accept(":") then return nil end
-    return name, scan.trim(sc:rest())
+    return name, text.trim(sc:rest())
 end
 
 -- An absolute-form target ("http://host:port/path?q") made the path and
 -- query alone; any other target as it is.
 local function originForm(target)
     local lower = target:lower()
-    local scheme = (scan.startsWith(lower, "http://") and "http://") or (scan.startsWith(lower, "https://") and "https://")
+    local scheme = (text.startsWith(lower, "http://") and "http://") or (text.startsWith(lower, "https://") and "https://")
     if not scheme then return target end
     local sc = scan.new(target, #scheme + 1)
     sc:readWhile(function(c) return c ~= "/" and c ~= "?" end)     -- (the authority)
@@ -231,7 +232,7 @@ function H.parse(raw)
         return nil
     end
     if s > H.MAX_HEAD then return false, 431 end
-    local lines = scan.lines(raw:sub(1, s - 1) .. "\n")
+    local lines = text.lines(raw:sub(1, s - 1) .. "\n")
     local method, target, major, minor = requestLine(lines[1] or "")
     if not method then return false, 400 end
     if major ~= "1" then return false, 505 end
@@ -255,14 +256,14 @@ function H.parse(raw)
     target = originForm(target)
     if target == "" then target = "/" end
     if target:sub(1, 1) ~= "/" and not (method == "OPTIONS" and target == "*") then return false, 400 end
-    local rawPath, query = scan.cut(target, "?")
+    local rawPath, query = text.cut(target, "?")
     query = query or ""
     local path = H.unescape(rawPath)
     if path:find("\0", 1, true) then return false, 400 end
     local body = raw:sub(e + 1, e + len)
     local args = H.parseQuery(query)
-    local contentType = scan.trim((headers["content-type"] or ""):lower())
-    local form = scan.startsWith(contentType, "application/x-www-form-urlencoded") and H.parseQuery(body) or {}
+    local contentType = text.trim((headers["content-type"] or ""):lower())
+    local form = text.startsWith(contentType, "application/x-www-form-urlencoded") and H.parseQuery(body) or {}
     local params = {}
     for k, v in pairs(args) do params[k] = v end
     for k, v in pairs(form) do params[k] = v end
@@ -275,11 +276,11 @@ end
 function H.parseCookies(s)
     local t = {}
     -- cookies: pair (";" pair)*; pair: name "=" value, the value maybe in "quotes"
-    for _, pair in ipairs(scan.split(s or "", ";")) do
-        local k, v = scan.cut(pair, "=")
+    for _, pair in ipairs(text.split(s or "", ";")) do
+        local k, v = text.cut(pair, "=")
         if v then
-            k, v = scan.trim(k), scan.trim(v)
-            if #v >= 2 and scan.startsWith(v, '"') and scan.endsWith(v, '"') then v = v:sub(2, -2) end
+            k, v = text.trim(k), text.trim(v)
+            if #v >= 2 and text.startsWith(v, '"') and text.endsWith(v, '"') then v = v:sub(2, -2) end
             if k ~= "" then t[k] = v end
         end
     end
@@ -398,7 +399,7 @@ function H.static(opts)
         if not h then return H.page(403, "That can't be read.") end
         local data = h.readAll() or ""
         h.close()
-        local _, ext = scan.cutLast(p, ".")     -- (the extension: after the last ".", in the file's own name)
+        local _, ext = text.cutLast(p, ".")     -- (the extension: after the last ".", in the file's own name)
         if ext == "" or (ext and ext:find("/", 1, true)) then ext = nil end
         return 200, { ["Content-Type"] = H.TYPES[ext and ext:lower()] or H.DEFAULT_TYPE }, data
     end
@@ -571,7 +572,7 @@ function H.lua(opts)
     local fs = opts.fs or fs
     local dir = fs.combine(opts.dir, "")
     local prefix = opts.prefix or "/cgi"
-    while scan.endsWith(prefix, "/") do prefix = prefix:sub(1, -2) end
+    while text.endsWith(prefix, "/") do prefix = prefix:sub(1, -2) end
     local states, templates = {}, {}
 
     -- The script for the part of a path below prefix: its file, its own
@@ -585,7 +586,7 @@ function H.lua(opts)
         local at = dir
         for i, seg in ipairs(segs) do
             local p = fs.combine(at, seg)
-            local file = scan.endsWith(seg, ".lua") and p or (p .. ".lua")
+            local file = text.endsWith(seg, ".lua") and p or (p .. ".lua")
             if fs.exists(file) and not fs.isDir(file) then
                 return file, "/" .. table.concat(segs, "/", i + 1), table.concat(segs, "/", 1, i)
             end
@@ -679,8 +680,8 @@ function H.lua(opts)
             return code, headers, body or ""
         end
 
-        local text = read(script)
-        local fn, err = text and load(text, "@/" .. script, "t", env)
+        local source = read(script)
+        local fn, err = source and load(source, "@/" .. script, "t", env)
         local ok, a, b, c
         if fn then
             ok, a, b, c = xpcall(fn, function(e) return debug.traceback(tostring(e), 2) end)
@@ -689,7 +690,7 @@ function H.lua(opts)
             a = err or ("can't read " .. script)
         end
         if not ok then
-            if opts.log then opts.log("error: " .. req.method .. " " .. req.target .. ": " .. (scan.cut(tostring(a), "\n"))) end
+            if opts.log then opts.log("error: " .. req.method .. " " .. req.target .. ": " .. (text.cut(tostring(a), "\n"))) end
             local status, h, body = H.page(500, "The script " .. req.script .. " failed.")
             if opts.debug then body = replace(body, "</body>", "<pre>" .. H.html(a) .. "</pre></body>") end
             return status, h, body

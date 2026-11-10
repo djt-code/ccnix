@@ -9,6 +9,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("dirname", "dirname string")
 local scan = require("scan")
+local text = require("text")
 local _, ops = cu.getopt({ ... }, "")
 if #ops ~= 1 then cu.usageError(#ops < 1 and "missing operand" or "extra operand") end
 
@@ -29,7 +30,7 @@ else
     if not s:find("/", 1, true) then
         s = "."
     else
-        local parent = scan.cutLast(s, "/")     -- (the last part dropped)
+        local parent = text.cutLast(s, "/")     -- (the last part dropped)
         s = stripSlashes(parent)
         if s == "" then s = "/" end
     end

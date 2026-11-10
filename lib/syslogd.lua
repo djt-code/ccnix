@@ -26,6 +26,7 @@
 
 local L = require("log")
 local scan = require("scan")
+local text = require("text")
 local D = {}
 
 D.CONF = "/etc/syslog.conf"
@@ -69,7 +70,7 @@ local function isFacilityChar(c) return c ~= "." and not scan.isSpace(c) end
 -- the pieces of s between each sep, the empty ones left out (not trimmed)
 local function pieces(s, sep)
     local out = {}
-    for _, piece in ipairs(scan.split(s, sep, true)) do
+    for _, piece in ipairs(text.split(s, sep, true)) do
         if piece ~= "" then out[#out + 1] = piece end
     end
     return out
@@ -123,7 +124,7 @@ local function parseAction(a)
     if a == "*" or a == "/dev/console" then return { kind = "console" } end
     if a:sub(1, 1) == "@" then
         -- @host or @host:port, the port digits
-        local host, port = scan.cut(a:sub(2), ":")
+        local host, port = text.cut(a:sub(2), ":")
         if not (port and host ~= "" and port ~= "" and scan.all(port, scan.isDigit)) then
             host, port = a:sub(2), nil
         end
@@ -132,15 +133,15 @@ local function parseAction(a)
         return { kind = "forward", host = host, port = port }
     end
     -- "-"? then a path from the root
-    local path = scan.startsWith(a, "-") and a:sub(2) or a
-    if scan.startsWith(path, "/") and #path > 1 then return { kind = "file", path = path } end
+    local path = text.startsWith(a, "-") and a:sub(2) or a
+    if text.startsWith(path, "/") and #path > 1 then return { kind = "file", path = path } end
     return nil, "unknown action \"" .. a .. "\" (a /file, /dev/console, * or @host)"
 end
 
 -- line with its comment taken off: from a "#" at the start, or from the
 -- blanks before a "#"
 local function stripComment(line)
-    if scan.startsWith(line, "#") then return "" end
+    if text.startsWith(line, "#") then return "" end
     for k = 2, #line do
         if line:sub(k, k) == "#" and scan.isSpace(line:sub(k - 1, k - 1)) then
             local to = k - 1
@@ -174,14 +175,14 @@ local function notProgSep(c) return not isProgSep(c) end
 
 -- syslog.conf's text as rules: { sels, action, progs }; and its problems,
 -- "line n: why" (the line is left out).
-function D.parse(text)
+function D.parse(conf)
     local rules, problems, progs, n = {}, {}, nil, 0
-    for _, raw in ipairs(scan.lines(tostring(text))) do
+    for _, raw in ipairs(text.lines(tostring(conf))) do
         n = n + 1
-        local line = scan.trim(raw)
+        local line = text.trim(raw)
         local block = blockOf(line)
         if block then
-            block = scan.trim(block)
+            block = text.trim(block)
             if block == "*" or block == "" then progs = nil
             else
                 -- the programs, "," or blanks between them

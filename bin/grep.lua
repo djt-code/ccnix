@@ -19,13 +19,13 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("grep",
     "grep [-E|-F] [-c|-l|-q] [-insvx] [-e patterns] [-f file] [patterns] [file...]")
 local regex = require("regex")
-local scan = require("scan")
+local text = require("text")
 local opts, files, order = cu.getopt({ ... }, "EFce:f:ilnqsvx")
 
 -- the pattern lists from -e and -f, in order; else the first operand
 local ere, fixed, pats, given = false, false, {}, false
 local function addList(s)
-    for _, p in ipairs(scan.split(s, "\n", true)) do pats[#pats + 1] = p end
+    for _, p in ipairs(text.split(s, "\n", true)) do pats[#pats + 1] = p end
 end
 for _, o in ipairs(order) do
     local c, v = o[1], o[2]

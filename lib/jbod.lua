@@ -32,6 +32,7 @@
 -- member's own mount (/disk2/...) are in the pool too.
 
 local scan = require("scan")
+local text = require("text")
 
 local J = {}
 
@@ -139,7 +140,7 @@ function J.new(base, opts)
     -- Paths are relative to the pool's root ("" is the root).  Nothing
     -- starting .jbod at the root is part of it.
     local function hidden(rel)
-        local top = scan.cut(rel, "/")                 -- its first folder (or name)
+        local top = text.cut(rel, "/")                 -- its first folder (or name)
         return top ~= "" and hiddenTop(top)
     end
 
@@ -172,7 +173,7 @@ function J.new(base, opts)
                 for _, name in ipairs(base.list(dir)) do
                     if name:sub(1, #prefix) == prefix then
                         -- after the prefix: "n-total", two numbers
-                        local n, total = scan.cut(name:sub(#prefix + 1), "-")
+                        local n, total = text.cut(name:sub(#prefix + 1), "-")
                         if isNumber(n) and isNumber(total) then
                             byN[tonumber(n)] = base.combine(dir, name)
                             of = math.max(of, tonumber(total))
@@ -300,7 +301,7 @@ function J.new(base, opts)
             local line
             if e then line = data:sub(pos, keep and e or e - 1); pos = e + 1
             else line = data:sub(pos); pos = #data + 1 end
-            if not keep and scan.endsWith(line, "\r") then line = line:sub(1, -2) end
+            if not keep and text.endsWith(line, "\r") then line = line:sub(1, -2) end
             return line
         end
         function h.readAll()
@@ -663,7 +664,7 @@ function J.install(fsTable, opts)
         function fsTable.find(pattern)
             local out = origFind(pattern)
             local parts = {}
-            for _, part in ipairs(scan.split(base.combine(pattern), "/", true)) do  -- (names kept as they are)
+            for _, part in ipairs(text.split(base.combine(pattern), "/", true)) do  -- (names kept as they are)
                 if part ~= "" then parts[#parts + 1] = part end
             end
             if #parts == 0 or not globMatch(parts[1], mount) then return out end

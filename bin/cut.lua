@@ -16,6 +16,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("cut", "cut -b list [-n] | -c list | -f list [-d delim] [-s] [file...]")
 local scan = require("scan")
+local text = require("text")
 local opts, files = cu.getopt({ ... }, "b:c:d:f:ns")
 
 local n = (opts.b and 1 or 0) + (opts.c and 1 or 0) + (opts.f and 1 or 0)
@@ -81,7 +82,7 @@ for l in cu.lines(files) do
             if not opts.s then io.write(l, "\n") end
         else
             local i = 0
-            for _, f in ipairs(scan.split(l, delim, true)) do
+            for _, f in ipairs(text.split(l, delim, true)) do
                 i = i + 1
                 if wanted(i) then t[#t + 1] = f end
             end

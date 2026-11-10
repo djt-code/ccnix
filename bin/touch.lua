@@ -14,6 +14,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("touch", "touch [-acm] [-r ref_file | -t time | -d date_time] file...")
 local scan = require("scan")
+local text = require("text")
 local opts, files = cu.getopt({ ... }, "acmr:t:d:")
 if #files == 0 then cu.usageError("missing file operand") end
 -- month, day, hour, minute and second (strings) all in POSIX's ranges?
@@ -87,7 +88,7 @@ local bump = not (opts.r or opts.t or opts.d) and (opts.m or not opts.a)
 
 -- an fs error without its "/path: " prefix
 local function why(e)
-    local _, reason = scan.cut(tostring(e), ": ")
+    local _, reason = text.cut(tostring(e), ": ")
     return reason or tostring(e)
 end
 
@@ -95,7 +96,7 @@ for _, name in ipairs(files) do
     local path = shell.resolve(name)
     if name == "" then
         cu.fail(": No such file or directory")
-    elseif (scan.endsWith(name, "/") or scan.endsWith(name, "\\")) and not fs.isDir(path) then
+    elseif (text.endsWith(name, "/") or text.endsWith(name, "\\")) and not fs.isDir(path) then
         -- "file/" names a directory, which can't be made here
         if fs.exists(path) then cu.fail(name .. ": Not a directory")
         elseif not opts.c then cu.fail(name .. ": No such file or directory") end

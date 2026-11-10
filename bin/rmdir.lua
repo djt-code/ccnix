@@ -9,7 +9,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("rmdir", "rmdir [-p] dir...")
-local scan = require("scan")
+local text = require("text")
 local opts, dirs = cu.getopt({ ... }, "p")
 if #dirs == 0 then cu.usageError("missing operand") end
 
@@ -35,7 +35,7 @@ end
 -- the part of d before its last slash, when there's a name on both sides
 -- of it ("a/b" gives "a"); nil otherwise
 local function parentOf(d)
-    local before, after = scan.cutLast(d, "/")
+    local before, after = text.cutLast(d, "/")
     if not after or after == "" or before == "" then return nil end
     return before
 end

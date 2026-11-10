@@ -25,6 +25,7 @@
 -- a word ...), steps over the whole of it and paints what it stepped over.
 
 local scan = require("scan")
+local text = require("text")
 local isDigit, isAlnum, isSpace = scan.isDigit, scan.isAlnum, scan.isSpace
 local isNameStart, isNameChar = scan.isNameStart, scan.isNameChar
 
@@ -43,7 +44,7 @@ S.COLOURS = {
 
 local function set(list)
     local t = {}
-    for _, w in ipairs(scan.words(list)) do t[w] = true end
+    for _, w in ipairs(text.words(list)) do t[w] = true end
     return t
 end
 

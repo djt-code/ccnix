@@ -18,6 +18,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("seq", "seq [-w] [-s sep] [-f format] [first [increment]] last")
 local scan = require("scan")
+local text = require("text")
 
 -- Options come first; a negative number ends them (seq -2 2) unless it's
 -- -s's or -f's argument (seq -s -1 5).  cu.getopt would take it for an
@@ -118,8 +119,8 @@ local function show(v)
     local s = string.format("%." .. places .. "f", v)
     -- (no "-0": "-0", then a point or not, then only zeros)
     local afterZero = s:sub(3)
-    if scan.startsWith(afterZero, ".") then afterZero = afterZero:sub(2) end
-    if scan.startsWith(s, "-0") and scan.all(afterZero, scan.oneOf("0")) then s = s:sub(2) end
+    if text.startsWith(afterZero, ".") then afterZero = afterZero:sub(2) end
+    if text.startsWith(s, "-0") and scan.all(afterZero, scan.oneOf("0")) then s = s:sub(2) end
     return s
 end
 local width = opts.w and math.max(#show(first), #show(last)) or 0
@@ -127,7 +128,7 @@ local function padded(v)
     local s = show(v)
     if #s >= width then return s end
     local sign, digits = "", s
-    if scan.startsWith(s, "-") then sign, digits = "-", s:sub(2) end
+    if text.startsWith(s, "-") then sign, digits = "-", s:sub(2) end
     return sign .. ("0"):rep(width - #s) .. digits
 end
 

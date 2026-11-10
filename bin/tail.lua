@@ -17,7 +17,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tail", "tail [-f | -r] [-c number | -n number] [file...]")
-local scan = require("scan")
+local text = require("text")
 local args = { ... }
 if args[1] and args[1]:sub(1, 1) == "-" and cu.isInt(args[1]) then     -- -number
     args[1] = "-n" .. args[1]:sub(2)
@@ -60,7 +60,7 @@ end
 
 -- The lines of s last first (a last line without a newline gets one).
 local function reverse(s)
-    local t, r = scan.split(s, "\n", true), {}
+    local t, r = text.split(s, "\n", true), {}
     if t[#t] == "" then t[#t] = nil end     -- (after the last newline: not a line)
     for i = #t, 1, -1 do r[#r + 1] = t[i] .. "\n" end
     return table.concat(r)

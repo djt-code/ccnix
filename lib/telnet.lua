@@ -17,6 +17,7 @@
 -- 128-159 its 2x3 block graphics (sent as Unicode's sextants, U+1FB00).
 
 local scan = require("scan")
+local text = require("text")
 
 local T = {}
 T.IAC, T.DONT, T.DO, T.WONT, T.WILL, T.SB, T.SE = 255, 254, 253, 252, 251, 250, 240
@@ -362,7 +363,7 @@ function T.terminal(win, colour)
     end
     local function sgr(params)
         local p, i = {}, 1
-        for _, v in ipairs(scan.split(params, ";", true)) do p[#p + 1] = tonumber(v) or 0 end
+        for _, v in ipairs(text.split(params, ";", true)) do p[#p + 1] = tonumber(v) or 0 end
         if #p == 0 then p[1] = 0 end
         while i <= #p do
             local v = p[i]

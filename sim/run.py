@@ -41,8 +41,10 @@ def run_one(path):
 
 
 def check():
-    """Syntax, and CC's limit of 200 locals in scope (see locals.py)."""
+    """Syntax, CC's limit of 200 locals in scope (see locals.py), and
+    libraries hidden by locals of the same name (see shadow.py)."""
     import locals as cclocals
+    import shadow
     load = lua().eval("function(s, n) local f, e = load(s, '@' .. n); return e end")
     bad = 0
     dirs = ["bin", "lib", os.path.join("lib", "ircscripts"), "turtle", "pc", "deploy", "sim", os.path.join("sim", "lib")]
@@ -57,6 +59,11 @@ def check():
                     name, line, most, cclocals.LIMIT)
             elif most > cclocals.LIMIT - 15:
                 print("warn %s:%d: %d locals in scope, close to CC's %d" % (name, line, most, cclocals.LIMIT))
+        if not err:
+            hidden = shadow.check(src)
+            if hidden:
+                err = "; ".join("%s:%d: %s.x used where a local %s hides the library" % (name, n, lib, lib)
+                                for n, lib in hidden)
         print(("FAIL " + err) if err else ("ok   " + name))
         bad += err is not None
     import mkhelp

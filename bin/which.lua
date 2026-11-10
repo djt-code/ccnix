@@ -11,7 +11,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("which", "which [-a] name...")
-local scan = require("scan")
+local text = require("text")
 local opts, names = cu.getopt({ ... }, "a")
 if #names == 0 then cu.usageError("missing operand") end
 
@@ -33,7 +33,7 @@ for _, name in ipairs(names) do
         if name:find("/", 1, true) or name:find("\\", 1, true) then
             add(file(shell.resolve(name)))
         else
-            for _, dir in ipairs(scan.split(shell.path(), ":", true)) do
+            for _, dir in ipairs(text.split(shell.path(), ":", true)) do
                 if dir ~= "" then add(file(fs.combine(shell.resolve(dir), name))) end
             end
         end

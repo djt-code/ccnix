@@ -22,6 +22,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("expr", "expr operand...")
 local scan = require("scan")
+local text = require("text")
 local args = { ... }
 if args[1] == "--" and #args > 1 then table.remove(args, 1) end
 if #args == 0 then cu.usageError("missing operand") end
@@ -29,7 +30,7 @@ if #args == 0 then cu.usageError("missing operand") end
 local function bad(msg) cu.err(msg); cu.exit(2) end
 -- an integer: an optional "-", then digits
 local function isInt(s)
-    local digits = scan.startsWith(s, "-") and s:sub(2) or s
+    local digits = text.startsWith(s, "-") and s:sub(2) or s
     return digits ~= "" and scan.all(digits, scan.isDigit)
 end
 -- Lua numbers are doubles on CraftOS: past 2^53 they lose digits, so
@@ -49,7 +50,7 @@ local function zero(s) return s == "" or (isInt(s) and tonumber(s) == 0) end
 -- an integer's sign ("-" or "") and its digits without the leading zeros
 local function signAndDigits(s)
     local sign = ""
-    if scan.startsWith(s, "-") then sign, s = "-", s:sub(2) end
+    if text.startsWith(s, "-") then sign, s = "-", s:sub(2) end
     local from = 1
     while s:sub(from, from) == "0" do from = from + 1 end
     return sign, s:sub(from)

@@ -98,6 +98,7 @@
 -- settings' services without init (service.lua).
 
 local scan = require("scan")
+local text = require("text")
 
 local P = {}
 
@@ -119,7 +120,7 @@ local rawResume = coroutine.resume      -- (while a process runs, coroutine.resu
 -- "TERM"; 0 and "0" are 0; nil for one that isn't known.
 function P.signal(s)
     s = tostring(s):upper()
-    if scan.startsWith(s, "SIG") then s = s:sub(4) end
+    if text.startsWith(s, "SIG") then s = s:sub(4) end
     if s == "0" then return 0 end
     if P.SIGNALS[s] then return s end
     for name, n in pairs(P.SIGNALS) do if tostring(n) == s then return name end end
@@ -141,7 +142,7 @@ end
 -- A command line's program name: its first word, after the last / in it
 local function programName(cmd)
     local word = scan.new(cmd):readWhile(function(c) return not scan.isSpace(c) end)
-    local _, name = scan.cutLast(word, "/")
+    local _, name = text.cutLast(word, "/")
     return name or word
 end
 
@@ -213,7 +214,7 @@ function P.serviceNames(settingsT, known)
     local names, seen = {}, {}
     for _, key in ipairs(settingsT.getNames()) do
         -- service.<name>.cmd, the name not empty
-        local n = #key > #"service..cmd" and scan.startsWith(key, "service.") and scan.endsWith(key, ".cmd")
+        local n = #key > #"service..cmd" and text.startsWith(key, "service.") and text.endsWith(key, ".cmd")
             and key:sub(#"service." + 1, -#".cmd" - 1)
         if n and not seen[n] then seen[n] = true; names[#names + 1] = n end
     end
@@ -867,7 +868,7 @@ function P.new(o)
         if (p.stderr or 0) > 0 then p.logerr = true end
         local buf = (p.logbuf or "") .. tostring(s)
         while true do
-            local line, rest = scan.cut(buf, "\n")
+            local line, rest = text.cut(buf, "\n")
             if not rest then break end
             buf = rest
             K.logLine(p, line)

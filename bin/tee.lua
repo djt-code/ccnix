@@ -11,12 +11,12 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tee", "tee [-ai] [file...]")
-local scan = require("scan")
+local text = require("text")
 
 -- io.open's message can start with the path and ": ": keep just the reason
 local function reason(e)
-    if scan.startsWith(e, "/") then
-        local _, rest = scan.cut(e, ": ")
+    if text.startsWith(e, "/") then
+        local _, rest = text.cut(e, ": ")
         if rest then return rest end
     end
     return e

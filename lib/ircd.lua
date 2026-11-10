@@ -45,6 +45,7 @@
 
 local irc = require("irc")
 local scan = require("scan")
+local text = require("text")
 
 local D = {}
 D.VERSION = "ccnix-ircd-1.0"
@@ -738,26 +739,26 @@ local function message(srv, c, p, command)
     local notice = command == "NOTICE"
     local function complain(...) if not notice then srv:numeric(c, ...) end end
     if not p[1] then return complain("NORECIPIENT", "No recipient given (" .. command .. ")") end
-    local text = p[2]
-    if not text or text == "" then return complain("NOTEXTTOSEND") end
+    local body = p[2]
+    if not body or body == "" then return complain("NOTEXTTOSEND") end
     c.idleSince = srv.time()
-    for _, target in ipairs(scan.split(p[1], ",")) do
+    for _, target in ipairs(text.split(p[1], ",")) do
         if irc.isChannel(target, "#&") then
             local chan = srv:channel(target)
             local why = chan and sendRefusal(srv, chan, c)
             if not chan then complain("NOSUCHCHANNEL", target)
             elseif why then complain("CANNOTSENDTOCHAN", chan.name, "Cannot send to channel: " .. why)
             else
-                srv:toChannel(chan, srv:from(c, command, chan.name, text), c)
-                srv:emit("message", c, chan, text, notice)
+                srv:toChannel(chan, srv:from(c, command, chan.name, body), c)
+                srv:emit("message", c, chan, body, notice)
             end
         else
             local who = srv:find(target)
             if not who then complain("NOSUCHNICK", target)
             elseif who.service then
-                if not notice then who.service(c, text) end
+                if not notice then who.service(c, body) end
             else
-                srv:send(who, srv:from(c, command, who.nick, text))
+                srv:send(who, srv:from(c, command, who.nick, body))
                 if who.away then complain("AWAY", who.nick, who.away) end
             end
         end
@@ -846,8 +847,8 @@ command("JOIN", 1, function(srv, c, p)
         for _, chan in pairs(c.channels) do part(srv, c, chan, "Left all channels") end
         return
     end
-    local keys = scan.split(p[2] or "", ",")
-    for i, name in ipairs(scan.split(p[1], ",")) do
+    local keys = text.split(p[2] or "", ",")
+    for i, name in ipairs(text.split(p[1], ",")) do
         local chan = srv:channel(name)
         if not (chan and member(srv, chan, c)) then
             local refused = joinRefusal(srv, c, name, keys[i])
@@ -857,7 +858,7 @@ command("JOIN", 1, function(srv, c, p)
 end)
 
 command("PART", 1, function(srv, c, p)
-    for _, name in ipairs(scan.split(p[1], ",")) do
+    for _, name in ipairs(text.split(p[1], ",")) do
         local chan = srv:channel(name)
         if not chan then srv:numeric(c, "NOSUCHCHANNEL", name)
         elseif not member(srv, chan, c) then srv:numeric(c, "NOTONCHANNEL", name)
@@ -884,7 +885,7 @@ command("NAMES", 0, function(srv, c, p)
         end
         return
     end
-    for _, name in ipairs(scan.split(p[1], ",")) do
+    for _, name in ipairs(text.split(p[1], ",")) do
         local chan = srv:channel(name)
         if chan and canSee(srv, chan, c) then srv:sendNames(c, chan) else srv:numeric(c, "ENDOFNAMES", name) end
     end
@@ -895,7 +896,7 @@ command("LIST", 0, function(srv, c, p)
     local want
     if p[1] then
         want = {}
-        for _, name in ipairs(scan.split(p[1], ",")) do want[srv:fold(name)] = true end
+        for _, name in ipairs(text.split(p[1], ",")) do want[srv:fold(name)] = true end
     end
     local keys = {}
     for key in pairs(srv.channels) do keys[#keys + 1] = key end
@@ -959,7 +960,7 @@ end)
 command("WHOIS", 0, function(srv, c, p)
     local list = p[2] or p[1]                         -- (WHOIS server nick: the server is this one)
     if not list then return srv:numeric(c, "NONICKNAMEGIVEN") end
-    for _, nick in ipairs(scan.split(list, ",")) do
+    for _, nick in ipairs(text.split(list, ",")) do
         local who = srv:find(nick)
         if who then whois(srv, c, who) else srv:numeric(c, "NOSUCHNICK", nick) end
     end
@@ -985,7 +986,7 @@ end)
 command("ISON", 1, function(srv, c, p)
     local on = {}
     for _, param in ipairs(p) do
-        for _, nick in ipairs(scan.words(param)) do
+        for _, nick in ipairs(text.words(param)) do
             local who = srv:find(nick)
             if who then on[#on + 1] = who.nick end
         end

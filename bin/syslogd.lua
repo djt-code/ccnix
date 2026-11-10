@@ -37,7 +37,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("syslogd", "syslogd")
 local L = require("log")
 local D = require("syslogd")
-local scan = require("scan")
+local text = require("text")
 local okNet, net = pcall(require, "net")
 if not okNet then net = nil end
 
@@ -45,7 +45,7 @@ if #{ ... } > 0 then cu.usageError() end
 local proc = rawget(_G, "proc")
 if not (proc and proc.register) then cu.fail("init isn't running (`help init`): programs log through it"); return cu.exit() end
 
-local text, from = D.DEFAULT, "the defaults"
+local conf, from = D.DEFAULT, "the defaults"
 if not fs.exists(D.CONF) then                       -- (the defaults, written out for editing)
     fs.makeDir(fs.getDir(D.CONF))
     local h = fs.open(D.CONF, "w")
@@ -53,9 +53,9 @@ if not fs.exists(D.CONF) then                       -- (the defaults, written ou
 end
 if fs.exists(D.CONF) and not fs.isDir(D.CONF) then
     local h = fs.open(D.CONF, "r")
-    if h then text, from = h.readAll() or "", D.CONF; h.close() end
+    if h then conf, from = h.readAll() or "", D.CONF; h.close() end
 end
-local rules, problems = D.parse(text)
+local rules, problems = D.parse(conf)
 
 local function num(key, default)
     local v = tonumber(settings.get(key))
@@ -128,7 +128,7 @@ print("syslogd: " .. started)
 engine.note("info", started)                        -- (in the log, as rsyslogd's own start is)
 for _, p in ipairs(problems) do
     print("syslogd: " .. p)
-    engine.note("err", (scan.startsWith(p, "line ") and D.CONF .. ": " or "") .. p)
+    engine.note("err", (text.startsWith(p, "line ") and D.CONF .. ": " or "") .. p)
 end
 
 local tick = os.startTimer(5)

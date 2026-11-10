@@ -37,7 +37,7 @@
 -- Detector.
 
 local irc = require("irc")
-local scan = require("scan")
+local text = require("text")
 
 local S = {}
 S.ENFORCE = 60              -- seconds to identify for a registered nick
@@ -75,7 +75,7 @@ function S.hash(password, salt)
     return string.format("%08x", h)
 end
 
-local function words(text) return scan.words(text or "") end
+local function words(s) return text.words(s or "") end
 
 --------------------------------------------------------------------------
 -- Attaching

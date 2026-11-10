@@ -36,6 +36,7 @@
 
 local irc = require("irc")
 local scan = require("scan")
+local text = require("text")
 
 local C = {}
 C.VERSION = "1.0"
@@ -93,7 +94,7 @@ local COMMANDS = {}             -- the built-in /commands: name -> { fn, usage, 
 --------------------------------------------------------------------------
 -- Small things
 --------------------------------------------------------------------------
-local trim = scan.trim
+local trim = text.trim
 
 -- The first word and the rest (the blanks between left out).
 local function splitWord(s)
@@ -104,21 +105,21 @@ local function splitWord(s)
     return word, sc:readRest()
 end
 
-local function words(s) return scan.words(s or "") end
+local function words(s) return text.words(s or "") end
 
 -- s without a / in front (a command's name typed with one).
-local function noSlash(s) return scan.startsWith(s, "/") and s:sub(2) or s end
+local function noSlash(s) return text.startsWith(s, "/") and s:sub(2) or s end
 
 -- A file's name without .lua: the script it holds (nil if it isn't one).
 local function scriptName(file)
-    if #file > 4 and scan.endsWith(file, ".lua") then return file:sub(1, -5) end
+    if #file > 4 and text.endsWith(file, ".lua") then return file:sub(1, -5) end
     return nil
 end
 
 -- A setting's name for a network: network.<name>.<key>, the network's
 -- name and key, or nil.
 local function networkKey(name)
-    local parts = scan.split(name, ".", true)
+    local parts = text.split(name, ".", true)
     if #parts ~= 3 or parts[1] ~= "network" or parts[2] == "" or parts[3] == "" then return nil end
     if not scan.all(parts[3], scan.isNameChar) then return nil end
     return parts[2], parts[3]
@@ -142,7 +143,7 @@ local function home()
     local getenv = os.getenv
     local h = getenv and getenv("HOME")
     local dir = (h and h ~= "") and h or "/"
-    if scan.endsWith(dir, "/") then dir = dir:sub(1, -2) end
+    if text.endsWith(dir, "/") then dir = dir:sub(1, -2) end
     return dir .. "/.irc"
 end
 
@@ -243,16 +244,16 @@ function Client:loadConfig()
     if not fs.exists(path) then return end
     local h = fs.open(path, "r")
     if not h then return end
-    local text = h.readAll() or ""
+    local contents = h.readAll() or ""
     h.close()
-    for _, raw in ipairs(scan.lines(text)) do
+    for _, raw in ipairs(text.lines(contents)) do
         local line = trim(raw)
         local eq = line:find(" = ", 1, true)
         if line ~= "" and line:sub(1, 1) ~= "#" and eq then
             local key, value = line:sub(1, eq - 1), line:sub(eq + 3)
-            if scan.startsWith(key, "alias.") then
+            if text.startsWith(key, "alias.") then
                 self.aliases[key:sub(7)] = value ~= "" and value or nil
-            elseif scan.startsWith(key, "ignore.") then
+            elseif text.startsWith(key, "ignore.") then
                 self.ignores[#self.ignores + 1] = { mask = key:sub(8), levels = value }
             else
                 local d = self.settingDefs[key]
@@ -619,22 +620,22 @@ end
 Server.send_raw = Server.send
 
 -- PRIVMSG (or NOTICE) text to target, cut into pieces that fit a line.
-function Server:message(target, text, command)
+function Server:message(target, body, command)
     command = command or "PRIVMSG"
     local room = 400 - #target
     local pieces = {}
-    while #text > room do
+    while #body > room do
         -- cut at the last space that fits (one too early in the piece: at the room)
         local cut = room + 1
         for k = room, 1, -1 do
-            if text:sub(k, k) == " " then cut = k; break end
+            if body:sub(k, k) == " " then cut = k; break end
         end
         if cut < room / 2 then cut = room + 1 end
-        pieces[#pieces + 1] = text:sub(1, cut - 1)
-        text = text:sub(cut)
-        if scan.startsWith(text, " ") then text = text:sub(2) end
+        pieces[#pieces + 1] = body:sub(1, cut - 1)
+        body = body:sub(cut)
+        if text.startsWith(body, " ") then body = body:sub(2) end
     end
-    pieces[#pieces + 1] = text
+    pieces[#pieces + 1] = body
     for _, p in ipairs(pieces) do self:send(irc.build(command, target, p)) end
     return pieces
 end
@@ -818,8 +819,8 @@ EVENTS.CAP = function(s, m)
         s.capOffered = (s.capOffered or "") .. " " .. (m.params[#m.params] or "")
         if m.params[3] == "*" then return end
         local want = {}
-        for _, cap in ipairs(scan.words(s.capOffered)) do
-            local name = scan.cut(cap, "=")
+        for _, cap in ipairs(text.words(s.capOffered)) do
+            local name = text.cut(cap, "=")
             if name == "multi-prefix" or name == "away-notify" or (name == "sasl" and user and pass) then
                 want[#want + 1] = name
             end
@@ -859,9 +860,9 @@ EVENTS["001"] = function(s, m)
     s.pingAt = client.clock()
     client:print(s.buffer, m.params[2] or "", { prefix = "--", prefixColour = 12 })
     client:emit("server connected", s)
-    for _, cmd in ipairs(scan.split(s:net("commands") or "", ";")) do client:command("/" .. cmd, s.buffer) end
+    for _, cmd in ipairs(text.split(s:net("commands") or "", ";")) do client:command("/" .. cmd, s.buffer) end
     local chans = {}
-    for _, chan in ipairs(scan.split(s:net("autojoin") or "", ",")) do chans[#chans + 1] = chan end
+    for _, chan in ipairs(text.split(s:net("autojoin") or "", ",")) do chans[#chans + 1] = chan end
     for _, b in ipairs(client.buffers) do      -- (back after a lost connection: the channels it was in)
         if b.server == s and b.kind == "channel" and b.wanted then chans[#chans + 1] = b.name end
     end
@@ -1093,7 +1094,7 @@ EVENTS.NOTICE = function(s, m) privmsg(s, m, true) end
 local function modeTakesArg(s, letter, adding)
     if s.prefixModes:find(letter, 1, true) then return true end
     local groups = {}
-    for _, g in ipairs(scan.split(s.isupport.CHANMODES or "b,k,l,imnst", ",", true)) do groups[#groups + 1] = g end
+    for _, g in ipairs(text.split(s.isupport.CHANMODES or "b,k,l,imnst", ",", true)) do groups[#groups + 1] = g end
     if (groups[1] or ""):find(letter, 1, true) or (groups[2] or ""):find(letter, 1, true) then return true end
     if (groups[3] or ""):find(letter, 1, true) then return adding end
     return false
@@ -1149,10 +1150,10 @@ EVENTS["353"] = function(s, m)
         return s.client:note(s.client.current, "Names " .. (m.params[3] or "") .. ": " .. (m.params[4] or ""))
     end
     if b.namesDone ~= false then b.nicks, b.namesDone = {}, false end
-    for _, entry in ipairs(scan.words(m.params[4] or "")) do
+    for _, entry in ipairs(text.words(m.params[4] or "")) do
         local i = 1
         while i <= #entry and s.prefixSymbols:find(entry:sub(i, i), 1, true) do i = i + 1 end
-        local nick = scan.cut(entry:sub(i), "!")    -- (userhost-in-names: nick!user@host)
+        local nick = text.cut(entry:sub(i), "!")    -- (userhost-in-names: nick!user@host)
         b:setNick(nick, entry:sub(1, i - 1))
     end
 end
@@ -1264,10 +1265,10 @@ EVENTS["321"] = function() end
 EVENTS["323"] = function(s) s.client:note(s.listBuffer or s.buffer, "End of the list"); s.listBuffer = nil end
 
 -- WHO's last param, "hops realname": the real name.
-local function realName(text)
-    local hops, rest = scan.cut(text, " ")
+local function realName(last)
+    local hops, rest = text.cut(last, " ")
     if rest and hops ~= "" and scan.all(hops, scan.isDigit) then return rest end
-    return text
+    return last
 end
 
 EVENTS["352"] = function(s, m)
@@ -1355,7 +1356,7 @@ function Client:command(line, buffer, depth)
     local alias = self.aliases[name]
     if alias then
         local cmds = {}
-        for _, part in ipairs(scan.split(alias, ";")) do cmds[#cmds + 1] = part end
+        for _, part in ipairs(text.split(alias, ";")) do cmds[#cmds + 1] = part end
         for _, part in ipairs(cmds) do
             local expanded = self:expandAlias(part, args, buffer)
             self:command("/" .. expanded, buffer, depth + 1)
@@ -1456,7 +1457,7 @@ local function serverFor(client, target, port)
         return client:newServer(target, address, p)
     end
     -- host:port, or a host alone
-    local host, p = scan.cutLast(target, ":")
+    local host, p = text.cutLast(target, ":")
     if not (p and p ~= "" and scan.all(p, scan.isDigit)) then host, p = target, nil end
     p = tonumber(port or p or "") or 6667
     return client:findServer(host) or client:newServer(host, host, p)
@@ -1543,7 +1544,7 @@ COMMANDS.join = { function(args, server, buffer, client)
     local chans, key = splitWord(args)
     if chans == "" then return client:err(buffer, "/join #channel [key]") end
     local list = {}
-    for _, name in ipairs(scan.split(chans, ",")) do
+    for _, name in ipairs(text.split(chans, ",")) do
         local c = server:isChannel(name) and name or ("#" .. name)
         list[#list + 1] = c
         local b = client:findBuffer(server, c)
@@ -2023,7 +2024,7 @@ function Client:scriptApi(sc)
     function api.switch(buffer) client:switch(buffer) end
     api.strip, api.colour, api.parse, api.build = irc.strip, C.colour, irc.parse, irc.build
     api.casefold, api.match, api.nick_colour = irc.casefold, irc.match, C.nickColour
-    api.words, api.split, api.trim = scan.words, scan.split, scan.trim
+    api.words, api.split, api.trim = text.words, text.split, text.trim
     return api
 end
 

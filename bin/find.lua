@@ -32,6 +32,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("find", "find [-H|-L] [path...] [expression]")
 local scan = require("scan")
+local text = require("text")
 local args = { ... }
 local i = 1
 while args[i] == "-H" or args[i] == "-L" do i = i + 1 end     -- no links in CraftOS
@@ -342,7 +343,7 @@ local function visit(p, path, depth, drive)
     local to = #path
     while to > 0 and path:sub(to, to) == "/" do to = to - 1 end     -- (the slashes at the end dropped)
     local trimmed = path:sub(1, to)
-    local _, last = scan.cutLast(trimmed, "/")
+    local _, last = text.cutLast(trimmed, "/")
     e.name = trimmed == "" and "/" or last or trimmed
     local test = depth >= minDepth and depth <= maxDepth
     if test and not depthFirst then expr(e) end

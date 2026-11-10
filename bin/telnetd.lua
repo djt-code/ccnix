@@ -34,7 +34,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
 local net = require("net")
 local T = require("telnet")
-local scan = require("scan")
+local text = require("text")
 
 local function fail(msg)
     printError("telnetd: " .. msg)
@@ -100,7 +100,7 @@ local function startSession(s)
         ptys = ptys + 1
         s.term = proc.newTerm(s.w, s.h, true)
         local ccsh = ccnix and ccnix.find("bin/ccsh.lua") or (fs.exists(repo .. "/bin/ccsh.lua") and repo .. "/bin/ccsh.lua")
-        if ccsh and scan.endsWith(ccsh, ".lua") then ccsh = ccsh:sub(1, -5) end    -- (run without its .lua)
+        if ccsh and text.endsWith(ccsh, ".lua") then ccsh = ccsh:sub(1, -5) end    -- (run without its .lua)
         local cmd = settings.get("ccsh.login") and ccsh or nil
         s.tty = "pts/" .. ptys
         s.pid = proc.spawn({ cmd = cmd, term = s.term, tty = s.tty, session = true })

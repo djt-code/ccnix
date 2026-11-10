@@ -50,6 +50,7 @@ local USAGE = "tcpdump [-DenpqSvx] [-t...] [-c count] [-i iface]... [-r file] [-
 local cu = require("cu").init("tcpdump", USAGE)
 local net = require("net")
 local scan = require("scan")
+local text = require("text")
 
 local opts, operands, order = cu.getopt({ ... }, "Dc:ei:npqr:Stvw:x", 1)
 local tflag, verbose, ifaceArgs = 0, 0, {}
@@ -394,7 +395,7 @@ if opts.r then
     showIface = true
     for line in h:lines() do
         if done() then break end
-        if line:sub(1, 2) ~= "--" and scan.trim(line) ~= "" then
+        if line:sub(1, 2) ~= "--" and text.trim(line) ~= "" then
             local rec = textutils.unserialise(line)
             if type(rec) == "table" and rec.iface and rec.t then handle(rec) end
         end

@@ -12,7 +12,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("rm", "rm [-fiRrd] file...")
-local scan = require("scan")
+local text = require("text")
 local opts, files, order = cu.getopt({ ... }, "fiRrd")
 local force, ask = false, false
 for _, o in ipairs(order) do
@@ -27,13 +27,13 @@ end
 local function yes(question)
     io.stderr:write("rm: " .. question .. "? ")
     local answer = cu.readLine(io.input()) or ""
-    local first = scan.trim(answer):sub(1, 1)       -- (blanks before it are allowed)
+    local first = text.trim(answer):sub(1, 1)       -- (blanks before it are allowed)
     return first == "y" or first == "Y"
 end
 
 -- fs.delete's message starts with the path and ": ": keep just the reason
 local function reason(e)
-    local _, rest = scan.cut(e, ": ")
+    local _, rest = text.cut(e, ": ")
     return rest or e
 end
 
@@ -73,7 +73,7 @@ end
 local function lastPart(f)
     local to = #f
     while to > 0 and f:sub(to, to) == "/" do to = to - 1 end
-    local _, after = scan.cutLast(f:sub(1, to), "/")
+    local _, after = text.cutLast(f:sub(1, to), "/")
     return after or f:sub(1, to)
 end
 

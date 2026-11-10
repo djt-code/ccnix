@@ -19,6 +19,7 @@
 local _ENV = setmetatable({}, { __index = _ENV })
 local regex = require("regex")
 local scan = require("scan")
+local text = require("text")
 local syntax = require("syntax")
 local V = {}
 
@@ -1923,7 +1924,7 @@ function exRun(line)
         cx = firstNonBlank(cy)
     elseif is(name, "set", 2) then
         if arg == "" then setOption("") end
-        for _, word in ipairs(scan.words(arg)) do setOption(word) end
+        for _, word in ipairs(text.words(arg)) do setOption(word) end
     elseif is(name, "syntax", 2) and vimMode then
         if arg == "on" or arg == "enable" then opt.syntax = true
         elseif arg == "off" then opt.syntax = false

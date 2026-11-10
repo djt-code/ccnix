@@ -17,6 +17,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("diff", "diff [-c|-e|-f|-u|-C n|-U n] [-bqr] file1 file2")
 local scan = require("scan")
+local text = require("text")
 local args = { ... }
 local opts, ops, order = cu.getopt(args, "bcefqruC:U:", 2)
 if #ops ~= 2 then cu.usageError() end
@@ -89,7 +90,7 @@ local function squeezeBlanks(l)
 end
 
 local function split(s)
-    local L, K = scan.split(s, "\n", true), {}
+    local L, K = text.split(s, "\n", true), {}
     local last = table.remove(L)    -- (what comes after the last newline)
     if last ~= "" then L[#L + 1] = last end
     for i, l in ipairs(L) do

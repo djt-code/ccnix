@@ -29,7 +29,7 @@
 -- sends it.  A chat message starting with $ is hidden in the game (AP's
 -- rule), and isn't an event here.
 
-local scan = require("scan")
+local text = require("text")
 
 local M = {}
 
@@ -57,11 +57,11 @@ end
 -- "There are 2 of a max of 20 players online: Steve, Alex" (and the
 -- older "There are 2/20 players online:") as a list of names.
 local function namesFromList(out)
-    local text = table.concat(out or {}, " ")
-    local colon = text:find(":", 1, true)
+    local line = table.concat(out or {}, " ")
+    local colon = line:find(":", 1, true)
     local names = {}
     if not colon then return names end
-    for _, name in ipairs(scan.split(text:sub(colon + 1), ",")) do names[#names + 1] = name end
+    for _, name in ipairs(text.split(line:sub(colon + 1), ",")) do names[#names + 1] = name end
     return names
 end
 
