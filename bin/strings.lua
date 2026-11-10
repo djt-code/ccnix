@@ -10,11 +10,13 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("strings", "strings [-a] [-t format] [-n number] [file...]")
+local convert = require("convert")
+local scan = require("scan")
 local opts, files = cu.getopt({ ... }, "an:t:")
 
 local min = 4
 if opts.n then
-    min = cu.int(opts.n)
+    min = convert.toInteger(opts.n)
     if not min or min < 1 then cu.usageError("invalid minimum string length: " .. opts.n) end
 end
 local fmt = nil
@@ -31,13 +33,12 @@ local function found(s, a, b)
     end
 end
 
--- the runs of printable characters (space to ~, bytes 32 to 126) in s
+-- the runs of printable characters (scan.isPrintable: space to ~) in s
 cu.each(files, function(h)
     local s = cu.readAll(h)
     local runStart = nil
     for i = 1, #s + 1 do
-        local b = s:byte(i)     -- (nil past the end, which ends a run)
-        local printable = b ~= nil and b >= 32 and b <= 126
+        local printable = scan.isPrintable(s:sub(i, i))     -- ("" past the end, which ends a run)
         if printable and not runStart then
             runStart = i
         elseif not printable and runStart then

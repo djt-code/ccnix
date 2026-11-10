@@ -19,30 +19,33 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("od", "od [-v] [-A base] [-j skip] [-N count] [-t type]... [-bcdosx] [file...]")
+local convert = require("convert")
 local scan = require("scan")
 local text = require("text")
 local opts, files, order = cu.getopt({ ... }, "vA:j:N:t:bcdosx")
 
--- A -j or -N number: decimal, 0x hex or 0 octal, with an optional
--- multiplier suffix when `mult` is allowed.
+-- A -j or -N number: "0x" hex digits, "0" octal digits or decimal
+-- digits; with `mult`, the octal or decimal ones may end in b, k or m
+-- (not the hex: "b" is a hex digit there).  The number, or nil.
 local MULT = { b = 512, k = 1024, m = 1048576 }
-local isOctal = scan.oneOf("01234567")
 local function number(s, mult)
-    -- the body, then b, k or m (none after 0x: "b" is a hex digit there)
-    local hex = text.startsWith(s, "0x") or text.startsWith(s, "0X")
-    local body, suf = s, ""
-    if not hex and MULT[s:sub(-1)] then body, suf = s:sub(1, -2), s:sub(-1) end
-    if suf ~= "" and not mult then return nil end
-    -- the body: "0x" hex digits, "0" octal digits, or decimal digits
+    local hex = text.stripPrefix(s, "0x") or text.stripPrefix(s, "0X")
+    if hex then return scan.isHex(hex) and convert.toInteger(hex, 16) or nil end
+    local body, suffix = s, s:sub(-1)
+    if MULT[suffix] then
+        if not mult then return nil end
+        body = s:sub(1, -2)
+    end
     local n
-    if hex and #body > 2 and scan.all(body:sub(3), scan.isHexDigit) then n = tonumber(body:sub(3), 16)
-    elseif text.startsWith(body, "0") then n = scan.all(body, isOctal) and tonumber(body, 8) or nil
-    elseif body ~= "" and scan.all(body, scan.isDigit) then n = tonumber(body) end
-    return n and n * (MULT[suf] or 1)
+    if text.startsWith(body, "0") then n = convert.toInteger(body, 8)
+    elseif scan.isUnsigned(body) then n = convert.toInteger(body) end
+    return n and n * (MULT[suffix] or 1)
 end
 
 -- the output types, in order: { letter, size }
 local SIZES = { C = 1, S = 2, I = 4, L = 8 }
+-- the sizes there are, each as its column in WIDTH below
+local SIZE_COLUMN = { [1] = 1, [2] = 2, [4] = 3, [8] = 4 }
 local SHORT = { b = "o1", c = "c", d = "u2", o = "o2", s = "d2", x = "x2" }
 local isSized = scan.oneOf("doux")     -- (the types that take a size)
 local types = {}
@@ -61,7 +64,7 @@ for _, o in ipairs(order) do
                 local digits = scan.new(spec, p):readWhile(scan.isDigit)
                 if digits ~= "" then size = tonumber(digits); p = p + #digits
                 elseif SIZES[spec:sub(p, p)] then size = SIZES[spec:sub(p, p)]; p = p + 1 end
-                if size ~= 1 and size ~= 2 and size ~= 4 and size ~= 8 then
+                if not SIZE_COLUMN[size] then
                     cu.usageError("invalid type size in " .. spec)
                 end
                 types[#types + 1] = { c, size }
@@ -132,8 +135,12 @@ local ESC = { [0] = "\\0", [7] = "\\a", [8] = "\\b", [9] = "\\t", [10] = "\\n",
 local WIDTH = { o = { 3, 6, 11, 22 }, u = { 3, 5, 10, 20 }, d = { 4, 6, 11, 20 }, x = { 2, 4, 8, 16 } }
 local function width(t)
     if t[1] == "a" or t[1] == "c" then return 3 end
-    return WIDTH[t[1]][({ 1, 2, nil, 3, nil, nil, nil, 4 })[t[2]]]
+    return WIDTH[t[1]][SIZE_COLUMN[t[2]]]
 end
+
+-- each number type's base, and the ones written with leading zeros
+local BASE = { o = 8, x = 16, d = 10, u = 10 }
+local ZERO_FILLED = { o = true, x = true }
 
 -- one field of type t holding the bytes s
 local function field(t, s)
@@ -143,13 +150,14 @@ local function field(t, s)
         return NAMES[b] or string.char(b)
     elseif c == "c" then
         if ESC[b] then return ESC[b] end
-        if b >= 32 and b < 127 then return string.char(b) end
+        local ch = s:sub(1, 1)
+        if scan.isPrintable(ch) then return ch end
         return string.format("%03o", b)
     elseif c == "d" and s:byte(#s) >= 128 then
         return "-" .. digits(negate(s), 10)
     end
-    local v = digits(s, c == "o" and 8 or c == "x" and 16 or 10)
-    if c == "o" or c == "x" then v = string.rep("0", width(t) - #v) .. v end
+    local v = digits(s, BASE[c])
+    if ZERO_FILLED[c] then v = text.padLeft(v, width(t), "0") end
     return v
 end
 
@@ -175,9 +183,8 @@ for pos = 1, #data, 16 do
             local fw = math.floor(lineW / (16 / t[2]))
             for p = 1, #block, t[2] do
                 local s = block:sub(p, p + t[2] - 1)
-                s = s .. string.rep("\0", t[2] - #s)    -- a short last field: zero-filled
-                local f = field(t, s)
-                line[#line + 1] = string.rep(" ", fw - #f) .. f
+                s = text.padRight(s, t[2], "\0")    -- a short last field: zero-filled
+                line[#line + 1] = text.padLeft(field(t, s), fw)
             end
             io.write(table.concat(line), "\n")
         end

@@ -12,15 +12,18 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("head", "head [-c number | -n number] [file...]")
+local convert = require("convert")
+local scan = require("scan")
+local text = require("text")
 local args = { ... }
-if args[1] and args[1]:sub(1, 1) == "-" and cu.isInt(args[1]) then     -- -number
-    args[1] = "-n" .. args[1]:sub(2)
-end
+-- the obsolete form: -number is -n number
+local obsolete = args[1] and text.stripPrefix(args[1], "-")
+if obsolete and scan.isUnsigned(obsolete) then args[1] = "-n" .. obsolete end
 local _, files, order = cu.getopt(args, "c:n:")
 
 local bytes, count = false, 10
 for _, o in ipairs(order) do
-    local n = cu.int(o[2])
+    local n = convert.toInteger(o[2])
     if not n or n < 0 then cu.usageError("invalid count: " .. o[2]) end
     bytes, count = o[1] == "c", math.min(n, 0x7fffffff)
 end

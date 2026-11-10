@@ -13,6 +13,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("rm", "rm [-fiRrd] file...")
 local text = require("text")
+local path = require("path")
 local opts, files, order = cu.getopt({ ... }, "fiRrd")
 local force, ask = false, false
 for _, o in ipairs(order) do
@@ -37,59 +38,54 @@ local function reason(e)
     return rest or e
 end
 
-local function remove(shown, path)
-    local ok, err = pcall(fs.delete, path)
+local function remove(shown, full)
+    local ok, err = pcall(fs.delete, full)
     if not ok then cu.fail(shown .. ": " .. reason(tostring(err)), 1); return false end
     return true
 end
 
--- path (shown as `shown`) and, for a directory with -r, what's in it
-local function rm(shown, path)
-    if fs.isDir(path) then
+-- full (the path on disk, shown as `shown`) and, for a directory with -r,
+-- what's in it
+local function rm(shown, full)
+    if fs.isDir(full) then
         if not recursive then
-            if opts.d and #fs.list(path) == 0 then
-                if not ask or yes("remove directory '" .. shown .. "'") then remove(shown, path) end
+            if opts.d and #fs.list(full) == 0 then
+                if not ask or yes("remove directory '" .. shown .. "'") then remove(shown, full) end
             else
                 cu.fail(shown .. ": is a directory")
             end
             return
         end
         if ask then
-            if #fs.list(path) > 0 and not yes("descend into directory '" .. shown .. "'") then return end
-            for _, name in ipairs(fs.list(path)) do
-                rm(shown .. (shown:sub(-1) == "/" and "" or "/") .. name, fs.combine(path, name))
+            if #fs.list(full) > 0 and not yes("descend into directory '" .. shown .. "'") then return end
+            for _, name in ipairs(fs.list(full)) do
+                rm(path.join(shown, name), fs.combine(full, name))
             end
             -- (something in it was kept: it stays, unasked)
-            if #fs.list(path) == 0 and yes("remove directory '" .. shown .. "'") then remove(shown, path) end
+            if #fs.list(full) == 0 and yes("remove directory '" .. shown .. "'") then remove(shown, full) end
             return
         end
     elseif ask and not yes("remove '" .. shown .. "'") then
         return
     end
-    remove(shown, path)
+    remove(shown, full)
 end
 
--- the last part of path name f: after its last slash, trailing slashes dropped
-local function lastPart(f)
-    local to = #f
-    while to > 0 and f:sub(to, to) == "/" do to = to - 1 end
-    local _, after = text.cutLast(f:sub(1, to), "/")
-    return after or f:sub(1, to)
-end
+-- the names rm never removes
+local DOTS = { ["."] = true, [".."] = true }
 
 for _, f in ipairs(files) do
-    local last = lastPart(f)
-    local path = shell.resolve(f)
-    if last == "." or last == ".." then
+    local full = shell.resolve(f)
+    if DOTS[path.basename(f)] then
         cu.fail("refusing to remove '.' or '..' directory: skipping '" .. f .. "'")
-    elseif path == "" then
+    elseif full == "" then
         cu.fail("refusing to remove '/'")
-    elseif not fs.exists(path) then
+    elseif not fs.exists(full) then
         if not force then cu.fail(f .. ": No such file or directory") end
-    elseif fs.isReadOnly(path) then
+    elseif fs.isReadOnly(full) then
         cu.fail(f .. ": Permission denied (read-only)")
     else
-        rm(f, path)
+        rm(f, full)
     end
 end
 return cu.exit()

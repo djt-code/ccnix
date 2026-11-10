@@ -53,7 +53,7 @@ for _, p in ipairs(pats) do
         tests[#tests + 1] = function(l)
             if opts.i then l = l:lower() end
             if opts.x then return l == want end
-            return l:find(want, 1, true) ~= nil
+            return text.contains(l, want)
         end
     else
         local re, err = regex.compile(p, { ere = ere, icase = opts.i })

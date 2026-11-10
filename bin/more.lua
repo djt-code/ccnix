@@ -17,6 +17,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("more", "more [-cs] [-u] [file...]")
 local pager = require("pager")
+local text = require("text")
 local opts, files = cu.getopt({ ... }, "csu")
 
 -- s with each run of blank lines made one: three or more newlines in a
@@ -24,7 +25,7 @@ local opts, files = cu.getopt({ ... }, "csu")
 local function squeeze(s)
     local out, i = {}, 1
     while i <= #s do
-        local nl = s:find("\n", i, true)
+        local nl = text.find(s, "\n", i)
         if not nl then out[#out + 1] = s:sub(i); break end
         out[#out + 1] = s:sub(i, nl - 1)
         local run = 1
@@ -38,22 +39,22 @@ local function squeeze(s)
 end
 
 -- the text of one input, squeezed with -s
-local function text(h)
+local function contents(h)
     local s = cu.readAll(h)
     if opts.s then s = squeeze(s) end
     return s
 end
 
 if not cu.isTerminal() then
-    cu.each(files, function(h) io.write(text(h)) end)
+    cu.each(files, function(h) io.write(contents(h)) end)
     return cu.exit()
 end
 
 local parts = {}
 cu.each(files, function(h, name)
     if #files > 1 then parts[#parts + 1] = "::::::::::::::\n" .. name .. "\n::::::::::::::\n" end
-    local s = text(h)
-    if s ~= "" and s:sub(-1) ~= "\n" then s = s .. "\n" end
+    local s = contents(h)
+    if s ~= "" and not text.endsWith(s, "\n") then s = s .. "\n" end
     parts[#parts + 1] = s
 end)
 local all = table.concat(parts)

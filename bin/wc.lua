@@ -12,6 +12,8 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("wc", "wc [-c|-m] [-lw] [file...]")
+local scan = require("scan")
+local text = require("text")
 local opts, files = cu.getopt({ ... }, "clmw")
 if not (opts.c or opts.l or opts.m or opts.w) then opts.l, opts.w, opts.c = true, true, true end
 
@@ -26,13 +28,12 @@ local function report(n, name)
     io.write(table.concat(t, " "), "\n")
 end
 
--- the words in s: runs of characters that aren't blanks (space, \t \n
--- \v \f \r, bytes 32 and 9 to 13)
+-- the words in s: runs of characters that aren't blanks (scan.isSpace:
+-- space, \t \n \v \f \r)
 local function countWords(s)
     local words, inWord = 0, false
     for i = 1, #s do
-        local b = s:byte(i)
-        local blank = b == 32 or (b >= 9 and b <= 13)
+        local blank = scan.isSpace(s:sub(i, i))
         if not blank and not inWord then words = words + 1 end
         inWord = not blank
         -- a big file takes a while: yield now and then, or CC stops us
@@ -43,8 +44,7 @@ end
 
 cu.each(files, function(h, name)
     local s = cu.readAll(h)
-    -- (gsub of a plain "\n" counts the newlines in one call)
-    local n = { select(2, s:gsub("\n", "")), countWords(s), #s }
+    local n = { text.count(s, "\n"), countWords(s), #s }
     for i = 1, 3 do total[i] = total[i] + n[i] end
     report(n, #files > 0 and name or nil)
 end)

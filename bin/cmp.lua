@@ -12,6 +12,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("cmp", "cmp [-l|-s] file1 file2")
+local text = require("text")
 local opts, ops = cu.getopt({ ... }, "ls", 2)
 if #ops ~= 2 then cu.usageError() end
 if opts.l and opts.s then cu.usageError("-l and -s can't be used together") end
@@ -53,7 +54,7 @@ if i <= n then
             end
         end
     elseif not opts.s then
-        local _, lines = a:sub(1, i - 1):gsub("\n", "")
+        local lines = text.count(a:sub(1, i - 1), "\n")
         io.write(string.format("%s %s differ: char %d, line %d\n", ops[1], ops[2], i, lines + 1))
     end
     cu.status = 1

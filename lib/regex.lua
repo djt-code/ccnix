@@ -16,13 +16,13 @@
 -- bytes in the C locale.
 
 local scan = require("scan")
+local text = require("text")
 
 local regex = {}
 local byte, char = string.byte, string.char
 
 -- The [:class:] names, as tests on a one-character string (ASCII, as in
 -- the C locale).
-local function isGraph(c) return scan.isAlnum(c) or scan.isPunct(c) end
 local CLASS = {
     alpha = scan.isAlpha,
     digit = scan.isDigit,
@@ -30,12 +30,12 @@ local CLASS = {
     upper = scan.isUpper,
     lower = scan.isLower,
     space = scan.isSpace,
-    blank = function(c) return c == " " or c == "\t" end,
+    blank = scan.oneOf(" \t"),
     punct = scan.isPunct,
-    cntrl = function(c) return byte(c) < 32 or byte(c) == 127 end,
+    cntrl = scan.isControl,
     xdigit = scan.isHexDigit,
-    graph = isGraph,
-    print = function(c) return isGraph(c) or c == " " end,
+    graph = function(c) return scan.isAlnum(c) or scan.isPunct(c) end,
+    print = scan.isPrintable,
 }
 
 --------------------------------------------------------------------------
@@ -72,7 +72,7 @@ local function parse(pat, ere, icase)
     local function elem()
         local c, d = peek(), peek(1)
         if c == "[" and (d == "." or d == "=") then
-            local close = pat:find(d .. "]", pos + 2, true)
+            local close = text.find(pat, d .. "]", pos + 2)
             if not close then fail("brackets ([ ]) not balanced") end
             local name = pat:sub(pos + 2, close - 1)
             if #name ~= 1 then fail("invalid collating element") end
@@ -92,7 +92,7 @@ local function parse(pat, ere, icase)
             if peek() == "]" and not first then pos = pos + 1; break end
             first = false
             if peek() == "[" and peek(1) == ":" then
-                local close = pat:find(":]", pos + 2, true)
+                local close = text.find(pat, ":]", pos + 2)
                 if not close then fail("brackets ([ ]) not balanced") end
                 local f = CLASS[pat:sub(pos + 2, close - 1)]
                 if not f then fail("invalid character class") end
@@ -290,8 +290,8 @@ function regex.compile(pat, opts)
                 if not caps[a] then return false end
                 local want = S:sub(caps[a], caps[b] - 1)
                 local got = S:sub(i, i + #want - 1)
-                if opts.icase then want, got = want:lower(), got:lower() end
-                if want == got then return k(i + #want) end
+                local same = want == got or (opts.icase and text.equalFold(want, got))
+                if same then return k(i + #want) end
                 return false
             end
         end

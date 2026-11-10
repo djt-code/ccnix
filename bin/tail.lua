@@ -17,11 +17,13 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tail", "tail [-f | -r] [-c number | -n number] [file...]")
+local convert = require("convert")
+local scan = require("scan")
 local text = require("text")
 local args = { ... }
-if args[1] and args[1]:sub(1, 1) == "-" and cu.isInt(args[1]) then     -- -number
-    args[1] = "-n" .. args[1]:sub(2)
-end
+-- the obsolete form: -number is -n number
+local obsolete = args[1] and text.stripPrefix(args[1], "-")
+if obsolete and scan.isUnsigned(obsolete) then args[1] = "-n" .. obsolete end
 local opts, files, order = cu.getopt(args, "fc:n:r")
 
 -- The last -c or -n: bytes?, the count, and whether it counts from the start.
@@ -29,9 +31,9 @@ local bytes, count, fromStart = false, 10, false
 if opts.r then count, fromStart = 1, true end      -- -r alone: every line
 for _, o in ipairs(order) do
     if o[1] == "c" or o[1] == "n" then
-        local n = cu.int(o[2])
+        local n = convert.toInteger(o[2])
         if not n then cu.usageError("invalid number: " .. o[2]) end
-        bytes, count, fromStart = o[1] == "c", math.min(math.abs(n), 0x7fffffff), o[2]:sub(1, 1) == "+"
+        bytes, count, fromStart = o[1] == "c", math.min(math.abs(n), 0x7fffffff), text.startsWith(o[2], "+")
     end
 end
 if opts.r and (opts.c or opts.f) then
@@ -49,7 +51,7 @@ local function part(s)
     local starts, p = {}, 1
     while p <= #s do
         starts[#starts + 1] = p
-        local e = s:find("\n", p, true)
+        local e = text.find(s, "\n", p)
         if not e then break end
         p = e + 1
     end

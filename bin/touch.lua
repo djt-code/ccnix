@@ -60,15 +60,19 @@ local function isDateEnd(rest)
     return sc:atEnd()
 end
 
+-- how many digits -t's [[CC]YY]MMDDhhmm can have
+local T_LENGTHS = { [8] = true, [10] = true, [12] = true }
+
 if opts.t then
     -- [[CC]YY]MMDDhhmm[.SS]: the digits, then "" or "." and two digits
     local sc = scan.new(opts.t)
     local digits = sc:readWhile(scan.isDigit)
     local secs = sc:rest()
     local md = digits:sub(-8)
-    local secsOk = secs == "" or (#secs == 3 and secs:sub(1, 1) == "." and scan.all(secs:sub(2), scan.isDigit))
-    if not (#digits == 8 or #digits == 10 or #digits == 12) or not secsOk
-        or not inRange(md:sub(1, 2), md:sub(3, 4), md:sub(5, 6), md:sub(7, 8), secs:sub(2) ~= "" and secs:sub(2) or "0") then
+    local ss = text.stripPrefix(secs, ".")
+    local secsOk = secs == "" or (ss ~= nil and #ss == 2 and scan.isUnsigned(ss))
+    if not T_LENGTHS[#digits] or not secsOk
+        or not inRange(md:sub(1, 2), md:sub(3, 4), md:sub(5, 6), md:sub(7, 8), ss or "0") then
         cu.usageError("invalid date format '" .. opts.t .. "'")
     end
 end
@@ -105,9 +109,9 @@ for _, name in ipairs(files) do
     elseif fs.exists(path) then
         if bump then
             local f, e = io.open(path, "rb")
-            local text = f and f:read("a") or ""
+            local body = f and f:read("a") or ""
             if f then f:close(); f, e = io.open(path, "wb") end
-            if f then f:write(text); f:close()
+            if f then f:write(body); f:close()
             else cu.fail(name .. ": " .. why(e)) end
         end
     elseif not opts.c then

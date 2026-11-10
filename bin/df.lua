@@ -14,6 +14,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("df", "df [-k] [-P] [file...]")
+local text = require("text")
 local opts, files = cu.getopt({ ... }, "kP")
 local unit = opts.k and 1024 or 512
 
@@ -75,9 +76,9 @@ for _, r in ipairs(rows) do
     for i, s in ipairs(r) do width[i] = math.max(width[i] or 0, #s) end
 end
 for _, r in ipairs(rows) do
-    local out = { r[1] .. (" "):rep(width[1] - #r[1]) }
-    for i = 2, 5 do out[i] = (" "):rep(width[i] - #r[i]) .. r[i] end
+    local out = { text.padRight(r[1], width[1]) }
+    for i = 2, 5 do out[i] = text.padLeft(r[i], width[i]) end
     out[6] = r[6]
-    io.write(table.concat(out, " "), "\n")
+    io.write(text.join(out, " "), "\n")
 end
 return cu.exit()

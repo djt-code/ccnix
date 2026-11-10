@@ -48,8 +48,8 @@ end
 
 -- a keydef: start ("," end)?, as the start's field, char and mods, then
 -- the end's (nil if it has none); nil if it's neither
-local function readKeydef(text)
-    local ks = scan.new(text)
+local function readKeydef(keydef)
+    local ks = scan.new(keydef)
     local sf, sc, sm = readKeyEnd(ks)
     if not sf then return nil end
     if ks:atEnd() then return sf, sc, sm end
@@ -74,7 +74,7 @@ for _, o in ipairs(order) do
             k.mods, k.bs, k.be = global, global.b, global.b
         else
             local mods = sm .. (em or "")
-            k.mods, k.bs, k.be = {}, sm:find("b", 1, true) ~= nil, (em or ""):find("b", 1, true) ~= nil
+            k.mods, k.bs, k.be = {}, text.contains(sm, "b"), text.contains(em or "", "b")
             for i = 1, #mods do k.mods[mods:sub(i, i)] = true end
         end
         keys[#keys + 1] = k
@@ -98,7 +98,7 @@ local function fields(l)
     local f, p = {}, 1
     if sep then
         while true do
-            local q = l:find(sep, p, true)
+            local q = text.find(l, sep, p)
             f[#f + 1] = { p, (q or #l + 1) - 1 }
             if not q then break end
             p = q + 1
@@ -134,7 +134,6 @@ local function keepOnly(t, keep)
 end
 
 local function isDictChar(c) return scan.isAlnum(c) or isBlank(c) end     -- (-d)
-local function isPrintable(c) return c:byte() >= 32 and c:byte() <= 126 end      -- (-i)
 
 -- the number at the start of t for -n: blanks, then "-"? digit* ("."
 -- digit*)?; 0 if that isn't a number
@@ -157,7 +156,7 @@ local function keyText(l, k)
     if whole and k.mods.b then s = pastBlanks(l, 1) end
     local t = l:sub(s, e)
     if k.mods.d then t = keepOnly(t, isDictChar) end
-    if k.mods.i then t = keepOnly(t, isPrintable) end
+    if k.mods.i then t = keepOnly(t, scan.isPrintable) end
     if k.mods.f then t = t:upper() end
     if k.mods.n then t = leadingNumber(t) end
     return t
@@ -223,7 +222,7 @@ if opts.o then
     -- io.open's message starts with the path and ": ": keep just the reason
     local why = tostring(e)
     local _, rest = text.cut(why, ":")
-    if rest and text.startsWith(rest, " ") then why = rest:sub(2) end
+    why = rest and text.stripPrefix(rest, " ") or why
     if not h then cu.fail(opts.o .. ": " .. why, 2); return cu.exit() end
     h:write(table.concat(out))
     h:close()

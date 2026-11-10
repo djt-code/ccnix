@@ -40,6 +40,10 @@ OPTIONS = {
     hlsearch = { "hls", "bool" }, syntax = { "syn", "str" }, filetype = { "ft", "str" },
 }
 VIM_ONLY = { hlsearch = true, syntax = true, filetype = true }
+-- :set syntax= and filetype= values: the language, false for none, or
+-- "detect" to go by the file again
+LANG_VALUES = { [""] = false, off = false, none = false, on = "detect",
+    lua = "lua", sh = "sh", ccsh = "sh", bash = "sh" }
 
 --------------------------------------------------------------------------
 -- Little helpers
@@ -54,28 +58,18 @@ function fail(e) error(e, 0) end
 
 function beep() bad = true end
 
-function say(text, isErr) msg, msgErr = text, isErr or false end
+function say(message, isErr) msg, msgErr = message, isErr or false end
 
 function nextVer() verCounter = verCounter + 1; return verCounter end
 
 -- Characters, as vi sees them (lib/scan's tests).  A word (w b e, *,
 -- Ctrl+W) is letters, digits and _; a big word (W B E) anything but blanks.
 isDigit, isAlpha, isAlnum, isSpace = scan.isDigit, scan.isAlpha, scan.isAlnum, scan.isSpace
-isUpper, isLower = scan.isUpper, scan.isLower
+isUpper = scan.isUpper
 isWordChar = scan.isNameChar
-
--- s is nothing but blanks (or nothing at all)
-function isBlank(s) return scan.all(s, isSpace) end
 
 -- the blanks at the start of s: its indent
 function indentOf(s) return scan.new(s):readWhile(isSpace) end
-
--- s without the blanks at its start
-function trimLeft(s)
-    local sc = scan.new(s)
-    sc:skipSpaces()
-    return sc:rest()
-end
 
 -- the index of the first character of s that isn't blank (nil if none is)
 function firstNonSpace(s)
@@ -88,55 +82,12 @@ end
 -- the word starting at index i of s ("" if no word character is there)
 function wordAt(s, i) return scan.new(s, i):readWhile(isWordChar) end
 
--- s up to its first newline
-function firstLine(s)
-    local nl = s:find("\n", 1, true)
-    return nl and s:sub(1, nl - 1) or s
-end
-
 -- s has a capital letter in it (with smartcase, a search then minds case)
 function hasUpper(s)
     for i = 1, #s do
         if isUpper(s:sub(i, i)) then return true end
     end
     return false
-end
-
--- s with its lower-case letters made upper case and its upper-case ones lower
-function swapCase(s)
-    local out = {}
-    for i = 1, #s do
-        local c = s:sub(i, i)
-        if isLower(c) then c = c:upper() elseif isUpper(c) then c = c:lower() end
-        out[#out + 1] = c
-    end
-    return table.concat(out)
-end
-
--- The text as lines (a final newline isn't a line of its own).
-function splitLines(text)
-    local out, from = {}, 1
-    while true do
-        local nl = text:find("\n", from, true)
-        if not nl then
-            out[#out + 1] = text:sub(from)
-            return out
-        end
-        out[#out + 1] = text:sub(from, nl - 1)
-        from = nl + 1
-    end
-end
-
--- A file's lines (ended by \n, \r\n or \r), the empty ones left out.
-isLineEnd = scan.oneOf("\r\n")
-function nonEmptyLines(text)
-    local sc, out = scan.new(text), {}
-    while not sc:atEnd() do
-        local l = sc:readWhile(function(c) return not isLineEnd(c) end)
-        if l ~= "" then out[#out + 1] = l end
-        sc:advance()
-    end
-    return out
 end
 
 function viewHeight()
@@ -158,7 +109,7 @@ end
 -- Tabs: the display column (from 0) where byte x of s starts, and the
 -- byte under display column dc.
 function dispCol(s, x)
-    if not s:find("\t", 1, true) then return x - 1 end
+    if not text.contains(s, "\t") then return x - 1 end
     local col, ts = 0, opt.tabstop
     for i = 1, math.min(x - 1, #s) do
         if s:byte(i) == 9 then col = col + ts - col % ts else col = col + 1 end
@@ -180,7 +131,7 @@ end
 -- s with its tabs as spaces, and fg and bg (blit digits, one per byte)
 -- widened to match.
 function expand(s, fg, bg)
-    if not s:find("\t", 1, true) then return s, fg, bg end
+    if not text.contains(s, "\t") then return s, fg, bg end
     local t, f, b, col, ts = {}, {}, {}, 0, opt.tabstop
     for i = 1, #s do
         local c = s:sub(i, i)
@@ -234,11 +185,11 @@ function removeLines(a, b)
 end
 
 -- Put text (newlines split it) at (y, x); returns the place after it.
-function insertAt(y, x, text)
+function insertAt(y, x, body)
     local s = lines[y]
     local before, after = s:sub(1, x - 1), s:sub(x)
-    local parts = splitLines(text)
-    if text:sub(-1) == "\n" then parts[#parts + 1] = "" end
+    local parts = text.split(body, "\n", true)
+    if text.endsWith(body, "\n") then parts[#parts + 1] = "" end
     if #parts == 1 then
         setLine(y, before .. parts[1] .. after)
         return y, x + #parts[1]
@@ -267,8 +218,8 @@ function deleteText(y1, x1, y2, x2)
     setLine(y1, head .. tail)
 end
 
-function insertText(text)
-    cy, cx = insertAt(cy, cx, text)
+function insertText(typed)
+    cy, cx = insertAt(cy, cx, typed)
 end
 
 --------------------------------------------------------------------------
@@ -333,14 +284,14 @@ end
 -- Registers
 --------------------------------------------------------------------------
 
-function setReg(name, text, linewise, yank)
+function setReg(name, value, linewise, yank)
     if name == "_" then return end
-    local r = { text = text, linewise = linewise }
+    local r = { text = value, linewise = linewise }
     if name and isUpper(name) then
         local lower = name:lower()
         local old = regs[lower]
         if old then
-            r = { text = old.text .. ((old.linewise or linewise) and "\n" or "") .. text,
+            r = { text = old.text .. ((old.linewise or linewise) and "\n" or "") .. value,
                 linewise = old.linewise or linewise }
         end
         name = lower
@@ -521,14 +472,13 @@ function render()
                     fg = fg:sub(1, a - 1) .. string.rep("f", b - a + 1) .. fg:sub(b + 1)
                     bg = bg:sub(1, a - 1) .. string.rep("4", b - a + 1) .. bg:sub(b + 1)
                 end
-                local text, f, bk = expand(s, fg, bg)
-                text, f, bk = text:sub(leftcol + 1, leftcol + tw), f:sub(leftcol + 1, leftcol + tw), bk:sub(leftcol + 1, leftcol + tw)
-                local pad = tw - #text
-                term.blit(gut .. text .. string.rep(" ", pad), string.rep("4", #gut) .. f .. string.rep("0", pad),
-                    string.rep("f", #gut) .. bk .. string.rep("f", pad))
+                local shown, f, bk = expand(s, fg, bg)
+                shown, f, bk = shown:sub(leftcol + 1, leftcol + tw), f:sub(leftcol + 1, leftcol + tw), bk:sub(leftcol + 1, leftcol + tw)
+                term.blit(gut .. text.padRight(shown, tw), string.rep("4", #gut) .. text.padRight(f, tw, "0"),
+                    string.rep("f", #gut) .. text.padRight(bk, tw, "f"))
             else
-                local text = (expand(s)):sub(leftcol + 1, leftcol + tw)
-                term.write(gut .. text .. string.rep(" ", tw - #text))
+                local shown = (expand(s)):sub(leftcol + 1, leftcol + tw)
+                term.write(gut .. text.padRight(shown, tw))
             end
         elseif colour then
             term.blit("~" .. string.rep(" ", w - 1), "b" .. string.rep("0", w - 1), string.rep("f", w))
@@ -541,8 +491,7 @@ function render()
         local s = cmdline.prefix .. cmdline.text
         local cur = #cmdline.prefix + cmdline.pos
         local off = math.max(0, cur - w + 1)
-        local shown = s:sub(off + 1, off + w)
-        term.write(shown .. string.rep(" ", w - #shown))
+        term.write(text.padRight(s:sub(off + 1, off + w), w))
         term.setCursorPos(cur - off + 1, h)
     else
         local left = msg or (mode == "insert" and "-- INSERT --") or (mode == "replace" and "-- REPLACE --") or ""
@@ -551,7 +500,7 @@ function render()
         if #right >= w or (msg and #msg + #right + 1 > w) then right = "" end    -- a long message gets the line
         local room = w - #right - (right ~= "" and 1 or 0)
         left = left:sub(1, room)
-        local line = left .. string.rep(" ", w - #left - #right) .. right
+        local line = text.padRight(left, w - #right) .. right
         if colour and msg and msgErr then
             term.blit(line, string.rep("e", #left) .. string.rep("0", w - #left), string.rep("f", w))
         else
@@ -927,18 +876,18 @@ function apply(op, reg, y1, x1, y2, x2, kind)
             cy = y1; cx = firstNonBlank(cy)
             return
         end
-        local text = table.concat(lines, "\n", y1, y2)
+        local taken = table.concat(lines, "\n", y1, y2)
         if op == "y" then
-            setReg(reg, text, true, true)
+            setReg(reg, taken, true, true)
             if y1 < cy then cy = y1 end
             linesReport(k, "lines yanked")
         elseif op == "d" then
-            setReg(reg, text, true)
+            setReg(reg, taken, true)
             removeLines(y1, y2)
             cy = math.min(y1, #lines); cx = firstNonBlank(cy)
             linesReport(k, "fewer lines")
         elseif op == "c" then
-            setReg(reg, text, true)
+            setReg(reg, taken, true)
             local indent = opt.autoindent and indentOf(lines[y1]) or ""
             if y2 > y1 then removeLines(y1 + 1, y2) end
             setLine(y1, indent)
@@ -952,16 +901,16 @@ function apply(op, reg, y1, x1, y2, x2, kind)
             cy = y1; cx = firstNonBlank(cy)
             return
         end
-        local text = textOf(y1, x1, y2, x2)
+        local taken = textOf(y1, x1, y2, x2)
         if op == "y" then
-            setReg(reg, text, false, true)
+            setReg(reg, taken, false, true)
             cy, cx = y1, x1
         elseif op == "d" then
-            setReg(reg, text, false)
+            setReg(reg, taken, false)
             deleteText(y1, x1, y2, x2)
             cy, cx = y1, x1
         elseif op == "c" then
-            setReg(reg, text, false)
+            setReg(reg, taken, false)
             deleteText(y1, x1, y2, x2)
             cy, cx = y1, x1
             mode = "insert"
@@ -1006,7 +955,7 @@ function operate(op, n, reg)
     if jumpFrom then marks["'"], jumpFrom = jumpFrom, nil end
     if not y then return beep() end
     -- dw at a line's last word stops at the end of the line
-    if (k == "w" or k == "W") and y > cy and isBlank(lines[y]:sub(1, x - 1)) then
+    if (k == "w" or k == "W") and y > cy and scan.isBlank(lines[y]:sub(1, x - 1)) then
         y, x = y - 1, #lines[y - 1] + 1
         if y < cy then y, x = cy, #lines[cy] + 1 end
     end
@@ -1018,7 +967,7 @@ function operate(op, n, reg)
             y2 = y2 - 1
             x2 = #lines[y2]
             kind = "incl"
-            if isBlank(lines[y1]:sub(1, x1 - 1)) then kind = "line" end
+            if scan.isBlank(lines[y1]:sub(1, x1 - 1)) then kind = "line" end
         else
             x2 = x2 - 1
         end
@@ -1055,8 +1004,8 @@ function insertMode(kind, cnt, again)
         elseif k == "<CR>" then
             local indent = opt.autoindent and indentOf(s) or ""
             local before, after = s:sub(1, cx - 1), s:sub(cx)
-            if aiLine == cy and isBlank(before) then before = "" end
-            if indent ~= "" then after = trimLeft(after) end
+            if aiLine == cy and scan.isBlank(before) then before = "" end
+            if indent ~= "" then after = text.trimStart(after) end
             setLine(cy, before)
             insertLines(cy + 1, { indent .. after })
             cy, cx = cy + 1, #indent + 1
@@ -1147,7 +1096,7 @@ function insertMode(kind, cnt, again)
             aiLine = nil
         end
     end
-    if aiLine == cy and lines[cy] ~= "" and isBlank(lines[cy]) then setLine(cy, ""); cx = 1 end
+    if aiLine == cy and lines[cy] ~= "" and scan.isBlank(lines[cy]) then setLine(cy, ""); cx = 1 end
     aiLine = nil
     if cnt and cnt > 1 and not moved then
         local t = table.concat(typed)
@@ -1169,16 +1118,16 @@ function put(reg, after, n)
     local r = regs[reg or '"']
     if not r then fail("E353: Nothing in register " .. (reg or '"')) end
     if r.linewise then
-        local list, one = {}, splitLines(r.text)
+        local list, one = {}, text.split(r.text, "\n", true)
         for _ = 1, n do for _, l in ipairs(one) do list[#list + 1] = l end end
         local at = after and cy + 1 or cy
         insertLines(at, list)
         cy = at; cx = firstNonBlank(cy)
         linesReport(#list, "more lines")
     else
-        local text = string.rep(r.text, n)
+        local copies = string.rep(r.text, n)
         local x = (after and #lines[cy] > 0) and cx + 1 or cx
-        local y2, x2 = insertAt(cy, x, text)
+        local y2, x2 = insertAt(cy, x, copies)
         if y2 == cy then cx = x2 - 1 else cx = x end
     end
     clampCursor()
@@ -1191,7 +1140,7 @@ function join(y, count, spaces)
         local a, b = lines[y], lines[y + 1]
         local sep = ""
         if spaces then
-            b = trimLeft(b)
+            b = text.trimStart(b)
             if a ~= "" and b ~= "" and not isSpace(a:sub(-1)) and b:sub(1, 1) ~= ")" then sep = " " end
         end
         removeLines(y + 1, y + 1)
@@ -1311,7 +1260,7 @@ function doCommand(k, n, reg)
     elseif k == "~" then
         if #s == 0 then return beep() end
         local x2 = math.min(cx + cnt - 1, #s)
-        local part = swapCase(s:sub(cx, x2))
+        local part = text.swapCase(s:sub(cx, x2))
         setLine(cy, s:sub(1, cx - 1) .. part .. s:sub(x2 + 1))
         cx = math.min(x2 + 1, #s)
         setWant()
@@ -1454,19 +1403,19 @@ function readCmdline(prefix, init, hist)
             if got[1] then c.text, c.pos = t:sub(1, p) .. got[1] .. t:sub(p + 1), p + #got[1] end
         elseif k == "<C-r>" then
             local r = regs[getKey()]
-            local add = r and firstLine(r.text) or ""
+            local add = r and (text.cut(r.text, "\n")) or ""
             c.text, c.pos = t:sub(1, p) .. add .. t:sub(p + 1), p + #add
         elseif k == "<Paste>" then
-            local add = firstLine(pasted or "")
+            local add = (text.cut(pasted or "", "\n"))
             c.text, c.pos = t:sub(1, p) .. add .. t:sub(p + 1), p + #add
         elseif #k == 1 then
             c.text, c.pos = t:sub(1, p) .. k .. t:sub(p + 1), p + 1
         end
     end
-    local text = cmdline.text
+    local typed = cmdline.text
     cmdline = nil
-    if text ~= "" and hist[#hist] ~= text then hist[#hist + 1] = text end
-    return text
+    if typed ~= "" and hist[#hist] ~= typed then hist[#hist + 1] = typed end
+    return typed
 end
 
 --------------------------------------------------------------------------
@@ -1495,17 +1444,18 @@ function loadFile(arg)
         if not f then
             say('"' .. arg .. '" [Permission Denied]', true)
         else
-            local text = f.readAll() or ""
+            local body = f.readAll() or ""
             f.close()
-            if text:find("\r\n", 1, true) and not text:gsub("\r\n", ""):find("\n", 1, true) then
+            -- every line ended by CR LF: written back so
+            if text.contains(body, "\r\n") and not text.contains((text.replace(body, "\r\n", "")), "\n") then
                 crlf = true
-                text = text:gsub("\r\n", "\n")
+                body = text.replace(body, "\r\n", "\n")
             end
-            lines = splitLines(text)
-            if text:sub(-1) == "\n" and #lines > 1 then lines[#lines] = nil end
-            if text == "" then lines = { "" } else noLines = false end
+            lines = text.split(body, "\n", true)
+            if text.endsWith(body, "\n") and #lines > 1 then lines[#lines] = nil end
+            if body == "" then lines = { "" } else noLines = false end
             opt.readonly = fs.isReadOnly(path)
-            say('"' .. arg .. '"' .. (opt.readonly and " [readonly]" or "") .. " " .. #lines .. "L, " .. #text .. "B")
+            say('"' .. arg .. '"' .. (opt.readonly and " [readonly]" or "") .. " " .. #lines .. "L, " .. #body .. "B")
         end
     else
         opt.readonly = fs.isReadOnly(path)
@@ -1598,6 +1548,9 @@ function address(sc)
     return y
 end
 
+-- what \n \r and \t stand for in :s's replacement (\r makes a new line too)
+REP_ESCAPES = { n = "\n", r = "\n", t = "\t" }
+
 function expandRep(rep, whole, caps)
     local out, i = {}, 1
     while i <= #rep do
@@ -1605,9 +1558,7 @@ function expandRep(rep, whole, caps)
         if c == "\\" then
             local d = rep:sub(i + 1, i + 1)
             if isDigit(d) then out[#out + 1] = d == "0" and whole or (caps[tonumber(d)] or "")
-            elseif d == "n" or d == "r" then out[#out + 1] = "\n"
-            elseif d == "t" then out[#out + 1] = "\t"
-            else out[#out + 1] = d end
+            else out[#out + 1] = REP_ESCAPES[d] or d end
             i = i + 2
         elseif c == "&" then
             out[#out + 1] = whole
@@ -1652,10 +1603,10 @@ function substitute(a1, a2, arg)
         end
         lastSub = { pat = pat, rep = rep, flags = flags }
     end
-    local g = flags:find("g", 1, true)
+    local g = text.contains(flags, "g")
     local saveIc = opt.ignorecase
-    if flags:find("i", 1, true) then opt.ignorecase = true
-    elseif flags:find("I", 1, true) then opt.ignorecase = false end
+    if text.contains(flags, "i") then opt.ignorecase = true
+    elseif text.contains(flags, "I") then opt.ignorecase = false end
     local ok, re = pcall(compile, pat)
     opt.ignorecase = saveIc
     if not ok then error(re, 0) end
@@ -1683,9 +1634,9 @@ function substitute(a1, a2, arg)
             out[#out + 1] = s:sub(init)
             local new = table.concat(out)
             nl, lastY = nl + 1, y
-            if new:find("\n", 1, true) then
-                local parts = splitLines(new)
-                if new:sub(-1) == "\n" then parts[#parts + 1] = "" end
+            if text.contains(new, "\n") then
+                local parts = text.split(new, "\n", true)
+                if text.endsWith(new, "\n") then parts[#parts + 1] = "" end
                 setLine(y, parts[1])
                 local rest = {}
                 for i = 2, #parts do rest[#rest + 1] = parts[i] end
@@ -1712,7 +1663,7 @@ function global(a1, a2, arg, invert)
     local sc = scan.new(arg, 2)
     local pat, closed = sc:readUntil(d)
     local cmd = closed and sc:readRest() or ""
-    if isBlank(cmd) then cmd = "p" end
+    if scan.isBlank(cmd) then cmd = "p" end
     if pat == "" then
         if not lastSearch then fail("E35: No previous regular expression") end
         pat = lastSearch.pat
@@ -1770,9 +1721,10 @@ function setOption(word)
         end
     end
     local full, kind = lookup(key)
-    if not full and key:sub(1, 2) == "no" then full, kind = lookup(key:sub(3)); no = true end
+    local noKey, invKey = text.stripPrefix(key, "no"), text.stripPrefix(key, "inv")
+    if not full and noKey then full, kind = lookup(noKey); no = true end
     local inv = false
-    if not full and key:sub(1, 3) == "inv" then full, kind = lookup(key:sub(4)); inv = true end
+    if not full and invKey then full, kind = lookup(invKey); inv = true end
     if not full then fail("E518: Unknown option: " .. word) end
     if query or (kind ~= "bool" and not val and not no) then
         local v = opt[full]
@@ -1788,15 +1740,13 @@ function setOption(word)
         if not v or v < 1 or v ~= math.floor(v) then fail("E487: Argument must be positive: " .. word) end
         opt[full] = v
     else
-        if val == "" or val == "off" or val == "none" then langSet = false
-        elseif val == "on" then langSet = nil
-        elseif val == "lua" or val == "sh" then langSet = val
-        elseif val == "ccsh" or val == "bash" then langSet = "sh"
-        else fail("E474: Invalid argument: " .. word) end
+        local lang = LANG_VALUES[val]
+        if lang == nil then fail("E474: Invalid argument: " .. word) end
+        if lang == "detect" then langSet = nil else langSet = lang end
     end
 end
 
-function is(name, full, min) return #name >= min and full:sub(1, #name) == name end
+function is(name, full, min) return #name >= min and text.startsWith(full, name) end
 
 isExSymbol = scan.oneOf("!&<>=#")
 isOneLetterName = scan.oneOf("sgv")
@@ -1828,7 +1778,7 @@ function trailingNumber(s)
 end
 
 -- :kx, the mark command with its letter run on
-function isMarkK(name) return #name == 2 and name:sub(1, 1) == "k" and isAlpha(name:sub(2)) end
+function isMarkK(name) return #name == 2 and text.startsWith(name, "k") and isAlpha(name:sub(2)) end
 
 function shellCommand(cmd)
     term.setCursorBlink(false)
@@ -1888,12 +1838,13 @@ function exRun(line)
     if ranged and (a1 < 1 or a2 > #lines) then fail("E16: Invalid range") end
     local name, after = commandName(rest)
     local bang = false
-    if name ~= "!" and after:sub(1, 1) == "!" then bang, after = true, after:sub(2) end
-    local arg = trimLeft(after)
+    local afterBang = text.stripPrefix(after, "!")
+    if name ~= "!" and afterBang then bang, after = true, afterBang end
+    local arg = text.trimStart(after)
     if name == "!" then
         shellCommand(after)
     elseif name == "wq" or name == "x" or is(name, "xit", 2) or name == "wqa" or name == "xa" or is(name, "exit", 3) then
-        if name:sub(1, 1) == "w" or modified() then writeFile(arg, bang, 1, #lines, true) end
+        if text.startsWith(name, "w") or modified() then writeFile(arg, bang, 1, #lines, true) end
         quitting = true
     elseif is(name, "write", 1) then
         if ranged then writeFile(arg, bang, a1, a2, a1 == 1 and a2 == #lines)
@@ -1904,7 +1855,7 @@ function exRun(line)
     elseif is(name, "edit", 1) then
         editFile(arg, bang)
     elseif is(name, "next", 1) or is(name, "Next", 1) or is(name, "previous", 4) then
-        local step = name:sub(1, 1) == "n" and 1 or -1
+        local step = text.startsWith(name, "n") and 1 or -1
         local j = argIdx + step
         if j > #argList then fail("E165: Cannot go beyond last file") end
         if j < 1 then fail("E164: Cannot go before first file") end
@@ -1915,10 +1866,10 @@ function exRun(line)
         local p = resolve(arg)
         if not fs.exists(p) or fs.isDir(p) then fail('E484: Can\'t open file ' .. arg) end
         local f = fs.open(p, "r")
-        local text = f.readAll() or ""
+        local body = f.readAll() or ""
         f.close()
-        local list = splitLines(text:gsub("\r\n", "\n"))
-        if text:sub(-1) == "\n" and #list > 1 then list[#list] = nil end
+        local list = text.split((text.replace(body, "\r\n", "\n")), "\n", true)
+        if text.endsWith(body, "\n") and #list > 1 then list[#list] = nil end
         insertLines(a2 + 1, list)
         cy = a2 + 1
         cx = firstNonBlank(cy)
@@ -1936,14 +1887,14 @@ function exRun(line)
         substitute(a1, a2, arg)
     elseif is(name, "global", 1) or is(name, "vglobal", 1) then
         if not ranged then a1, a2 = 1, #lines end
-        global(a1, a2, arg, name:sub(1, 1) == "v" or bang)
+        global(a1, a2, arg, text.startsWith(name, "v") or bang)
     elseif is(name, "delete", 1) or is(name, "yank", 1) then
         -- :d [x] [count]: a register (a letter, " or _), a count at the end
         local c = arg:sub(1, 1)
         local reg = (isAlpha(c) or c == '"' or c == "_") and c or nil
         local num = trailingNumber(arg)
         if num then a1 = a2; a2 = math.min(#lines, a1 + num - 1) end
-        apply(name:sub(1, 1) == "d" and "d" or "y", reg, a1, 1, a2, 0, "line")
+        apply(text.startsWith(name, "d") and "d" or "y", reg, a1, 1, a2, 0, "line")
     elseif is(name, "put", 2) then
         cy = a2
         local c = arg:sub(1, 1)
@@ -1958,7 +1909,7 @@ function exRun(line)
         if not dest or dest < 0 or dest > #lines then fail("E14: Invalid address") end
         local chunk = {}
         for y = a1, a2 do chunk[#chunk + 1] = lines[y] end
-        if name:sub(1, 1) == "m" then
+        if text.startsWith(name, "m") then
             if dest >= a1 and dest < a2 then fail("E134: Cannot move a range of lines into itself") end
             if dest >= a2 then
                 insertLines(dest + 1, chunk)
@@ -1978,7 +1929,7 @@ function exRun(line)
         say(tostring(ranged and a2 or #lines))
     elseif is(name, "print", 1) or name == "#" or is(name, "number", 2) then
         cy = a2
-        say(((name == "#" or name:sub(1, 1) == "n") and (a2 .. " ") or "") .. lines[a2])
+        say(((name == "#" or text.startsWith(name, "n")) and (a2 .. " ") or "") .. lines[a2])
     elseif isMarkK(name) or is(name, "mark", 2) then
         local m = isMarkK(name) and name:sub(2) or (isAlpha(arg:sub(1, 1)) and arg:sub(1, 1)) or nil
         if not m then fail("E471: Argument required") end
@@ -2051,7 +2002,8 @@ function V.main(args, o)
 
     local files, startCmd, ro = {}, nil, false
     for _, a in ipairs(args or {}) do
-        if a:sub(1, 1) == "+" then startCmd = a == "+" and "$" or a:sub(2)
+        local cmd = text.stripPrefix(a, "+")
+        if cmd then startCmd = cmd == "" and "$" or cmd
         elseif a == "-R" then ro = true
         else files[#files + 1] = a end
     end
@@ -2061,9 +2013,10 @@ function V.main(args, o)
     local rc = vimMode and (fs.exists("/.vimrc") and "/.vimrc" or "/.exrc") or "/.exrc"
     if fs.exists(rc) and not fs.isDir(rc) then
         local f = fs.open(rc, "r")
-        local text = f and f.readAll() or ""
+        local commands = f and f.readAll() or ""
         if f then f.close() end
-        for _, l in ipairs(nonEmptyLines(text)) do
+        -- one per line (ended by LF, CR LF or CR), blank ones skipped
+        for _, l in ipairs(text.split(text.replace(commands, "\r", "\n"), "\n")) do
             local ok, e = pcall(exRun, l)
             if not ok then opening = rc .. ": " .. tostring(e) end
         end
