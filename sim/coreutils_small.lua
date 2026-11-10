@@ -309,6 +309,9 @@ check("-w: leading zeros (a minus first)", lines("-w", "8", "10") == "08 09 10 "
     lines("-w", "-1", "1"))
 check("-s: the separator, a newline at the end; \t is a tab",
     seq("-s", ", ", "3").out == "1, 2, 3\n" and seq("-s\t", "2").out == "1\t2\n", show(seq("-s\t", "2").out))
+check("-s: C's escapes (a tab, octal, a backslash); a backslash before anything else kept",
+    seq("-s", "\\t", "2").out == "1\t2\n" and seq("-s", "\\101", "2").out == "1A2\n"
+    and seq("-s", "\\\\", "2").out == "1\\2\n" and seq("-s", "\\q", "2").out == "1\\q2\n", show(seq("-s", "\\101", "2").out))
 check("-f: a printf floating-point format", lines("-f", "%.2f", "1", "0.5", "2") == "1.00 1.50 2.00 "
     and lines("-f", "%05.1f", "2") == "001.0 002.0 " and lines("-f", "n=%g%%", "2") == "n=1% n=2% ")
 r = seq("x")

@@ -30,7 +30,7 @@ for _, name in ipairs(names) do
     -- its program is missing)
     add(shell.resolveProgram(name))
     if opts.a then
-        if name:find("/", 1, true) or name:find("\\", 1, true) then
+        if text.contains(name, "/") or text.contains(name, "\\") then
             add(file(shell.resolve(name)))
         else
             for _, dir in ipairs(text.split(shell.path(), ":", true)) do

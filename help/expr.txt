@@ -12,4 +12,4 @@ Every number, string and operator is its own argument (expr 1 + 2, not expr 1+2)
            start of a: the number of bytes matched (0 if none), or with
            \( \) the text the first group matched ("" if none)
   ( expr ) grouping
-An integer is digits with an optional leading "-".  A leading "--" is skipped, so "expr -- -1 + 2" works.  The result is printed with a newline; the exit status is 0 if it is neither empty nor 0, 1 if it is, 2 for a bad expression (syntax, a non-integer in arithmetic, dividing by zero, arithmetic beyond 2^53).  The stock shell's * is not a wildcard, so it needs no quoting.
+An integer is digits with an optional leading "-" or "+".  A leading "--" is skipped, so "expr -- -1 + 2" works.  The result is printed with a newline; the exit status is 0 if it is neither empty nor 0, 1 if it is, 2 for a bad expression (syntax, a non-integer in arithmetic, dividing by zero, arithmetic beyond 2^53).  The stock shell's * is not a wildcard, so it needs no quoting.

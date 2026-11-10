@@ -30,6 +30,7 @@ local cu = require("cu").init("xargs", "xargs [-prtx] [-E eofstr | -0] "
     .. "[-I replstr | -L number | -n number] [-s size] [utility [argument...]]")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 local opts, ops, order = cu.getopt({ ... }, "prtx0E:I:L:n:s:")
 local mode, count, repl = nil, nil, nil     -- "I", "L" or "n" (the last one given)
 for _, o in ipairs(order) do
@@ -40,12 +41,12 @@ for _, o in ipairs(order) do
             repl = v
             if v == "" then cu.usageError("empty replstr") end
         else
-            count = cu.int(v)
+            count = convert.toInteger(v)
             if not count or count < 1 then cu.usageError("invalid number '" .. v .. "'") end
         end
     end
 end
-local size = opts.s and cu.int(opts.s)
+local size = opts.s and convert.toInteger(opts.s)
 if opts.s and (not size or size < 1) then cu.usageError("invalid size '" .. opts.s .. "'") end
 local eof = not opts["0"] and opts.E ~= "" and opts.E or nil
 local lineMode = (mode == "I" or mode == "L") and not opts["0"]
@@ -122,12 +123,9 @@ local function fill()
         breathe()
         queue, qi = {}, 1
         if opts["0"] then
-            local all, p = cu.readAll(input), 1
-            while p <= #all do
-                local z = all:find("\0", p, true) or #all + 1
-                queue[#queue + 1] = all:sub(p, z - 1)
-                p = z + 1
-            end
+            -- each argument ends at a NUL (the last one may not have one)
+            queue = text.split(cu.readAll(input), "\0", true)
+            if queue[#queue] == "" then queue[#queue] = nil end
             done = true
         else
             local line = cu.readLine(input)
@@ -149,18 +147,6 @@ local function peek()
     return a
 end
 local function take() qi = qi + 1 end
-
--- Replace every replstr in s with v, taking both literally.
-local function replace(s, v)
-    local out, p = {}, 1
-    while true do
-        local a, b = s:find(repl, p, true)
-        if not a then out[#out + 1] = s:sub(p); break end
-        out[#out + 1] = s:sub(p, a - 1) .. v
-        p = b + 1
-    end
-    return table.concat(out)
-end
 
 local function run(args)
     if not shell.resolveProgram(cmd) then
@@ -202,7 +188,7 @@ while true do
         local v = peek()
         if v == nil then break end
         take()
-        for _, a in ipairs(base) do push(replace(a, v)) end
+        for _, a in ipairs(base) do push((text.replace(a, repl, v))) end   -- (every replstr, as it is)
     else
         for _, a in ipairs(base) do push(a) end
         while not count or n < count do

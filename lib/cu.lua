@@ -5,11 +5,8 @@
 --   for line in cu.lines(files) do io.write(line, "\n") end
 --   return cu.exit()
 --
--- Options follow the POSIX Utility Syntax Guidelines: flags group (-abc),
--- an option-argument can be attached (-n5) or separate (-n 5), "--" ends
--- the options, "-" is an operand and so is everything after the first
--- operand.  A bad option prints the getopt message and the usage line and
--- exits with status 2.
+-- Options are lib/getopt's (the POSIX Utility Syntax Guidelines); a bad
+-- one prints getopt's message and the usage line and exits with status 2.
 --
 -- Output goes to io.write (io.output()), diagnostics to printError as
 -- "<name>: <message>", so a shell that can redirect io.input()/io.output()
@@ -20,6 +17,8 @@
 -- cu.exit(status) records the status in _G.POSIX_STATUS; a nonzero one
 -- ends the program with error("", 0), which the stock shell takes as a
 -- failure without printing anything.
+
+local getopt = require("getopt")
 
 local cu = {}
 
@@ -60,64 +59,13 @@ function cu.usageError(msg, status)
     cu.exit(status or 2)
 end
 
--- Parse the options in `args` against `spec` ("n:cv": a colon after a
--- letter means it takes an argument).  Returns opts (opts.c = true for a
--- flag, the argument string for the others; the last one wins), the list
--- of operands, and every option in order as { letter, value }.
-function cu.getopt(args, spec, status)
-    -- spec: (letter ":"?)*, a stray colon skipped
-    local takes = {}
-    for k = 1, #spec do
-        local c = spec:sub(k, k)
-        if c ~= ":" then takes[c] = spec:sub(k + 1, k + 1) == ":" end
-    end
-    local opts, order, operands = {}, {}, {}
-    local i = 1
-    while i <= #args do
-        local a = args[i]
-        if a == "--" then i = i + 1; break end
-        if a:sub(1, 1) ~= "-" or a == "-" then break end
-        local j = 2
-        while j <= #a do
-            local c = a:sub(j, j)
-            if takes[c] == nil then cu.usageError("illegal option -- " .. c, status) end
-            local v = true
-            if takes[c] then
-                v = a:sub(j + 1)
-                if v == "" then
-                    i = i + 1
-                    v = args[i]
-                    if v == nil then cu.usageError("option requires an argument -- " .. c, status) end
-                end
-                j = #a
-            end
-            opts[c] = v
-            order[#order + 1] = { c, v }
-            j = j + 1
-        end
-        i = i + 1
-    end
-    for k = i, #args do operands[#operands + 1] = args[k] end
+-- getopt.parse(args, spec, long) (lib/getopt's header says what it reads
+-- and returns: opts, operands, order), with a bad option made a usage
+-- error: its message, the usage line, status 2 (or status).
+function cu.getopt(args, spec, status, long)
+    local opts, operands, order = getopt.parse(args, spec, long)
+    if not opts then cu.usageError(operands, status) end
     return opts, operands, order
-end
-
--- Is s a whole decimal integer: an optional + or -, then digits?  (By
--- hand, not with lib/scan: every utility loads cu, and it needs nothing.)
-function cu.isInt(s)
-    if type(s) ~= "string" then return false end
-    local from = (s:sub(1, 1) == "+" or s:sub(1, 1) == "-") and 2 or 1
-    if from > #s then return false end
-    for k = from, #s do
-        local b = s:byte(k)
-        if b < 48 or b > 57 then return false end      -- (not 0-9)
-    end
-    return true
-end
-
--- A whole decimal integer (sign allowed), or nil.
-function cu.int(s)
-    if cu.isInt(s) then return tonumber(s) end
-    return nil
 end
 
 --------------------------------------------------------------------------

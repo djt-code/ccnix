@@ -22,7 +22,9 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("test", "test [expression]")
+local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 local args = { ... }
 
 local function bad(msg) cu.err(msg); cu.exit(2) end
@@ -39,25 +41,25 @@ local function mtime(p)
     local a = try(fs.attributes, p)
     if a then return a.modified or a.modification end
 end
-local function int(s) return cu.int(s) or bad(s .. ": integer expression expected") end
+-- an integer operand (scan.isInteger's shape) as a number, or an error
+local function integer(s) return convert.toInteger(s) or bad(s .. ": integer expression expected") end
 local function no() return false end
 
--- an integer's sign ("+", "-" or "") and its digits without the leading zeros
-local function signAndDigits(s)
-    local sign = ""
-    if text.startsWith(s, "+") or text.startsWith(s, "-") then sign, s = s:sub(1, 1), s:sub(2) end
-    local from = 1
-    while s:sub(from, from) == "0" do from = from + 1 end
-    return sign, s:sub(from)
+-- integer: sign? "0"* digits: the digits, without the sign and the
+-- leading zeros
+local function magnitude(s)
+    local sc = scan.new(s)
+    local _ = sc:accept("+") or sc:accept("-")
+    sc:readWhile(scan.oneOf("0"))
+    return sc:rest()
 end
 
 -- compare two integers as text, -1, 0 or 1, so that numbers past 2^53
 -- (where Lua's doubles lose digits) still compare exactly
 local function icmp(a, b)
-    int(a); int(b)
-    local sa, da = signAndDigits(a)
-    local sb, db = signAndDigits(b)
-    local na, nb = sa == "-" and da ~= "", sb == "-" and db ~= ""
+    integer(a); integer(b)
+    local da, db = magnitude(a), magnitude(b)
+    local na, nb = scan.isNegative(a), scan.isNegative(b)
     if na ~= nb then return na and -1 or 1 end
     local c = 0
     if #da ~= #db then c = #da < #db and -1 or 1
@@ -75,12 +77,12 @@ local UNARY = {
     ["-x"] = function(p)
         if try(fs.isDir, p) then return true end
         local n = fs.getName(shell.resolve(p))
-        return isFile(p) and (text.endsWith(n, ".lua") or not n:find(".", 1, true))
+        return isFile(p) and (text.endsWith(n, ".lua") or not text.contains(n, "."))
     end,
     ["-n"] = function(s) return s ~= "" end,
     ["-z"] = function(s) return s == "" end,
     ["-t"] = function(fd)
-        fd = int(fd)
+        fd = integer(fd)
         if fd == 0 then return cu.isKeyboard() end
         if fd == 1 then return cu.isTerminal() end
         return fd == 2
