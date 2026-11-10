@@ -38,11 +38,11 @@ local P = {}
 local HSTEP = 8            -- columns per sideways step
 local WHEEL = 3            -- lines per notch of the mouse wheel
 
--- The text as a list of lines: no carriage returns, tabs as 4 spaces.
+-- The text as a list of lines: no carriage returns, tabs as 4 spaces;
+-- no text at all is one empty line.
 function P.lines(s)
-    s = s:gsub("\r", ""):gsub("\t", "    ")
-    local out = text.split(s, "\n", true)
-    if out[#out] == "" and #out > 1 then out[#out] = nil end    -- a final newline isn't a line
+    local out = text.lines(text.replace(text.replace(s, "\r", ""), "\t", "    "))
+    if #out == 0 then out[1] = "" end
     return out
 end
 
@@ -78,7 +78,7 @@ function P.wrap(lines, w)
             local chunk = body:sub(pos, pos + w)
             -- break at the chunk's last space, if there's text before it
             local before, after = text.cutLast(chunk, " ")
-            if after and not scan.all(before, scan.isSpace) then
+            if after and not scan.isBlank(before) then
                 local cut = #before + 1                         -- (where the space is)
                 row(pos, pos + cut - 2)
                 pos = pos + cut
@@ -96,13 +96,12 @@ end
 
 -- Draw columns left.. of line `l` at the cursor, `w` wide at most.
 function P.drawLine(l, left, w)
-    local text = textOf(l):sub(left, left + w - 1)
+    local shown = textOf(l):sub(left, left + w - 1)
     if type(l) == "table" and l[2] and colourScreen() then
-        local fg = l[2]:sub(left, left + w - 1)
-        fg = fg .. string.rep("0", #text - #fg)
-        term.blit(text, fg, string.rep("f", #text))
+        local fg = text.padRight(l[2]:sub(left, left + w - 1), #shown, "0")
+        term.blit(shown, fg, string.rep("f", #shown))
     else
-        term.write(text)
+        term.write(shown)
     end
 end
 

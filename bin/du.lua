@@ -13,14 +13,16 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("du", "du [-a|-s] [-kx] [-H|-L] [file...]")
+local path = require("path")
 local opts, files = cu.getopt({ ... }, "askxHL")
 if opts.a and opts.s then cu.usageError("-a and -s can't be used together") end
 local unit = opts.k and 1024 or 512
 if #files == 0 then files = { "." } end
 
--- the size of p in blocks, writing a line for each entry that should get one
+-- the size of p (shown as `shown`) in blocks, writing a line for each
+-- entry that should get one
 local seen = 0
-local function walk(p, path, drive, top)
+local function walk(p, shown, drive, top)
     -- yield now and then, or a big tree trips "Too long without yielding"
     seen = seen + 1
     if seen % 200 == 0 then os.queueEvent("du"); os.pullEvent("du") end
@@ -28,17 +30,17 @@ local function walk(p, path, drive, top)
     if fs.isDir(p) then
         n = 0
         local ok, names = pcall(fs.list, p)
-        if not ok then cu.fail(path .. ": " .. tostring(names)); names = {} end
+        if not ok then cu.fail(shown .. ": " .. tostring(names)); names = {} end
         for _, name in ipairs(names) do
             local cp = fs.combine(p, name)
             if not opts.x or fs.getDrive(cp) == drive then
-                n = n + walk(cp, (path:sub(-1) == "/" and path or path .. "/") .. name, drive, false)
+                n = n + walk(cp, path.join(shown, name), drive, false)
             end
         end
-        if not opts.s or top then io.write(tostring(n), " ", path, "\n") end
+        if not opts.s or top then io.write(tostring(n), " ", shown, "\n") end
     else
         n = math.ceil(fs.getSize(p) / unit)
-        if top or opts.a then io.write(tostring(n), " ", path, "\n") end
+        if top or opts.a then io.write(tostring(n), " ", shown, "\n") end
     end
     return n
 end

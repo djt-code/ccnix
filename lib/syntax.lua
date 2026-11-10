@@ -1,10 +1,10 @@
 -- syntax.lua -- colours for source text, a line at a time (vim's highlighting)
 --
 --   local syntax = require("syntax")
---   local lang = syntax.detect(path, firstLine)   -- "lua", "sh" or nil
---   local fg, state = syntax.line(lang, text, state)
+--   local lang = syntax.detect(file, firstLine)   -- "lua", "sh" or nil
+--   local fg, state = syntax.line(lang, line, state)
 --
--- fg has one blit digit per byte of text ("4" yellow, "e" red ...), as
+-- fg has one blit digit per byte of the line ("4" yellow, "e" red ...), as
 -- term.blit takes them.  state is what carries over to the next line (a
 -- long string or comment still open, a quote not yet closed): pass the
 -- previous line's state in, nil for the first line.  syntax.COLOURS holds
@@ -24,6 +24,7 @@
 -- next character, decides what it starts (a comment, a string, a number,
 -- a word ...), steps over the whole of it and paints what it stepped over.
 
+local path = require("path")
 local scan = require("scan")
 local text = require("text")
 local isDigit, isAlnum, isSpace = scan.isDigit, scan.isAlnum, scan.isSpace
@@ -65,41 +66,26 @@ local SH_BUILTINS = set([[alias bg break cd continue echo eval exec exit export 
 -- after these a new command starts
 local SH_LEAD = set("if then else elif while until do ! time {")
 
--- The last part of a path: what follows its last "/".
-local function baseName(path)
-    local from = 1
-    while true do
-        local slash = path:find("/", from, true)
-        if not slash then return path:sub(from) end
-        from = slash + 1
-    end
-end
+-- The language of each extension, and of the names that have none
+local BY_EXTENSION = { lua = "lua", sh = "sh", ccsh = "sh", bash = "sh" }
+local BY_NAME = { [".profile"] = "sh", [".ccshrc"] = "sh" }
+-- what a #! line names, looked for in this order
+local INTERPRETERS = { { "lua", "lua" }, { "sh", "sh" } }
 
--- A file name's extension: what follows its last ".", if that dot has
--- something before it and something after ("a.lua"; not ".profile" or "a.").
-local function extension(name)
-    local dot
-    for i = #name, 2, -1 do
-        if name:sub(i, i) == "." then dot = i; break end
-    end
-    if not dot or dot == #name then return nil end
-    return name:sub(dot + 1)
-end
-
-function S.detect(path, first)
+function S.detect(file, first)
     first = first or ""
-    if first:sub(1, 2) == "#!" then
-        if first:find("lua", 1, true) then return "lua" end
-        if first:find("sh", 1, true) then return "sh" end
+    if text.startsWith(first, "#!") then
+        for _, i in ipairs(INTERPRETERS) do
+            if text.contains(first, i[1]) then return i[2] end
+        end
     end
-    local name = baseName(path or "")
-    if name == "" then return nil end
-    local ext = extension(name)
-    if ext == "lua" then return "lua" end
-    if ext == "sh" or ext == "ccsh" or ext == "bash" or name == ".profile" or name == ".ccshrc" then
-        return "sh"
-    end
-    if not ext and name:sub(1, 1) ~= "." then return "lua" end
+    local name = path.basename(file or "")
+    if name == "" or name == "/" then return nil end
+    local ext = path.extension(name)
+    local lang = BY_EXTENSION[ext] or BY_NAME[name]
+    if lang then return lang end
+    -- no extension: a CraftOS program (but not a hidden file)
+    if ext == "" and not text.startsWith(name, ".") then return "lua" end
     return nil
 end
 
@@ -121,11 +107,13 @@ end
 -- The level of a long bracket opening at the scanner, "[" then "="s then
 -- "[" (its level is how many "="s), or nil if there isn't one there.
 -- Steps over nothing: the opening is level + 2 characters long.
+local isEquals = scan.oneOf("=")
+
 local function longOpenAt(sc)
     local start = sc:pos()
     local level
     if sc:accept("[") then
-        local eqs = sc:readWhile(function(c) return c == "=" end)
+        local eqs = sc:readWhile(isEquals)
         if sc:accept("[") then level = #eqs end
     end
     sc:setPos(start)
@@ -136,7 +124,7 @@ end
 -- 2): true, or false (at the end of the line) if it isn't on this line.
 local function skipLongClose(sc, level)
     local close = "]" .. string.rep("=", level) .. "]"
-    local _, stop = sc.text:find(close, sc:pos(), true)
+    local _, stop = text.find(sc.text, close, sc:pos())
     if not stop then sc:readRest(); return false end
     sc:setPos(stop + 1)
     return true
@@ -156,8 +144,8 @@ end
 
 -- The state after a line whose string in quotes q ran off its end: it
 -- carries on only if the line ends in a backslash.
-local function quoteCarries(text, q)
-    if text:sub(-1) == "\\" then return { quote = q } end
+local function quoteCarries(line, q)
+    if text.endsWith(line, "\\") then return { quote = q } end
     return nil
 end
 
@@ -181,9 +169,9 @@ local function startsNumber(sc)
     return isDigit(sc:peek()) or (sc:peek() == "." and isDigit(sc:peek(2)))
 end
 
-local function luaLine(text, state)
+local function luaLine(line, state)
     local C = S.COLOURS
-    local sc = scan.new(text)
+    local sc = scan.new(line)
     local p = painter(sc)
     if state then
         if state.long then
@@ -196,7 +184,7 @@ local function luaLine(text, state)
             -- a string continued past a backslash at the end of the last line
             local closed = skipQuoted(sc, state.quote)
             p.paintFrom(1, C.string)
-            if not closed then return p.result(), quoteCarries(text, state.quote) end
+            if not closed then return p.result(), quoteCarries(line, state.quote) end
         end
     end
     while not sc:atEnd() do
@@ -225,7 +213,7 @@ local function luaLine(text, state)
             sc:advance()
             local closed = skipQuoted(sc, ch)
             p.paintFrom(start, C.string)
-            if not closed then return p.result(), quoteCarries(text, ch) end
+            if not closed then return p.result(), quoteCarries(line, ch) end
         elseif startsNumber(sc) then
             skipNumber(sc)
             p.paintFrom(start, C.constant)
@@ -292,11 +280,9 @@ local function assignmentLength(word)
     return 0
 end
 
-local function isNumber(word) return word ~= "" and scan.all(word, isDigit) end
-
-local function shLine(text, state)
+local function shLine(line, state)
     local C = S.COLOURS
-    local sc = scan.new(text)
+    local sc = scan.new(line)
     local p = painter(sc)
     local cmdpos = true
     -- the inside of a double-quoted string, from the scanner: true when it
@@ -380,7 +366,7 @@ local function shLine(text, state)
                 local c = C.text
                 if cmdpos and SH_KEYWORDS[word] then c = C.keyword
                 elseif cmdpos and SH_BUILTINS[word] then c = C.builtin
-                elseif isNumber(word) then c = C.constant end
+                elseif scan.isUnsigned(word) then c = C.constant end
                 if word == "in" or word == "do" then c = C.keyword end
                 p.paintFrom(start, c)
                 cmdpos = cmdpos and SH_LEAD[word] or false
@@ -392,10 +378,10 @@ end
 
 -- The colours of one line of `lang` (nil: all plain), and the state for
 -- the next.
-function S.line(lang, text, state)
-    if lang == "lua" then return luaLine(text, state) end
-    if lang == "sh" then return shLine(text, state) end
-    return string.rep(S.COLOURS.text, #text), nil
+function S.line(lang, line, state)
+    if lang == "lua" then return luaLine(line, state) end
+    if lang == "sh" then return shLine(line, state) end
+    return string.rep(S.COLOURS.text, #line), nil
 end
 
 return S

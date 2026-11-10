@@ -89,6 +89,10 @@ t0 = W.clock
 r = W:run("sleep", "0.5")
 r2 = W:run("sleep", ".25")
 check("sleep takes decimals", r.status == 0 and r2.status == 0 and math.abs(W.clock - t0 - 0.75) < 1e-9)
+t0 = W.clock
+r = W:run("sleep", "+1")
+r2 = W:run("sleep", "1e0")
+check("sleep takes a sign and an exponent, as GNU's", r.status == 0 and r2.status == 0 and W.clock - t0 == 2)
 r = W:run("sleep", "abc")
 check("sleep abc: invalid, status 2", r.status == 2 and r.err[1] == "sleep: invalid time interval 'abc'")
 r = W:run("sleep", "-1")
@@ -361,6 +365,9 @@ check("rmdir: not empty is said, status 1", r.status == 1 and r.err[1] == "rmdir
 W.fs.delete("p/q/r/f.txt")
 r = W:run("rmdir", "-p", "p/q/r/")
 check("rmdir -p: the directory and the ones above it as they empty", r.status == 0 and not W.fs.exists("p"), show(r.errText))
+W:dir("p/q/r")
+r = W:run("rmdir", "-p", "p//q/r")
+check("rmdir -p: a doubled slash doesn't stop it going up", r.status == 0 and not W.fs.exists("p"), show(r.errText))
 W:file("x.txt", "x")
 r = W:run("rmdir", "x.txt", "nope")
 check("rmdir: a file, a missing one", r.status == 1 and r.err[1] == "rmdir: x.txt: Not a directory"

@@ -14,11 +14,12 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("uniq", "uniq [-c|-d|-u] [-f fields] [-s chars] [input [output]]")
+local convert = require("convert")
 local scan = require("scan")
 local text = require("text")
 local opts, ops = cu.getopt({ ... }, "cdf:s:u")
 if #ops > 2 then cu.usageError("too many operands") end
-local nf, ns = cu.int(opts.f or "0"), cu.int(opts.s or "0")
+local nf, ns = convert.toInteger(opts.f or "0"), convert.toInteger(opts.s or "0")
 if not nf or nf < 0 then cu.usageError("bad field count: " .. opts.f) end
 if not ns or ns < 0 then cu.usageError("bad character count: " .. opts.s) end
 
@@ -39,8 +40,7 @@ end
 -- io.open's message starts with the path and ": ": keep just the reason
 local function reason(e)
     local _, rest = text.cut(e, ":")
-    if rest and text.startsWith(rest, " ") then return rest:sub(2) end
-    return e
+    return rest and text.stripPrefix(rest, " ") or e
 end
 
 local h = cu.open(ops[1] or "-")

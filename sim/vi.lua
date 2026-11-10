@@ -229,6 +229,13 @@ same("& repeats the last :s", edit("aa\naa\n", ":s/a/b/<CR>j&:wq<CR>"), "ba\nba\
 same("marks: ma, then d'a", edit("1\n2\n3\n4\n", "jmajjd'a:wq<CR>"), "1\n")
 same("+N on the command line starts there", edit("1\n2\n3\n", "x:wq<CR>", { args = { "+2", "t.lua" } }), "1\n\n3\n")
 same(":r reads a file in", edit("a\n", ":r other<CR>:wq<CR>", { files = { other = "x\ny\n" } }), "a\nx\ny\n")
+same(":r of a CRLF file reads its lines", edit("a\n", ":r other<CR>:wq<CR>", { files = { other = "x\r\ny\r\n" } }),
+    "a\nx\ny\n")
+same("+ alone starts at the end", edit("1\n2\n3\n", "x:wq<CR>", { args = { "+", "t.lua" } }), "1\n2\n\n")
+same(":s: \\t and \\n in the replacement", edit("a,b\n", [[:s/,/\t\n/<CR>:wq<CR>]]), "a\t\nb\n")
+same(".exrc: CR LF and blank lines, blanks around a command",
+    edit("\n", "i<Tab>x<Esc>:wq<CR>", { files = { ["/.exrc"] = "set noet\r\n\r\n   set ts=8   \r\n" } }), "\tx\n")
+same(":wq! writes a read-only file", edit("a\n", "x:set ro<CR>:wq!<CR>"), "\n")
 
 -- 6. files: what's kept, what's refused
 same("CRLF files stay CRLF", edit("a\r\nb\r\n", "x:wq<CR>"), "\r\nb\r\n")
@@ -289,3 +296,16 @@ check("sh: a quoted string spans lines", select(2, syntax.line("sh", "echo 'a"))
 check("sh: NAME=value, then a reserved word", syntax.line("sh", "X=1 if") == "330044", (syntax.line("sh", "X=1 if")))
 check("detect", syntax.detect("a.lua") == "lua" and syntax.detect("x.sh") == "sh" and syntax.detect("startup") == "lua"
     and syntax.detect("run", "#!/ccnix/bin/ccsh") == "sh" and syntax.detect("notes.txt") == nil and syntax.detect(".profile") == "sh")
+for _, case in ipairs({ { "ft=sh", "sh" }, { "ft=bash", "sh" }, { "ft=lua", "lua" }, { "ft=off", "" },
+    { "ft=none", "" }, { "ft=on", "lua" } }) do
+    edit("x\n", ":set " .. case[1] .. "<CR>:set ft?<CR>:q<CR>", { vim = true })
+    local shown = bottomHas("filetype=")
+    check(":set " .. case[1] .. " then ft? says " .. case[2], shown and shown:find("filetype=" .. case[2] .. " ", 1, true) ~= nil,
+        shown)
+end
+edit("x\n", ":set ft=perl<CR>:q<CR>", { vim = true })
+check(":set ft=perl: E474", bottomHas("E474") ~= nil)
+check("detect: by the last name's extension, or its name", syntax.detect("/a.d/x.bash") == "sh"
+    and syntax.detect("/h/.ccshrc") == "sh" and syntax.detect("a.lua.bak") == nil and syntax.detect(".lua") == nil
+    and syntax.detect("/rom/programs/edit") == "lua" and syntax.detect("x.sh", "#!/bin/lua") == "lua"
+    and syntax.detect("") == nil and syntax.detect(nil) == nil)

@@ -28,17 +28,20 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("ls", "ls [-aAdFhlpRrSt1] [file...]")
+local convert = require("convert")
+local path = require("path")
+local text = require("text")
 local opts, operands = cu.getopt({ ... }, "aAdFhlpRrSt1")
 local mark = opts.F or opts.p
 
--- An entry: name as shown, path on disk, and its attributes.
-local function entry(name, path)
-    local ok, a = pcall(fs.attributes, path)
+-- An entry: name as shown, full path on disk, and its attributes.
+local function entry(name, full)
+    local ok, a = pcall(fs.attributes, full)
     if not ok or not a then
-        a = { size = 0, isDir = fs.isDir(path), isReadOnly = fs.isReadOnly(path), modified = 0 }
+        a = { size = 0, isDir = fs.isDir(full), isReadOnly = fs.isReadOnly(full), modified = 0 }
     end
     local m = a.modified or a.modification or 0
-    return { name = name, path = path, dir = a.isDir, ro = a.isReadOnly, size = a.isDir and 0 or a.size,
+    return { name = name, path = full, dir = a.isDir, ro = a.isReadOnly, size = a.isDir and 0 or a.size,
              time = m }
 end
 
@@ -55,20 +58,9 @@ local function sorted(list)
     return list
 end
 
--- 1.5K, 23K, 4.0M: one decimal below 10, as GNU's -h does (rounding up).
-local UNITS = { "K", "M", "G", "T" }
-local function human(n)
-    if n < 1024 then return tostring(n) end
-    local i = 1
-    n = n / 1024
-    while n >= 1024 and i < #UNITS do n, i = n / 1024, i + 1 end
-    if n < 10 then
-        local v = math.ceil(n * 10) / 10
-        if v < 10 then return string.format("%.1f%s", v, UNITS[i]) end
-    end
-    local v = math.ceil(n)
-    if v >= 1024 and i < #UNITS then return "1.0" .. UNITS[i + 1] end
-    return v .. UNITS[i]
+-- a size for -l: bytes, or with -h 1.5K, 23K, 4.0M (as GNU's -h)
+local function size(n)
+    return opts.h and convert.humanSize(n) or tostring(n)
 end
 
 local now = os.epoch and os.epoch("utc") / 1000 or os.time()
@@ -77,7 +69,8 @@ local function when(ms)
     if not ms or ms <= 0 then return "           -" end    -- (none recorded: the root)
     local t = math.floor(ms / 1000)
     local day = os.date("%d", t)
-    if day:sub(1, 1) == "0" then day = " " .. day:sub(2) end     -- " 5", not "05"
+    local oneDigit = text.stripPrefix(day, "0")
+    if oneDigit then day = " " .. oneDigit end     -- " 5", not "05"
     if math.abs(now - t) < HALF_YEAR then
         return os.date("%b ", t) .. day .. os.date(" %H:%M", t)
     end
@@ -101,18 +94,18 @@ end
 local function long(list, withTotal)
     local total = 0
     for _, e in ipairs(list) do total = total + e.size end
-    if withTotal then io.write("total ", opts.h and human(total) or tostring(math.ceil(total / 1024)), "\n") end
+    if withTotal then io.write("total ", opts.h and size(total) or tostring(math.ceil(total / 1024)), "\n") end
     local rows, wide = {}, 0
     for i, e in ipairs(list) do
         local w = e.ro and "-" or "w"
         local mode = (e.dir and "d" or "-") .. "r" .. w .. (e.dir and "x" or "-")
             .. "r-" .. (e.dir and "x" or "-") .. "r-" .. (e.dir and "x" or "-")
-        rows[i] = { mode = mode, size = opts.h and human(e.size) or tostring(e.size), time = when(e.time) }
+        rows[i] = { mode = mode, size = size(e.size), time = when(e.time) }
         wide = math.max(wide, #rows[i].size)
     end
     for i, e in ipairs(list) do
         local r = rows[i]
-        io.write(r.mode, " ", string.rep(" ", wide - #r.size), r.size, " ", r.time, " ")
+        io.write(r.mode, " ", text.padLeft(r.size, wide), " ", r.time, " ")
         writeName(e)
         io.write("\n")
     end
@@ -156,20 +149,20 @@ local function show(list, isDir)
     else columns(list) end
 end
 
--- What's in directory `path` (shown as `label`), and its subdirectories
+-- What's in directory `dir` (shown as `label`), and its subdirectories
 -- after it with -R.
 local listed = 0
-local function listDir(path, label, header)
+local function listDir(dir, label, header)
     if header then io.write(label, ":\n") end
-    local ok, names = pcall(fs.list, path)
+    local ok, names = pcall(fs.list, dir)
     if not ok then cu.fail(label .. ": " .. tostring(names), 2); return end
     local list = {}
     if opts.a then
-        list[#list + 1] = entry(".", path)
-        list[#list + 1] = entry("..", path == "" and "" or fs.getDir(path))
+        list[#list + 1] = entry(".", dir)
+        list[#list + 1] = entry("..", dir == "" and "" or fs.getDir(dir))
     end
     for _, n in ipairs(names) do
-        local p = fs.combine(path, n)
+        local p = fs.combine(dir, n)
         if opts.a or opts.A or not cu.hidden(p) then list[#list + 1] = entry(n, p) end
         listed = listed + 1
         if listed % 200 == 0 then os.queueEvent("ls"); os.pullEvent("ls") end   -- (long trees)
@@ -179,7 +172,7 @@ local function listDir(path, label, header)
         for _, e in ipairs(list) do
             if e.dir and e.name ~= "." and e.name ~= ".." then
                 io.write("\n")
-                listDir(e.path, (label:sub(-1) == "/" and label or label .. "/") .. e.name, true)
+                listDir(e.path, path.join(label, e.name), true)
             end
         end
     end

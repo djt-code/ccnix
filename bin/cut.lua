@@ -78,7 +78,7 @@ for l in cu.lines(files) do
     if done % 1000 == 0 then os.queueEvent("cut_yield"); os.pullEvent("cut_yield") end
     local t = {}
     if opts.f then
-        if not l:find(delim, 1, true) then
+        if not text.contains(l, delim) then
             if not opts.s then io.write(l, "\n") end
         else
             local i = 0

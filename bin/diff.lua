@@ -16,6 +16,8 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("diff", "diff [-c|-e|-f|-u|-C n|-U n] [-bqr] file1 file2")
+local convert = require("convert")
+local path = require("path")
 local scan = require("scan")
 local text = require("text")
 local args = { ... }
@@ -33,7 +35,7 @@ for _, o in ipairs(order) do
     if c == "c" or c == "u" then fmt, ctx = c, 3
     elseif c == "e" or c == "f" then fmt = c
     elseif c == "C" or c == "U" then
-        local num = cu.int(v)
+        local num = convert.toInteger(v)
         if not num or num < 0 then cu.usageError("bad context length: " .. v) end
         fmt, ctx = c:lower(), num
     end
@@ -321,7 +323,7 @@ end
 local function diffFiles(n1, n2, inDir)
     local t1, t2 = slurp(n1), slurp(n2)
     if not t1 or not t2 or (t1 == t2) then return end
-    local binary = t1:find("\0", 1, true) or t2:find("\0", 1, true)
+    local binary = text.contains(t1, "\0") or text.contains(t2, "\0")
     local L1, K1, ne1 = split(t1)
     local L2, K2, ne2 = split(t2)
     local ch = (binary or (opts.q and not opts.b)) and { true } or changes(K1, K2)
@@ -343,12 +345,6 @@ local function diffFiles(n1, n2, inDir)
 end
 
 local function isDir(name) return name ~= "-" and fs.isDir(shell.resolve(name)) end
--- directory d (its slashes at the end dropped), "/", name f
-local function join(d, f)
-    local to = #d
-    while to > 0 and d:sub(to, to) == "/" do to = to - 1 end
-    return d:sub(1, to) .. "/" .. f
-end
 
 -- compare two directories by the names in them
 local function diffDirs(d1, d2)
@@ -360,7 +356,7 @@ local function diffDirs(d1, d2)
     end
     table.sort(names)
     for _, f in ipairs(names) do
-        local p1, p2 = join(d1, f), join(d2, f)
+        local p1, p2 = path.join(d1, f), path.join(d2, f)
         local e1, e2 = fs.exists(shell.resolve(p1)), fs.exists(shell.resolve(p2))
         if not e2 then out("Only in ", d1, ": ", f, "\n"); cu.status = math.max(cu.status, 1)
         elseif not e1 then out("Only in ", d2, ": ", f, "\n"); cu.status = math.max(cu.status, 1)
@@ -381,8 +377,8 @@ if isDir(f1) and isDir(f2) then
     diffDirs(f1, f2)
 else
     -- a directory and a file: the file of that name in the directory
-    if isDir(f1) then f1 = join(f1, f2 == "-" and "-" or fs.getName(shell.resolve(f2))) end
-    if isDir(f2) then f2 = join(f2, f1 == "-" and "-" or fs.getName(shell.resolve(f1))) end
+    if isDir(f1) then f1 = path.join(f1, f2 == "-" and "-" or fs.getName(shell.resolve(f2))) end
+    if isDir(f2) then f2 = path.join(f2, f1 == "-" and "-" or fs.getName(shell.resolve(f1))) end
     diffFiles(f1, f2, false)
 end
 return cu.exit()

@@ -23,6 +23,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tr", "tr [-c|-C] [-ds] string1 [string2]")
 local scan = require("scan")
+local text = require("text")
 local opts, ops = cu.getopt({ ... }, "cCds")
 local comp = opts.c or opts.C
 local want = (opts.d and opts.s or not opts.d and not opts.s) and 2 or 1
@@ -31,12 +32,11 @@ if #ops ~= want then cu.usageError(#ops < want and "missing operand" or "extra o
 
 local ESC = { ["\\"] = "\\", a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v" }
 -- the classes, each a test on one character (bytes 0 to 127 are tried)
-local function byteIn(lo, hi) return function(c) return c:byte() >= lo and c:byte() <= hi end end
+local function isGraph(c) return scan.isPrintable(c) and c ~= " " end
 local CLASS = { alnum = scan.isAlnum, alpha = scan.isAlpha, blank = scan.oneOf(" \t"),
-    cntrl = function(c) return c:byte() < 32 or c:byte() == 127 end, digit = scan.isDigit,
-    graph = byteIn(33, 126), lower = scan.isLower, print = byteIn(32, 126), punct = scan.isPunct,
+    cntrl = scan.isControl, digit = scan.isDigit,
+    graph = isGraph, lower = scan.isLower, print = scan.isPrintable, punct = scan.isPunct,
     space = scan.isSpace, upper = scan.isUpper, xdigit = scan.isHexDigit }
-local isOctal = scan.oneOf("01234567")
 
 -- one character (escapes allowed) at i: the character and the next index
 local function char(s, i)
@@ -44,7 +44,7 @@ local function char(s, i)
     if c ~= "\\" or i == #s then return c, i + 1 end
     -- \ooo: one to three octal digits
     local sc, oct = scan.new(s, i + 1), ""
-    while #oct < 3 and isOctal(sc:peek()) do oct = oct .. sc:advance() end
+    while #oct < 3 and scan.isOctalDigit(sc:peek()) do oct = oct .. sc:advance() end
     if oct ~= "" then return string.char(tonumber(oct, 8) % 256), i + 1 + #oct end
     c = s:sub(i + 1, i + 1)
     return ESC[c] or c, i + 2
@@ -87,7 +87,7 @@ local function parse(s, second)
         elseif s:sub(i, i) == "[" and s:sub(j, j) == "*" and repeatCount(s, j + 1) then
             local num = repeatCount(s, j + 1)
             if not second then cu.usageError("[c*n] belongs in string2", 1) end
-            local count = tonumber(num, num:sub(1, 1) == "0" and 8 or 10) or 0
+            local count = tonumber(num, text.startsWith(num, "0") and 8 or 10) or 0
             if count == 0 and not fill then fill = #t + 1; t[#t + 1] = { c } end
             for _ = 1, count do t[#t + 1] = c end
             i = j + #num + 2
