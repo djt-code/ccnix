@@ -110,6 +110,27 @@ check("sizes: a number, K and M (KiB, MiB), junk is nil",
     D.size(32768) == 32768 and D.size("2M") == 2097152 and D.size("512k") == 524288 and D.size("1.5M") == 1572864
         and D.size("2MB") == 2097152 and D.size("4096") == 4096 and D.size("big") == nil and D.size(nil) == nil)
 
+-- the settings, each checked (syslogd's and lib/log's alone the same)
+STORE["syslog.keep"], STORE["syslog.maxSize"], STORE["syslog.port"], STORE["syslog.burst"] = -1, "2M", "515", 2.7
+local set = D.settings()
+check("settings: sizes read, whole numbers, a negative one (or none) the default",
+    set.keep == D.KEEP and set.maxSize == 2097152 and set.port == 515 and set.burst == 2 and set.listen == false,
+    set.keep .. " " .. set.maxSize .. " " .. set.port .. " " .. set.burst)
+STORE["syslog.keep"], STORE["syslog.maxSize"], STORE["syslog.port"], STORE["syslog.burst"] = nil, nil, nil, nil
+set = D.settings()
+check("... unset: the defaults", set.keep == D.KEEP and set.maxSize == D.MAX_SIZE and set.port == D.PORT
+    and set.burst == D.BURST)
+
+-- the rules' file: syslog.conf, else the defaults
+local conf0, from0 = D.loadConf()
+local hc = W.fs.open(D.CONF, "w")
+hc.write("*.* /var/log/all\n")
+hc.close()
+local conf1, from1 = D.loadConf()
+W.fs.delete(D.CONF)
+check("loadConf: the defaults without " .. D.CONF .. ", its text with it",
+    conf0 == D.DEFAULT and from0 == "the defaults" and conf1 == "*.* /var/log/all\n" and from1 == D.CONF, show(from0) .. " / " .. show(from1))
+
 -- rotation, in the world's filesystem
 local fsT = W.fs
 for i = 1, 5 do D.append(fsT, "var/log/r.log", ("a"):rep(30), 64, 2) end

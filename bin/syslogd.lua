@@ -38,6 +38,7 @@ local cu = require("cu").init("syslogd", "syslogd")
 local L = require("log")
 local D = require("syslogd")
 local text = require("text")
+local fileio = require("fileio")
 local okNet, net = pcall(require, "net")
 if not okNet then net = nil end
 
@@ -45,25 +46,15 @@ if #{ ... } > 0 then cu.usageError() end
 local proc = rawget(_G, "proc")
 if not (proc and proc.register) then cu.fail("init isn't running (`help init`): programs log through it"); return cu.exit() end
 
-local conf, from = D.DEFAULT, "the defaults"
 if not fs.exists(D.CONF) then                       -- (the defaults, written out for editing)
     fs.makeDir(fs.getDir(D.CONF))
-    local h = fs.open(D.CONF, "w")
-    if h then h.write(D.DEFAULT); h.close() end
+    fileio.write(D.CONF, D.DEFAULT)
 end
-if fs.exists(D.CONF) and not fs.isDir(D.CONF) then
-    local h = fs.open(D.CONF, "r")
-    if h then conf, from = h.readAll() or "", D.CONF; h.close() end
-end
+local conf, from = D.loadConf()
 local rules, problems = D.parse(conf)
 
-local function num(key, default)
-    local v = tonumber(settings.get(key))
-    if v and v >= 0 then return math.floor(v) end
-    return default
-end
-local maxSize, keep, burst = D.size(settings.get("syslog.maxSize")) or D.MAX_SIZE, num("syslog.keep", D.KEEP), num("syslog.burst", D.BURST)
-local listen, port = settings.get("syslog.listen") == true, num("syslog.port", D.PORT)
+local set = D.settings()
+local maxSize, keep, burst, listen, port = set.maxSize, set.keep, set.burst, set.listen, set.port
 local me = proc.self()
 
 -- the console: a line on its screen, red from err

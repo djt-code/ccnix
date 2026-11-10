@@ -28,6 +28,8 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local jbod = require("jbod")
 local scan = require("scan")
 local text = require("text")
+local fileio = require("fileio")
+local sysenv = require("sysenv")
 
 local MOUNT = "jbod"
 local args = { ... }
@@ -42,8 +44,7 @@ local function ours(label)
     return scan.isUnsigned(text.stripPrefix(where, "drive_")) or SIDES[where] == true
 end
 local function label(name)
-    local host = os.getComputerLabel() or ("computer " .. os.getComputerID())
-    local want, have = text.truncate(host .. " " .. name, 32), disk.getLabel(name)
+    local want, have = text.truncate(sysenv.computerName() .. " " .. name, 32), disk.getLabel(name)
     if have ~= want and ours(have) then disk.setLabel(name, want) end
 end
 
@@ -96,20 +97,13 @@ elseif cmd == "startup" then
         line = string.format('shell.run("%s mount")', "/" .. prog)
     end
     local target = fs.isDir("/startup") and "/startup/10-fileserver.lua" or "/startup.lua"
-    local startup = ""
-    if fs.exists(target) then
-        local f = fs.open(target, "r")
-        startup = f.readAll() or ""
-        f.close()
-    end
+    local startup = fileio.read(target) or ""
     if text.contains(startup, line) then
         print(target .. " mounts it already.")
     else
         -- first, before anything that doesn't return (ccsh at boot, the
         -- autostart), which deploy/setup puts at the end
-        local f = fs.open(target, "w")
-        f.write(line .. "\n" .. startup)
-        f.close()
+        fileio.write(target, line .. "\n" .. startup)
         print("Added to " .. target .. ": /" .. MOUNT .. " is mounted at every boot.")
     end
 else

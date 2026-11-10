@@ -24,16 +24,14 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("sysctl", "sysctl [-n | -d] -a | name[=value]...")
 local text = require("text")
 local convert = require("convert")
+local tables = require("tables")
 local opts, ops = cu.getopt({ ... }, "adnw")
 if opts.n and opts.d then return cu.usageError("-n or -d, not both") end
 if (opts.a ~= nil) == (#ops > 0) then return cu.usageError() end
 
 local known = {}
 for _, name in ipairs(settings.getNames()) do known[name] = true end
-if opts.a then
-    for name in pairs(known) do ops[#ops + 1] = name end
-    table.sort(ops)
-end
+if opts.a then ops = tables.sortedKeys(known) end
 
 local function shown(v)
     if v == nil then return "" end

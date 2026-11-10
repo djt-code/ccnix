@@ -21,6 +21,8 @@ local regex = require("regex")
 local scan = require("scan")
 local text = require("text")
 local syntax = require("syntax")
+local fileio = require("fileio")
+local tables = require("tables")
 local V = {}
 
 UNDO_MAX = 200
@@ -1440,19 +1442,16 @@ function loadFile(arg)
     if fs.exists(path) and fs.isDir(path) then
         say('"' .. arg .. '" is a directory', true)
     elseif fs.exists(path) then
-        local f = fs.open(path, "r")
-        if not f then
+        local body = fileio.read(path)
+        if not body then
             say('"' .. arg .. '" [Permission Denied]', true)
         else
-            local body = f.readAll() or ""
-            f.close()
             -- every line ended by CR LF: written back so
             if text.contains(body, "\r\n") and not text.contains((text.replace(body, "\r\n", "")), "\n") then
                 crlf = true
                 body = text.replace(body, "\r\n", "\n")
             end
-            lines = text.split(body, "\n", true)
-            if text.endsWith(body, "\n") and #lines > 1 then lines[#lines] = nil end
+            lines = text.lines(body, true)      -- (a CR left before a LF stays: not every line had one)
             if body == "" then lines = { "" } else noLines = false end
             opt.readonly = fs.isReadOnly(path)
             say('"' .. arg .. '"' .. (opt.readonly and " [readonly]" or "") .. " " .. #lines .. "L, " .. #body .. "B")
@@ -1470,17 +1469,14 @@ function writeFile(target, bang, a1, a2, whole)
     if p == path and opt.readonly and not bang then fail("E45: 'readonly' option is set (add ! to override)") end
     if p ~= path and fs.exists(p) and not bang then fail("E13: File exists (add ! to override)") end
     if fs.exists(p) and fs.isDir(p) then fail('E502: "' .. (target ~= "" and target or name) .. '" is a directory') end
-    local f = fs.open(p, "w")
-    if not f then fail("E212: Can't open file for writing") end
-    local nl, bytes = crlf and "\r\n" or "\n", 0
+    local nl, out = crlf and "\r\n" or "\n", {}
     local empty = whole and noLines
     if not empty then
-        for y = a1, a2 do
-            f.write(lines[y] .. nl)
-            bytes = bytes + #lines[y] + #nl
-        end
+        for y = a1, a2 do out[#out + 1] = lines[y] .. nl end
     end
-    f.close()
+    local body = table.concat(out)
+    if not fileio.write(p, body) then fail("E212: Can't open file for writing") end
+    local bytes = #body
     local shown = target ~= "" and target or name
     if whole and (p == path or not path) then
         if not path then
@@ -1863,16 +1859,16 @@ function exRun(line)
         argIdx = j
     elseif is(name, "read", 1) then
         if arg == "" then fail("E32: No file name") end
-        local p = resolve(arg)
-        if not fs.exists(p) or fs.isDir(p) then fail('E484: Can\'t open file ' .. arg) end
-        local f = fs.open(p, "r")
-        local body = f.readAll() or ""
-        f.close()
-        local list = text.split((text.replace(body, "\r\n", "\n")), "\n", true)
-        if text.endsWith(body, "\n") and #list > 1 then list[#list] = nil end
-        insertLines(a2 + 1, list)
-        cy = a2 + 1
-        cx = firstNonBlank(cy)
+        local body = fileio.read(resolve(arg))
+        if not body then fail('E484: Can\'t open file ' .. arg) end
+        -- its lines: CR LF ends one as LF does; a CR alone stays, as when
+        -- a file is opened.  An empty file adds none, as in vim.
+        local list = text.lines(text.replace(body, "\r\n", "\n"), true)
+        if #list > 0 then
+            insertLines(a2 + 1, list)
+            cy = a2 + 1
+            cx = firstNonBlank(cy)
+        end
     elseif is(name, "set", 2) then
         if arg == "" then setOption("") end
         for _, word in ipairs(text.words(arg)) do setOption(word) end
@@ -1974,10 +1970,7 @@ function rescue(err)
     term.clear()
     term.setCursorPos(1, 1)
     if lines and modified and modified() then
-        local f = fs.open("/.vi-recover", "w")
-        if f then
-            f.write(table.concat(lines, "\n") .. "\n")
-            f.close()
+        if fileio.write("/.vi-recover", table.concat(lines, "\n") .. "\n") then
             print("vi: the text so far is in /.vi-recover")
         end
     end
@@ -1986,8 +1979,7 @@ end
 
 function V.main(args, o)
     vimMode = o and o.vim or false
-    opt = {}
-    for k, v in pairs(DEFAULTS) do opt[k] = v end
+    opt = tables.copy(DEFAULTS)
     regs, queue, rec, exHist, searchHist = {}, {}, {}, {}, {}
     verCounter, changeDepth, mode, msg, msgErr, showcmd = 0, 0, "normal", nil, false, ""
     lastSearch, lastSub, lastFind, lastChange, hlHidden = nil, nil, nil, nil, false
@@ -2011,10 +2003,8 @@ function V.main(args, o)
     loadFile(files[1])
     local opening = msg
     local rc = vimMode and (fs.exists("/.vimrc") and "/.vimrc" or "/.exrc") or "/.exrc"
-    if fs.exists(rc) and not fs.isDir(rc) then
-        local f = fs.open(rc, "r")
-        local commands = f and f.readAll() or ""
-        if f then f.close() end
+    local commands = fileio.read(rc)
+    if commands then
         -- one per line (ended by LF, CR LF or CR), blank ones skipped
         for _, l in ipairs(text.split(text.replace(commands, "\r", "\n"), "\n")) do
             local ok, e = pcall(exRun, l)

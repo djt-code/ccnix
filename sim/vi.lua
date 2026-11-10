@@ -231,6 +231,9 @@ same("+N on the command line starts there", edit("1\n2\n3\n", "x:wq<CR>", { args
 same(":r reads a file in", edit("a\n", ":r other<CR>:wq<CR>", { files = { other = "x\ny\n" } }), "a\nx\ny\n")
 same(":r of a CRLF file reads its lines", edit("a\n", ":r other<CR>:wq<CR>", { files = { other = "x\r\ny\r\n" } }),
     "a\nx\ny\n")
+same(":r of an empty file adds no lines (as vim)", edit("a\nb\n", ":r other<CR>:wq<CR>", { files = { other = "" } }), "a\nb\n")
+same(":r keeps a CR alone at the end, as opening a file does", edit("a\n", ":r other<CR>:wq<CR>", { files = { other = "x\r" } }),
+    "a\nx\r\n")
 same("+ alone starts at the end", edit("1\n2\n3\n", "x:wq<CR>", { args = { "+", "t.lua" } }), "1\n2\n\n")
 same(":s: \\t and \\n in the replacement", edit("a,b\n", [[:s/,/\t\n/<CR>:wq<CR>]]), "a\t\nb\n")
 same(".exrc: CR LF and blank lines, blanks around a command",

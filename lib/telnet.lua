@@ -98,7 +98,7 @@ end
 
 local OUT, IN = {}, {}       -- CC character -> UTF-8; code point -> { char, inverted }
 for c = 0, 255 do
-    if c >= 32 and c < 127 then OUT[c] = string.char(c)
+    if scan.isPrintable(string.char(c)) then OUT[c] = string.char(c)
     elseif c >= 160 then OUT[c] = convert.utf8(c)
     elseif c >= 128 then OUT[c] = convert.utf8(sextant(c - 128))
     else OUT[c] = " " end
@@ -421,7 +421,7 @@ function T.terminal(win, colour)
             local modes = {}
             local sc = scan.new(params)
             while not sc:atEnd() do
-                sc:readWhile(function(c) return not scan.isDigit(c) end)
+                sc:readWhile(scan.isNot(scan.isDigit))
                 local digits = sc:readWhile(scan.isDigit)
                 if digits ~= "" then modes[#modes + 1] = digits end
             end
@@ -441,11 +441,8 @@ function T.terminal(win, colour)
         while i <= n do
             local b = s:byte(i)
             if state == "ground" then
-                if b >= 32 and b < 127 then
-                    local j = i
-                    while j < n and s:byte(j + 1) >= 32 and s:byte(j + 1) < 127 do j = j + 1 end
-                    for k = i, j do put(s:sub(k, k)) end
-                    i = j
+                local ch = s:sub(i, i)
+                if scan.isPrintable(ch) then put(ch)
                 elseif b >= 0xC0 then utf, need, cp = true, b >= 0xF0 and 3 or b >= 0xE0 and 2 or 1, b % (b >= 0xF0 and 8 or b >= 0xE0 and 16 or 32)
                     state = "utf"
                 elseif b >= 0x80 then put("?")

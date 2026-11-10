@@ -16,6 +16,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("ps", "ps [-l] [-e] [-A]")
+local P = require("proc")               -- the module: the lines' layout; the running init is _G.proc
 local opts, operands = cu.getopt({ ... }, "leA")
 if #operands > 0 then cu.usageError("unexpected operand " .. operands[1]) end
 local proc = rawget(_G, "proc")
@@ -24,18 +25,8 @@ if not proc then
     return cu.exit()
 end
 
-local rows = {}
-for _, p in ipairs(proc.list()) do
-    local cmd = p.service and p.name or p.cmd
-    local time = string.format("%.1f", p.cpu)
-    local stat = p.state .. (p.fg and "+" or "")
-    if opts.l then
-        rows[#rows + 1] = string.format("%5d %5d %5d %-6s %-4s %6s %s %s", p.pid, p.ppid, p.pgid or p.pid, p.tty, stat,
-            time, os.date("%H:%M", math.floor(p.started / 1000)), cmd)
-    else
-        rows[#rows + 1] = string.format("%5d %-6s %-4s %6s %s", p.pid, p.tty, stat, time, cmd)
-    end
-end
-io.write(opts.l and "  PID  PPID  PGID TTY    STAT   TIME START CMD\n" or "  PID TTY    STAT   TIME CMD\n")
-for _, r in ipairs(rows) do io.write(r, "\n") end
+local long = opts.l and true or false
+local rows = proc.list()
+io.write(P.psHeader(long), "\n")
+for _, p in ipairs(rows) do io.write(P.psLine(p, long), "\n") end
 return cu.exit()

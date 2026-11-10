@@ -85,7 +85,7 @@ if action == "add" then
     -- the words as the CraftOS shell will split them again: one with a
     -- space (ccsh's 'cat /nope') goes in double quotes, so it stays one
     local words = {}
-    local function solid(c) return not scan.isSpace(c) end
+    local solid = scan.isNot(scan.isSpace)
     for k = 3, #args do
         local a = args[k]
         words[#words + 1] = (a == "" or not scan.all(a, solid)) and ('"' .. a .. '"') or a

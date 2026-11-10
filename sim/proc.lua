@@ -145,6 +145,19 @@ local names = {}
 for _, p in ipairs(ps) do names[#names + 1] = p.pid .. ":" .. p.name .. ":" .. p.tty .. ":" .. p.state end
 check("ps: init first, then the rest oldest first, with tty and state",
     table.concat(names, " ") == "1:init:?:S 2:con:con:S 3:bg:?:S 4:parent:?:S 5:child:?:S", table.concat(names, " "))
+-- the lines ps (and a panic's report) show them as
+local row = { pid = 12, ppid = 1, pgid = 12, tty = "pts/1", state = "S", fg = true, cpu = 1.5, started = 3600000,
+              cmd = "telnetd -p 23", name = "telnetd", service = "telnetd" }
+local startAt = os.date("%H:%M", 3600)
+check("ps's lines: the heading and a process, short and -l (a service by its name, + in front)",
+    P.psHeader() == "  PID TTY    STAT   TIME CMD" and P.psLine(row) == "   12 pts/1  S+      1.5 telnetd"
+        and P.psHeader(true) == "  PID  PPID  PGID TTY    STAT   TIME START CMD"
+        and P.psLine(row, true) == "   12     1    12 pts/1  S+      1.5 " .. startAt .. " telnetd",
+    P.psLine(row) .. " / " .. P.psLine(row, true))
+check("... without START (a panic's report), and a damaged row still a line",
+    P.psHeader(true, false) == "  PID  PPID  PGID TTY    STAT   TIME CMD"
+        and P.psLine({ pid = 3, cpu = "x" }, true, false) == "    3   nil     3 nil    nil     0.0 nil",
+    P.psLine({ pid = 3, cpu = "x" }, true, false))
 
 -- 4. signals
 local ended = {}
@@ -690,6 +703,7 @@ end }, { __index = fakeOs })
 local FILES = {}
 local fakeFs = {
     exists = function(p) return FILES[p] ~= nil end,
+    isDir = function() return false end,
     getDir = function(p)
         local i = #p
         while i > 0 and p:sub(i, i) ~= "/" do i = i - 1 end

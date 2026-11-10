@@ -35,6 +35,8 @@ local scan = require("scan")
 local text = require("text")
 local glob = require("glob")
 local path = require("path")
+local tables = require("tables")
+local fileio = require("fileio")
 
 local J = {}
 
@@ -191,13 +193,7 @@ function J.new(base, opts)
         return out, whole, byN[1]
     end
 
-    local function readFile(path)
-        local h = base.open(path, "rb")
-        if not h then return nil end
-        local s = h.readAll() or ""
-        h.close()
-        return s
-    end
+    local under = fileio.on(base)               -- (the members' own files: under the pool)
 
     -- The file at rel, nil if there's none; false if part of it is missing.
     local function contents(rel)
@@ -209,8 +205,8 @@ function J.new(base, opts)
         end
         local parts, whole = partsOf(rel)
         if not whole then return false end
-        local t = { readFile(real(m, rel)) or "" }
-        for _, p in ipairs(parts) do t[#t + 1] = readFile(p) or "" end
+        local t = { under.read(real(m, rel), true) or "" }
+        for _, p in ipairs(parts) do t[#t + 1] = under.read(p, true) or "" end
         return table.concat(t)
     end
 
@@ -494,11 +490,8 @@ local FIND_GLOB = { escapes = false, classes = false }
 -- called once they're patched.
 local ROM_FS_API = "rom/apis/fs.lua"
 local function romComplete(base, fsTable)
-    if not base.exists(ROM_FS_API) or base.isDir(ROM_FS_API) then return nil end
-    local h = base.open(ROM_FS_API, "r")
-    if not h then return nil end
-    local source = h.readAll()
-    h.close()
+    local source = fileio.on(base).read(ROM_FS_API)
+    if not source then return nil end
     local env = setmetatable({ fs = fsTable }, { __index = _G })
     local chunk = source and load(source, "@/" .. ROM_FS_API, "t", env)
     if not chunk or not pcall(chunk) then return nil end
@@ -564,8 +557,7 @@ end
 -- Returns the pool.  Installing twice does nothing more.
 function J.install(fsTable, opts)
     if fsTable.jbodPool then return fsTable.jbodPool end
-    local base = {}
-    for k, v in pairs(fsTable) do base[k] = v end
+    local base = tables.copy(fsTable)           -- (the functions underneath, kept as they were)
     local P = J.new(base, opts)
     local F, mount = P.fs, P.mount
 
@@ -610,14 +602,11 @@ function J.install(fsTable, opts)
                 copyTree(base.combine(from, n), base.combine(to, n))
             end
         else
-            local r = fsTable.open(from, "rb")
-            if not r then error("/" .. base.combine(from) .. ": No such file", 0) end
-            local data = r.readAll() or ""
-            r.close()
-            local w, err = fsTable.open(to, "wb")
-            if not w then error(err, 0) end
-            w.write(data)
-            w.close()
+            local pool = fileio.on(fsTable)
+            local data = pool.read(from, true)
+            if not data then error("/" .. base.combine(from) .. ": No such file", 0) end
+            local ok, err = pool.write(to, data, true)
+            if not ok then error(err, 0) end
         end
     end
     local origCopy, origMove = base.copy, base.move

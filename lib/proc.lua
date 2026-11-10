@@ -100,6 +100,9 @@
 local scan = require("scan")
 local text = require("text")
 local path = require("path")
+local tables = require("tables")
+local fileio = require("fileio")
+local sysenv = require("sysenv")
 
 local P = {}
 
@@ -127,10 +130,46 @@ function P.signal(s)
     for name, n in pairs(P.SIGNALS) do if tostring(n) == s then return name end end
 end
 
-local function copy(t)
-    local c = {}
-    for k, v in pairs(t) do c[k] = v end
-    return c
+-- ps's columns: heading, width, on the right (numbers), and the field
+-- of a process (a row of proc.list()) as text.  long: ps -l's alone;
+-- start: only where START is shown (not in a panic's report).
+local PS_COLUMNS = {
+    { head = "PID", width = 5, right = true, field = function(p) return p.pid end },
+    { head = "PPID", width = 5, right = true, long = true, field = function(p) return p.ppid end },
+    { head = "PGID", width = 5, right = true, long = true, field = function(p) return p.pgid or p.pid end },
+    { head = "TTY", width = 6, field = function(p) return p.tty end },
+    -- the state, + in its terminal's foreground group
+    { head = "STAT", width = 4, field = function(p) return tostring(p.state) .. (p.fg and "+" or "") end },
+    { head = "TIME", width = 6, right = true, field = function(p) return string.format("%.1f", tonumber(p.cpu) or 0) end },
+    { head = "START", width = 0, long = true, start = true,
+      field = function(p) return os.date("%H:%M", math.floor((tonumber(p.started) or 0) / 1000)) end },
+    -- a service by its name
+    { head = "CMD", width = 0, field = function(p) return p.service and p.name or p.cmd end },
+}
+
+local function psCells(long, start, cellOf)
+    local cells = {}
+    for _, c in ipairs(PS_COLUMNS) do
+        if (long or not c.long) and (start or not c.start) then
+            local s = tostring(cellOf(c))
+            cells[#cells + 1] = c.right and text.padLeft(s, c.width) or text.padRight(s, c.width)
+        end
+    end
+    return table.concat(cells, " ")
+end
+
+-- ps's heading: PID TTY STAT TIME CMD; with long PPID and PGID after
+-- the PID too, and START (when it started, by the computer's clock)
+-- before CMD unless start is false.
+function P.psHeader(long, start)
+    return psCells(long, long and start ~= false, function(c) return c.head end)
+end
+
+-- Process p (a row of proc.list()) as a line under P.psHeader(long,
+-- start).  Each field goes through tostring, so a damaged row (in a
+-- panic's report) still makes a line.
+function P.psLine(p, long, start)
+    return psCells(long, long and start ~= false, function(c) return c.field(p) end)
 end
 
 -- A command line's program name: its first word's last name
@@ -163,21 +202,6 @@ local function traceOf(co, msg)
     return out
 end
 
--- os.getenv, os.setenv and os.environ over the table env.
-local function envApi(env)
-    return {
-        getenv = function(name)
-            if type(name) ~= "string" then error("bad argument #1 (string expected, got " .. type(name) .. ")", 2) end
-            return env[name]
-        end,
-        setenv = function(name, value)
-            if type(name) ~= "string" or name == "" or text.contains(name, "=") then error("bad argument #1 (a name expected)", 2) end
-            env[name] = value ~= nil and tostring(value) or nil
-        end,
-        environ = function() return copy(env) end,
-    }
-end
-
 -- Service `name` as the settings (settingsT) define it: { cmd, restart,
 -- enabled }, or nil without a service.<name>.cmd.
 function P.serviceDef(name, settingsT)
@@ -192,18 +216,15 @@ end
 -- K.services), sorted.
 function P.serviceNames(settingsT, known)
     settingsT = settingsT or settings
-    local names, seen = {}, {}
+    local seen = {}
     for _, key in ipairs(settingsT.getNames()) do
         -- service.<name>.cmd, the name not empty
         local inner = text.stripPrefix(key, "service.")
         local n = inner and text.stripSuffix(inner, ".cmd")
-        if n and n ~= "" and not seen[n] then seen[n] = true; names[#names + 1] = n end
+        if n and n ~= "" then seen[n] = true end
     end
-    for n in pairs(known or {}) do
-        if not seen[n] then seen[n] = true; names[#names + 1] = n end
-    end
-    table.sort(names)
-    return names
+    for n in pairs(known or {}) do seen[n] = true end
+    return tables.sortedKeys(seen)
 end
 
 -- { name, state ("running", "restarting", "stopped", "exited", or
@@ -243,6 +264,7 @@ function P.new(o)
     local native = o.native or term.current()
     local termT = o.term or term
     local fsT = o.fs or rawget(_G, "fs")
+    local files = fsT and fileio.on(fsT)
     local SHELL = o.shellProgram or "rom/programs/shell.lua"
     local RUNNER = o.runner
     local keysT = o.keys or rawget(_G, "keys")
@@ -259,16 +281,12 @@ function P.new(o)
         inbox = {},             -- events for one process, { pid, ev }, or typed at a terminal, { tty, ev }
         ttys = {},              -- terminal -> { sid (its session's leader), fg (the group in front), ctrl }
         nextPid = 2, console = nil, current = nil, started = now(), cpu = 0,
-        env = o.env and copy(o.env) or {},
+        env = o.env and tables.copy(o.env) or {},
         syslog = nil,           -- syslogd's process ID
         held = {},              -- messages waiting for it
         logDropped = 0,         -- messages dropped since the last one handed over
     }
-    local hostname = o.hostname or function()
-        local label = osT.getComputerLabel and osT.getComputerLabel()
-        if label and label ~= "" then return label end
-        return tostring(osT.getComputerID and osT.getComputerID() or 0)
-    end
+    local hostname = o.hostname or function() return sysenv.hostname(osT) end
 
     --------------------------------------------------------------------
     -- Terminals
@@ -424,9 +442,7 @@ function P.new(o)
     local function resume(p, ...)
         local was = K.current
         K.current = p
-        local api = p.envApi
-        local saved = { rawget(osT, "getenv"), rawget(osT, "setenv"), rawget(osT, "environ") }
-        osT.getenv, osT.setenv, osT.environ = api.getenv, api.setenv, api.environ
+        local savedEnv = sysenv.swapEnv(p.envApi, osT)
         local savedResume = coroutine.resume
         coroutine.resume = watchedResume
         local prevTerm = termT.redirect(p.term)
@@ -442,7 +458,7 @@ function P.new(o)
         p.term = termT.current()
         termT.redirect(prevTerm)
         coroutine.resume = savedResume
-        osT.getenv, osT.setenv, osT.environ = saved[1], saved[2], saved[3]
+        sysenv.swapEnv(savedEnv, osT)
         K.current = was
         if coroutine.status(p.co) == "dead" then
             reap(p, r[1], r[2], p.co)
@@ -491,7 +507,7 @@ function P.new(o)
             return
         end
         local any = false
-        for _, p in ipairs(copy(K.list)) do
+        for _, p in ipairs(tables.copy(K.list)) do
             if K.procs[p.pid] and p.pgid == tt.fg and p.tty == t then any = true; deliver(p, ev) end
         end
         local leader = not any and K.procs[tt.sid]
@@ -502,7 +518,7 @@ function P.new(o)
     local function flush()
         for _ = 1, 1000 do
             local busy = false
-            for _, p in ipairs(copy(K.list)) do
+            for _, p in ipairs(tables.copy(K.list)) do
                 if p.state == "new" then start(p); busy = true end
             end
             while K.inbox[1] do
@@ -529,7 +545,7 @@ function P.new(o)
         elseif USER[ev[1]] then
             input("con", ev)
         else
-            for _, p in ipairs(copy(K.list)) do
+            for _, p in ipairs(tables.copy(K.list)) do
                 if K.procs[p.pid] then deliver(p, ev) end
             end
         end
@@ -575,7 +591,7 @@ function P.new(o)
         if capture == nil and not session and (spec.term == nil or spec.term == parent.term) then
             capture = parent.capture
         end
-        local env = copy(spec.env or (parent and parent.env) or K.env)
+        local env = tables.copy(spec.env or (parent and parent.env) or K.env)
         local co
         if spec.fn then
             local args = spec.args or {}
@@ -598,7 +614,7 @@ function P.new(o)
             pid = pid, ppid = parent and parent.pid or 1, co = co, state = "new",
             name = spec.name or (spec.cmd and programName(spec.cmd)) or "shell",
             cmd = spec.cmd or spec.name or "shell",
-            term = spec.term or K.newTerm(), tty = tty, env = env, envApi = envApi(env),
+            term = spec.term or K.newTerm(), tty = tty, env = env, envApi = sysenv.envApi(env),
             started = now(), cpu = 0, service = spec.service, onExit = spec.onExit, isCmd = spec.fn == nil,
             capture = capture, enter = spec.enter, leave = spec.leave,
             sid = session and pid or parent.sid,
@@ -666,7 +682,7 @@ function P.new(o)
         local tt = K.ttys[p.tty]
         if tt and tt.sid == p.pid then                          -- a session leader: its terminal hangs up
             K.ttys[p.tty] = nil
-            for _, q in ipairs(copy(K.list)) do
+            for _, q in ipairs(tables.copy(K.list)) do
                 if q.sid == p.pid then signalOne(q, "HUP"); signalOne(q, "CONT") end
             end
         end
@@ -711,7 +727,7 @@ function P.new(o)
     -- Signal every process in group pgid; how many it reached.
     signalGroup = function(pgid, name, fromTty)
         local n = 0
-        for _, p in ipairs(copy(K.list)) do
+        for _, p in ipairs(tables.copy(K.list)) do
             if p.pgid == pgid and K.procs[p.pid] and signalOne(p, name, fromTty) then n = n + 1 end
         end
         return n
@@ -768,7 +784,7 @@ function P.new(o)
     -- The last few processes to end, oldest first: K.exited's entries.
     function K.exits()
         local out = {}
-        for _, pid in ipairs(K.exitOrder) do out[#out + 1] = copy(K.exited[pid]) end
+        for _, pid in ipairs(K.exitOrder) do out[#out + 1] = tables.copy(K.exited[pid]) end
         return out
     end
 
@@ -949,12 +965,9 @@ function P.new(o)
         for _, line in ipairs(text.lines(tostring(trace or ""))) do put(line) end
         put("")
         put("processes:")
-        put("  PID  PPID  PGID TTY    STAT   TIME CMD")
+        put(P.psHeader(true, false))
         local okP, rows = pcall(K.ps)
-        for _, p in ipairs(okP and rows or {}) do
-            put(string.format("%5s %5s %5s %-6s %-4s %6.1f %s", tostring(p.pid), tostring(p.ppid), tostring(p.pgid),
-                tostring(p.tty), tostring(p.state), tonumber(p.cpu) or 0, tostring(p.cmd)))
-        end
+        for _, p in ipairs(okP and rows or {}) do put(P.psLine(p, true, false)) end
         local waiting = {}
         for _, rec in ipairs(K.held) do waiting[#waiting + 1] = rec end
         for _, m in ipairs(K.inbox) do
@@ -976,13 +989,11 @@ function P.new(o)
     -- nil and why it couldn't.
     function K.writePanic(err, trace)
         if not fsT then return nil, "no file system" end
-        local okR, text = pcall(K.panicReport, err, trace)
-        if not okR then text = "init panicked: " .. tostring(err) .. "\n(and the report failed: " .. tostring(text) .. ")\n" end
+        local okR, report = pcall(K.panicReport, err, trace)
+        if not okR then report = "init panicked: " .. tostring(err) .. "\n(and the report failed: " .. tostring(report) .. ")\n" end
         pcall(fsT.makeDir, fsT.getDir(P.PANIC))
-        local h, why = fsT.open(P.PANIC, "w")
-        if not h then return nil, why or "can't write " .. P.PANIC end
-        h.write(text)
-        h.close()
+        local ok, why = files.write(P.PANIC, report)
+        if not ok then return nil, why end
         return P.PANIC
     end
 
@@ -994,19 +1005,14 @@ function P.new(o)
         if not fsT then return 1 end
         local countFile = P.PANIC .. ".count"
         local inRow = 1
-        local h = fsT.exists(countFile) and fsT.open(countFile, "r")
-        if h then
-            local saved = text.lines(h.readAll() or "")
-            h.close()
-            local n, at = tonumber(saved[1] or ""), tonumber(saved[2] or "")
+        local saved = files.read(countFile)
+        if saved then
+            local said = text.lines(saved)
+            local n, at = tonumber(said[1] or ""), tonumber(said[2] or "")
             if n and at and now - at < P.PANIC_WINDOW then inRow = n + 1 end
         end
         pcall(fsT.makeDir, fsT.getDir(countFile))
-        h = fsT.open(countFile, "w")
-        if h then
-            h.write(inRow .. "\n" .. now .. "\n")
-            h.close()
-        end
+        files.write(countFile, inRow .. "\n" .. now .. "\n")
         return inRow
     end
 
@@ -1014,10 +1020,8 @@ function P.new(o)
     -- it at crit (facility kern) and move the report to P.PANIC .. ".1"
     -- (one there before is dropped).  Its error line, or nil.
     function K.lastPanic()
-        if not (fsT and fsT.exists(P.PANIC)) then return nil end
-        local h = fsT.open(P.PANIC, "r")
-        local report = h and h.readAll() or ""
-        if h then h.close() end
+        local report = files and files.read(P.PANIC)
+        if not report then return nil end
         local errLine = "?"
         for _, line in ipairs(text.lines(report)) do
             local said = text.stripPrefix(line, "error: ")

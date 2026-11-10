@@ -181,6 +181,9 @@ local text = require("text")
 local convert = require("convert")
 local glob = require("glob")
 local path = require("path")
+local tables = require("tables")
+local fileio = require("fileio")
+local sysenv = require("sysenv")
 
 -- What a command gets when nothing is redirected: this shell's own.
 local real = {
@@ -218,15 +221,9 @@ local P = {
 }
 local mainP = P
 
-local function copy(t)
-    local c = {}
-    for k, v in pairs(t) do c[k] = v end
-    return c
-end
-
 local function cloneState(s)
-    local c = copy(s)
-    c.vars, c.exported, c.pos, c.funcs, c.opts = copy(s.vars), copy(s.exported), copy(s.pos), copy(s.funcs), copy(s.opts)
+    local c = tables.copy(s)
+    c.vars, c.exported, c.pos, c.funcs, c.opts = tables.copy(s.vars), tables.copy(s.exported), tables.copy(s.pos), tables.copy(s.funcs), tables.copy(s.opts)
     return c
 end
 
@@ -250,21 +247,6 @@ if P.vars.PS1 == nil then
     P.vars.PS1 = (os.getComputerLabel and os.getComputerLabel()) and "\\h:\\w\\$ " or "\\w\\$ "
 end
 P.exported.PS1 = true
-
--- The functions a program gets over its environment `env`.
-local function envApi(env)
-    return {
-        getenv = function(name)
-            if type(name) ~= "string" then error("bad argument #1 (string expected, got " .. type(name) .. ")", 2) end
-            return env[name]
-        end,
-        setenv = function(name, value)
-            if type(name) ~= "string" or name == "" or text.contains(name, "=") then error("bad argument #1 (a name expected)", 2) end
-            env[name] = value ~= nil and tostring(value) or nil
-        end,
-        environ = function() return copy(env) end,
-    }
-end
 
 local function join(...)
     local t = table.pack(...)
@@ -386,14 +368,10 @@ local function reader(data)
     })
 end
 
+-- The file `name` (from the shell's directory), as it is; nil if it
+-- can't be read.
 local function readFile(name)
-    local file = shell.resolve(name)
-    if not fs.exists(file) or fs.isDir(file) then return nil end
-    local f = fs.open(file, "rb")
-    if not f then return nil end
-    local s = f.readAll() or ""
-    f.close()
-    return s
+    return (fileio.read(shell.resolve(name), true))
 end
 
 --------------------------------------------------------------------------
@@ -611,7 +589,7 @@ local function lex(src)
 
     while i <= n do
         local c = src:sub(i, i)
-        if c == " " or c == "\t" then finish(); i = i + 1
+        if scan.isTabOrSpace(c) then finish(); i = i + 1
         elseif c == "\n" then finish(); toks[#toks + 1] = { op = ";", nl = true, s = i, e = i }; i = i + 1
         elseif c == "#" and not parts then i = src:find("\n", i, true) or n + 1
         elseif c == "\\" then
@@ -921,8 +899,7 @@ local function getVar(name)
     elseif name == "@" or name == "*" then return P.pos, true
     elseif name == "PATH" then return shell.path()
     elseif name == "PWD" then return "/" .. shell.dir()
-    elseif name == "HOSTNAME" then
-        return os.getComputerLabel and os.getComputerLabel() or tostring(os.getComputerID())
+    elseif name == "HOSTNAME" then return sysenv.hostname()
     elseif name == "PPID" then return ids.ppid and tostring(ids.ppid) or ""
     elseif name == "!" then return P.lastBg and tostring(P.lastBg) or ""
     elseif name == "-" then return optionLetters()
@@ -1019,7 +996,7 @@ local function fields(parts, whole)
             local isBlank = scan.oneOf(" \t\n")
             local sc = scan.new(v)
             while true do
-                add(sc:readWhile(function(c) return not isBlank(c) end), false)
+                add(sc:readWhile(scan.isNot(isBlank)), false)
                 if sc:atEnd() then break end
                 sc:readWhile(isBlank)
                 cut()
@@ -1187,14 +1164,13 @@ local function enter(ctx)
     local o = {
         term = term.redirect(ctx.term), input = io.input(), output = io.output(), stderr = io.stderr,
         write = _G.write, printError = _G.printError, read = _G.read, kb = kb.readLine, sh = _G.POSIX_SH,
-        getenv = rawget(os, "getenv"), setenv = rawget(os, "setenv"), environ = rawget(os, "environ"),
     }
     io.input(ctx.input)
     io.output(ctx.output)
     io.stderr = ctx.stderr
     _G.write, _G.printError, _G.read, kb.readLine = ctx.write, ctx.printError, ctx.read, ctx.kb
     _G.POSIX_SH = "ccsh"
-    os.getenv, os.setenv, os.environ = ctx.env.getenv, ctx.env.setenv, ctx.env.environ
+    o.env = sysenv.swapEnv(ctx.env)
     return o
 end
 
@@ -1206,7 +1182,7 @@ local function leave(ctx, o)
     io.output(o.output)
     io.stderr = o.stderr
     _G.write, _G.printError, _G.read, kb.readLine, _G.POSIX_SH = o.write, o.printError, o.read, o.kb, o.sh
-    os.getenv, os.setenv, os.environ = o.getenv, o.setenv, o.environ
+    sysenv.swapEnv(o.env)
 end
 
 -- Run fn(...) as a coroutine, its context installed only while it runs
@@ -1476,7 +1452,7 @@ local function dispatch(top, ev)
         return
     end
     deliver(top, ev)
-    for _, j in ipairs(copy(jobs)) do
+    for _, j in ipairs(tables.copy(jobs)) do
         if j ~= top then deliver(j, ev) end
     end
 end
@@ -1546,7 +1522,7 @@ end
 
 -- Tell of the jobs that have ended, before a prompt.
 local function notify()
-    for _, j in ipairs(copy(jobs)) do
+    for _, j in ipairs(tables.copy(jobs)) do
         if j.state == "done" then print(describe(j)); removeJob(j) end
     end
 end
@@ -1560,7 +1536,7 @@ end
 -- Ctrl+T for every job (HUP for their processes), then forget them:
 -- they can't outlive the shell.
 local function endJobs()
-    for _, j in ipairs(copy(jobs)) do
+    for _, j in ipairs(tables.copy(jobs)) do
         signalProcs(j, "HUP")
         signalProcs(j, "CONT")
         signal(j)
@@ -1642,11 +1618,10 @@ function builtins.export(a, b)
     local k, un = 2, a[2] == "-n"
     if un then k = 3 end
     if a[k] == "-p" or not a[k] then
-        local env, names = processEnv(), {}
-        for name in pairs(env) do names[#names + 1] = name end
-        for name in pairs(P.exported) do if env[name] == nil then names[#names + 1] = name end end
-        table.sort(names)
-        for _, name in ipairs(names) do
+        local env = processEnv()
+        local all = tables.copy(P.exported)
+        for name in pairs(env) do all[name] = true end
+        for _, name in ipairs(tables.sortedKeys(all)) do
             b.out("export " .. name .. (env[name] and ("=" .. convert.shellQuote(env[name])) or "") .. "\n")
         end
         return 0
@@ -1666,7 +1641,7 @@ function builtins.export(a, b)
     return st
 end
 function builtins.jobs(a, b)
-    for _, j in ipairs(copy(jobs)) do
+    for _, j in ipairs(tables.copy(jobs)) do
         b.out((a[2] == "-p" and tostring(j.pid) or describe(j, a[2] == "-l")) .. "\n")
         if j.state == "done" then removeJob(j) end
     end
@@ -1774,10 +1749,7 @@ end
 -- after --) the positional parameters
 function builtins.set(a, b)
     if #a == 1 then
-        local names = {}
-        for name in pairs(P.vars) do names[#names + 1] = name end
-        table.sort(names)
-        for _, name in ipairs(names) do b.out(name .. "=" .. convert.shellQuote(P.vars[name]) .. "\n") end
+        for _, name in ipairs(tables.sortedKeys(P.vars)) do b.out(name .. "=" .. convert.shellQuote(P.vars[name]) .. "\n") end
         return 0
     end
     local function letterOf(name)
@@ -1846,7 +1818,7 @@ function builtins.read(a, b)
     -- the line without spaces and tabs at its ends; then each name but the
     -- last takes a word (up to a blank) and the blanks after it, the last
     -- one what's left
-    local isBlank = scan.oneOf(" \t")
+    local isBlank = scan.isTabOrSpace
     local from, to = 1, #line
     while from <= to and isBlank(line:sub(from, from)) do from = from + 1 end
     while to >= from and isBlank(line:sub(to, to)) do to = to - 1 end
@@ -1855,7 +1827,7 @@ function builtins.read(a, b)
         if k == #names then
             setVar(nm, sc:readRest())
         else
-            setVar(nm, sc:readWhile(function(c) return not scan.isSpace(c) end))
+            setVar(nm, sc:readWhile(scan.isNot(scan.isSpace)))
             sc:readWhile(isBlank)
         end
     end
@@ -2085,7 +2057,7 @@ local function compound(cmd)
     elseif kind == "while" then
         return loop(cmd)
     elseif kind == "for" then
-        local items = cmd.items and expandWords(cmd.items) or copy(P.pos)
+        local items = cmd.items and expandWords(cmd.items) or tables.copy(P.pos)
         return loop(cmd, items)
     elseif kind == "case" then
         local subject = fields(cmd.subject, true)
@@ -2158,8 +2130,7 @@ local OWNS_WHEEL = { edit = true }
 local function listed(list, name)
     local program = name and shell.resolveProgram(name)
     if not program then return false end
-    local base = fs.getName(program)
-    return list[text.stripSuffix(base, ".lua") or base] == true
+    return list[path.basename(program, ".lua")] == true
 end
 local function keepsCtrlC(name) return listed(KEEPS_CTRL_C, name) end
 
@@ -2267,7 +2238,7 @@ local function runCommand(cmd, inText, out)
     local outS = fd[1] ~= TTY and fd[1].raw and fd[1] or nil
     local errS = fd[2] ~= TTY and fd[2].raw and fd[2] or nil
     local envT = processEnv(assigns)
-    local ctx = { input = input, kb = real.kb, env = envApi(envT) }
+    local ctx = { input = input, kb = real.kb, env = sysenv.envApi(envT) }
     if outS then
         ctx.term, ctx.output, ctx.write = outS.term, outS.handle, outS.raw
         ctx.kb = function(...) return withReal(real.kb, ...) end
@@ -2432,10 +2403,10 @@ local function promptText()
     local ps1 = P.vars.PS1
     if ps1 == nil then return (label and (label .. ":") or "") .. "/" .. shell.dir() .. "$ " end
     local dir = "/" .. shell.dir()
-    local _, lastPart = text.cutLast(dir, "/")
+    local host = sysenv.hostname()
     local esc = {
-        h = label or tostring(os.getComputerID()), H = label or tostring(os.getComputerID()),
-        w = dir, W = dir == "/" and "/" or (lastPart ~= "" and lastPart or nil), i = tostring(os.getComputerID()),
+        h = host, H = host,
+        w = dir, W = path.basename(dir), i = tostring(os.getComputerID()),
         ["$"] = "$", n = "\n", ["\\"] = "\\",
     }
     -- \c is esc[c] (or stays \c); a \ at the very end stays
@@ -2472,16 +2443,10 @@ local function histTrim()
     local file, max = histFile(), histSize()
     local lines = {}
     if not file then return lines end
-    for _, l in ipairs(text.split(readFile("/" .. file) or "", "\n", true)) do
-        if l ~= "" then lines[#lines + 1] = l end
-    end
+    lines = text.pieces(readFile("/" .. file) or "", "\n")
     if #lines > max then
         lines = { table.unpack(lines, #lines - max + 1) }
-        local f = fs.open(file, "wb")
-        if f then
-            f.write(#lines > 0 and table.concat(lines, "\n") .. "\n" or "")
-            f.close()
-        end
+        fileio.write(file, #lines > 0 and table.concat(lines, "\n") .. "\n" or "", true)
     end
     return lines
 end

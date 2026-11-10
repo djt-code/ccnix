@@ -27,6 +27,8 @@
 local L = require("log")
 local scan = require("scan")
 local text = require("text")
+local fileio = require("fileio")
+local sysenv = require("sysenv")
 local D = {}
 
 D.CONF = "/etc/syslog.conf"
@@ -64,7 +66,7 @@ function D.size(v)
     return math.floor(n * (unit == "M" and 1048576 or unit == "K" and 1024 or 1))
 end
 
-local function notSpace(c) return not scan.isSpace(c) end
+local notSpace = scan.isNot(scan.isSpace)
 local function isFacilityChar(c) return c ~= "." and not scan.isSpace(c) end
 
 -- a selector: facilities "." severity, the facilities anything but "."
@@ -159,7 +161,25 @@ local function readRule(line)
 end
 
 local function isProgSep(c) return c == "," or scan.isSpace(c) end
-local function notProgSep(c) return not isProgSep(c) end
+local notProgSep = scan.isNot(isProgSep)
+
+-- The rules' text: D.CONF's, or D.DEFAULT without it.  The text and
+-- where it came from (D.CONF, or "the defaults").
+function D.loadConf()
+    local conf = fileio.read(D.CONF)
+    if conf then return conf, D.CONF end
+    return D.DEFAULT, "the defaults"
+end
+
+-- The settings (`help syslog`), each checked: { maxSize (bytes: D.size),
+-- keep, burst, port (whole numbers, 0 or more), listen (true or false) },
+-- the default for one that's unset or no good.
+function D.settings()
+    local function count(name, default) return math.floor(sysenv.setting(name, default, 0)) end
+    return { maxSize = D.size(settings.get("syslog.maxSize")) or D.MAX_SIZE, keep = count("syslog.keep", D.KEEP),
+             burst = count("syslog.burst", D.BURST), port = count("syslog.port", D.PORT),
+             listen = settings.get("syslog.listen") == true }
+end
 
 -- syslog.conf's text as rules: { sels, action, progs }; and its problems,
 -- "line n: why" (the line is left out).

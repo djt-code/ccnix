@@ -31,10 +31,10 @@
 -- `service status telnetd` shows the last of it.
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
-local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
 local net = require("net")
 local T = require("telnet")
 local text = require("text")
+local sysenv = require("sysenv")
 
 local function fail(msg)
     printError("telnetd: " .. msg)
@@ -49,7 +49,7 @@ if (type(password) ~= "string" or password == "") and not open then
     fail("no password: sysctl telnetd.password=<password> (or telnetd.open=true, for anyone)")
 end
 local attach = settings.get("telnetd.attach") == "console"
-local port = tonumber(settings.get("telnetd.port")) or 23
+local port = sysenv.setting("telnetd.port", 23)
 local listener, err = net.listen(port)
 if not listener then fail(err) end
 
@@ -99,9 +99,7 @@ local function startSession(s)
     if not attach then
         ptys = ptys + 1
         s.term = proc.newTerm(s.w, s.h, true)
-        local ccsh = ccnix and ccnix.find("bin/ccsh.lua") or (fs.exists(repo .. "/bin/ccsh.lua") and repo .. "/bin/ccsh.lua")
-        ccsh = ccsh and (text.stripSuffix(ccsh, ".lua") or ccsh)    -- (run without its .lua)
-        local cmd = settings.get("ccsh.login") and ccsh or nil
+        local cmd = settings.get("ccsh.login") and sysenv.findProgram("bin/ccsh") or nil
         s.tty = "pts/" .. ptys
         s.pid = proc.spawn({ cmd = cmd, term = s.term, tty = s.tty, session = true })
     end
@@ -183,7 +181,7 @@ local function newSession(conn)
     if open then
         startSession(s)
     else
-        send(s, "\r\n" .. (os.getComputerLabel() or ("computer " .. os.getComputerID())) .. "\r\nPassword: ")
+        send(s, "\r\n" .. sysenv.computerName() .. "\r\nPassword: ")
     end
 end
 

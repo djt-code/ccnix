@@ -52,15 +52,8 @@
 -- moves the report to /var/log/panic.1.
 
 local args = { ... }
-local repo = "/" .. fs.getDir(fs.getDir(shell.getRunningProgram()))
-package.path = (ccnix and ccnix.lib or repo .. "/lib/?.lua;") .. package.path
-local text = require("text")
--- a program of the repo's (path without .lua): ccnix's, or the one beside this
-local function program(path)
-    local found = ccnix and ccnix.find(path .. ".lua")
-    if found then return text.stripSuffix(found, ".lua") or found end
-    return fs.exists(repo .. "/" .. path .. ".lua") and repo .. "/" .. path or nil
-end
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
+local sysenv = require("sysenv")
 
 if args[1] == "boot" then
     local on = args[2] ~= "off"
@@ -82,7 +75,7 @@ end
 local P = require("proc")
 local resume0 = coroutine.resume                -- (the kernel swaps it while a process runs)
 -- (commands run through lib/procrun, so a crash is seen)
-local K = P.new({ native = term.current(), shell = shell, multishell = multishell, runner = program("lib/procrun") })
+local K = P.new({ native = term.current(), shell = shell, multishell = multishell, runner = sysenv.findProgram("lib/procrun") })
 _G.proc = K.api
 -- what services print, to the system log (syslogd: `help syslog`)
 local uncapture = K.capture(_G)
@@ -97,12 +90,13 @@ end)
 -- the console: each of these in turn
 local chain = {}
 local auto = settings.get("ccnix.autostart", "")
-local def = auto ~= "" and require("proc").serviceDef(auto)
+local def = auto ~= "" and P.serviceDef(auto)
 if args[1] == "--boot" and auto ~= "" and not (turtle and def and def.enabled) then
-    if turtle and program("turtle/autostart") then chain[#chain + 1] = program("turtle/autostart")
-    elseif auto == "router" and program("pc/router") then chain[#chain + 1] = program("pc/router") end
+    local job = (turtle and sysenv.findProgram("turtle/autostart")) or (auto == "router" and sysenv.findProgram("pc/router"))
+    if job then chain[#chain + 1] = job end
 end
-if settings.get("ccsh.login") and program("bin/ccsh") then chain[#chain + 1] = program("bin/ccsh") end
+local ccsh = settings.get("ccsh.login") and sysenv.findProgram("bin/ccsh")
+if ccsh then chain[#chain + 1] = ccsh end
 chain[#chain + 1] = false                       -- the CraftOS shell
 
 local w, h = term.getSize()
@@ -156,7 +150,7 @@ coroutine.resume = resume0
 local wrote, why = K.writePanic(err, type(failure) == "table" and failure.trace or nil)
 printError("init panicked: " .. tostring(err))
 printError(wrote and ("(what it knew is in " .. wrote .. ")") or ("(" .. P.PANIC .. " not written: " .. tostring(why) .. ")"))
-local delay = tonumber(settings.get("init.panic")) or 10
+local delay = sysenv.setting("init.panic", 10)
 -- (a fault that comes back every boot stops after a few, not a reboot
 -- every few seconds for ever)
 local inRow = K.panicsInRow(os.epoch("utc"))

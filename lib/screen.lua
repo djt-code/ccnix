@@ -39,6 +39,7 @@
 local scan = require("scan")
 local text = require("text")
 local readline = require("readline")
+local sysenv = require("sysenv")
 
 local M = {}
 M.HISTORY = 500             -- rows each window keeps of what scrolled off its top
@@ -71,9 +72,7 @@ Session.__index = Session
 -- else the CraftOS shell (nil).
 local function loginShell()
     if not (settings and settings.get("ccsh.login")) then return nil end
-    local ccsh = ccnix and ccnix.find and ccnix.find("bin/ccsh.lua")
-    if not ccsh then return nil end
-    return text.stripSuffix(ccsh, ".lua") or ccsh
+    return sysenv.findProgram("bin/ccsh")
 end
 
 function M.newSession(proc, opts)

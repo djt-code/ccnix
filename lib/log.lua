@@ -34,6 +34,8 @@
 
 local scan = require("scan")
 local text = require("text")
+local path = require("path")
+local sysenv = require("sysenv")
 
 local L = {}
 
@@ -69,17 +71,10 @@ FAC_NAME[4] = "auth"
 function L.facilityName(n) return FAC_NAME[n] or tostring(n) end
 function L.severityName(n) return L.SEVERITIES[(n or 6) + 1] or tostring(n) end
 
--- This computer's name in the log: its label, else its ID.
-function L.hostname()
-    local label = os.getComputerLabel and os.getComputerLabel()
-    if label and label ~= "" then return label end
-    return tostring(os.getComputerID and os.getComputerID() or 0)
-end
-
 -- A message: { fac, sev (numbers), time (os.epoch "utc"), host, app, pid, msg }.
 function L.record(facility, severity, app, msg, pid)
     return { fac = L.facility(facility) or 1, sev = L.severity(severity) or 6, time = os.epoch("utc"),
-             host = L.hostname(), app = app, pid = pid, msg = tostring(msg) }
+             host = sysenv.hostname(), app = app, pid = pid, msg = tostring(msg) }
 end
 
 -- ms (os.epoch "utc") as RFC 3339 in UTC: 2026-11-03T14:02:11Z, with the
@@ -95,7 +90,7 @@ end
 function L.line(rec)
     local tag = rec.app or "-"
     if rec.pid then tag = tag .. "[" .. tostring(rec.pid) .. "]" end
-    return (rec.stamp or L.stamp(rec.time)) .. " " .. tostring(rec.host or L.hostname()) .. " " .. tag .. ": " .. tostring(rec.msg or "")
+    return (rec.stamp or L.stamp(rec.time)) .. " " .. tostring(rec.host or sysenv.hostname()) .. " " .. tag .. ": " .. tostring(rec.msg or "")
 end
 
 -- RFC 5424's header fields are printable ASCII with no spaces (! to ~),
@@ -105,8 +100,8 @@ local function field(s, max)
     s = tostring(s)
     local out = {}
     for i = 1, #s do
-        local b = s:byte(i)
-        out[i] = (b >= 33 and b <= 126) and s:sub(i, i) or "_"
+        local c = s:sub(i, i)
+        out[i] = scan.isGraph(c) and c or "_"
     end
     return table.concat(out):sub(1, max)
 end
@@ -124,7 +119,7 @@ end
 
 local function dash(s) if s ~= "-" then return s end end
 
-local function notSpace(c) return not scan.isSpace(c) end
+local notSpace = scan.isNot(scan.isSpace)
 
 -- "<" PRI ">" with PRI one to three digits: PRI and the scanner after it,
 -- or nil
@@ -240,27 +235,17 @@ local function fallback(rec)
     if not fallbackEngine then
         local ok, D = pcall(require, "syslogd")
         if not ok or type(D) ~= "table" then return end
-        local conf = D.DEFAULT
-        if fs.exists(D.CONF) and not fs.isDir(D.CONF) then
-            local h = fs.open(D.CONF, "r")
-            if h then conf = h.readAll() or ""; h.close() end
-        end
-        fallbackEngine = D.new({ rules = (D.parse(conf)), fs = fs, files = true,
-            maxSize = D.size(settings.get("syslog.maxSize")), keep = tonumber(settings.get("syslog.keep")) })
+        local set = D.settings()
+        fallbackEngine = D.new({ rules = (D.parse((D.loadConf()))), fs = fs, files = true,
+            maxSize = set.maxSize, keep = set.keep })
     end
     pcall(fallbackEngine.route, rec)
 end
 
 local function programName()
     local sh = shell
-    if type(sh) == "table" and sh.getRunningProgram then
-        local p = sh.getRunningProgram()
-        if p then
-            local name = fs.getName(p)
-            return text.stripSuffix(name, ".lua") or name
-        end
-    end
-    return "lua"
+    local p = type(sh) == "table" and sh.getRunningProgram and sh.getRunningProgram()
+    return p and path.basename(p, ".lua") or "lua"
 end
 
 -- A logger of its own: app (nil: the program's name), facility (user),

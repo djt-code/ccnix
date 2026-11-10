@@ -112,7 +112,7 @@ local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lu
 local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/netstat.lua", "bin/tcpdump.lua", "bin/curl.lua", "lib/net.lua",
               "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
 local INIT = { "bin/init.lua", "bin/ps.lua", "bin/kill.lua", "bin/service.lua", "lib/proc.lua", "lib/procrun.lua", "lib/cu.lua",
-               "bin/syslogd.lua", "bin/logger.lua", "lib/log.lua", "lib/syslogd.lua", "help/syslog.txt" }
+               "bin/syslogd.lua", "bin/logger.lua", "lib/log.lua", "lib/syslogd.lua", "lib/sysenv.lua", "help/syslog.txt" }
 local IRC = { "lib/irc.lua" }
 local APPS = {
     mine = { "turtle/mine.lua", TURTLE },
@@ -121,9 +121,9 @@ local APPS = {
     autocompost = { "turtle/autocompost.lua", TURTLE },
     claude = { "turtle/claude.lua", TURTLE },
     coreutils = { "bin/", "lib/" },
-    ccsh = { "bin/ccsh.lua", "lib/readline.lua" },
+    ccsh = { "bin/ccsh.lua", "lib/readline.lua", "lib/sysenv.lua" },
     diskclone = { "pc/diskclone.lua" },
-    fileserver = { "pc/fileserver.lua", "lib/jbod.lua" },
+    fileserver = { "pc/fileserver.lua", "lib/jbod.lua", "lib/sysenv.lua" },
     net = { NET },
     router = { "pc/router.lua", NET },
     init = { INIT },
