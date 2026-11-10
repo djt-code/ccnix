@@ -24,6 +24,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside pc/
 local net = require("net")
 local text = require("text")
+local tables = require("tables")
 local args = { ... }
 
 shell.run("ip", "forward", "on")
@@ -61,9 +62,7 @@ local function draw()
     line(1, string.format("router %d: forwarded %d, dropped %d (spoofed %d)", os.getComputerID(), c.forwarded,
         c.dropped, c.spoofed or 0), colours.yellow)
     local y = 2
-    local names = {}
-    for k in pairs(S.ifaces) do names[#names + 1] = k end
-    table.sort(names)
+    local names = tables.sortedKeys(S.ifaces)
     for _, name in ipairs(names) do
         local i = S.ifaces[name]
         line(y, string.format("%-9s %-18s in %d out %d", name, net.cidrString(i.ip, i.len), i.rx, i.tx))

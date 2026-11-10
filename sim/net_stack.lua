@@ -115,6 +115,15 @@ assert(R1.addRoute("10.9.0.0/16", "10.0.2.2"))          -- R2 sends it back: a l
 --------------------------------------------------------------------------
 check("addresses: parsed and printed back", N.ipString(N.parseIP("10.0.1.2")) == "10.0.1.2"
     and N.parseIP("10.0.1.256") == nil and select(2, N.parseCIDR("default")) == 0)
+local ip = N.parseIP
+check("network arithmetic: netOf, broadcastOf, inNet, maskOf, routeOrder",
+    N.netOf(ip("10.0.1.200"), 24) == ip("10.0.1.0") and N.netOf(ip("10.0.1.200"), 0) == 0
+        and N.netOf(ip("10.0.1.200"), 32) == ip("10.0.1.200") and N.broadcastOf(ip("10.0.1.2"), 23) == ip("10.0.1.255")
+        and N.inNet(ip("10.0.1.9"), ip("10.0.1.200"), 24) and not N.inNet(ip("10.0.2.9"), ip("10.0.1.0"), 24)
+        and N.inNet(ip("192.168.0.1"), ip("10.0.0.0"), 0) and N.maskOf(24) == ip("255.255.255.0")
+        and N.maskOf(0) == 0 and N.maskOf(32) == N.ALL and N.maskOf(17) == ip("255.255.128.0")
+        and N.routeOrder({ len = 24, net = 9 }, { len = 16, net = 1 }) and N.routeOrder({ len = 8, net = 1 }, { len = 8, net = 2 })
+        and not N.routeOrder({ len = 0, net = 0 }, { len = 8, net = 0 }))
 check("routes: the longest prefix wins", A.route(N.parseIP("10.0.1.9")).len == 24
     and A.route(N.parseIP("10.5.5.5")).len == 0 and A.route(N.parseIP("10.5.5.5")).gw == N.parseIP("10.0.1.1"))
 

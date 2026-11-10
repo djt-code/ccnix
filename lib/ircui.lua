@@ -36,6 +36,7 @@
 -- the line; the wheel scrolls the chat, or the nick list under it.
 
 local irc = require("irc")
+local scan = require("scan")
 local text = require("text")
 local readline = require("readline")
 local ircclient = require("ircclient")
@@ -139,8 +140,7 @@ local function cellsOf(message, defaultFg, out)
         local s = r.text
         for i = 1, #s do
             local ch = s:sub(i, i)
-            local b = ch:byte()
-            if b == 9 then ch = " " elseif b < 32 then ch = "?" end
+            if ch == "\t" then ch = " " elseif scan.isControl(ch) then ch = "?" end     -- (DEL too)
             local n = #out.ch + 1
             out.ch[n], out.fg[n], out.bg[n] = ch, fg, bg
         end

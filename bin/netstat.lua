@@ -30,6 +30,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("netstat", "netstat [-atulnpe] | -r | -i | -s")
 local net = require("net")
 local text = require("text")
+local tables = require("tables")
 local opts, operands = cu.getopt({ ... }, "atulnpersi")
 if #operands > 0 then cu.usageError("unexpected operand " .. operands[1]) end
 
@@ -37,39 +38,23 @@ local S, why = net.stack()
 if not S then cu.fail(why); return cu.exit() end
 local ip = net.ipString
 
--- rows as columns, each as wide as its widest cell (the last one left ragged)
+-- rows as columns (text.columns), a line each
 local function columns(rows, right)
-    local widths = {}
-    for _, r in ipairs(rows) do
-        for k, cell in ipairs(r) do widths[k] = math.max(widths[k] or 0, #cell) end
-    end
-    for _, r in ipairs(rows) do
-        local parts = {}
-        for k, cell in ipairs(r) do
-            if k == #r then parts[k] = cell
-            elseif right and right[k] then parts[k] = text.padLeft(cell, widths[k])
-            else parts[k] = text.padRight(cell, widths[k]) end
-        end
-        io.write(text.trimEnd(table.concat(parts, " ")), "\n")      -- (no blanks at the end)
-    end
+    for _, line in ipairs(text.columns(rows, right)) do io.write(line, "\n") end
 end
 
-local function sorted(t)
-    local keys = {}
-    for k in pairs(t) do keys[#keys + 1] = k end
-    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
-    return keys
-end
+-- a table's keys in order as strings ("1000" before "23"), as netstat has
+-- always listed its ports
+local function byString(a, b) return tostring(a) < tostring(b) end
+local function sorted(t) return tables.sortedKeys(t, byString) end
 
 if opts.r then
     io.write("Kernel IP routing table\n")
     local rows = { { "Destination", "Gateway", "Genmask", "Flags", "Iface" } }
-    local routes = {}
-    for _, r in ipairs(S.routes) do routes[#routes + 1] = r end
-    table.sort(routes, function(a, b) if a.len ~= b.len then return a.len > b.len end return a.net < b.net end)
+    local routes = tables.copy(S.routes)
+    table.sort(routes, net.routeOrder)
     for _, r in ipairs(routes) do
-        local mask = r.len == 0 and 0 or math.floor(4294967296 - 2 ^ (32 - r.len))
-        rows[#rows + 1] = { ip(r.net), r.gw and ip(r.gw) or "0.0.0.0", ip(mask), "U" .. (r.gw and "G" or ""), r.iface }
+        rows[#rows + 1] = { ip(r.net), r.gw and ip(r.gw) or "0.0.0.0", ip(net.maskOf(r.len)), "U" .. (r.gw and "G" or ""), r.iface }
     end
     columns(rows)
     return cu.exit()

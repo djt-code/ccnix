@@ -69,6 +69,7 @@ local irc = require("irc")
 local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
+local fileio = require("fileio")
 local ircd = require("ircd")
 local ircserv = require("ircserv")
 local mcLib = require("mc")
@@ -92,12 +93,10 @@ local function hostPart(s)
 end
 local defaultName = label and ("irc." .. hostPart(label:lower())) or "irc.ccnix"
 
-local function readLines(path)
-    if not fs.exists(path) then return nil end
-    local h = fs.open(path, "r")
-    if not h then return nil end
-    local out = text.lines(h.readAll() or "")
-    h.close()
+local function readLines(file)
+    local contents = fileio.read(file)
+    if not contents then return nil end
+    local out = text.lines(contents)
     while out[#out] == "" do out[#out] = nil end
     return out
 end
@@ -111,19 +110,13 @@ local motd = readLines(motdPath) or {
 
 local dataPath = settings.get("ircd.data") or "/etc/ircd.db"
 local function loadDb()
-    if not fs.exists(dataPath) then return nil end
-    local h = fs.open(dataPath, "r")
-    local saved = h and h.readAll()
-    if h then h.close() end
+    local saved = fileio.read(dataPath)
     return saved and textutils.unserialize(saved)
 end
 local function saveDb(db)
     local dir = fs.getDir(dataPath)
     if dir ~= "" and not fs.exists(dir) then fs.makeDir(dir) end
-    local h = fs.open(dataPath, "w")
-    if not h then syslog.err("can't write " .. dataPath); return end
-    h.write(textutils.serialize(db))
-    h.close()
+    if not fileio.write(dataPath, textutils.serialize(db)) then syslog.err("can't write " .. dataPath) end
 end
 
 local srv = ircd.new({

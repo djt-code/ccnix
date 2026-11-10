@@ -53,6 +53,8 @@ local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
 local path = require("path")
+local httpc = require("httpc")
+local tables = require("tables")
 
 local H = {}
 H.SERVER = "ccnix-httpd"
@@ -119,10 +121,7 @@ function H.response(status, headers, body, head)
     end
     add("Date", H.date())
     add("Server", H.SERVER)
-    local names = {}
-    for k in pairs(headers or {}) do names[#names + 1] = k end
-    table.sort(names)
-    for _, k in ipairs(names) do
+    for _, k in ipairs(tables.sortedKeys(headers or {})) do
         if not ({ date = true, server = true, connection = true })[k:lower()] then
             local v = headers[k]
             if type(v) == "table" then for _, one in ipairs(v) do add(k, one) end    -- (Set-Cookie, one a line)
@@ -196,8 +195,7 @@ function H.parse(raw)
     for i = 2, #lines do
         local name, value = headerLine(lines[i])
         if not name then return false, 400 end
-        name = name:lower()
-        headers[name] = headers[name] and (headers[name] .. ", " .. value) or value
+        httpc.addHeader(headers, name, value)
     end
     if headers["transfer-encoding"] then return false, 501 end
     local len = 0
@@ -219,8 +217,7 @@ function H.parse(raw)
     local args = H.parseQuery(query)
     local contentType = text.trim((headers["content-type"] or ""):lower())
     local form = text.startsWith(contentType, "application/x-www-form-urlencoded") and H.parseQuery(body) or {}
-    local params = {}
-    for k, v in pairs(args) do params[k] = v end
+    local params = tables.copy(args)
     for k, v in pairs(form) do params[k] = v end
     return { method = method, target = target, rawPath = rawPath, path = decoded, query = query, args = args,
              form = form, params = params, cookies = H.parseCookies(headers.cookie),
@@ -518,6 +515,8 @@ end
 --   state              a table kept for the script between requests
 --   here               the script's folder ("/www/cgi"): for its own files,
 --                      which the script root never serves
+--   text               lib/text (text.trim, text.split ...), for what
+--                      visitors type
 -- A script answers with what it writes, or returns a string (the body),
 -- status, headers, body, or a router.  An error: 500, and with
 -- opts.debug the traceback on the page.  opts.fs: the filesystem API.
@@ -592,7 +591,7 @@ function H.lua(opts)
         local env = setmetatable({}, { __index = _G })
         states[script] = states[script] or {}
         env.req, env.state, env.html, env.router = req, states[script], H.html, H.router
-        env.here, env.fs = "/" .. fs.getDir(script), fs
+        env.here, env.fs, env.text = "/" .. fs.getDir(script), fs, text
         function env.write(...)
             for i = 1, select("#", ...) do out[#out + 1] = tostring((select(i, ...))) end
         end

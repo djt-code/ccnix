@@ -564,6 +564,14 @@ check("httpc.parseURL: scheme, user, host, port, path and query; no scheme is ht
         and httpc.parseURL("http://u:p%40w@wiki:8080/").user == "u:p@w" and httpc.parseURL("10.0.2.5").path == "/"
         and httpc.parseURL("b?q").path == "/?q" and select(3, httpc.parseURL("https://x/")) == "protocol"
         and select(3, httpc.parseURL("http://")) == "url" and select(3, httpc.parseURL("http://x:0/")) == "url")
+do
+    local h = {}
+    httpc.addHeader(h, "Set-Cookie", "a=1")
+    httpc.addHeader(h, "set-COOKIE", "b=2")
+    httpc.addHeader(h, "Host", "x")
+    check("httpc.addHeader: names in lower case, a repeated one's values joined with \", \"",
+        h["set-cookie"] == "a=1, b=2" and h.host == "x" and h.Host == nil)
+end
 check("httpc.resolve: absolute, //host, /path, relative, ?query and .. against the URL redirected from",
     httpc.resolve("http://a/b/c", "http://z/") == "http://z/" and httpc.resolve("http://a:81/b/c", "//z/y") == "http://z/y"
         and httpc.resolve("http://a:81/b/c", "/y") == "http://a:81/y" and httpc.resolve("http://a/b/c", "d") == "http://a/b/d"
@@ -913,6 +921,10 @@ check("the example guestbook: empty; a blank name refused (400, the message kept
         and o4:find("<b>Ann &lt;b&gt;</b>") and o4:find("<p>hello\nthere</p>") and o4:find("1 entry")
         and W:read("www/cgi/guestbook.db") and s5 == 200 and o5:find("Ann &lt;b&gt;") and s6 == 404,
     show(o2) .. show(o4))
+local s7 = sign(gb, "name=++Bo%09&message=%0D%0A+hey+")
+local s8, o8 = ask(gb, "GET /cgi/guestbook HTTP/1.1\r\n\r\n")
+check("the guestbook trims the blanks round a name and a message (text.trim, from the page's text)",
+    s7 == 303 and s8 == 200 and o8:find("<b>Bo</b>", 1, true) and o8:find("<p>hey</p>", 1, true), show(o8))
 
 local cl, got, asked = nil, "", false
 r = W:run("httpd", "-p", "80", "www", { events = {}, onPull = function(w)

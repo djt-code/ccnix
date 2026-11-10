@@ -81,6 +81,7 @@ local cu = require("cu").init("ip", nil)
 local net = require("net")
 local scan = require("scan")
 local text = require("text")
+local tables = require("tables")
 local args = { ... }
 
 -- options, before the command: -d[etails] (one or two dashes, any cut)
@@ -227,19 +228,14 @@ end
 
 local function showAddr(S)
     if S then
-        local names = {}
-        for k in pairs(S.ifaces) do names[#names + 1] = k end
-        table.sort(names)
-        for _, name in ipairs(names) do
+        for _, name in ipairs(tables.sortedKeys(S.ifaces)) do
             local i = S.ifaces[name]
             out(string.format("%-12s %-18s %srx %d tx %d%s", name, net.cidrString(i.ip, i.len),
                 details and (i.mac .. " ") or "", i.rx, i.tx, i.vlan and (" (vlan " .. i.vlan .. ")") or ""))
         end
     else
         local cfg = net.config()
-        local names = {}
-        for k in pairs(cfg.ifaces) do names[#names + 1] = k end
-        table.sort(names)
+        local names = tables.sortedKeys(cfg.ifaces)
         for _, name in ipairs(names) do
             local modem = net.link(name)
             out(string.format("%-12s %-18s %s(not up)", name, cfg.ifaces[name],
@@ -251,9 +247,8 @@ end
 
 local function showRoutes(S)
     if S then
-        local list = {}
-        for _, r in ipairs(S.routes) do list[#list + 1] = r end
-        table.sort(list, function(a, b) if a.len ~= b.len then return a.len > b.len end return a.net < b.net end)
+        local list = tables.copy(S.routes)
+        table.sort(list, net.routeOrder)
         for _, r in ipairs(list) do
             local dest = r.len == 0 and "default" or net.cidrString(r.net, r.len)
             out(string.format("%-18s %s dev %s", dest, r.gw and ("via " .. net.ipString(r.gw)) or "direct", r.iface))
@@ -328,10 +323,8 @@ elseif cmd == "boot" then
 elseif cmd == "link" then
     noMore(2)
     local cfg = net.config()
-    local used, names = {}, {}
-    for name in pairs(cfg.ifaces) do names[#names + 1] = name end
-    table.sort(names)
-    for _, name in ipairs(names) do
+    local used = {}
+    for _, name in ipairs(tables.sortedKeys(cfg.ifaces)) do
         local modem = net.link(name)
         if modem then used[modem] = (used[modem] and (used[modem] .. " ") or "") .. name end
     end
@@ -512,8 +505,7 @@ elseif cmd == "neighbour" then
             if S then for name, i in pairs(S.ifaces) do ifaces[name] = net.cidrString(i.ip, i.len) end end
             for name, cidr in pairs(ifaces) do
                 local nip, len = net.parseCIDR(cidr)
-                local size = nip and 2 ^ (32 - len)
-                if nip and math.floor(ip / size) == math.floor(nip / size) then dev = name end
+                if nip and net.inNet(ip, nip, len) then dev = name end
             end
             if not dev then cu.fail("no interface on " .. addr .. "'s network: say which, with dev"); return cu.exit() end
         end
@@ -580,10 +572,7 @@ elseif cmd == "host" then
         if #t == 0 then settings.unset("net.hosts") else settings.set("net.hosts", table.concat(t, ", ")) end
         save()
     end
-    local names = {}
-    for k in pairs(hosts) do names[#names + 1] = k end
-    table.sort(names)
-    for _, k in ipairs(names) do out(string.format("%-16s %s", k, hosts[k])) end
+    for _, k in ipairs(tables.sortedKeys(hosts)) do out(string.format("%-16s %s", k, hosts[k])) end
 elseif cmd == "dns" then
     local w = args[2] and not net.parseIP(args[2]) and pick(args[2], DNS_WORDS)
     if w == "cache" or w == "flush" then

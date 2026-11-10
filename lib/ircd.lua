@@ -47,6 +47,7 @@ local irc = require("irc")
 local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
+local tables = require("tables")
 
 local D = {}
 D.VERSION = "ccnix-ircd-1.0"
@@ -387,13 +388,9 @@ end
 
 -- A user name as given, kept to letters, digits, - . and _, ten at most.
 local USER_CHAR = scan.oneOf("-._")
+local function isUserChar(ch) return scan.isAlnum(ch) or USER_CHAR(ch) end
 local function cleanUserName(given)
-    local kept = {}
-    for i = 1, #given do
-        local ch = given:sub(i, i)
-        if scan.isAlnum(ch) or USER_CHAR(ch) then kept[#kept + 1] = ch end
-    end
-    local user = text.truncate(table.concat(kept), 10)
+    local user = text.truncate(text.keep(given, isUserChar), 10)
     return user ~= "" and user or "user"
 end
 
@@ -649,22 +646,22 @@ local function channelMode(srv, c, chan, p)
         return srv:numeric(c, "ENDOFBANLIST", chan.name)
     end
     if not isOp(srv, chan, c) then return srv:numeric(c, "CHANOPRIVSNEEDED", chan.name) end
-    local adding, nextArg, withArgs = true, 3, 0
-    local done = newChangeList()
-    for i = 1, #spec do
-        local letter = spec:sub(i, i)
+    local function wantsArg(letter, adding)
         local mode = CHANNEL_MODES[letter]
-        if letter == "+" or letter == "-" then
-            adding = letter == "+"
-        elseif not mode then
+        return mode ~= nil and takesArg(mode, adding)
+    end
+    local withArgs = 0
+    local done = newChangeList()
+    for _, ch in ipairs(irc.modeChanges(spec, { table.unpack(p, 3) }, wantsArg)) do
+        local mode, adding, letter = CHANNEL_MODES[ch.letter], ch.set, ch.letter
+        if not mode then
             srv:numeric(c, "UNKNOWNMODE", letter)
         elseif not takesArg(mode, adding) then
             local out = mode.apply(srv, c, chan, adding, nil, letter)
             if out then done.add(adding, letter, out) end
-        elseif withArgs < D.MAX_MODE_ARGS and p[nextArg] then
-            local arg = p[nextArg]
-            nextArg, withArgs = nextArg + 1, withArgs + 1
-            local out = mode.apply(srv, c, chan, adding, arg, letter)
+        elseif withArgs < D.MAX_MODE_ARGS and ch.arg then      -- (at most MAX_MODE_ARGS with arguments)
+            withArgs = withArgs + 1
+            local out = mode.apply(srv, c, chan, adding, ch.arg, letter)
             if out then done.add(adding, letter, out) end
         end
     end
@@ -899,10 +896,7 @@ command("LIST", 0, function(srv, c, p)
         want = {}
         for _, name in ipairs(text.split(p[1], ",")) do want[srv:fold(name)] = true end
     end
-    local keys = {}
-    for key in pairs(srv.channels) do keys[#keys + 1] = key end
-    table.sort(keys)
-    for _, key in ipairs(keys) do
+    for _, key in ipairs(tables.sortedKeys(srv.channels)) do
         local chan = srv.channels[key]
         if (not want or want[key]) and canSee(srv, chan, c) then
             srv:numeric(c, "LIST", chan.name, tostring(srv:countMembers(chan)), chan.topic or "")

@@ -46,7 +46,6 @@ local cu = require("cu").init("curl", "curl [-fiILOsSv] [-X method] [-d data] [-
 local httpc = require("httpc")
 local scan = require("scan")
 local text = require("text")
-local convert = require("convert")
 local getopt = require("getopt")
 
 local SPEC = "X:d:H:A:u:o:m:LiIOfsSvh"
@@ -128,8 +127,7 @@ if user and not text.contains(user, ":") then
     io.write("Enter host password for user '" .. user .. "': ")
     user = user .. ":" .. (read("*") or "")
 end
-local timeout = last("m") and convert.toNumber(last("m"))
-if last("m") and not timeout then cu.usageError("bad -m " .. last("m")) end
+local timeout = cu.number({ m = last("m") }, "m")          -- (the last -m given)
 
 -- where the body goes
 local url = urls[1]

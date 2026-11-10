@@ -105,6 +105,7 @@
 
 local scan = require("scan")
 local text = require("text")
+local tables = require("tables")
 
 local N = {}
 N.CHANNEL = 60000             -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
@@ -215,12 +216,31 @@ function N.parseMAC(s)
     return table.concat(b, ":")
 end
 
-local function netOf(ip, len)
+-- Network arithmetic, on addresses as numbers:
+--   N.netOf(ip, len)        the network ip is on, with a /len prefix
+--   N.broadcastOf(ip, len)  that network's broadcast address
+--   N.inNet(ip, net, len)   ip is on net/len (net need not be the network's
+--                           first address: any address on it will do)
+--   N.maskOf(len)           the netmask of a /len prefix (24: 255.255.255.0)
+--   N.routeOrder(a, b)      table.sort's order for routes ({ net, len }):
+--                           the longest prefix first, then by network
+function N.netOf(ip, len)
     if len <= 0 then return 0 end
     local size = 2 ^ (32 - len)
     return math.floor(ip / size) * size
 end
-local function broadcastOf(ip, len) return netOf(ip, len) + 2 ^ (32 - len) - 1 end
+local netOf = N.netOf
+function N.broadcastOf(ip, len) return netOf(ip, len) + 2 ^ (32 - len) - 1 end
+local broadcastOf = N.broadcastOf
+function N.inNet(ip, net, len) return netOf(ip, len) == netOf(net, len) end
+function N.maskOf(len)
+    if len <= 0 then return 0 end
+    return math.floor(4294967296 - 2 ^ (32 - len))
+end
+function N.routeOrder(a, b)
+    if a.len ~= b.len then return a.len > b.len end
+    return a.net < b.net
+end
 
 function N.cidrString(ip, len) return N.ipString(ip) .. "/" .. len end
 
@@ -322,7 +342,7 @@ function N.new(opts)
         if gw and not g then return false, "bad gateway " .. tostring(gw) end
         if not iface and g then
             for _, ifc in pairs(S.ifaces) do
-                if netOf(g, ifc.len) == netOf(ifc.ip, ifc.len) then iface = ifc.name end
+                if N.inNet(g, ifc.ip, ifc.len) then iface = ifc.name end
             end
         end
         if not iface or not S.ifaces[iface] then
@@ -412,7 +432,7 @@ function N.new(opts)
         if not m then return false, "bad MAC " .. tostring(mac) end
         if not iface then
             for name, ifc in pairs(S.ifaces) do
-                if netOf(n, ifc.len) == netOf(ifc.ip, ifc.len) then iface = name end
+                if N.inNet(n, ifc.ip, ifc.len) then iface = name end
             end
             if not iface then return false, "no interface on " .. N.ipString(n) .. "'s network (give dev)" end
         end
@@ -672,8 +692,7 @@ function N.new(opts)
             drop("dropNoRoute")
             return icmpError(pkt, "unreachable", "net")
         end
-        local copy = {}
-        for k, v in pairs(pkt) do copy[k] = v end
+        local copy = tables.copy(pkt)
         copy.ttl = pkt.ttl - 1
         counters.forwarded = counters.forwarded + 1
         output(copy, r, false)

@@ -40,6 +40,8 @@ local text = require("text")
 local convert = require("convert")
 local glob = require("glob")
 local path = require("path")
+local tables = require("tables")
+local fileio = require("fileio")
 
 local C = {}
 C.VERSION = "1.0"
@@ -168,13 +170,7 @@ end
 function Client:defaultNick()
     local label = os.getComputerLabel and os.getComputerLabel()
     -- the label's letters, digits and the other characters a nick may have
-    local nickChar = scan.oneOf("-_[]\\`^{|}")
-    local kept = {}
-    for i = 1, label and #label or 0 do
-        local c = label:sub(i, i)
-        if scan.isAlnum(c) or nickChar(c) then kept[#kept + 1] = c end
-    end
-    local nick = table.concat(kept)
+    local nick = text.keep(label or "", irc.isNickChar)
     if nick == "" or not irc.validNick(nick) then nick = "cc" .. (os.getComputerID and os.getComputerID() or 0) end
     return nick
 end
@@ -238,12 +234,8 @@ end
 function Client:configPath() return self.home .. "/config" end
 
 function Client:loadConfig()
-    local path = self:configPath()
-    if not fs.exists(path) then return end
-    local h = fs.open(path, "r")
-    if not h then return end
-    local contents = h.readAll() or ""
-    h.close()
+    local contents = fileio.read(self:configPath())
+    if not contents then return end
     -- line = key " = " value, or a "#" comment
     for _, raw in ipairs(text.lines(contents)) do
         local line = text.trim(raw)
@@ -266,10 +258,7 @@ end
 function Client:saveConfig()
     if self.noConfig then return end
     local out = { "# ccnix irc's settings: name = value (/set changes them; this file is rewritten)" }
-    local keys = {}
-    for k in pairs(self.values) do keys[#keys + 1] = k end
-    table.sort(keys)
-    for _, k in ipairs(keys) do
+    for _, k in ipairs(tables.sortedKeys(self.values)) do
         local v = self.values[k]
         if type(v) == "boolean" then v = v and "on" or "off" end
         out[#out + 1] = k .. " = " .. tostring(v)
@@ -285,10 +274,7 @@ function Client:saveConfig()
     for _, name in ipairs(names) do out[#out + 1] = "alias." .. name .. " = " .. (self.aliases[name] or "") end
     for _, ig in ipairs(self.ignores) do out[#out + 1] = "ignore." .. ig.mask .. " = " .. ig.levels end
     if not fs.exists(self.home) then fs.makeDir(self.home) end
-    local h = fs.open(self:configPath(), "w")
-    if not h then return end
-    h.write(table.concat(out, "\n") .. "\n")
-    h.close()
+    fileio.write(self:configPath(), table.concat(out, "\n") .. "\n")
 end
 
 --------------------------------------------------------------------------
@@ -1169,19 +1155,12 @@ EVENTS.MODE = function(s, m)
     end
     local b = client:findBuffer(s, target)
     if not b then return end
-    local spec, argi, adding = m.params[2] or "", 3, true
-    for i = 1, #spec do
-        local ch = spec:sub(i, i)
-        if ch == "+" then adding = true
-        elseif ch == "-" then adding = false
-        else
-            local arg
-            if modeTakesArg(s, ch, adding) then arg = m.params[argi]; argi = argi + 1 end
-            local at = text.find(s.prefixModes, ch)
-            if at and arg then
-                local entry = b:getNick(arg)
-                if entry then entry.prefix = addPrefix(s, entry.prefix, s.prefixSymbols:sub(at, at), adding) end
-            end
+    local function takesArg(letter, adding) return modeTakesArg(s, letter, adding) end
+    for _, ch in ipairs(irc.modeChanges(m.params[2] or "", { table.unpack(m.params, 3) }, takesArg)) do
+        local at = text.find(s.prefixModes, ch.letter)
+        if at and ch.arg then
+            local entry = b:getNick(ch.arg)
+            if entry then entry.prefix = addPrefix(s, entry.prefix, s.prefixSymbols:sub(at, at), ch.set) end
         end
     end
     client:print(b, "Mode " .. colour(14, target) .. " [" .. table.concat(m.params, " ", 2) .. "] by "
@@ -1476,9 +1455,7 @@ COMMANDS.help = { function(args, _, buffer, client)
         end
         return
     end
-    local names = {}
-    for n in pairs(client.commands) do names[#names + 1] = n end
-    table.sort(names)
+    local names = tables.sortedKeys(client.commands)
     client:note(buffer, "Commands (/help <command> for more; anything else goes to the server as it is):")
     local row = {}
     for _, n in ipairs(names) do
@@ -1904,10 +1881,7 @@ end, "[name [value]] | -default <name>", "show or change settings (wildcards lis
 COMMANDS.alias = { function(args, _, buffer, client)
     local name, exp = splitWord(args)
     if name == "" then
-        local names = {}
-        for n in pairs(client.aliases) do names[#names + 1] = n end
-        table.sort(names)
-        for _, n in ipairs(names) do client:note(buffer, colour(14, "/" .. n) .. " = /" .. client.aliases[n]) end
+        for _, n in ipairs(tables.sortedKeys(client.aliases)) do client:note(buffer, colour(14, "/" .. n) .. " = /" .. client.aliases[n]) end
         return
     end
     name = name:lower()
@@ -2107,13 +2081,11 @@ function Client:scriptApi(sc)
 end
 
 function Client:loadScript(name)
-    local path = self:scriptPath(name)
-    if not path then return nil, "no script " .. name .. " (/script list)" end
-    local h = fs.open(path, "r")
-    if not h then return nil, "can't read " .. path end
-    local src = h.readAll() or ""
-    h.close()
-    local sc = { name = name, path = path, signals = {}, commands = {}, timers = {}, info = {} }
+    local file = self:scriptPath(name)
+    if not file then return nil, "no script " .. name .. " (/script list)" end
+    local src = fileio.read(file)
+    if not src then return nil, "can't read " .. file end
+    local sc = { name = name, path = file, signals = {}, commands = {}, timers = {}, info = {} }
     local env = setmetatable({}, { __index = _G })
     env.irc = self:scriptApi(sc)
     env.script = sc.info

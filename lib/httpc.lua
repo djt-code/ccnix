@@ -45,6 +45,10 @@
 -- "resolve" (no such host), "connect", "send", "timeout", "redirects"
 -- (too many), "empty" (it closed without a word), "partial" (it closed
 -- before Content-Length's end), "read" (it broke, or what came isn't HTTP).
+--
+-- httpc.addHeader(headers, name, value)  a header line's name and value
+-- into headers as a response's (and lib/httpd's requests') are kept: the
+-- name in lower case, a repeated one's values joined with ", ".
 
 local net = require("net")
 local scan = require("scan")
@@ -65,6 +69,11 @@ local function schemeOf(url)
     local scheme = sc:readWhile(isSchemeChar)
     if not sc:accept("://") then return nil end
     return scheme, sc:rest()
+end
+
+function H.addHeader(headers, name, value)
+    name = name:lower()
+    headers[name] = headers[name] and (headers[name] .. ", " .. value) or value
 end
 
 -- A URL's parts: { host, port, path (with its query), user, url (as
@@ -180,7 +189,7 @@ end
 local function requestHeaders(u, opts, auth, body)
     local list, dropped = {}, {}
     local function find(name)
-        for i, h in ipairs(list) do if h[1]:lower() == name:lower() then return i end end
+        for i, h in ipairs(list) do if text.equalFold(h[1], name) then return i end end
     end
     local function set(name, value)
         local i = find(name)
@@ -276,11 +285,7 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
             if l == "" then break end
             resp.lines[#resp.lines + 1] = l
             local name, value = text.cut(l, ":")        -- (name ":" value)
-            if value and name ~= "" then
-                value = text.trim(value)
-                name = name:lower()
-                resp.headers[name] = resp.headers[name] and (resp.headers[name] .. ", " .. value) or value
-            end
+            if value and name ~= "" then H.addHeader(resp.headers, name, text.trim(value)) end
         end
     until resp.status >= 200 or resp.status == 101
 

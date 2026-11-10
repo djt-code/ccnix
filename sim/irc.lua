@@ -90,7 +90,23 @@ check("casefold: rfc1459's []\\~ are {}|^; ascii folds letters only",
     irc.casefold("Nick[a]\\~") == "nick{a}|^" and irc.casefold("A[]", "ascii") == "a[]")
 check("validNick, validChannel", irc.validNick("Bob_[1]") and not irc.validNick("1bob") and not irc.validNick("a b")
     and irc.validChannel("#ccnix") and not irc.validChannel("ccnix") and not irc.validChannel("#a,b"))
-check("match: * and ?, folded", irc.match("*!*@*.lab", "Bob!b@HOST.lab") and irc.match("b?b!*", "bob!x@y")
+check("isNickStart, isNickChar: a letter or []\\`_^{|} first; digits and - after",
+    irc.isNickStart("a") and irc.isNickStart("[") and irc.isNickStart("|") and not irc.isNickStart("1")
+    and not irc.isNickStart("-") and irc.isNickChar("1") and irc.isNickChar("-") and irc.isNickChar("\\")
+    and not irc.isNickChar(" ") and not irc.isNickChar("!") and not irc.isNickChar("ab"))
+local function changesText(spec, args, takes)
+    local out = {}
+    for _, ch in ipairs(irc.modeChanges(spec, args, takes)) do
+        out[#out + 1] = (ch.set and "+" or "-") .. ch.letter .. (ch.arg and ("=" .. ch.arg) or "")
+    end
+    return table.concat(out, " ")
+end
+local function takesOLK(letter, set) return letter == "o" or letter == "k" or (letter == "l" and set) end
+check("modeChanges: + first, signs toggle, each letter that takes one has the next argument (nil when none are left)",
+    changesText("o-o+nl-lk", { "bob", "al", "5", "key" }, takesOLK) == "+o=bob -o=al +n +l=5 -l -k=key"
+    and changesText("+oo", { "x" }, takesOLK) == "+o=x +o" and changesText("", {}, takesOLK) == ""
+    and changesText("+-", { "x" }, takesOLK) == "", changesText("o-o+nl-lk", { "bob", "al", "5", "key" }, takesOLK))
+check("match: * and ?, folded",irc.match("*!*@*.lab", "Bob!b@HOST.lab") and irc.match("b?b!*", "bob!x@y")
     and not irc.match("*!*@other", "bob!b@host.lab") and irc.match("*", ""))
 local cmd, args = irc.ctcp("\1ACTION waves\1")
 check("ctcp: ACTION and its text; a quote made", cmd == "ACTION" and args == "waves"
@@ -218,6 +234,17 @@ alice.login("alice")
 check("ircd: registered: 001 welcome, 005 ISUPPORT, the MOTD",
     alice.has(" 001 alice :Welcome to the lab IRC network alice!alice@10.1.1.9") and alice.has("PREFIX=(ov)@+")
     and alice.has(" 372 alice :- hello, lab") and alice.has(" 376 "))
+do
+    local odd = fake(srv)
+    odd.say("NICK oddname")
+    odd.say("USER a~b$c.d-e_fghijkl 0 * :odd")
+    local blank = fake(srv)
+    blank.say("NICK blankname")
+    blank.say("USER ~!$ 0 * :blank")
+    check("ircd: a user name kept to letters, digits, - . _ and ten at most; none left: user",
+        odd.has("oddname!abc.d-e_fg@10.1.1.9") and blank.has("blankname!user@10.1.1.9"), odd.dump(" 001 ") .. blank.dump(" 001 "))
+    odd.say("QUIT"); blank.say("QUIT")
+end
 bob.say("PRIVMSG alice :early")
 check("ircd: before registering, 451", bob.has(" 451 "))
 bob.login("bob")
@@ -370,6 +397,17 @@ local function pump() for _ = 1, 10 do client_event("fake_net") end end
 local client = ircclient.new({ noConfig = true, connect = connector, home = "/.irc", scriptDirs = { "lib/ircscripts" },
     speaker = false })
 function client_event(...) client:event(...) end
+do
+    local labelled = {}
+    for _, label in ipairs({ "My Turtle #3!", "[x]-y_z", "!!!", "1abc" }) do
+        os.getComputerLabel = function() return label end
+        labelled[#labelled + 1] = client:defaultNick()
+    end
+    os.getComputerLabel = function() return nil end
+    labelled[#labelled + 1] = client:defaultNick()
+    check("client: the default nick, the label's nick characters (else cc and the ID)",
+        table.concat(labelled, " ") == "MyTurtle3 [x]-y_z cc7 cc7 cc7", table.concat(labelled, " "))
+end
 local function lastLine(b) local l = b.lines[#b.lines]; return l and irc.strip(l.text) or "" end
 local function bufferHas(b, part)
     for _, l in ipairs(b.lines) do if text.contains(irc.strip(l.text), part) then return l end end

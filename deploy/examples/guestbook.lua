@@ -31,18 +31,16 @@ local function save(list)
     h.close()
 end
 
-local function trim(s) return (s or ""):match("^%s*(.-)%s*$") end
-
 local list = entries()
 local problem
 if req.method == "POST" then
-    local name, text = trim(req.form.name), trim(req.form.message)
-    if name == "" or text == "" then
+    local name, message = text.trim(req.form.name or ""), text.trim(req.form.message or "")
+    if name == "" or message == "" then
         problem = "A name and a message, please."
-    elseif #name > MAX_NAME or #text > MAX_TEXT then
+    elseif #name > MAX_NAME or #message > MAX_TEXT then
         problem = "At most " .. MAX_NAME .. " characters of name and " .. MAX_TEXT .. " of message."
     else
-        table.insert(list, 1, { name = name, text = text, at = os.date("!%Y-%m-%d %H:%M UTC") })
+        table.insert(list, 1, { name = name, text = message, at = os.date("!%Y-%m-%d %H:%M UTC") })
         while #list > KEEP do table.remove(list) end
         save(list)
         return redirect(req.script)                -- (so a reload doesn't sign again)

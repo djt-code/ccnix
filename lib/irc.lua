@@ -18,11 +18,18 @@
 -- Names: casefold(s, mapping) as the server's CASEMAPPING folds them
 -- ("rfc1459", the default: A-Z and []\~ are a-z and {}|^; "strict-rfc1459"
 -- without ~ ^; "ascii" letters only), so names compare as the server
--- compares them.  isChannel(name, types), validNick(nick), splitSource
--- ("nick!user@host").  match(mask, s, mapping): a ban or ignore mask, *
+-- compares them.  isChannel(name, types), validNick(nick) (isNickStart(c)
+-- and isNickChar(c): the characters a nick starts with and holds),
+-- splitSource ("nick!user@host").  match(mask, s, mapping): a ban or ignore mask, *
 -- and ? wildcards, folded (lib/glob's, with \ [ ] as plain characters:
 -- nicks have them); compileMask(mask, mapping) the same as a test to
 -- use again.
+--
+-- Modes: modeChanges(spec, args, takesArg) walks a MODE line's changes
+-- ("+o-v" and its arguments, a list): a list of { set = true (+) or
+-- false (-), letter = "o", arg = "nick" (or nil) }, each letter for which
+-- takesArg(letter, set) is true taking the next argument (nil when they've
+-- run out).  The server and the client each decide what a letter means.
 --
 -- CTCP: ctcp(text) is the command and its argument when a PRIVMSG or
 -- NOTICE is \1CMD args\1 (ACTION, VERSION, PING...), else nil; ctcpQuote
@@ -216,11 +223,29 @@ end
 -- A nick: a letter or one of []\`_^{|} first, then those, digits and -,
 -- at most `most` long (30).
 local NICK_FIRST = scan.oneOf("[]\\`_^{|}")
-local function nickFirst(c) return scan.isAlpha(c) or NICK_FIRST(c) end
-local function nickChar(c) return nickFirst(c) or scan.isDigit(c) or c == "-" end
+function I.isNickStart(c) return scan.isAlpha(c) or NICK_FIRST(c) end
+function I.isNickChar(c) return I.isNickStart(c) or scan.isDigit(c) or c == "-" end
 function I.validNick(nick, most)
     if type(nick) ~= "string" or nick == "" or #nick > (most or 30) then return false end
-    return nickFirst(nick:sub(1, 1)) and scan.all(nick:sub(2), nickChar)
+    return I.isNickStart(nick:sub(1, 1)) and scan.all(nick:sub(2), I.isNickChar)
+end
+
+-- modes: (("+" | "-") letter*)*, a "+" before the first sign; each
+-- letter that takes an argument has the next of args.
+local MODE_SIGNS = { ["+"] = true, ["-"] = false }
+function I.modeChanges(spec, args, takesArg)
+    local changes, set, nextArg = {}, true, 1
+    for i = 1, #spec do
+        local letter = spec:sub(i, i)
+        if MODE_SIGNS[letter] ~= nil then
+            set = MODE_SIGNS[letter]
+        else
+            local arg
+            if takesArg(letter, set) then arg = args[nextArg]; nextArg = nextArg + 1 end
+            changes[#changes + 1] = { set = set, letter = letter, arg = arg }
+        end
+    end
+    return changes
 end
 
 -- A channel's name: # or & then no space, comma or BEL, at most 50.

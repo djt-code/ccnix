@@ -59,8 +59,7 @@ end
 
 local S, why = net.stack()
 if not S then cu.fail(why, 2); return cu.exit() end
-local wait = opts.w and convert.toNumber(opts.w)
-if opts.w and not wait then cu.usageError("bad -w " .. opts.w) end
+local wait = cu.number(opts, "w")
 
 -- Run fn, taking Ctrl+T (here, after the input) as the end.
 local function guarded(fn, ...)

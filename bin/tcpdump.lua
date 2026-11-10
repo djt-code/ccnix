@@ -52,6 +52,7 @@ local net = require("net")
 local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
+local tables = require("tables")
 
 local opts, operands, order = cu.getopt({ ... }, "Dc:ei:npqr:Stvw:x", 1)
 local tflag, verbose, ifaceArgs = 0, 0, {}
@@ -74,10 +75,7 @@ for name, ip in pairs(hosts) do names[ip] = names[ip] or name end
 if opts.D then
     local n, used = 0, {}
     if S then
-        local list = {}
-        for name in pairs(S.ifaces) do list[#list + 1] = name end
-        table.sort(list)
-        for _, name in ipairs(list) do
+        for _, name in ipairs(tables.sortedKeys(S.ifaces)) do
             local i = S.ifaces[name]
             n = n + 1
             used[i.modem] = true
@@ -191,9 +189,7 @@ local function compile(words)
             local spec = take("a network")
             local ip, len = net.parseCIDR(spec)
             if not ip then error("bad network " .. spec, 0) end
-            local size = 2 ^ (32 - len)
-            local base = math.floor(ip / size) * size
-            local function inside(a) return type(a) == "number" and math.floor(a / size) * size == base end
+            local function inside(a) return type(a) == "number" and net.inNet(a, ip, len) end
             return function(r) local a, b = addrs(r.frame, side) return inside(a) or inside(b) end
         else
             local n = number(take("a port"))
@@ -424,10 +420,7 @@ local any = #ifaceArgs == 0
 for _, name in ipairs(ifaceArgs) do if name == "any" then any = true end end
 if any then
     if S then
-        local list = {}
-        for name in pairs(S.ifaces) do list[#list + 1] = name end
-        table.sort(list)
-        for _, name in ipairs(list) do listen(name) end
+        for _, name in ipairs(tables.sortedKeys(S.ifaces)) do listen(name) end
     else
         for _, name in ipairs(peripheral.getNames()) do
             if peripheral.getType(name) == "modem" then listen(name) end
