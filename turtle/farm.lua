@@ -97,15 +97,19 @@ package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtle
 T = require("turtlelib")
 scan = require("scan")
 text = require("text")
+tables = require("tables")
+fileio = require("fileio")
 
 MAP_FILE = T.dataPath("farm.map")
 
 --------------------------------------------------------------------------
 -- Arguments
 --------------------------------------------------------------------------
-args = { ... }
+-- (T.options: a negative size, -3, is a size, not an option; a flag
+-- alone can't be wrong, so there's no error to check)
+opts, args = T.options({ ... }, { here = true })
 forceLearn, doClone, doRepair, doReset = false, false, false, false
-forceHere = T.popFlag(args, "--here")
+forceHere = opts.here == true
 if args[1] == "learn" then forceLearn = true; table.remove(args, 1)
 elseif args[1] == "repair" then doRepair = true; table.remove(args, 1)
 elseif args[1] == "clone" then doClone = true; forceHere = true; table.remove(args, 1)
@@ -203,31 +207,30 @@ keyXZ = T.keyXZ
 function cropAt(k) return crops[k] or DEFAULT_CROP end
 
 function saveMap()
-    local f = fs.open(MAP_FILE, "w")
-    f.writeLine(WIDTH .. " " .. LENGTH)
-    for _, k in ipairs(T.sortedKeys(tiles)) do
-        f.writeLine(k .. " " .. tiles[k] .. (crops[k] and (" " .. crops[k]) or ""))
+    local lines = { WIDTH .. " " .. LENGTH }
+    for _, k in ipairs(tables.sortedKeys(tiles)) do
+        lines[#lines + 1] = k .. " " .. tiles[k] .. (crops[k] and (" " .. crops[k]) or "")
     end
-    f.close()
+    fileio.write(MAP_FILE, table.concat(lines, "\n") .. "\n")
 end
 
 function loadMap()
-    if not fs.exists(MAP_FILE) then return false end
-    local f = fs.open(MAP_FILE, "r")
+    local saved = fileio.read(MAP_FILE)
+    if not saved then return false end
+    local lines = text.lines(saved)
     -- the first line: "width length"
-    local size = text.words(f.readLine() or "")
-    if not (scan.isInteger(size[1]) and scan.isInteger(size[2])) then f.close(); return false end
+    local size = text.words(lines[1] or "")
+    if not (scan.isInteger(size[1]) and scan.isInteger(size[2])) then return false end
     WIDTH, LENGTH = tonumber(size[1]), tonumber(size[2])
     tiles, crops = {}, {}
     -- then a line a tile: "key kind", and its crop if it has one
-    for line in f.readLine do
-        local w = text.words(line)
+    for i = 2, #lines do
+        local w = text.words(lines[i])
         if w[2] then
             tiles[w[1]] = w[2]
             if w[3] and CROPS[w[3]] then crops[w[1]] = w[3] end
         end
     end
-    f.close()
     return true
 end
 
@@ -613,7 +616,7 @@ function waitAndCompost(seconds)
             if more then sleep(math.min(COMPOST_CHECK, math.max(0, wake - os.clock()))) end
         end
         local parts = {}
-        for _, name in ipairs(T.sortedKeys(fed)) do
+        for _, name in ipairs(tables.sortedKeys(fed)) do
             if fed[name] > 0 then parts[#parts + 1] = fed[name] .. " " .. name .. " seeds" end
         end
         if #parts > 0 then
@@ -1496,7 +1499,7 @@ function farmPass(harvest, lanes, grow)
         print(string.format("Damage: %d crop/cane tiles won't plant, %d lane tiles not a source, %d blocked",
             stats.damaged, stats.dry, stats.blocked))
     end
-    for _, seed in ipairs(T.sortedKeys(bare)) do
+    for _, seed in ipairs(tables.sortedKeys(bare)) do
         print(string.format("Out of %s: %d tiles left bare. Put some in the chest.",
             (text.replace(text.stripPrefix(seed, "minecraft:") or seed, "_", " ")), bare[seed]))
     end

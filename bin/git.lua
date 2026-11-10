@@ -74,6 +74,8 @@ local text = require("text")
 local path = require("path")
 local convert = require("convert")
 local getopt = require("getopt")
+local fileio = require("fileio")
+local tables = require("tables")
 
 -- Show lines in pager.lua when it can be found (deploy/setup's copy of
 -- git has the text libraries but no pager), otherwise a screenful at a
@@ -144,27 +146,18 @@ local function requestJSON(url, headers)
     return obj
 end
 
-local function readState(dir)
-    local p = fs.combine(dir, STATE_FILE)
-    if not fs.exists(p) then return nil end
-    local f = fs.open(p, "r")
-    local s = unjson(f.readAll())
-    f.close()
-    return s
-end
+local function readState(dir) return fileio.readJSON(fs.combine(dir, STATE_FILE)) end
 
 local function writeState(dir, state)
-    local f = fs.open(fs.combine(dir, STATE_FILE), "w")
-    f.write(tojson(state))
-    f.close()
+    local ok, err = fileio.write(fs.combine(dir, STATE_FILE), tojson(state))
+    if not ok then die(err) end
 end
 
-local function writeFile(path, data)
-    local parent = fs.getDir(path)
+local function writeFile(file, data)
+    local parent = fs.getDir(file)
     if parent ~= "" and not fs.exists(parent) then fs.makeDir(parent) end
-    local f = fs.open(path, "wb")
-    f.write(data)
-    f.close()
+    local ok, err = fileio.write(file, data, true)
+    if not ok then die(err) end
 end
 
 -- Remove now-empty directories left behind by deleted files.
@@ -192,7 +185,7 @@ local function parseRepoURL(url)
     if owner == "" or not rest then return nil end
     local stop = #rest + 1                                -- (the repo ends at a / ? or #)
     for _, mark in ipairs({ "/", "?", "#" }) do
-        local found = rest:find(mark, 1, true)
+        local found = text.find(rest, mark)
         if found and found < stop then stop = found end
     end
     local repo = rest:sub(1, stop - 1)
@@ -316,12 +309,7 @@ end
 -- date, files = { [path] = blobSha } }, or {} if it has none
 local function lowerManifest(state)
     if not state.lower then return {} end
-    local p = fs.combine(state.lower, ".manifest")
-    if not fs.exists(p) then return {} end
-    local f = fs.open(p, "r")
-    local m = unjson(f.readAll())
-    f.close()
-    return type(m) == "table" and m or {}
+    return fileio.readJSON(fs.combine(state.lower, ".manifest")) or {}
 end
 
 local function checkout(R, dir, state, commit)
@@ -357,10 +345,7 @@ local function checkout(R, dir, state, commit)
     state.files = got
     writeState(dir, state)
 
-    local paths = {}
-    for path in pairs(remote) do paths[#paths + 1] = path end
-    table.sort(paths)
-    for _, path in ipairs(paths) do
+    for _, path in ipairs(tables.sortedKeys(remote)) do
         local sha, p = remote[path], fs.combine(dir, path)
         if have[path] ~= sha or not fs.exists(p) then
             print("  " .. path)
@@ -547,10 +532,8 @@ local cmd = table.remove(pos, 1)
 
 if not http then die("HTTP is disabled on this server.") end
 
-if cmd == "clone" then cmdClone(pos, opts)
-elseif cmd == "pull" then cmdPull(pos, opts)
-elseif cmd == "status" then cmdStatus(pos)
-elseif cmd == "log" then cmdLog(pos, opts)
+local COMMANDS = { clone = cmdClone, pull = cmdPull, status = cmdStatus, log = cmdLog }
+if COMMANDS[cmd] then COMMANDS[cmd](pos, opts)
 else
     print("Usage:")
     print("  git clone <url> [dir] [-b branch] [--token t]")

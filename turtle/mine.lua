@@ -198,8 +198,9 @@ package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtle
 T = require("turtlelib")
 scan = require("scan")
 text = require("text")
+fileio = require("fileio")
+tables = require("tables")
 
-JOB_FILE = T.dataPath("mine.job")
 PROGRESS_FILE = T.dataPath("mine.seg")
 VEIN_REACH = 4       -- how far a vein is followed out from the tunnel
 SCAN_RADIUS = 8      -- Geo Scanner radius (free of fuel up to 8)
@@ -215,16 +216,19 @@ MAX_SPACING = 64     -- most blocks between homes
 --------------------------------------------------------------------------
 -- Arguments
 --------------------------------------------------------------------------
-args = { ... }
-forceHere = T.popFlag(args, "--here")
-resume = T.popFlag(args, "--resume")
-fresh = T.popFlag(args, "--new")
-lights = not T.popFlag(args, "--no-lights")
+-- (T.options: a negative size, -3, is a size, not an option)
+opts, args = T.options({ ... }, { here = true, resume = true, new = true, ["no-lights"] = true,
+    spacing = "=", home = "=", ["to-start"] = true })
+if not opts then
+    print("mine: " .. args)
+    args, badOption = {}, true                  -- (the usage, below)
+    opts = {}
+end
+forceHere, resume, fresh, toStart = opts.here == true, opts.resume == true, opts.new == true, opts["to-start"] == true
+lights = not opts["no-lights"]
     and T.setting("mine.lights", true, "Light mined tunnels with torches in wall niches")
-spacingArg, homeArg = T.popValue(args, "--spacing"), T.popValue(args, "--home")
-spacingArg, homeArg = spacingArg and tonumber(spacingArg), homeArg and tonumber(homeArg)
+spacingArg, homeArg = opts.spacing and tonumber(opts.spacing), opts.home and tonumber(opts.home)
 doReset = args[1] == "reset"
-toStart = T.popFlag(args, "--to-start")
 doHaul = args[1] == "haul"
 doWhere = args[1] == "where"
 WIDTH, HEIGHT, LENGTH = tonumber(args[1]), tonumber(args[2]), tonumber(args[3])
@@ -251,7 +255,7 @@ function usage()
     print("width: + right / - left; height: + up / - down;")
     print("no length: dig until out of chests, fuel or room")
 end
-if not (doReset or resume or doHaul or doWhere) and (not (WIDTH and HEIGHT) or WIDTH == 0 or HEIGHT == 0
+if badOption or not (doReset or resume or doHaul or doWhere) and (not (WIDTH and HEIGHT) or WIDTH == 0 or HEIGHT == 0
         or (args[3] and not (LENGTH and LENGTH >= 1))) then
     usage()
     return
@@ -275,8 +279,8 @@ end
 
 -- Blocks never to dig: storage, spawners and ComputerCraft blocks.
 function protected(name)
-    return name:find("chest", 1, true) or name:find("barrel", 1, true) or name:find("shulker", 1, true)
-        or name:find("spawner", 1, true) or text.startsWith(name, "computercraft:")
+    return text.contains(name, "chest") or text.contains(name, "barrel") or text.contains(name, "shulker")
+        or text.contains(name, "spawner") or text.startsWith(name, "computercraft:")
 end
 
 -- Bulk items go in a home's bulk chest; everything else is a valuable.
@@ -366,7 +370,7 @@ end
 function isPlanks(name) return text.endsWith(name, "_planks") end
 function isWood(name) return isLog(name) or isPlanks(name) or name == STICK end
 -- The Advanced Peripherals Geo Scanner: kept on board, never unloaded.
-function isScanner(name) return name:find("geo_scanner", 1, true) ~= nil end
+function isScanner(name) return text.contains(name, "geo_scanner") end
 -- A bucket: kept on board (one), for taking up lava to burn (see scoop).
 BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 function isSupply(name)
@@ -389,7 +393,7 @@ VALUE = {
 }
 function value(name)
     if VALUE[name] then return VALUE[name] end
-    if name:find("raw_", 1, true) or name:find("ore", 1, true) or name:find("gem", 1, true) then return 40 end
+    if text.contains(name, "raw_") or text.contains(name, "ore") or text.contains(name, "gem") then return 40 end
     return 10
 end
 
@@ -523,7 +527,7 @@ end
 -- their worth, coal because the turtle runs on it, and wood while it's
 -- wanted, for chests and torches.
 function goesFar(name)
-    return name:find("diamond", 1, true) ~= nil or name:find("coal", 1, true) ~= nil or (woodNeed > 0 and isWoodBlock(name))
+    return text.contains(name, "diamond") or text.contains(name, "coal") or (woodNeed > 0 and isWoodBlock(name))
 end
 
 --------------------------------------------------------------------------
@@ -540,30 +544,26 @@ end
 home = nil          -- the home the turtle works from
 lastHome = 0         -- the furthest home built (the supplies are there)
 
--- The job, saved so `mine --resume` and `mine reset` know the tunnel.
+-- The job, saved so `mine --resume` and `mine reset` know the tunnel
+-- (and autostart, whether to resume it): T.saveMineJob's file.
 function saveJob(state)
-    local f = fs.open(JOB_FILE, "w")
-    f.write(string.format("%d %d %d %d %d %s", WIDTH, HEIGHT,
-        LENGTH == math.huge and 0 or LENGTH, SPACING, lastHome, state))
-    f.close()
+    T.saveMineJob({ width = WIDTH, height = HEIGHT, length = LENGTH ~= math.huge and LENGTH or nil,
+                    spacing = SPACING, homes = lastHome, state = state })
 end
 
 -- How far the segment being dug has got, so `mine --resume` carries on
 -- from there instead of going over it all again: the home it's dug from,
 -- the lane it's on, and the last block of that lane it finished.
 function saveProgress(lane, z)
-    local f = fs.open(PROGRESS_FILE, "w")
-    f.write(string.format("%d %d %d %d", home.k, lane, z, laneCount))
-    f.close()
+    fileio.write(PROGRESS_FILE, string.format("%d %d %d %d", home.k, lane, z, laneCount))
 end
 
 function loadProgress()
-    if not fs.exists(PROGRESS_FILE) then return nil end
-    local f = fs.open(PROGRESS_FILE, "r")
+    local saved = fileio.read(PROGRESS_FILE)
+    if not saved then return nil end
     -- "home lane z lanes", as saveProgress writes it (files from before
     -- the lane count have the first three)
-    local w = text.words(f.readAll() or "")
-    f.close()
+    local w = text.words(saved)
     if not (scan.isUnsigned(w[1]) and scan.isUnsigned(w[2]) and scan.isInteger(w[3])) then return nil end
     return { k = tonumber(w[1]), lane = tonumber(w[2]), z = tonumber(w[3]),
              lanes = scan.isUnsigned(w[4]) and tonumber(w[4]) or nil }
@@ -573,20 +573,7 @@ function clearProgress()
     if fs.exists(PROGRESS_FILE) then fs.delete(PROGRESS_FILE) end
 end
 
-function loadJob()
-    if not fs.exists(JOB_FILE) then return nil end
-    local f = fs.open(JOB_FILE, "r")
-    -- "width height length spacing homes state", as saveJob writes it
-    local w = text.words(f.readAll() or "")
-    f.close()
-    if not (scan.isInteger(w[1]) and scan.isInteger(w[2]) and scan.isInteger(w[3]) and scan.isUnsigned(w[4])
-            and scan.isUnsigned(w[5]) and scan.isName(w[6])) then
-        return nil
-    end
-    local l = tonumber(w[3])
-    return { width = tonumber(w[1]), height = tonumber(w[2]), length = l ~= 0 and l or nil,
-             spacing = tonumber(w[4]), homes = tonumber(w[5]), state = w[6] }
-end
+loadJob = T.loadMineJob
 
 --------------------------------------------------------------------------
 -- Directions: turtlelib's six (0..3 as T.dir, 0 = +z ahead, 1 = +x
@@ -1180,7 +1167,7 @@ end
 function restockSet(side, set, keep)
     local test = function(n) return set[n] end
     local counts = chestCounts(side)
-    for _, name in ipairs(T.sortedKeys(counts)) do
+    for _, name in ipairs(tables.sortedKeys(counts)) do
         local n = counts[name]
         local have = T.countItem(test)
         if have >= keep then break end
@@ -1314,7 +1301,7 @@ function takeSupplies(room)
         stock = stock - leave
         return leave
     end
-    for _, name in ipairs(T.sortedKeys(counts)) do
+    for _, name in ipairs(tables.sortedKeys(counts)) do
         local n = counts[name]
         if isSupply(name) then
             local want = n - leaveOf(name, n)
@@ -1326,7 +1313,7 @@ function takeSupplies(room)
         end
     end
     counts, stock = chestCounts(home.val), home.k > 0 and FUEL_STOCK or 0
-    for _, name in ipairs(T.sortedKeys(counts)) do
+    for _, name in ipairs(tables.sortedKeys(counts)) do
         if isSupply(name) and counts[name] > leaveOf(name, counts[name]) then return took, true end
     end
     return took, false
@@ -1521,7 +1508,7 @@ function craftSteps(side, recipe, picks, steps)
             local short = steps - turtle.getItemCount(slot)
             if short <= 0 then break end
             local counts, name = chestCounts(home.val), nil
-            for _, nm in ipairs(T.sortedKeys(counts)) do
+            for _, nm in ipairs(tables.sortedKeys(counts)) do
                 local it = turtle.getItemDetail(slot)
                 if pick(nm) and (not it or it.name == nm) then name = nm; break end
             end
@@ -2009,10 +1996,8 @@ function relative(blocks)
     local first = blocks[1]
     if first and not (type(first.x) == "number" and type(first.y) == "number"
             and type(first.z) == "number" and type(first.name) == "string") then
-        local keys = {}
-        for k in pairs(first) do keys[#keys + 1] = tostring(k) end
-        table.sort(keys)
-        return nil, "scan entries aren't {x, y, z, name, tags} (they have: " .. table.concat(keys, ", ") .. ")"
+        local keys = tables.sortedKeys(first, function(a, b) return tostring(a) < tostring(b) end)
+        return nil, "scan entries aren't {x, y, z, name, tags} (they have: " .. text.join(keys, ", ") .. ")"
     end
     -- whole numbers (they come as 3.0, which "3.0" .. keys wouldn't match),
     -- with the turtle-relative r, u, f (right, up, forward) when given
@@ -2106,7 +2091,7 @@ function record(blocks, z1, z2, toCell)
         local zTop = z2 == LENGTH and z2 + SCAN_REACH or z2
         if kind == "ore" and out >= 1 and p.z >= z1 and p.z <= zTop and not opened[k]
                 and (inReach(p) or goesFar(e.name)) then
-            targets[k] = { x = p.x, y = p.y, z = p.z, coal = e.name:find("coal", 1, true) ~= nil,
+            targets[k] = { x = p.x, y = p.y, z = p.z, coal = text.contains(e.name, "coal"),
                            from = from, scan = scans }
         end
     end
@@ -3079,7 +3064,7 @@ if doHaul then
     home = startingHome(true)
     if not home then return end
     T.withTool(pickaxe, haul)
-    for _, k in ipairs(T.sortedKeys(leftBehind)) do
+    for _, k in ipairs(tables.sortedKeys(leftBehind)) do
         print(string.format("Still %d items in home %d (z=%d).", leftBehind[k], k, homeAt(k).z))
     end
     return
@@ -3237,7 +3222,7 @@ print(string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid bloc
     hasScanner and (", " .. stats.fetched .. " deposits fetched from further out") or "")
     .. (stats.wood > 0 and string.format(" Dug %d blocks of wood for chests and torches.", stats.wood) or "")
     .. (stats.lava > 0 and string.format(" Burned %d lava sources for fuel.", stats.lava) or ""))
-for _, k in ipairs(T.sortedKeys(leftBehind)) do
+for _, k in ipairs(tables.sortedKeys(leftBehind)) do
     print(string.format("No room to bring back %d items from home %d (z=%d).", leftBehind[k], k, homeAt(k).z))
 end
 if stopped then print("Stopped because: " .. stopped .. " `mine --resume` carries on.") end

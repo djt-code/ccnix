@@ -17,7 +17,9 @@
 --   * chest-below helpers: dump with a keep policy, count, restock,
 --     merge part stacks
 --   * reading item names and saved files with lib/scan and lib/text,
---     not Lua patterns
+--     not Lua patterns; the files with lib/fileio
+--   * the programs' options (T.options, on lib/getopt) and mine's job
+--     file (T.loadMineJob, T.saveMineJob: mine and autostart read it)
 --
 -- Programs configure it by setting fields on T.cfg and T.diggable before
 -- moving.  Everything is relative to where the turtle starts: (0,0,0)
@@ -25,10 +27,14 @@
 
 local T = {}
 
--- Reading names and the saved files: lib/scan and lib/text (ccnix's
--- boot puts lib/ on the path beside turtle/)
+-- Reading names and the saved files: lib/scan, lib/text and the rest
+-- (ccnix's boot puts lib/ on the path beside turtle/)
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
+local fileio = require("fileio")
+local tables = require("tables")
+local getopt = require("getopt")
 
 --------------------------------------------------------------------------
 -- Configuration (override from the program)
@@ -89,8 +95,9 @@ T.mode = "flat"            -- "flat" or "terrain": which stepper to use going ho
 function T.dataPath(name)
     local prog = shell and shell.getRunningProgram and shell.getRunningProgram() or ""
     local dir = fs.getDir(prog)
-    if dir:sub(1, 4) == "rom/" then
-        dir = dir:sub(5)
+    local inRom = text.stripPrefix(dir, "rom/")
+    if inRom then
+        dir = inRom
         if not fs.exists(dir) then fs.makeDir(dir) end
     end
     local path = fs.combine(dir, name)
@@ -107,10 +114,9 @@ local POS_FILE = ".turtlepos"
 T.stopping = false
 
 function T.savePos()
-    local f = fs.open(T.dataPath(POS_FILE), "w")
-    if not f then return end
-    f.write(string.format("%d %d %d %d %s", T.pos.x, T.pos.y, T.pos.z, T.dir, T.mode))
-    f.close()
+    if not fileio.write(T.dataPath(POS_FILE), string.format("%d %d %d %d %s", T.pos.x, T.pos.y, T.pos.z, T.dir, T.mode)) then
+        return
+    end
     if T.stopping then
         T.stopping = false
         error("Terminated", 0)
@@ -148,11 +154,8 @@ end
 
 -- Returns the saved position table or nil.
 function T.loadPos()
-    local p = T.dataPath(POS_FILE)
-    if not fs.exists(p) then return nil end
-    local f = fs.open(p, "r")
-    local line = f.readAll() or ""
-    f.close()
+    local line = fileio.read(T.dataPath(POS_FILE))
+    if not line then return nil end
     -- "x y z dir mode", as savePos writes it: three whole numbers, a digit, a word
     local w = text.words(line)
     local x, y, z, d, mode = w[1], w[2], w[3], w[4], w[5]
@@ -573,12 +576,12 @@ end
 function T.here() return { x = T.pos.x, y = T.pos.y, z = T.pos.z } end
 function T.at(p) return T.pos.x == p.x and T.pos.y == p.y and T.pos.z == p.z end
 function T.posKey(p) return p.x .. "," .. p.y .. "," .. p.z end
--- Inverse of posKey: the x, y, z of "x,y,z".
+-- Inverse of posKey: the x, y, z of "x,y,z" (whole numbers, as posKey
+-- writes them); nil if k isn't one.
 function T.keyPos(k)
-    local c1 = k:find(",", 1, true)
-    local c2 = c1 and k:find(",", c1 + 1, true)
-    if not c2 then return nil end
-    return tonumber(k:sub(1, c1 - 1)), tonumber(k:sub(c1 + 1, c2 - 1)), tonumber(k:sub(c2 + 1))
+    local part = text.split(k, ",", true)
+    if #part ~= 3 then return nil end
+    return convert.toInteger(part[1]), convert.toInteger(part[2]), convert.toInteger(part[3])
 end
 function T.dist(a, b) return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z) end
 
@@ -678,11 +681,11 @@ end
 T.blocked = {}
 function T.ckey(x, z) return x .. "," .. z end
 
--- Inverse of ckey: the x, z a key was made from.
+-- Inverse of ckey: the x, z a key ("x,z") was made from; nils if k isn't one.
 function T.keyXZ(k)
-    local comma = k:find(",", 1, true)          -- "x,z"
-    if not comma then return nil, nil end
-    return tonumber(k:sub(1, comma - 1)), tonumber(k:sub(comma + 1))
+    local part = text.split(k, ",", true)
+    if #part ~= 2 then return nil, nil end
+    return convert.toInteger(part[1]), convert.toInteger(part[2])
 end
 function T.markBlocked(x, z) T.blocked[T.ckey(x, z)] = true end
 function T.clearBlocked() T.blocked = {} end
@@ -858,17 +861,6 @@ function T.requireHome(force, prog)
     return false
 end
 
--- The keys of a table, sorted (by `cmp` if given): going over a table
--- with pairs takes a different order every run, so wherever the order
--- shows (which chest stack is taken first, a tie between two targets),
--- this gives the same one each time.
-function T.sortedKeys(t, cmp)
-    local keys = {}
-    for k in pairs(t) do keys[#keys + 1] = k end
-    table.sort(keys, cmp)
-    return keys
-end
-
 -- A setting from CC's settings (`sysctl mine.width=5` at the prompt), defined
 -- here so `sysctl -d` describes it with its description; its default where there is
 -- no settings API.
@@ -883,30 +875,80 @@ end
 -- settings, so the next run without them (or the autostart) uses them.
 function T.saveSettings(values)
     if not settings or next(values) == nil then return end
-    for _, name in ipairs(T.sortedKeys(values)) do settings.set(name, values[name]) end
+    for _, name in ipairs(tables.sortedKeys(values)) do settings.set(name, values[name]) end
     settings.save()
 end
 
--- Remove every occurrence of `flag` from an argument list; true if found.
-function T.popFlag(args, flag)
-    local found = false
-    for i = #args, 1, -1 do
-        if args[i] == flag then found = true; table.remove(args, i) end
-    end
-    return found
+-- A program's options, read by lib/getopt (parseMixed: anywhere among the
+-- words).  long names them as getopt's long table does: name = true a
+-- flag (--here), name = "=" one that takes a word (--spacing 8, or
+-- --spacing=8).  Returns opts (opts.here = true, opts.spacing = "8") and
+-- the other words in order, or nil and getopt's message.
+--
+-- The turtles' words are free: sizes go negative (`mine -3 3 32`, three
+-- blocks to the left) and claude's goal is any text, so only the
+-- program's own options are options here.  Any other word starting with
+-- a dash (-3, -x, --, --foo) is handed to getopt as a stand-in that
+-- doesn't, and comes back as itself, an operand (or the word after an
+-- option that takes one).
+local STAND_IN = "\0"         -- (no word typed at a prompt has a NUL in it)
+
+-- `a` is one of the options in long: "--name" for a flag, "--name" or
+-- "--name=word" for one that takes a word
+local function isOption(a, long)
+    local body = text.stripPrefix(a, "--")
+    if not body then return false end
+    local name, value = text.cut(body, "=")
+    local kind = long[name]
+    return kind == "=" or (kind == true and value == nil)
 end
 
--- Remove the first `flag` and the word after it; that word, or nil when
--- the flag isn't there (a flag with nothing after it stays).
-function T.popValue(args, flag)
-    for i = 1, #args - 1 do
-        if args[i] == flag then
-            local v = args[i + 1]
-            table.remove(args, i); table.remove(args, i)
-            return v
+function T.options(args, long)
+    local given, held = {}, {}
+    for i, a in ipairs(args) do
+        if text.startsWith(a, "-") and not isOption(a, long) then
+            given[i] = STAND_IN .. i
+            held[given[i]] = a
+        else
+            given[i] = a
         end
     end
+    local opts, operands = getopt.parseMixed(given, "", long)
+    if not opts then return nil, operands end
+    local function back(w) return held[w] or w end
+    for name, v in pairs(opts) do opts[name] = back(v) end
+    for i, w in ipairs(operands) do operands[i] = back(w) end
+    return opts, operands
 end
+
+-- mine's job file (mine.job): "width height length spacing homes state",
+-- length 0 for a tunnel with no end.  mine writes it; mine and autostart
+-- read it.
+local MINE_JOB = "mine.job"
+
+-- The job: { width, height, length (nil: no end), spacing, homes, state },
+-- or nil if there's none or it isn't one.
+function T.loadMineJob()
+    local job = fileio.read(T.dataPath(MINE_JOB))
+    if not job then return nil end
+    local w = text.words(job)
+    local width, height, length = convert.toInteger(w[1]), convert.toInteger(w[2]), convert.toInteger(w[3])
+    if not (width and height and length and scan.isUnsigned(w[4]) and scan.isUnsigned(w[5]) and scan.isName(w[6])) then
+        return nil
+    end
+    return { width = width, height = height, length = length ~= 0 and length or nil,
+             spacing = convert.toInteger(w[4]), homes = convert.toInteger(w[5]), state = w[6] }
+end
+
+-- Save a job as loadMineJob reads it back.
+function T.saveMineJob(job)
+    fileio.write(T.dataPath(MINE_JOB), string.format("%d %d %d %d %d %s", job.width, job.height,
+        job.length or 0, job.spacing, job.homes, job.state))
+end
+
+-- Whether a mine.job file is there at all (a job that can't be read
+-- still counts: mine was given one).
+function T.hasMineJob() return fs.exists(T.dataPath(MINE_JOB)) end
 
 --------------------------------------------------------------------------
 -- Plans
@@ -1040,7 +1082,7 @@ function T.freeSlots()
 end
 
 function T.isContainer(name)
-    return name:find("chest", 1, true) ~= nil or name:find("barrel", 1, true) ~= nil
+    return text.contains(name, "chest") or text.contains(name, "barrel")
 end
 
 function T.containerBelow() return T.containerOn("bottom") end
@@ -1190,9 +1232,9 @@ end
 -- What kind of thing an item is, for grouping like with like: the last
 -- word of its id ("wheat_seeds" -> "seeds", "water_bucket" -> "bucket").
 local function itemKind(name)
-    local from = #name
-    while from > 0 and name:sub(from, from) ~= "_" and name:sub(from, from) ~= ":" do from = from - 1 end
-    local kind = name:sub(from + 1)               -- after the last _ or :
+    local _, id = text.cutLast(name, ":")         -- (the id after the mod's name)
+    local _, kind = text.cutLast(id or name, "_")
+    kind = kind or id or name                     -- after the last _ or :
     return kind ~= "" and kind or name
 end
 

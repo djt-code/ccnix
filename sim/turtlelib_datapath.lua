@@ -12,6 +12,7 @@ local check = M.check
 
 local S = { files = {} }               -- the computer's files, for M.fsApi
 fs = M.fsApi(S)
+textutils = M.textutilsApi()               -- (lib/fileio, under turtlelib, reads JSON with it)
 local T = require("turtlelib")
 
 S.files, shell = { ["ccnix/mine.seg"] = "12 64" }, M.shellApi("ccnix/turtle/mine.lua")

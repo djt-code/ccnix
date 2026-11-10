@@ -106,6 +106,14 @@ end
 local scan = require("scan")
 local text = require("text")
 local path = require("path")
+local fileio = require("fileio")
+local getopt = require("getopt")
+local tables = require("tables")
+
+local function die(msg)
+    printError(msg)
+    error("", 0)
+end
 
 -- What each app needs.  A path ending in / is a whole folder.
 local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lua" }
@@ -143,38 +151,45 @@ local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost
 
 local cloneArgs, apps = {}, {}
 local autostart, example, noReboot, login, netBoot, router, initBoot
-local args = { ... }
-local i = 1
-while i <= #args do
-    local a = args[i]
-    if a == "--ccsh" then login = true
-    elseif a == "--net" then netBoot = true
-    elseif a == "--router" then netBoot, router = true, true
-    elseif a == "--init" then initBoot = true
-    elseif a == "--no-reboot" then noReboot = true
-    elseif a == "--all" then cloneArgs[#cloneArgs + 1] = a
-    elseif a == "--skip" and args[i + 1] then
-        cloneArgs[#cloneArgs + 1] = a
-        cloneArgs[#cloneArgs + 1] = args[i + 1]
-        i = i + 1
-    elseif a == "--example" then
-        example = true
-    elseif a == "--autostart" and AUTOSTART[args[i + 1]] then
-        autostart = args[i + 1]
-        if autostart == "router" then netBoot, router = true, true end
-        i = i + 1
-    elseif APPS[a] then
-        apps[#apps + 1] = a
-    else
-        print("Usage: setup [app...] [--autostart app] [--example] [--ccsh] [--net] [--router] [--init] [--no-reboot] [--all] [--skip dir]...")
-        local names = {}
-        for name in pairs(APPS) do names[#names + 1] = name end
-        table.sort(names)
-        print("Apps: " .. table.concat(names, " "))
-        print("--autostart: " .. (turtle and "mine, farm, mow or autocompost" or "router"))
-        return
+
+local function usage()
+    print("Usage: setup [app...] [--autostart app] [--example] [--ccsh] [--net] [--router] [--init] [--no-reboot] [--all] [--skip dir]...")
+    print("Apps: " .. table.concat(tables.sortedKeys(APPS), " "))
+    print("--autostart: " .. (turtle and "mine, farm, mow or autocompost" or "router"))
+end
+
+-- The options (anywhere among the apps), and what each does; false back
+-- from one: it was given a word it can't take
+local OPTIONS = { ccsh = true, net = true, router = true, init = true, ["no-reboot"] = true, all = true,
+                  skip = "=", example = true, autostart = "=" }
+local OPTION = {
+    ccsh = function() login = true end,
+    net = function() netBoot = true end,
+    router = function() netBoot, router = true, true end,
+    init = function() initBoot = true end,
+    ["no-reboot"] = function() noReboot = true end,
+    all = function() cloneArgs[#cloneArgs + 1] = "--all" end,
+    skip = function(dir)                         -- (more than one adds up: git's --skip)
+        cloneArgs[#cloneArgs + 1] = "--skip"
+        cloneArgs[#cloneArgs + 1] = dir
+    end,
+    example = function() example = true end,
+    autostart = function(app)
+        if not AUTOSTART[app] then return false end
+        autostart = app
+        if app == "router" then netBoot, router = true, true end
+    end,
+}
+do
+    local given, named, order = getopt.parseMixed({ ... }, "", OPTIONS)
+    if not given then usage(); return end
+    for _, o in ipairs(order) do
+        if OPTION[o[1]](o[2]) == false then usage(); return end
     end
-    i = i + 1
+    for _, a in ipairs(named) do
+        if not APPS[a] then usage(); return end
+        apps[#apps + 1] = a
+    end
 end
 if example then                    -- (the guestbook is httpd's)
     local named = false
@@ -223,11 +238,8 @@ local function paths(extra)
 end
 -- The paths a checkout at DIR was told to take (its --only), or nil.
 local function savedChoice()
-    local f = fs.open(fs.combine(DIR, ".gitlite"), "r")
-    if not f then return nil end
-    local state = (textutils.unserialiseJSON or textutils.unserializeJSON)(f.readAll() or "")
-    f.close()
-    return type(state) == "table" and type(state.only) == "table" and state.only or nil
+    local state = fileio.readJSON(fs.combine(DIR, ".gitlite"))
+    return state and type(state.only) == "table" and state.only or nil
 end
 if #apps > 0 then
     for _, o in ipairs(paths()) do cloneArgs[#cloneArgs + 1] = o end
@@ -235,11 +247,6 @@ elseif savedChoice() then
     -- no apps named: the choice stays, with what every install takes now
     -- (ALWAYS grows: the text libraries came after many a checkout)
     for _, o in ipairs(paths(savedChoice())) do cloneArgs[#cloneArgs + 1] = o end
-end
-
-local function die(msg)
-    printError(msg)
-    error("", 0)
 end
 
 -- syslogd, telnetd, httpd, ircd: services init starts at every boot (syslogd
@@ -271,16 +278,13 @@ local function services(from)
             local root = settings.get("httpd.root") or "/www"
             if not fs.exists(root) then
                 fs.makeDir(root)
-                local f = fs.open(fs.combine(root, "index.html"), "w")
-                f.write("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>" .. (os.getComputerLabel() or ("computer " .. os.getComputerID()))
+                fileio.write(fs.combine(root, "index.html"),
+                    "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>" .. (os.getComputerLabel() or ("computer " .. os.getComputerID()))
                     .. "</title></head>\n<body><h1>It works</h1><p>ccnix's httpd, serving " .. root .. ".</p>"
                     .. "<p>A Lua page: <a href=\"cgi/hello\">cgi/hello</a>.</p></body></html>\n")
-                f.close()
-                f = fs.open(fs.combine(root, "cgi/hello.lua"), "w")
-                f.write("-- a Lua page (help httpd-pages): /cgi/hello\n"
+                fileio.write(fs.combine(root, "cgi/hello.lua"), "-- a Lua page (help httpd-pages): /cgi/hello\n"
                     .. "write(\"<h1>Hello, \", html(req.params.name or \"world\"), \"</h1>\")\n"
                     .. "write(\"<form method=post><input name=name> <button>Hi</button></form>\")\n")
-                f.close()
                 print("httpd serves " .. root .. " (a first index.html is there, and cgi/hello.lua)")
             end
             if example then
@@ -291,18 +295,13 @@ local function services(from)
                     print("httpd.cgi is \"\" (no Lua pages): no guestbook")
                 else
                     cgi = tostring(cgi)
-                    local dir = fs.combine(cgi:sub(1, 1) == "/" and cgi or fs.combine(root, cgi), "")
+                    local dir = fs.combine(path.isAbsolute(cgi) and cgi or fs.combine(root, cgi), "")
                     for _, name in ipairs({ "guestbook.lua", "guestbook.etlua" }) do
-                        local src = fs.open(from("deploy/examples/" .. name), "r")
-                        local text = src.readAll()
-                        src.close()
-                        local dst = fs.open(fs.combine(dir, name), "w")
-                        dst.write(text)
-                        dst.close()
+                        fileio.write(fs.combine(dir, name), assert(fileio.read(from("deploy/examples/" .. name))))
                     end
                     -- its URL: its path in the document root, or /<its name> outside it
                     local top = fs.combine(root, "")
-                    local url = top == "" and dir or (dir:sub(1, #top + 1) == top .. "/" and dir:sub(#top + 2) or fs.getName(dir))
+                    local url = top == "" and dir or text.stripPrefix(dir, top .. "/") or fs.getName(dir)
                     print("A guestbook in /" .. dir .. ": http://<this computer>/" .. url .. "/guestbook")
                 end
             end
@@ -330,19 +329,9 @@ local function configure(repo, romMode)
     local first = string.format('shell.run("%s")', boot)
     local last = string.format('shell.run("%s", "--end")', boot)
 
-    local function read(path)
-        if not fs.exists(path) then return nil end
-        local f = fs.open(path, "r")
-        local s = f.readAll()
-        f.close()
-        return s
-    end
-
-    local function write(path, s)
-        local f = fs.open(path, "w")
-        if not f then printError("Can't write " .. path); error("", 0) end
-        f.write(s)
-        f.close()
+    local read = fileio.read
+    local function write(file, s)
+        if not fileio.write(file, s) then die("Can't write " .. file) end
     end
 
     -- a startup file's lines less an earlier install's: ours, or any from
@@ -374,11 +363,11 @@ local function configure(repo, romMode)
             local lines = kept(target)
             table.insert(lines, 1, first)
             lines[#lines + 1] = last
-            local text = table.concat(lines, "\n") .. "\n"
-            if text == read(target) then
+            local startup = table.concat(lines, "\n") .. "\n"
+            if startup == read(target) then
                 print(target .. " runs " .. boot .. " already.")
             else
-                write(target, text)
+                write(target, startup)
                 print("Put " .. boot .. " first in " .. target .. ", and with --end last.")
             end
         end
@@ -433,33 +422,28 @@ if fs.exists("/rom/ccnix/.manifest") then
         -- an old line that ran a program: shell.run("/cc-turtles/<dir>/<prog><args>"),
         -- in either quotes, the folder letters and digits, prog those and -;
         -- prog and args, or nil if the line isn't one
+        local isQuote = scan.oneOf("\"'")
+        local function isProgChar(c) return scan.isAlnum(c) or c == "-" end
         local function oldRun(line)
-            local head, root = "shell.run(", "/cc-turtles/"
-            local function isQuote(c) return c == '"' or c == "'" end
-            if not text.startsWith(line, head) or not isQuote(line:sub(#head + 1, #head + 1)) then return nil end
-            local i = #head + 2
-            if line:sub(i, i + #root - 1) ~= root then return nil end
-            i = i + #root
-            local j = i                                          -- the folder
-            while j <= #line and scan.isAlnum(line:sub(j, j)) do j = j + 1 end
-            if j == i or line:sub(j, j) ~= "/" then return nil end
-            i = j + 1
-            j = i                                                -- the program
-            while j <= #line and (scan.isAlnum(line:sub(j, j)) or line:sub(j, j) == "-") do j = j + 1 end
-            if j == i then return nil end
+            local sc = scan.new(line)
+            if not (sc:accept("shell.run(") and isQuote(sc:peek())) then return nil end
+            sc:advance()
+            if not sc:accept("/cc-turtles/") then return nil end
+            if sc:readWhile(scan.isAlnum) == "" or not sc:accept("/") then return nil end    -- the folder
+            local prog = sc:readWhile(isProgChar)                                         -- the program
+            if prog == "" then return nil end
             -- the args run to the closing quote and ) that end the line
-            if #line < j + 1 or not isQuote(line:sub(-2, -2)) or line:sub(-1) ~= ")" then return nil end
-            return line:sub(i, j - 1), line:sub(j, -3)
+            local args = text.stripSuffix(sc:rest(), ")")
+            if not (args and isQuote(args:sub(-1))) then return nil end
+            return prog, args:sub(1, -2)
         end
         local files = { "/startup.lua" }
         if fs.isDir("/startup") then
             for _, name in ipairs(fs.list("/startup")) do files[#files + 1] = "/startup/" .. name end
         end
         for _, f in ipairs(files) do
-            if fs.exists(f) and not fs.isDir(f) and f ~= "/startup" then
-                local h = fs.open(f, "r")
-                local contents = h.readAll() or ""
-                h.close()
+            local contents = f ~= "/startup" and fileio.read(f)
+            if contents then
                 local out, changed = {}, false
                 for _, line in ipairs(text.lines(contents)) do
                     if text.contains(line, "/cc-turtles") then
@@ -473,17 +457,14 @@ if fs.exists("/rom/ccnix/.manifest") then
                 if changed then
                     local new = table.concat(out, "\n")
                     while text.endsWith(new, "\n") do new = new:sub(1, -2) end   -- (no blank lines at the end)
-                    if new == "" then fs.delete(f)
-                    else local h2 = fs.open(f, "w"); h2.write(new .. "\n"); h2.close() end
+                    if new == "" then fs.delete(f) else fileio.write(f, new .. "\n") end
                 end
             end
         end
         -- its files, as its .gitlite lists them (what else is there stays)
-        local h = fs.open("/cc-turtles/.gitlite", "r")
-        local state = (textutils.unserialiseJSON or textutils.unserializeJSON)(h.readAll()) or {}
-        h.close()
-        for path in pairs(state.files or {}) do
-            local p = "/cc-turtles/" .. path
+        local state = fileio.readJSON("/cc-turtles/.gitlite") or {}
+        for file in pairs(state.files or {}) do
+            local p = "/cc-turtles/" .. file
             if fs.exists(p) then fs.delete(p) end
             local dir = fs.getDir(p)
             while dir ~= "cc-turtles" and dir ~= "" and fs.isDir(dir) and #fs.list(dir) == 0 do
@@ -539,17 +520,11 @@ end
 -- and the repo was cc-turtles then: a checkout from then pulls from ccnix
 do
     local p = fs.combine(DIR, ".gitlite")
-    if fs.exists(p) then
-        local f = fs.open(p, "r")
-        local state = (textutils.unserialiseJSON or textutils.unserializeJSON)(f.readAll() or "")
-        f.close()
-        if type(state) == "table" and type(state.url) == "string" and state.url:find("/djt-code/cc-turtles", 1, true) then
-            state.url = REPO
-            f = fs.open(p, "w")
-            f.write((textutils.serialiseJSON or textutils.serializeJSON)(state))
-            f.close()
-            print("Pointed " .. DIR .. " at the repo's new name, ccnix.")
-        end
+    local state = fileio.readJSON(p)
+    if state and type(state.url) == "string" and text.contains(state.url, "/djt-code/cc-turtles") then
+        state.url = REPO
+        fileio.write(p, (textutils.serialiseJSON or textutils.serializeJSON)(state))
+        print("Pointed " .. DIR .. " at the repo's new name, ccnix.")
     end
 end
 
@@ -587,7 +562,7 @@ if fs.exists("/git.lua") and not fs.isDir("/git.lua") then
     local g = fs.open("/git.lua", "r")
     local head = g.readLine() or ""
     g.close()
-    if head:find("minimal git client", 1, true) then
+    if text.contains(head, "minimal git client") then
         fs.delete("/git.lua")
         print("Removed the old /git.lua (git is in " .. DIR .. "/bin now)")
     end

@@ -542,6 +542,7 @@ peripheral.call = function(side, name, ...)
 end
 
 fs = M.fsApi(Mine)
+textutils = textutils or M.textutilsApi()   -- (lib/fileio, under turtlelib, reads JSON with it)
 shell = M.shellApi("mine.lua")
 sleep = function() end
 os.startTimer = function() return 1 end

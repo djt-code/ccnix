@@ -174,6 +174,21 @@ local c2 = resultsIn(3).toolu_2
 check("declined code isn't run and the model is told", c1 and c1.is_error == true and tostring(c1.content):find("declined") and DIGS == 1, c1 and c1.content)
 check("accepted code runs", c2 and c2.content == "-> dug", c2 and c2.content)
 
+-- 5b. the options are getopt's (T.options): among the goal's words, which
+--     keep a "-2" or a "-x" as they are; --name=word too; one missing its
+--     word says so and nothing is sent
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("go", "-2", "blocks", "--model=claude-x", "on", "-x", "--effort", "low")
+local g1 = HTTP.requests[1]
+check("the goal keeps its words; the options are taken out",
+    g1 and g1.body.messages[1].content == "go -2 blocks on -x" and g1.body.model == "claude-x"
+        and g1.body.output_config.effort == "low", g1 and g1.body.messages[1].content)
+fresh({ "" })
+run("dig", "--steps")
+check("an option with no word after it: getopt's message, nothing sent",
+    #HTTP.requests == 0 and Mine.logHas("claude: option '%-%-steps' requires an argument"))
+
 -- 6. ask_user hands the question to the keyboard
 fresh({ "left", "" })
 HTTP.queue = {
@@ -323,13 +338,14 @@ check("after a failed request, the next goal joins the tool results it never sen
     m3 and #m3 == 3 and lastTurn.role == "user" and lastTurn.content[1].type == "tool_result"
         and lastTurn.content[2].text == "try again", m3 and textutils.serialiseJSON(m3))
 
--- 15. colour: on an advanced computer the code is highlighted as edit does
---     it; on a plain one (every scenario above) it's printed as it is
+-- 15. colour: on an advanced computer the code is highlighted as vi does
+--     it (lib/syntax), a long string going on from one line to the next;
+--     on a plain one (every scenario above) it's printed as it is
 -- (a screen 8 rows high, so what comes out overflows it and opens in the
 -- pager, which must show it in the same colours)
 local Tc = M.termApi(39, 8)
-local CC_COLOURS = { white = 1, orange = 2, lightBlue = 8, yellow = 16, grey = 128, lightGrey = 256,
-    green = 8192, red = 16384, black = 32768 }
+local CC_COLOURS = { white = 1, orange = 2, magenta = 4, lightBlue = 8, yellow = 16, grey = 128, lightGrey = 256,
+    cyan = 512, green = 8192, red = 16384, black = 32768 }
 local NAME = {}
 for k, v in pairs(CC_COLOURS) do NAME[v] = k end
 local cur, segs, blits = 1, {}, {}
@@ -344,7 +360,8 @@ fresh({ "" })
 Tc.events = { { "char", "q" } }
 HTTP.queue = {
     reply({ toolUse("lua", { code = [==[-- look
-local s = "a" .. 'b' --[[x]] return s, 42]==] }) }, "tool_use"),
+local s = "a" .. 'b' --[[x]] local t = [[one
+two]] return s, 42, math.max(1, #t)]==] }) }, "tool_use"),
     reply({ text("Looked.") }, "end_turn"),
 }
 run("look")
@@ -352,12 +369,14 @@ write, term, colours = plainWrite, nil, nil
 local seen = {}
 for _, sg in ipairs(segs) do seen[#seen + 1] = tostring(sg[1]) .. ":" .. sg[2] end
 local all = table.concat(seen, "|")
-check("code highlighted: comments green, keywords yellow, strings red, the rest white",
+check("code highlighted: comments green, keywords yellow, strings red, numbers magenta, library names cyan, the rest white",
     all:find("green:-- look", 1, true) and all:find("yellow:local", 1, true) and all:find('red:"a"', 1, true)
         and all:find("red:'b'", 1, true) and all:find("green:--[[x]]", 1, true) and all:find("yellow:return", 1, true)
-        and all:find("white: s, 42", 1, true), all)
+        and all:find("white: s, |magenta:42|", 1, true) and all:find("|cyan:math|", 1, true), all)
+check("a long string goes on to the next line", all:find("red:[[one|", 1, true) and all:find("red:two]]|", 1, true), all)
 check("and the prompt in yellow", all:find("yellow:> ", 1, true) ~= nil, all)
 local drawn = table.concat(blits, "|")
 check("the pager shows it in the same colours: the code highlighted, the banner yellow",
     drawn:find("-- look/ddddddd", 1, true) and drawn:find("--- lua/3333333", 1, true)
-        and drawn:find("Claude at the controls", 1, true) and drawn:find("/444444", 1, true), drawn)
+        and drawn:find("Claude at the controls", 1, true) and drawn:find("/444444", 1, true)
+        and drawn:find("two]] return s, 42, math.max(1, #t)/eeeee044444400002200999900000200000", 1, true), drawn)

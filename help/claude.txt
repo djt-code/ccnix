@@ -16,7 +16,7 @@ Usage:
 
 When it stops, type the next thing to do (it keeps the conversation), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run, so the saved position stays right).
 
-Colour (an advanced computer or turtle): the code it runs is highlighted as `edit` does it, what the code prints is grey, prompts and questions yellow, retries orange, errors red; Claude's own words are white.
+Colour (an advanced computer or turtle): the code it runs is highlighted as vi does it (lib/syntax: keywords yellow, comments green, strings red, numbers and nil/true/false magenta, library names cyan), what the code prints is grey, prompts and questions yellow, retries orange, errors red; Claude's own words are white.
 
 Reading back: when more comes out than the screen holds, it opens in the pager (lib/pager.lua) at the first line you haven't seen before it asks you anything: the mouse wheel, arrows or space to scroll, q to get to the prompt.  At an empty prompt, the wheel up (or PgUp) opens the whole session.
 
