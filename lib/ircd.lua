@@ -46,6 +46,7 @@
 local irc = require("irc")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 
 local D = {}
 D.VERSION = "ccnix-ircd-1.0"
@@ -237,8 +238,8 @@ function Server:emit(event, ...)
 end
 
 -- A service's NOTICE to one user, or its PRIVMSG to a channel.
-function Server:notice(svc, c, text) self:send(c, self:from(svc, "NOTICE", c.nick, text)) end
-function Server:say(svc, chan, text) self:toChannel(chan, self:from(svc, "PRIVMSG", chan.name, text), svc) end
+function Server:notice(svc, c, body) self:send(c, self:from(svc, "NOTICE", c.nick, body)) end
+function Server:say(svc, chan, body) self:toChannel(chan, self:from(svc, "PRIVMSG", chan.name, body), svc) end
 
 local function count(t)
     local n = 0
@@ -266,7 +267,7 @@ end
 function Server:input(c, line)
     if c.dead then return end
     c.heard, c.pingOut = self.clock(), nil
-    local m = irc.parse(line:sub(1, irc.MAX_LINE - 2))
+    local m = irc.parse(text.truncate(line, irc.MAX_LINE - 2))
     if not m then return end
     local cmd = COMMANDS[m.command]
     if not cmd then
@@ -386,13 +387,13 @@ end
 
 -- A user name as given, kept to letters, digits, - . and _, ten at most.
 local USER_CHAR = scan.oneOf("-._")
-local function cleanUserName(text)
+local function cleanUserName(given)
     local kept = {}
-    for i = 1, #text do
-        local ch = text:sub(i, i)
+    for i = 1, #given do
+        local ch = given:sub(i, i)
         if scan.isAlnum(ch) or USER_CHAR(ch) then kept[#kept + 1] = ch end
     end
-    local user = table.concat(kept):sub(1, 10)
+    local user = text.truncate(table.concat(kept), 10)
     return user ~= "" and user or "user"
 end
 
@@ -455,7 +456,7 @@ function Server:sendNames(c, chan)
     -- in lines that stay well under 512 bytes
     local line, size = {}, 0
     local function flush()
-        if #line > 0 then self:numeric(c, "NAMREPLY", chan.modes.s and "@" or "=", chan.name, table.concat(line, " ")) end
+        if #line > 0 then self:numeric(c, "NAMREPLY", chan.modes.s and "@" or "=", chan.name, text.join(line, " ")) end
         line, size = {}, 0
     end
     for _, n in ipairs(names) do
@@ -512,8 +513,8 @@ local function part(srv, c, chan, reason)
     srv:leave(c, chan)
 end
 
-function Server:setTopic(by, chan, text)
-    chan.topic, chan.topicBy, chan.topicAt = text:sub(1, D.TOPICLEN), by.nick, self.time()
+function Server:setTopic(by, chan, topic)
+    chan.topic, chan.topicBy, chan.topicAt = text.truncate(topic, D.TOPICLEN), by.nick, self.time()
     self:toChannel(chan, self:from(by, "TOPIC", chan.name, chan.topic))
     self:emit("topic", by, chan)
 end
@@ -599,9 +600,9 @@ local CHANNEL_MODES = {
             chan.modes.l = nil
             return ""
         end
-        local n = tonumber(arg)
+        local n = convert.toInteger(arg)
         if not n or n < 1 then return nil end
-        chan.modes.l = math.floor(n)
+        chan.modes.l = n
         return tostring(chan.modes.l)
     end },
     i = { apply = flagMode }, m = { apply = flagMode }, n = { apply = flagMode },
@@ -790,7 +791,7 @@ local function whois(srv, c, who)
         if canSee(srv, chan, c) then chans[#chans + 1] = memberPrefix(member(srv, chan, who)) .. chan.name end
     end
     table.sort(chans)
-    if #chans > 0 then srv:numeric(c, "WHOISCHANNELS", who.nick, table.concat(chans, " ")) end
+    if #chans > 0 then srv:numeric(c, "WHOISCHANNELS", who.nick, text.join(chans, " ")) end
     for _, line in ipairs(WHOIS_LINES) do
         local params = { line[2](srv, who) }
         if params[1] then srv:numeric(c, line[1], who.nick, table.unpack(params)) end
@@ -949,7 +950,7 @@ command("NOTICE", 0, function(srv, c, p) message(srv, c, p, "NOTICE") end)
 
 command("AWAY", 0, function(srv, c, p)
     if p[1] and p[1] ~= "" then
-        c.away = p[1]:sub(1, D.AWAYLEN)
+        c.away = text.truncate(p[1], D.AWAYLEN)
         srv:numeric(c, "NOWAWAY")
     else
         c.away = nil
@@ -991,7 +992,7 @@ command("ISON", 1, function(srv, c, p)
             if who then on[#on + 1] = who.nick end
         end
     end
-    srv:numeric(c, "ISON", table.concat(on, " "))
+    srv:numeric(c, "ISON", text.join(on, " "))
 end)
 
 command("USERHOST", 1, function(srv, c, p)
@@ -1003,7 +1004,7 @@ command("USERHOST", 1, function(srv, c, p)
                 .. (who.user or "*") .. "@" .. (who.host or "*")
         end
     end
-    srv:numeric(c, "USERHOST", table.concat(out, " "))
+    srv:numeric(c, "USERHOST", text.join(out, " "))
 end)
 
 command("MOTD", 0, function(srv, c) srv:sendMotd(c) end)

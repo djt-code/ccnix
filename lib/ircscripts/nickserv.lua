@@ -14,10 +14,10 @@ local done = {}
 
 irc.signal_add("server connected", function(server) done[server] = nil end)
 
-irc.signal_add("message irc notice", function(server, text, nick)
-    if nick:lower() ~= "nickserv" or done[server] then return end
-    local plain = irc.strip(text):lower()
-    if not (plain:find("registered", 1, true) and plain:find("identify", 1, true)) then return end
+irc.signal_add("message irc notice", function(server, body, nick)
+    if server:fold(nick) ~= server:fold("NickServ") or done[server] then return end
+    local plain = irc.strip(body):lower()
+    if not (irc.contains(plain, "registered") and irc.contains(plain, "identify")) then return end
     local pass = irc.settings_get_str("network." .. server.name .. ".nickserv_pass")
     if not pass or pass == "" then return end
     done[server] = true

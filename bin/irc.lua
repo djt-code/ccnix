@@ -79,7 +79,7 @@ if #args > 3 then cu.usageError() end
 local scriptDirs = {}
 for _, entry in ipairs(text.split(package.path, ";")) do
     if text.endsWith(entry, "/lib/?.lua") then
-        local dir = entry:sub(1, -#"?.lua" - 1) .. "ircscripts"
+        local dir = text.stripSuffix(entry, "?.lua") .. "ircscripts"
         if fs.isDir(dir) then scriptDirs[#scriptDirs + 1] = dir end
     end
 end

@@ -20,7 +20,9 @@
 -- without ~ ^; "ascii" letters only), so names compare as the server
 -- compares them.  isChannel(name, types), validNick(nick), splitSource
 -- ("nick!user@host").  match(mask, s, mapping): a ban or ignore mask, *
--- and ? wildcards, folded.
+-- and ? wildcards, folded (lib/glob's, with \ [ ] as plain characters:
+-- nicks have them); compileMask(mask, mapping) the same as a test to
+-- use again.
 --
 -- CTCP: ctcp(text) is the command and its argument when a PRIVMSG or
 -- NOTICE is \1CMD args\1 (ACTION, VERSION, PING...), else nil; ctcpQuote
@@ -37,10 +39,13 @@
 -- Bytes: IRC is UTF-8 now; a CC screen shows one byte a character,
 -- Latin-1 above 160.  fromUTF8 turns UTF-8 into that (what CC can't show
 -- becomes "?"; bytes that aren't UTF-8 are taken as Latin-1 already), and
--- toUTF8 goes back.  base64 is for SASL PLAIN.
+-- toUTF8 goes back.  base64 is for SASL PLAIN.  (All three are
+-- lib/convert's, here by these names for the client and its scripts.)
 
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
+local glob = require("glob")
 
 local I = {}
 
@@ -80,13 +85,16 @@ end
 local function notSpace(c) return c ~= " " end
 
 -- CR and LF as spaces: a param can't hold a line break.
-local function oneLine(s) return (tostring(s):gsub("\r", " "):gsub("\n", " ")) end
+local function oneLine(s)
+    local flat = text.replace(tostring(s), "\r", " ")
+    return (text.replace(flat, "\n", " "))
+end
 
 -- nick!user@host (or a server's name, with neither ! nor @).
 function I.splitSource(source)
     if not source then return nil end
-    local bang = source:find("!", 1, true)
-    local at = source:find("@", (bang or 0) + 1, true)
+    local bang = text.find(source, "!")
+    local at = text.find(source, "@", (bang or 0) + 1)
     if not bang and not at then return source end
     local nick = source:sub(1, (bang or at) - 1)
     local user = bang and source:sub(bang + 1, (at or 0) - 1) or nil
@@ -140,7 +148,7 @@ function I.build(command, ...)
         if p == nil then break end
         p = oneLine(p)
         local last = (i == n) or params[i + 1] == nil
-        if last and (p == "" or p:find(" ", 1, true) or p:sub(1, 1) == ":") then
+        if last and (p == "" or text.contains(p, " ") or text.startsWith(p, ":")) then
             p = ":" .. p
         end
         parts[#parts + 1] = p
@@ -156,7 +164,7 @@ function I.buildTrailing(command, ...)
     local params = { ... }
     local last = oneLine(params[n])
     local head = n > 1 and I.build(command, table.unpack(params, 1, n - 1)) or command
-    if n > 1 and head:find(" :", 1, true) then        -- (a middle param can't hold " :"; built as it is then)
+    if n > 1 and text.contains(head, " :") then        -- (a middle param can't hold " :"; built as it is then)
         return I.build(command, ...)
     end
     return head .. " :" .. last
@@ -166,10 +174,10 @@ end
 function I.lines(buf)
     local out, from = {}, 1
     while true do
-        local nl = buf:find("\n", from, true)
+        local nl = text.find(buf, "\n", from)
         if not nl then break end
         local line = buf:sub(from, nl - 1)
-        if line:sub(-1) == "\r" then line = line:sub(1, -2) end
+        line = text.stripSuffix(line, "\r") or line
         if line ~= "" then out[#out + 1] = line end
         from = nl + 1
     end
@@ -199,7 +207,7 @@ end
 -- Does s hold any one of the characters in chars?
 function I.containsAny(s, chars)
     for i = 1, #chars do
-        if s:find(chars:sub(i, i), 1, true) then return true end
+        if text.contains(s, chars:sub(i, i)) then return true end
     end
     return false
 end
@@ -220,7 +228,7 @@ end
 
 function I.isChannel(name, types)
     if type(name) ~= "string" or name == "" then return false end
-    return (types or "#&"):find(name:sub(1, 1), 1, true) ~= nil
+    return text.contains(types or "#&", name:sub(1, 1))
 end
 
 -- A nick: a letter or one of []\`_^{|} first, then those, digits and -,
@@ -239,40 +247,28 @@ function I.validChannel(name, types)
     return not I.containsAny(name, " ,\7")
 end
 
--- Does the mask (* any run, ? any one character) match s?  Both folded.
-function I.match(mask, s, mapping)
-    mask, s = I.casefold(mask, mapping), I.casefold(s, mapping)
-    -- the classic backtracking matcher: on a mismatch after a *, the *
-    -- takes one more character and the rest is tried again
-    local mi, si, starM, starS = 1, 1, nil, nil
-    while si <= #s do
-        local mc = mask:sub(mi, mi)
-        if mc == "*" then
-            starM, starS = mi, si
-            mi = mi + 1
-        elseif mc == "?" or (mc ~= "" and mc == s:sub(si, si)) then
-            mi, si = mi + 1, si + 1
-        elseif starM then
-            starS = starS + 1
-            mi, si = starM + 1, starS
-        else
-            return false
-        end
-    end
-    while mask:sub(mi, mi) == "*" do mi = mi + 1 end
-    return mi > #mask
+-- A mask (* any run, ? any one character) as a test of a string, both
+-- folded.  Only * and ? are wildcards: a nick may hold \ [ and ], so
+-- neither escapes nor classes are read.
+function I.compileMask(mask, mapping)
+    local function fold(s) return I.casefold(s, mapping) end
+    return glob.compile(mask, { escapes = false, classes = false, fold = fold })
 end
+
+-- Does the mask match s?
+function I.match(mask, s, mapping) return I.compileMask(mask, mapping)(s) end
 
 --------------------------------------------------------------------------
 -- CTCP
 --------------------------------------------------------------------------
-function I.ctcp(text)
-    if type(text) ~= "string" or #text < 2 or text:sub(1, 1) ~= "\1" then return nil end
-    local body = text:sub(2)
-    if body:sub(-1) == "\1" then body = body:sub(1, -2) end
-    local sp = body:find(" ", 1, true)
-    if not sp then return body:upper(), "" end
-    return body:sub(1, sp - 1):upper(), body:sub(sp + 1)
+-- ctcp = "\1" command [ " " args ] [ "\1" ]   (the closing \1 may be lost)
+function I.ctcp(message)
+    if type(message) ~= "string" or #message < 2 then return nil end
+    local body = text.stripPrefix(message, "\1")
+    if not body then return nil end
+    body = text.stripSuffix(body, "\1") or body
+    local command, args = text.cut(body, " ")
+    return command:upper(), args or ""
 end
 
 function I.ctcpQuote(cmd, args)
@@ -299,7 +295,7 @@ end
 local function readColourNumber(sc)
     local digits = ""
     while #digits < 2 and scan.isDigit(sc:peek()) do digits = digits .. sc:advance() end
-    return digits ~= "" and tonumber(digits) or nil
+    return convert.toInteger(digits)
 end
 
 -- \3 [fg [, bg]]: the colours it sets; \3 alone resets them.
@@ -331,8 +327,8 @@ local TOGGLES = { [I.BOLD] = "bold", [I.ITALIC] = "italic", [I.UNDERLINE] = "und
     [I.REVERSE] = "reverse", [I.STRIKE] = "strike" }
 
 -- The text as runs of one style each.
-function I.runs(text)
-    local out, st, sc = {}, {}, scan.new(text or "")
+function I.runs(message)
+    local out, st, sc = {}, {}, scan.new(message or "")
     local buf = {}
     local function flush()
         if #buf == 0 then return end
@@ -365,85 +361,15 @@ function I.runs(text)
     return out
 end
 
-function I.strip(text)
-    local words = {}
-    for _, r in ipairs(I.runs(text)) do words[#words + 1] = r.text end
-    return table.concat(words)
+function I.strip(message)
+    local plain = {}
+    for _, r in ipairs(I.runs(message)) do plain[#plain + 1] = r.text end
+    return table.concat(plain)
 end
 
 --------------------------------------------------------------------------
--- Bytes
+-- Bytes (lib/convert's)
 --------------------------------------------------------------------------
--- How many bytes follow a UTF-8 lead byte b (nil: not a lead byte).
-local function utf8Tail(b)
-    if b >= 0xC2 and b <= 0xDF then return 1 end
-    if b >= 0xE0 and b <= 0xEF then return 2 end
-    if b >= 0xF0 and b <= 0xF4 then return 3 end
-    return nil
-end
-
-local function isContinuation(b) return b and b >= 0x80 and b <= 0xBF end
-
--- Is any byte of s past ASCII?
-local function hasHighBytes(s)
-    for i = 1, #s do
-        if s:byte(i) >= 128 then return true end
-    end
-    return false
-end
-
-function I.fromUTF8(s)
-    if not hasHighBytes(s) then return s end
-    local out, i, n = {}, 1, #s
-    while i <= n do
-        local b = s:byte(i)
-        local tail = b >= 0x80 and utf8Tail(b)
-        local whole = tail
-        if tail then
-            for k = 1, tail do
-                if not isContinuation(s:byte(i + k)) then whole = false; break end
-            end
-        end
-        if whole then
-            local code = b % (2 ^ (6 - tail))
-            for k = 1, tail do code = code * 64 + s:byte(i + k) % 64 end
-            -- Latin-1 shows as itself; CC's 128-159 are its own graphics, not these
-            out[#out + 1] = (code >= 160 and code <= 255) and string.char(code) or "?"
-            i = i + tail + 1
-        else
-            out[#out + 1] = s:sub(i, i)         -- (not UTF-8: taken as Latin-1)
-            i = i + 1
-        end
-    end
-    return table.concat(out)
-end
-
-function I.toUTF8(s)
-    if not hasHighBytes(s) then return s end
-    local out = {}
-    for i = 1, #s do
-        local b = s:byte(i)
-        out[i] = b < 128 and string.char(b) or string.char(0xC0 + math.floor(b / 64), 0x80 + b % 64)
-    end
-    return table.concat(out)
-end
-
-local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-function I.base64(s)
-    local out = {}
-    for i = 1, #s, 3 do
-        local a, b, c = s:byte(i, i + 2)
-        local n = a * 65536 + (b or 0) * 256 + (c or 0)
-        local quad = {}
-        for k = 3, 0, -1 do
-            local v = math.floor(n / 64 ^ k) % 64
-            quad[#quad + 1] = B64:sub(v + 1, v + 1)
-        end
-        if not b then quad[3], quad[4] = "=", "="
-        elseif not c then quad[4] = "=" end
-        out[#out + 1] = table.concat(quad)
-    end
-    return table.concat(out)
-end
+I.fromUTF8, I.toUTF8, I.base64 = convert.fromUTF8, convert.toUTF8, convert.toBase64
 
 return I

@@ -57,13 +57,18 @@ end
 -- "There are 2 of a max of 20 players online: Steve, Alex" (and the
 -- older "There are 2/20 players online:") as a list of names.
 local function namesFromList(out)
-    local line = table.concat(out or {}, " ")
-    local colon = line:find(":", 1, true)
-    local names = {}
-    if not colon then return names end
-    for _, name in ipairs(text.split(line:sub(colon + 1), ",")) do names[#names + 1] = name end
-    return names
+    local _, names = text.cut(text.join(out or {}, " "), ":")
+    if not names then return {} end
+    return text.split(names, ",")
 end
+
+-- Advanced Peripherals' player events (both names it has used), as the
+-- kind of game event each is.
+local PLAYER_EVENTS = {
+    playerJoin = "join", player_join = "join",
+    playerLeave = "leave", player_leave = "leave",
+    playerDeath = "death", player_death = "death",
+}
 
 function M.new(opts)
     opts = opts or {}
@@ -146,23 +151,18 @@ function M.new(opts)
         self.flush()
         return true
     end
-    function self.say(text, from) return enqueue({ text = text, from = from }) end
-    function self.tell(player, text, from) return enqueue({ text = text, from = from, player = player }) end
+    function self.say(message, from) return enqueue({ text = message, from = from }) end
+    function self.tell(player, message, from) return enqueue({ text = message, from = from, player = player }) end
     function self.waiting() return #queue end
 
     -- A CC event as a game event, or nil.
     function self.event(name, a, b, _, d)
-        if name == "chat" and chat then
-            if d == true then return nil end                      -- ($: hidden)
+        if name == "chat" then
+            if not chat or d == true then return nil end          -- ($: hidden)
             return { kind = "chat", player = a, text = b }
-        elseif name == "playerJoin" or name == "player_join" then
-            return { kind = "join", player = a }
-        elseif name == "playerLeave" or name == "player_leave" then
-            return { kind = "leave", player = a }
-        elseif name == "playerDeath" or name == "player_death" then
-            return { kind = "death", player = a }
         end
-        return nil
+        local kind = PLAYER_EVENTS[name]
+        return kind and { kind = kind, player = a } or nil
     end
 
     -- Without a detector's events: who came and went since the last ask.

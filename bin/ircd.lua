@@ -68,14 +68,16 @@ local net = require("net")
 local irc = require("irc")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 local ircd = require("ircd")
 local ircserv = require("ircserv")
 local mcLib = require("mc")
 
 local opts, operands = cu.getopt({ ... }, "p:")
 if #operands > 0 then cu.usageError() end
-local port = tonumber(opts.p or settings.get("ircd.port") or 6667)
-if not port or port < 1 or port > 65535 or port % 1 ~= 0 then cu.usageError("bad port " .. tostring(opts.p or settings.get("ircd.port"))) end
+local portGiven = tostring(opts.p or settings.get("ircd.port") or 6667)
+local port = convert.toInteger(portGiven)
+if not port or port < 1 or port > 65535 then cu.usageError("bad port " .. portGiven) end
 
 local syslog = require("log").new("ircd", settings.get("ircd.facility") or "daemon", { perror = true })
 local label = os.getComputerLabel and os.getComputerLabel()
@@ -111,9 +113,9 @@ local dataPath = settings.get("ircd.data") or "/etc/ircd.db"
 local function loadDb()
     if not fs.exists(dataPath) then return nil end
     local h = fs.open(dataPath, "r")
-    local text = h and h.readAll()
+    local saved = h and h.readAll()
     if h then h.close() end
-    return text and textutils.unserialize(text)
+    return saved and textutils.unserialize(saved)
 end
 local function saveDb(db)
     local dir = fs.getDir(dataPath)
@@ -142,7 +144,7 @@ if not listener then cu.fail("port " .. port .. ": " .. err); return cu.exit() e
 local can = {}
 for k, v in pairs(mc.has) do can[#can + 1] = k .. " (" .. tostring(v) .. ")" end
 table.sort(can)
-syslog.info(srv.name .. " listening on port " .. port .. "; the game: " .. (#can > 0 and table.concat(can, ", ") or "the clock only"))
+syslog.info(srv.name .. " listening on port " .. port .. "; the game: " .. (#can > 0 and text.join(can, ", ") or "the clock only"))
 
 local conns = {}            -- connection id -> { conn, client, buf }
 
