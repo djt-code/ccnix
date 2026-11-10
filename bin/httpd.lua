@@ -53,12 +53,13 @@ local httpd = require("httpd")
 local text = require("text")
 local convert = require("convert")
 local path = require("path")
+local sysenv = require("sysenv")
 
 local opts, operands = cu.getopt({ ... }, "Lp:")
 if #operands > 1 then cu.usageError() end
 local root = operands[1] and shell.resolve(operands[1]) or settings.get("httpd.root") or "/www"
 local port
-if opts.p then port = convert.toInteger(opts.p) else port = tonumber(settings.get("httpd.port") or 80) end
+if opts.p then port = convert.toInteger(opts.p) else port = sysenv.setting("httpd.port", 80) end
 if not port or port < 1 or port > 65535 or port % 1 ~= 0 then cu.usageError("bad port " .. tostring(opts.p or settings.get("httpd.port"))) end
 local listing = not opts.L and settings.get("httpd.listing") ~= false
 local index = {}
