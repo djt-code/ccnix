@@ -17,6 +17,7 @@ local check = M.check
 local S = { files = {} }               -- the computer's files, for M.fsApi
 local SET, runs, out, EVENTS, failOn
 fs = M.fsApi(S)
+textutils = M.textutilsApi()               -- (lib/fileio, under turtlelib, reads JSON with it)
 settings = { get = function(name, default) if SET[name] == nil then return default end return SET[name] end }
 shell = M.shellApi("ccnix/turtle/autostart.lua")
 shell.run = function(...)

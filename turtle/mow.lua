@@ -38,10 +38,16 @@
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")
 
-local args = { ... }
-local TORCHES = not T.popFlag(args, "notorch")
-    and T.setting("mow.torches", true, "Light the lawn as mow goes")
-local HERE = T.popFlag(args, "--here")
+-- (T.options: a negative size, -3, is a size, not an option; a flag
+-- alone can't be wrong, so there's no error to check)
+local opts, args = T.options({ ... }, { here = true })
+local HERE = opts.here == true
+-- notorch is a word, not an option: wherever it is, it's taken out
+local noTorch = false
+for i = #args, 1, -1 do
+    if args[i] == "notorch" then noTorch = true; table.remove(args, i) end
+end
+local TORCHES = not noTorch and T.setting("mow.torches", true, "Light the lawn as mow goes")
 if args[1] == "reset" then
     if HERE then T.setHomeHere() else T.goHome() end
     return

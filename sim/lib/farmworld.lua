@@ -330,6 +330,7 @@ turtle = M.merge(
 -- The computer and the world around it
 --------------------------------------------------------------------------
 fs = M.fsApi(F)
+textutils = textutils or M.textutilsApi()   -- (lib/fileio, under turtlelib, reads JSON with it)
 shell = M.shellApi("farm.lua")
 peripheral = {
     wrap = function(side)

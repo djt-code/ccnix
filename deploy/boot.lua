@@ -46,6 +46,12 @@ local ending = ... == "--end"
 local here = ... == "--here"            -- (setup's, in its shell: not a boot)
 local romMode = fs.exists(ROM .. "/.manifest")
 
+-- boot loads no library, on purpose: the .manifest and .gitlite read here
+-- decide which lib/ is used (the updates' or the ROM's), an update's boot
+-- can run over a ROM from before a library was there, and a library that
+-- fails to load here would leave the computer without ccnix at all.  So
+-- this is lib/fileio's readJSON written out again (as bin/ccnix, the
+-- repair tool, has it), and the few string jobs below are done in place.
 local function readJSON(path)
     if not fs.exists(path) or fs.isDir(path) then return nil end
     local f = fs.open(path, "r")

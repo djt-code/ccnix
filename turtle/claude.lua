@@ -22,8 +22,10 @@
 -- so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
--- as `edit` does it, what the code prints is grey, prompts and questions
--- yellow, retries orange, errors red; Claude's own words are white.
+-- as vi does it (lib/syntax: keywords yellow, comments green, strings
+-- red, numbers and nil/true/false magenta, library names cyan), what the
+-- code prints is grey, prompts and questions yellow, retries orange,
+-- errors red; Claude's own words are white.
 --
 -- Reading back: when more comes out than the screen holds, it opens in
 -- the pager (lib/pager.lua) at the first line you haven't seen before it
@@ -68,6 +70,10 @@ if shell and shell.getRunningProgram then
 end
 local okPager, pager = pcall(require, "pager")
 if not (okPager and type(pager) == "table" and pager.page) then pager = nil end
+local convert = require("convert")
+local fileio = require("fileio")
+local syntax = require("syntax")
+local tables = require("tables")
 
 -- Colour on an advanced computer or turtle, plain text on the others.
 local COLOUR = term ~= nil and term.isColour ~= nil and term.isColour() and colours ~= nil
@@ -91,23 +97,27 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
 --------------------------------------------------------------------------
 -- Arguments
 --------------------------------------------------------------------------
-local args = { ... }
-local MODEL, EFFORT, MAX_STEPS = "claude-opus-5-5", "medium", 60
-local CONFIRM = T.popFlag(args, "--confirm")
-MODEL = T.popValue(args, "--model") or MODEL
-EFFORT = T.popValue(args, "--effort") or EFFORT
-local stepsArg = T.popValue(args, "--steps")
-MAX_STEPS = stepsArg and tonumber(stepsArg) or MAX_STEPS
+-- (T.options: the goal's words are free, a "-5" or a "-x" in it too;
+-- only these are options)
+local opts, args = T.options({ ... }, { confirm = true, model = "=", effort = "=", steps = "=" })
+if not opts then
+    print("claude: " .. args)
+    print("Usage: claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--confirm]")
+    return
+end
+local CONFIRM = opts.confirm == true
+local MODEL = opts.model or "claude-opus-5-5"
+local EFFORT = opts.effort or "medium"
+local MAX_STEPS = opts.steps and tonumber(opts.steps) or 60
 local goal = table.concat(args, " ")
 
 --------------------------------------------------------------------------
 -- The key
 --------------------------------------------------------------------------
 local function readKey()
-    if not fs.exists(KEY_FILE) then return nil end
-    local f = fs.open(KEY_FILE, "r")
-    local key = text.trim(f.readLine() or "")
-    f.close()
+    local saved = fileio.read(KEY_FILE)
+    if not saved then return nil end
+    local key = text.trim((text.cut(saved, "\n")))     -- (its first line)
     return key ~= "" and key or nil
 end
 
@@ -168,17 +178,15 @@ local screenPrint = print
 -- no pager to show colours, every line is plain.
 local function blit(colour) return pager and pager.blitOf(colour) or "0" end
 
--- Keep `text`'s lines; `fg`, on a colour screen, is each character's
+-- Keep `said`'s lines; `fg`, on a colour screen, is each character's
 -- colour (blit digits), and a line that isn't all white keeps it, for the
 -- pager to show in colour.
-local function keep(text, fg)
-    local pos = 1
-    while pos <= #text + 1 do            -- a line a time, the one after the last newline too
-        local nl = text:find("\n", pos, true) or #text + 1
-        local l = text:sub(pos, nl - 1)
-        local lfg = fg and fg:sub(pos, nl - 1)
+local function keep(said, fg)
+    local pos = 1                        -- (where the line starts in said, and in fg)
+    for _, l in ipairs(text.split(said, "\n", true)) do     -- the one after the last newline too
+        local lfg = fg and fg:sub(pos, pos + #l - 1)
         if lfg and lfg ~= string.rep("0", #lfg) then shown[#shown + 1] = { l, lfg } else shown[#shown + 1] = l end
-        pos = nl + 1
+        pos = pos + #l + 1
     end
     if #shown > SCROLLBACK + 500 then
         local cut, t = #shown - SCROLLBACK, {}
@@ -192,93 +200,34 @@ end
 print = function(...)
     local parts = {}
     for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end
-    local text = table.concat(parts, " ")
-    keep(text, COLOUR and string.rep(blit(term.getTextColour()), #text) or nil)
+    local line = table.concat(parts, " ")
+    keep(line, COLOUR and string.rep(blit(term.getTextColour()), #line) or nil)
     return screenPrint(...)
 end
 
--- Lua code, highlighted as `edit` does it on a colour screen: keywords
--- yellow, comments green, strings red.
-local KEYWORDS = {}
-local KEYWORD_LIST = "and break do else elseif end false for function goto if in local nil not or "
-    .. "repeat return then true until while"
-for _, w in ipairs(text.words(KEYWORD_LIST)) do KEYWORDS[w] = true end
+-- The colour of a blit digit ("e" -> colours.red)
+local function colourOf(digit) return math.floor(2 ^ convert.toInteger(digit, 16)) end
 
-local function isNameStart(c) return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_" end
-local function isNameChar(c) return isNameStart(c) or (c >= "0" and c <= "9") end
-
--- `code` as runs of { colour, text }.
-local function luaRuns(code)
-    local runs, i, n = {}, 1, #code
-    local function add(colour, s)
-        local last = runs[#runs]
-        if last and last[1] == colour then last[2] = last[2] .. s else runs[#runs + 1] = { colour, s } end
-    end
-    -- a long bracket's opening at j, [[ or [=[ ...: its ='s ("" for [[), or nil
-    local function longOpenAt(j)
-        if code:sub(j, j) ~= "[" then return nil end
-        local k = j + 1
-        while code:sub(k, k) == "=" do k = k + 1 end
-        if code:sub(k, k) ~= "[" then return nil end
-        return code:sub(j + 1, k - 1)
-    end
-    -- from j on, while test holds for the characters: where that stops
-    local function runEnd(j, test)
-        while j <= n and test(code:sub(j, j)) do j = j + 1 end
-        return j
-    end
-    -- what ends a run of plain text: a name, a string, a comment or a long bracket's start
-    local function isPlain(ch) return not (isNameChar(ch) or ch == '"' or ch == "'" or ch == "-" or ch == "[") end
-    while i <= n do
-        local c = code:sub(i, i)
-        local long = code:sub(i, i + 1) == "--" and longOpenAt(i + 2) or nil
-        local longStr = longOpenAt(i)
-        if long or longStr then          -- a long comment or string, to its ]]
-            local eq = long or longStr
-            local close = "]" .. eq .. "]"
-            local _, e = code:find(close, i + #eq + 2 + (long and 2 or 0), true)
-            e = e or n
-            add(long and "green" or "red", code:sub(i, e))
-            i = e + 1
-        elseif code:sub(i, i + 1) == "--" then
-            local e = (code:find("\n", i, true) or n + 1) - 1
-            add("green", code:sub(i, e))
-            i = e + 1
-        elseif c == '"' or c == "'" then
-            local j = i + 1
-            while j <= n do
-                local d = code:sub(j, j)
-                if d == "\\" then j = j + 2
-                elseif d == c or d == "\n" then break
-                else j = j + 1 end
-            end
-            j = math.min(j, n)
-            add("red", code:sub(i, j))
-            i = j + 1
-        elseif isNameStart(c) then
-            local word = code:sub(i, runEnd(i, isNameChar) - 1)
-            add(KEYWORDS[word] and "yellow" or "white", word)
-            i = i + #word
-        else
-            local e = runEnd(i, isPlain)
-            local s = e > i and code:sub(i, e - 1) or c       -- (a lone - or [ is plain too)
-            add("white", s)
-            i = i + #s
-        end
-    end
-    return runs
-end
-
--- Show the code: highlighted on a colour screen, kept for the pager.
+-- Show the code: highlighted on a colour screen as lib/syntax colours
+-- Lua (vi's colours), kept for the pager.
 local function showCode(code)
     if not COLOUR then return print(code) end
-    local fg = {}
-    for _, r in ipairs(luaRuns(code)) do
-        term.setTextColour(colours[r[1]])
-        write(r[2])
-        fg[#fg + 1] = string.rep(blit(colours[r[1]]), #r[2])
+    local fg, state = {}, nil
+    for i, line in ipairs(text.split(code, "\n", true)) do
+        if i > 1 then write("\n") end
+        local digits
+        digits, state = syntax.line("lua", line, state)
+        -- each run of one colour at a time, so write wraps it as it goes
+        local sc = scan.new(digits)
+        while not sc:atEnd() do
+            local from, digit = sc:pos(), sc:peek()
+            sc:readWhile(scan.oneOf(digit))
+            term.setTextColour(colourOf(digit))
+            write(line:sub(from, sc:pos() - 1))
+        end
+        fg[#fg + 1] = digits
     end
-    keep(code, table.concat(fg))
+    keep(code, table.concat(fg, "0"))      -- (a digit for each newline too)
     term.setTextColour(colours.white)
     write("\n")
 end
@@ -384,11 +333,11 @@ local function isKey(path) return norm(path):lower() == KEY_PATH end
 -- `path` is the key or a folder it's in (copying that would copy the key)
 local function holdsKey(path)
     local p = norm(path):lower()
-    return p == KEY_PATH or p == "" or KEY_PATH:sub(1, #p + 1) == p .. "/"
+    return p == KEY_PATH or p == "" or text.startsWith(KEY_PATH, p .. "/")
 end
 local function writable(path)
     local p = norm(path)
-    return p == WRITE_DIR or p:sub(1, #WRITE_DIR + 1) == WRITE_DIR .. "/"
+    return p == WRITE_DIR or text.startsWith(p, WRITE_DIR .. "/")
 end
 local function denied(path, why) error(tostring(path) .. ": " .. why, 3) end
 local function isWrite(mode) return mode ~= nil and mode ~= "r" and mode ~= "rb" end
@@ -473,18 +422,10 @@ setmetatable(modWorld, { __index = _G })
 local loadedMods = {}
 local function ccRequire(name)
     if type(name) ~= "string" or not CC_MODULES[name] then
-        local names = {}
-        for n in pairs(CC_MODULES) do names[#names + 1] = n end
-        table.sort(names)
-        error("require: only CraftOS's modules here: " .. table.concat(names, ", "), 2)
+        error("require: only CraftOS's modules here: " .. table.concat(tables.sortedKeys(CC_MODULES), ", "), 2)
     end
     if loadedMods[name] == nil then
-        local file = {}                                  -- cc.image.nft -> cc/image/nft
-        for j = 1, #name do
-            local ch = name:sub(j, j)
-            file[j] = ch == "." and "/" or ch
-        end
-        local path = "/rom/modules/main/" .. table.concat(file) .. ".lua"
+        local path = "/rom/modules/main/" .. text.replace(name, ".", "/") .. ".lua"   -- cc.image.nft -> cc/image/nft
         local chunk, err = loadfile(path, "t", modWorld)
         if not chunk then error("require: " .. tostring(err), 2) end
         local m = chunk(name, path)
@@ -523,9 +464,9 @@ local function runLua(code)
         if err == "Terminated" then error(err, 0) end
         out[#out + 1] = "error: " .. tostring(err)
     end
-    local text = table.concat(out, "\n")
-    if text == "" then text = "(no output)" end
-    return clip(text), not ok
+    local all = table.concat(out, "\n")
+    if all == "" then all = "(no output)" end
+    return clip(all), not ok
 end
 
 local function status()
@@ -558,7 +499,7 @@ local function runTool(name, input)
         log("lua:\n" .. code)
         if CONFIRM then
             local a = ask("Run it? [y/N] ")
-            if a:lower():sub(1, 1) ~= "y" then
+            if not text.startsWith(a:lower(), "y") then
                 say("orange", "--- not run")
                 return "The user declined to run this code.", true
             end
@@ -571,9 +512,8 @@ local function runTool(name, input)
         if not ok then error(out, 0) end        -- Terminated
         if isErr then
             -- the line from "error: " on, else all of it
-            local from = out:find("error: ", 1, true)
-            local nl = from and out:find("\n", from, true)
-            say("red", from and out:sub(from, nl and nl - 1 or -1) or out)
+            local from = text.find(out, "error: ")
+            say("red", from and (text.cut(out:sub(from), "\n")) or out)
         end
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
@@ -620,26 +560,27 @@ local HEADERS = {
 
 -- The events' data in a streamed reply: what follows each "data: ", up to
 -- the end of its line.
-local function eventData(text)
+local function eventData(stream)
     local out, pos = {}, 1
     while true do
-        local from = text:find("data: ", pos, true)
-        if not from then return out end
-        local start = from + #"data: "
-        local nl = text:find("\n", start, true) or #text + 1
-        local line = text:sub(start, nl - 1)
-        local cr = line:find("\r", 1, true)          -- (a CR ends it too)
-        if cr then line = line:sub(1, cr - 1) end
+        local _, last = text.find(stream, "data: ", pos)
+        if not last then return out end
+        local nl = text.find(stream, "\n", last + 1)
+        local line = text.cut(stream:sub(last + 1, (nl or #stream + 1) - 1), "\r")   -- (a CR ends it too)
         out[#out + 1] = line
-        pos = start + #line
+        pos = last + 1 + #line
     end
 end
 
+-- Which field of a content block each kind of delta adds to
+local DELTA_FIELD = { text_delta = "text", thinking_delta = "thinking", signature_delta = "signature",
+                      input_json_delta = "input" }
+
 -- The message from a streamed reply's events, or nil and the error the
 -- stream ended with ({ type = ..., message = ... }).
-local function fromEvents(text)
+local function fromEvents(stream)
     local msg, parts = nil, {}
-    for _, data in ipairs(eventData(text)) do
+    for _, data in ipairs(eventData(stream)) do
         local e = textutils.unserialiseJSON(data)
         local t = e and e.type
         if t == "message_start" then
@@ -650,8 +591,7 @@ local function fromEvents(text)
             parts[e.index + 1] = {}
         elseif t == "content_block_delta" and msg and parts[e.index + 1] then
             local d, p = e.delta, parts[e.index + 1]
-            local field = d.type == "text_delta" and "text" or d.type == "thinking_delta" and "thinking"
-                or d.type == "signature_delta" and "signature" or d.type == "input_json_delta" and "input"
+            local field = DELTA_FIELD[d.type]
             local piece = d.text or d.thinking or d.signature or d.partial_json
             if field and piece then
                 p[field] = p[field] or {}
@@ -676,9 +616,14 @@ local function fromEvents(text)
             return nil, e.error or { type = "error", message = data }
         end
     end
-    if not msg then return nil, { type = "unreadable", message = tostring(text):sub(1, 200) } end
+    if not msg then return nil, { type = "unreadable", message = tostring(stream):sub(1, 200) } end
     return msg
 end
+
+-- What a wait cures: rate limits, overloads and outages, by HTTP code,
+-- and by the error a stream ends with
+local RETRY_CODES = { [429] = true, [500] = true, [502] = true, [503] = true, [529] = true }
+local RETRY_ERRORS = { overloaded_error = true, api_error = true, rate_limit_error = true }
 
 -- Send the conversation; the reply as a table, or nil and why.  Rate
 -- limits, overloads and outages are retried with a growing wait, and so
@@ -687,28 +632,28 @@ local function request()
     local wait = 2
     for attempt = 1, RETRIES + 1 do
         local h, err, failed = http.post({ url = API_URL, headers = HEADERS, body = body(), timeout = HTTP_TIMEOUT })
-        local code, text
+        local code, got
         if h then
-            code, text = h.getResponseCode(), h.readAll()
+            code, got = h.getResponseCode(), h.readAll()
             h.close()
         elseif failed then
-            code, text = failed.getResponseCode(), failed.readAll()
+            code, got = failed.getResponseCode(), failed.readAll()
             if failed.close then failed.close() end
         end
         local detail, again
         if code == 200 then
-            local reply, e = fromEvents(text)
+            local reply, e = fromEvents(got)
             if reply then return reply end
             -- an error partway: the ones a wait cures, as for their HTTP codes
             detail = tostring(e.type) .. ": " .. tostring(e.message)
-            again = e.type == "overloaded_error" or e.type == "api_error" or e.type == "rate_limit_error"
+            again = RETRY_ERRORS[e.type] == true
         else
             detail = tostring(err or "")
-            if text then
-                local e = textutils.unserialiseJSON(text)
-                detail = e and e.error and (e.error.type .. ": " .. tostring(e.error.message)) or text:sub(1, 200)
+            if got then
+                local e = textutils.unserialiseJSON(got)
+                detail = e and e.error and (e.error.type .. ": " .. tostring(e.error.message)) or got:sub(1, 200)
             end
-            again = code == 429 or code == 500 or code == 502 or code == 503 or code == 529 or (not code)
+            again = (not code) or RETRY_CODES[code] == true
         end
         if not again or attempt > RETRIES then
             return nil, string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
@@ -741,21 +686,21 @@ local function unanswered(why)
     return out
 end
 
--- Add `text` as the user's: after tool calls left unanswered, with their
+-- Add `said` as the user's: after tool calls left unanswered, with their
 -- results first; after a user turn the API never answered (tool results
 -- whose request failed), onto that turn.
-local function addUser(text, why)
+local function addUser(said, why)
     local last = messages[#messages]
     if last and last.role == "user" then
         if type(last.content) == "string" then last.content = { { type = "text", text = last.content } } end
-        table.insert(last.content, { type = "text", text = text })
+        table.insert(last.content, { type = "text", text = said })
         return
     end
     local blocks = unanswered(why)
     if #blocks == 0 then
-        messages[#messages + 1] = { role = "user", content = text }
+        messages[#messages + 1] = { role = "user", content = said }
     else
-        blocks[#blocks + 1] = { type = "text", text = text }
+        blocks[#blocks + 1] = { type = "text", text = said }
         messages[#messages + 1] = { role = "user", content = blocks }
     end
 end

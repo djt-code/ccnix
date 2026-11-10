@@ -14,6 +14,7 @@ local M = require("mock")
 local realPrint = print
 local S = { files = {} }               -- the computer's files, for M.fsApi
 fs = M.fsApi(S)
+textutils = M.textutilsApi()               -- (lib/fileio, under turtlelib, reads JSON with it)
 shell = M.shellApi("x.lua")
 
 -- A turtle whose turns wait for their response, as in CC; the user

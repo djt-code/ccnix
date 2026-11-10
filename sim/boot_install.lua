@@ -304,6 +304,33 @@ check("setup from the ROM: sets ccsh.login and net.boot, writes no startup file,
     STORE["ccsh.login"] == true and STORE["net.boot"] == true and not W.fs.exists("/startup.lua") and not W.fs.exists("/startup")
         and r.out:find("the settings take effect at the next boot", 1, true), show(r.out) .. show(r.errText))
 
+-- setup's options are getopt's: anywhere among the apps, --name=word too;
+-- one it doesn't know prints the usage and sets nothing
+W = world(true)
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "--ccsh", "--bogus", "--no-reboot" }) end)
+check("setup --bogus: the usage, nothing set", STORE["ccsh.login"] == nil and r.out:find("Usage: setup", 1, true)
+    and r.out:find("Apps: autocompost ccsh claude", 1, true), show(r.out) .. show(r.errText))
+W = world(true)
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "--no-reboot", "--autostart=router" }) end)
+check("setup --autostart=router: the autostart and the network at boot, a router", STORE["ccnix.autostart"] == "router"
+    and STORE["net.boot"] == true and STORE["net.forward"] == true, show(r.out) .. show(r.errText))
+
+-- setup in ROM mode moves an install from before ccnix off: the startup
+-- lines that ran its programs run them by name (ip up goes: boot starts
+-- the network), its files go (what its .gitlite doesn't list stays)
+W = world(true)
+W:file("cc-turtles/.gitlite", '{"files":{"bin/ls.lua":"a","turtle/mine.lua":"b"}}')
+W:file("cc-turtles/bin/ls.lua", "x")
+W:file("cc-turtles/turtle/mine.lua", "y")
+W:file("cc-turtles/notes.txt", "mine")
+W:file("startup.lua", 'shell.run("/cc-turtles/bin/fileserver mount")\nprint(1)\nshell.run(\'/cc-turtles/bin/ip up\')\n'
+    .. 'if x then shell.run("/cc-turtles/bin/ccsh") end\n\n')
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "--no-reboot" }) end)
+check("setup moves /cc-turtles off: its startup lines run the programs by name, its files go, the rest stays",
+    W:read("startup.lua") == 'shell.run("fileserver mount")\nprint(1)\n' and not W.fs.exists("cc-turtles/bin")
+        and not W.fs.exists("cc-turtles/turtle") and not W.fs.exists("cc-turtles/.gitlite") and W:read("cc-turtles/notes.txt") == "mine"
+        and r.out:find("Moved off /cc-turtles", 1, true), show(W:read("startup.lua")) .. show(r.out) .. show(r.errText))
+
 --------------------------------------------------------------------------
 -- (d) no ROM: setup's two lines, run as CraftOS would
 --------------------------------------------------------------------------

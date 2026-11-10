@@ -106,6 +106,14 @@ run("2", "2")
 check("and no length given is kept as 0, no end", SAVED["mine.length"] == 0)
 settings = nil
 
+-- 1b. the options are getopt's (T.options): one missing its word says so,
+--     with the usage, and nothing moves
+setup(stock(4, 64))
+startAt(); Mine.inv, Mine.files = {}, {}
+run("3", "3", "--spacing")
+check("an option with no word after it: getopt's message and the usage, nothing dug",
+    logHas("mine: option '%-%-spacing' requires an argument") and logHas("Usage: mine") and Mine.moves == 0)
+
 -- 2. 50 long with homes every 16: supplies go forward, valuables come back
 setup(stock(8, 128, 64)); features()
 set(-1, 1, 20, ore("minecraft:diamond_ore"))       -- in the wall near home 1
