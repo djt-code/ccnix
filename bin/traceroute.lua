@@ -18,9 +18,10 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("traceroute", "traceroute [-n] [-m hops] [-q queries] [-w seconds] host")
 local net = require("net")
 local netdb = require("netdb")
+local convert = require("convert")
 local opts, operands = cu.getopt({ ... }, "nm:q:w:")
 if #operands ~= 1 then cu.usageError() end
-local maxHops, queries, wait = tonumber(opts.m or 30), tonumber(opts.q or 3), tonumber(opts.w or 2)
+local maxHops, queries, wait = convert.toNumber(opts.m or "30"), convert.toNumber(opts.q or "3"), convert.toNumber(opts.w or "2")
 if not (maxHops and queries and wait) then cu.usageError("bad number") end
 
 local S, why = net.stack()

@@ -41,6 +41,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("screen", "screen [-S name] [command...] | -ls | -r [name] | -d -r [name] | -x [name]")
 local screen = require("screen")
+local text = require("text")
 
 local proc = rawget(_G, "proc")
 if not (proc and proc.newTerm and proc.input) then
@@ -48,18 +49,17 @@ if not (proc and proc.newTerm and proc.input) then
     return cu.exit()
 end
 
--- The options, read by hand: -ls and -list are words of their own, as
--- screen has them, not -l -s.
+-- The options, read by hand, not getopt: -ls and -list are words of
+-- their own, as screen has them, not -l -s.  Each word and what it sets.
+local WORDS = { ["-ls"] = { "ls" }, ["-list"] = { "ls" }, ["-r"] = { "r" }, ["-d"] = { "d" }, ["-x"] = { "x" },
+                ["-dr"] = { "d", "r" }, ["-rd"] = { "d", "r" } }
 local args = { ... }
 local opt = {}
 local i = 1
 while i <= #args do
     local a = args[i]
-    if a == "-ls" or a == "-list" then opt.ls = true
-    elseif a == "-r" then opt.r = true
-    elseif a == "-d" then opt.d = true
-    elseif a == "-x" then opt.x = true
-    elseif a == "-dr" or a == "-rd" then opt.d, opt.r = true, true
+    if WORDS[a] then
+        for _, o in ipairs(WORDS[a]) do opt[o] = true end
     elseif a == "-S" then
         i = i + 1
         opt.name = args[i]
@@ -67,7 +67,7 @@ while i <= #args do
     elseif a == "--" then
         i = i + 1
         break
-    elseif a:sub(1, 1) == "-" and a ~= "-" then
+    elseif text.startsWith(a, "-") and a ~= "-" then
         cu.usageError("unknown option " .. a)
     else
         break

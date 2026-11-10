@@ -51,6 +51,7 @@ local cu = require("cu").init("tcpdump", USAGE)
 local net = require("net")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 
 local opts, operands, order = cu.getopt({ ... }, "Dc:ei:npqr:Stvw:x", 1)
 local tflag, verbose, ifaceArgs = 0, 0, {}
@@ -59,7 +60,7 @@ for _, o in ipairs(order) do
     elseif o[1] == "v" then verbose = verbose + 1
     elseif o[1] == "i" then ifaceArgs[#ifaceArgs + 1] = o[2] end
 end
-local count = opts.c and cu.int(opts.c)
+local count = opts.c and convert.toInteger(opts.c)
 if opts.c and not (count and count > 0) then cu.usageError("bad count " .. opts.c, 1) end
 
 local S = net.stack()
@@ -113,8 +114,8 @@ end
 -- The filter's tokens: words between blanks, and "(", ")" and "!" each one
 -- of its own (even against a word); "&&" is "and", "||" "or".
 local isBracket = scan.oneOf("()!")
-local function tokens(text)
-    local sc, toks, word = scan.new(text), {}, {}
+local function tokens(expression)
+    local sc, toks, word = scan.new(expression), {}, {}
     local function endWord()
         if #word > 0 then toks[#toks + 1] = table.concat(word) end
         word = {}
@@ -146,7 +147,7 @@ local function compile(words)
         return ip
     end
     local function number(s)
-        local n = cu.int(s)
+        local n = convert.toInteger(s)
         if not n then error("not a number: " .. s, 0) end
         return n
     end
@@ -171,7 +172,7 @@ local function compile(words)
         elseif t == "broadcast" then
             return function(r) return r.frame.dst == net.BROADCAST end
         elseif t == "vlan" then
-            local n = peek() and cu.int(peek())
+            local n = peek() and convert.toInteger(peek())
             if n then pos = pos + 1 end
             return function(r) local _, _, v = net.link(r.iface) return v ~= nil and (n == nil or v == n) end
         end
@@ -324,20 +325,14 @@ local function describe(f)
     return "type " .. tostring(f.type)
 end
 
-local function clock(ms)
-    ms = math.floor(ms)
-    local d = ms % 86400000
-    return string.format("%02d:%02d:%02d.%03d", math.floor(d / 3600000), math.floor(d / 60000) % 60,
-        math.floor(d / 1000) % 60, d % 1000)
-end
 local last
 local function stamp(ms)
     if tflag == 1 then return "" end
     local s
     if tflag == 2 then s = string.format("%d.%03d", math.floor(ms / 1000), math.floor(ms) % 1000)
-    elseif tflag == 3 then s = clock(last and ms - last or 0)
-    elseif tflag >= 4 then s = os.date("!%Y-%m-%d ", math.floor(ms / 1000)) .. clock(ms)
-    else s = clock(ms) end
+    elseif tflag == 3 then s = convert.clock(last and ms - last or 0)
+    elseif tflag >= 4 then s = os.date("!%Y-%m-%d ", math.floor(ms / 1000)) .. convert.clock(ms)
+    else s = convert.clock(ms) end
     last = ms
     return s .. " "
 end
@@ -353,13 +348,13 @@ local function copy(v, depth)
     return t
 end
 
-local function serialise(v) return (textutils.serialise(v, { compact = true }):gsub("\\\n", "\\n")) end
+local function serialise(v) return (text.replace(textutils.serialise(v, { compact = true }), "\\\n", "\\n")) end
 
 local seen, captured = 0, 0
 local out, showIface
 if opts.w then
-    local path = shell and shell.resolve(opts.w) or opts.w
-    out = io.open(path, "w")
+    local file = shell and shell.resolve(opts.w) or opts.w
+    out = io.open(file, "w")
     if not out then cu.fail("can't write " .. opts.w); return cu.exit() end
     out:write("-- ccnet frames (tcpdump -w): a Lua table a line\n")
 end
@@ -395,7 +390,7 @@ if opts.r then
     showIface = true
     for line in h:lines() do
         if done() then break end
-        if line:sub(1, 2) ~= "--" and text.trim(line) ~= "" then
+        if not text.startsWith(line, "--") and not scan.isBlank(line) then
             local rec = textutils.unserialise(line)
             if type(rec) == "table" and rec.iface and rec.t then handle(rec) end
         end

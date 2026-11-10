@@ -569,8 +569,9 @@ check("httpc.resolve: absolute, //host, /path, relative, ?query and .. against t
         and httpc.resolve("http://a:81/b/c", "/y") == "http://a:81/y" and httpc.resolve("http://a/b/c", "d") == "http://a/b/d"
         and httpc.resolve("http://a/b/c?q", "?r") == "http://a/b/c?r" and httpc.resolve("http://a/b/c/d", "../e") == "http://a/b/e"
         and httpc.resolve("http://a/b/c", "./") == "http://a/b/", httpc.resolve("http://a/b/c/d", "../e"))
-check("httpc.base64 (RFC 4648's examples)", httpc.base64("") == "" and httpc.base64("f") == "Zg==" and httpc.base64("fo") == "Zm8="
-    and httpc.base64("foo") == "Zm9v" and httpc.base64("foobar") == "Zm9vYmFy" and httpc.base64("user:pass") == "dXNlcjpwYXNz")
+local b64 = require("convert").toBase64           -- (what httpc sends Basic authentication in)
+check("base64 for httpc (RFC 4648's examples)", b64("") == "" and b64("f") == "Zg==" and b64("fo") == "Zm8="
+    and b64("foo") == "Zm9v" and b64("foobar") == "Zm9vYmFy" and b64("user:pass") == "dXNlcjpwYXNz")
 
 -- B answers on port 80: each request (head, body) is kept, and answered
 -- from PAGES by its path, then closed.
@@ -674,6 +675,12 @@ r2 = curl("-O", "http://b/chunked")
 check("curl -o file, -O: the body written to the file, nothing printed",
     r.status == 0 and r.out == "" and W:read("page.txt") == "hello\n" and r2.status == 0 and W:read("chunked") == "hello world\n",
     show(r.out) .. show(W:read("page.txt")))
+r = curl("http://b/", "-o", "after.txt", "--max-time=5")
+r2 = curl("--", "http://b/", "-i")
+local r3 = curl("-m", "0x10", "http://b/")
+check("curl: options after the URL (-o file, --name=value); after -- all are URLs; -m a decimal number",
+    r.status == 0 and r.out == "" and W:read("after.txt") == "hello\n" and r2.status == 2 and r3.status == 2,
+    show(r.errText) .. show(r2.errText) .. show(r3.errText))
 r = curl("http://b/continue")
 check("curl: a 100 Continue passed over for the answer after it", r.status == 0 and r.out == "ok\n", show(r.out) .. show(r.errText))
 r = curl("http://b/short")
@@ -687,7 +694,7 @@ check("curl: https (1), a bad URL (3), no such host (6), refused (7; -s quiet), 
     bad[1].status == 1 and bad[1].errText:find('protocol "https" not supported') and bad[2].status == 3 and bad[3].status == 6
         and bad[4].status == 7 and bad[4].errText:find("curl: %(7%) failed to connect to 10%.0%.2%.5 port 99: connection refused")
         and bad[5].status == 7 and bad[5].errText == "" and bad[6].status == 2 and bad[7].status == 2 and bad[8].status == 2
-        and bad[8].errText:find("option %-%-frob: is unknown"),
+        and bad[8].errText:find("unrecognized option '%-%-frob'"),
     show(bad[1].errText) .. show(bad[3].errText) .. show(bad[4].errText) .. show(bad[5].errText))
 r = curl("-m", "0", "http://b/hang")
 check("curl -m 0 and no answer: (28), the deadline past (the sim has no time going by)", r.status == 28 and r.errText:find("curl: %(28%) timed out"),
@@ -779,6 +786,14 @@ check("httpd.parse: not all there yet nil; refused: 400, 413, 431, 501, 505",
         and status(web:dispatch("GET / HTTP/1.1\r\nX: " .. ("y"):rep(9000))) == 431
         and status(web:dispatch("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n")) == 501
         and status(web:dispatch("GET / HTTP/2.0\r\n\r\n")) == 505)
+local function body(out) return out and select(2, require("text").cut(out, "\r\n\r\n")) end
+check("httpd static paths: // and /./ are the folder; any .. (as typed, or %2e%2e, or after %2f) 403; nothing above the root",
+    body(web:dispatch("GET //docs//a.txt HTTP/1.1\r\n\r\n")) == "alpha\n" and body(web:dispatch("GET /docs/./a.txt HTTP/1.1\r\n\r\n")) == "alpha\n"
+        and status(web:dispatch("GET /docs/sub/../a.txt HTTP/1.1\r\n\r\n")) == 403
+        and status(web:dispatch("GET /docs/%2e%2e/a.txt HTTP/1.1\r\n\r\n")) == 403
+        and status(web:dispatch("GET /docs%2f..%2f..%2fx HTTP/1.1\r\n\r\n")) == 403
+        and status(web:dispatch("GET /.. HTTP/1.1\r\n\r\n")) == 403
+        and status(web:dispatch("GET /... HTTP/1.1\r\n\r\n")) == 403)   -- (fs.combine takes ... up: past the root, refused)
 local app = httpd.new()
     :use(function(req)
         if req.path == "/hello" then return 200, { ["Content-Type"] = "text/plain" }, "hi " .. (req.args.name or "") end

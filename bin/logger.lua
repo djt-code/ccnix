@@ -20,7 +20,7 @@ local fac, sev = "user", "notice"
 if opts.p then
     -- facility.severity, a name each side of the one dot; else a severity alone
     local f, s = text.cut(opts.p, ".")
-    if not s or f == "" or s == "" or s:find(".", 1, true) then f, s = "user", opts.p end
+    if not s or f == "" or s == "" or text.contains(s, ".") then f, s = "user", opts.p end
     if not L.facility(f) then cu.usageError("unknown facility " .. f) end
     if not L.severity(s) then cu.usageError("unknown severity " .. s) end
     fac, sev = f, s

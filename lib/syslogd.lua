@@ -113,7 +113,7 @@ local function parseSelectors(s)
             local name = sc:rest()
             local n = L.severity(name == "*" and 7 or name)
             if not n or #op > 2 then return nil, "unknown severity \"" .. lvl .. "\"" end
-            sel.sev, sel.eq, sel.neg = n, op:find("=", 1, true) ~= nil, op:find("!", 1, true) ~= nil
+            sel.sev, sel.eq, sel.neg = n, text.contains(op, "="), text.contains(op, "!")
         end
         sels[#sels + 1] = sel
     end
@@ -122,19 +122,18 @@ end
 
 local function parseAction(a)
     if a == "*" or a == "/dev/console" then return { kind = "console" } end
-    if a:sub(1, 1) == "@" then
+    local dest = text.stripPrefix(a, "@")
+    if dest then
         -- @host or @host:port, the port digits
-        local host, port = text.cut(a:sub(2), ":")
-        if not (port and host ~= "" and port ~= "" and scan.all(port, scan.isDigit)) then
-            host, port = a:sub(2), nil
-        end
+        local host, port = text.cut(dest, ":")
+        if not (host ~= "" and scan.isUnsigned(port)) then host, port = dest, nil end
         port = tonumber(port) or D.PORT
         if host == "" or port < 1 or port > 65535 then return nil, "bad forward \"" .. a .. "\"" end
         return { kind = "forward", host = host, port = port }
     end
     -- "-"? then a path from the root
-    local path = text.startsWith(a, "-") and a:sub(2) or a
-    if text.startsWith(path, "/") and #path > 1 then return { kind = "file", path = path } end
+    local file = text.stripPrefix(a, "-") or a
+    if text.startsWith(file, "/") and #file > 1 then return { kind = "file", path = file } end
     return nil, "unknown action \"" .. a .. "\" (a /file, /dev/console, * or @host)"
 end
 
@@ -144,9 +143,7 @@ local function stripComment(line)
     if text.startsWith(line, "#") then return "" end
     for k = 2, #line do
         if line:sub(k, k) == "#" and scan.isSpace(line:sub(k - 1, k - 1)) then
-            local to = k - 1
-            while to > 0 and scan.isSpace(line:sub(to, to)) do to = to - 1 end
-            return line:sub(1, to)
+            return text.trimEnd(line:sub(1, k - 1))
         end
     end
     return line

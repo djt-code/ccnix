@@ -33,6 +33,8 @@
 
 local scan = require("scan")
 local text = require("text")
+local glob = require("glob")
+local path = require("path")
 
 local J = {}
 
@@ -56,10 +58,9 @@ end
 
 -- A split file's part n of `of` is named for its path ("!" -> "!!", "/" ->
 -- "!s") and the two numbers: "notes!sbig.txt.2-3".
-local function escaped(rel) return (rel:gsub("!", "!!"):gsub("/", "!s")) end
+local function escaped(rel) return (text.replace((text.replace(rel, "!", "!!")), "/", "!s")) end
 local function partName(rel, n, of) return escaped(rel) .. "." .. n .. "-" .. of end
 -- digits, one at least (the numbers in a part's name)
-local function isNumber(s) return s ~= nil and s ~= "" and scan.all(s, scan.isDigit) end
 
 -- A pool over the drives `opts.drives()` gives, using `base` (the real fs
 -- functions) for its members' files.  opts.clock: seconds now (os.clock);
@@ -171,10 +172,11 @@ function J.new(base, opts)
             local dir = base.combine(m.root, PARTS)
             if base.isDir(dir) then
                 for _, name in ipairs(base.list(dir)) do
-                    if name:sub(1, #prefix) == prefix then
+                    local after = text.stripPrefix(name, prefix)
+                    if after then
                         -- after the prefix: "n-total", two numbers
-                        local n, total = text.cut(name:sub(#prefix + 1), "-")
-                        if isNumber(n) and isNumber(total) then
+                        local n, total = text.cut(after, "-")
+                        if scan.isUnsigned(n) and scan.isUnsigned(total) then
                             byN[tonumber(n)] = base.combine(dir, name)
                             of = math.max(of, tonumber(total))
                         end
@@ -297,11 +299,11 @@ function J.new(base, opts)
         function h.readLine(keep)
             check()
             if pos > #data then return nil end
-            local e = data:find("\n", pos, true)
+            local e = text.find(data, "\n", pos)
             local line
             if e then line = data:sub(pos, keep and e or e - 1); pos = e + 1
             else line = data:sub(pos); pos = #data + 1 end
-            if not keep and text.endsWith(line, "\r") then line = line:sub(1, -2) end
+            if not keep then line = text.stripSuffix(line, "\r") or line end
             return line
         end
         function h.readAll()
@@ -449,7 +451,7 @@ function J.new(base, opts)
     end
 
     function F.open(rel, mode)
-        local binary = mode:find("b", 1, true) ~= nil
+        local binary = text.contains(mode, "b")
         local kind = mode:sub(1, 1)
         if kind == "r" then
             if isDir(rel) then return nil, full(rel) .. ": No such file" end
@@ -478,25 +480,9 @@ function J.new(base, opts)
     return P
 end
 
--- fs.find's patterns: "*" any run of characters within a name, "?" any
--- one, anything else itself; the whole name must match.  A "*" tries
--- each length of run, shortest first, until the rest matches.
-local function globMatch(pattern, name)
-    local function matchFrom(p, n)              -- pattern from p on against name from n on
-        if p > #pattern then return n > #name end
-        local c = pattern:sub(p, p)
-        if c == "*" then
-            for k = n, #name + 1 do
-                if matchFrom(p + 1, k) then return true end
-            end
-            return false
-        end
-        if n > #name then return false end
-        if c == "?" or c == name:sub(n, n) then return matchFrom(p + 1, n + 1) end
-        return false
-    end
-    return matchFrom(1, 1)
-end
+-- fs.find's patterns, for glob.match: "*" any run of characters within a
+-- name, "?" any one, anything else itself (no [classes], no \ escapes)
+local FIND_GLOB = { escapes = false, classes = false }
 
 --------------------------------------------------------------------------
 -- Tab completion through a patched fs table
@@ -539,7 +525,7 @@ local function splitCompletion(combine, path, location)
         if isSlash(path:sub(i, i)) then lastSlash = i end
     end
     local typed = path:sub(lastSlash + 1)
-    local folder = (path:sub(1, lastSlash):gsub("\\", "/"))
+    local folder = (text.replace(path:sub(1, lastSlash), "\\", "/"))
     if isSlash(path:sub(1, 1)) then return combine(folder), typed, true end
     return combine(location or "", folder), typed, lastSlash > 0
 end
@@ -557,13 +543,12 @@ local function completeThrough(fsTable, path, location, files, dirs)
     local names = {}
     if folder ~= "" and not namedFolder then names[1] = ".." end
     for _, name in ipairs(fsTable.list(folder)) do names[#names + 1] = name end
-    local showHidden = hidden or typed:sub(1, 1) == "."
+    local showHidden = hidden or text.startsWith(typed, ".")
 
     local out = {}
     for _, name in ipairs(names) do
-        local fits = name:sub(1, #typed) == typed
-        if fits and (showHidden or name:sub(1, 1) ~= ".") then
-            local ending = name:sub(#typed + 1)
+        local ending = text.stripPrefix(name, typed)        -- (nil: it doesn't fit)
+        if ending and (showHidden or not text.startsWith(name, ".")) then
             if name == ".." or fsTable.isDir(combine(folder, name)) then
                 out[#out + 1] = ending .. "/"
                 if dirs and ending ~= "" then out[#out + 1] = ending end
@@ -589,7 +574,7 @@ function J.install(fsTable, opts)
         if type(p) ~= "string" then return nil end
         p = base.combine(p)
         if p == mount then return "" end
-        if p:sub(1, #mount + 1) == mount .. "/" then return p:sub(#mount + 2) end
+        return text.stripPrefix(p, mount .. "/")
     end
 
     local function wrap(name, onRoot)
@@ -663,16 +648,13 @@ function J.install(fsTable, opts)
     if origFind then
         function fsTable.find(pattern)
             local out = origFind(pattern)
-            local parts = {}
-            for _, part in ipairs(text.split(base.combine(pattern), "/", true)) do  -- (names kept as they are)
-                if part ~= "" then parts[#parts + 1] = part end
-            end
-            if #parts == 0 or not globMatch(parts[1], mount) then return out end
+            local parts = path.segments(base.combine(pattern))
+            if #parts == 0 or not glob.match(parts[1], mount, FIND_GLOB) then return out end
             local function walk(rel, i)
                 if i > #parts then out[#out + 1] = base.combine(mount, rel); return end
                 if not F.isDir(rel) then return end
                 for _, n in ipairs(F.list(rel)) do
-                    if globMatch(parts[i], n) then walk(base.combine(rel, n), i + 1) end
+                    if glob.match(parts[i], n, FIND_GLOB) then walk(base.combine(rel, n), i + 1) end
                 end
             end
             walk("", 2)

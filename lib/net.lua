@@ -136,7 +136,7 @@ function N.parseIP(s)
     if #parts ~= 4 then return nil end
     local n = 0
     for _, part in ipairs(parts) do
-        if part == "" or not scan.all(part, scan.isDigit) then return nil end
+        if not scan.isUnsigned(part) then return nil end
         local octet = tonumber(part)
         if octet > 255 then return nil end
         n = n * 256 + octet
@@ -160,7 +160,7 @@ function N.parseCIDR(s)
     local ip, len = text.cut(tostring(s), "/")
     if len == nil then
         ip, len = s, "32"
-    elseif len == "" or not scan.all(len, scan.isDigit) then
+    elseif not scan.isUnsigned(len) then
         return nil
     end
     ip, len = N.parseIP(ip), tonumber(len)
@@ -173,7 +173,7 @@ end
 function N.link(name)
     -- name: modem ["." digits]
     local modem, vlan = text.cutLast(name, ".")
-    if vlan == nil or vlan == "" or not scan.all(vlan, scan.isDigit) then return name, N.CHANNEL, nil end
+    if not scan.isUnsigned(vlan) then return name, N.CHANNEL, nil end
     vlan = tonumber(vlan)
     if vlan < 1 or vlan > 4094 then return nil end
     return modem, N.CHANNEL + vlan, vlan
@@ -186,8 +186,8 @@ N.SIDES = { top = 0, bottom = 1, left = 2, right = 3, front = 4, back = 5 }
 -- 249), else a hash of its name into 6-255.
 function N.port(modem)
     if N.SIDES[modem] then return N.SIDES[modem] end
-    local digits = text.startsWith(modem, "modem_") and modem:sub(#"modem_" + 1)
-    local n = digits and digits ~= "" and scan.all(digits, scan.isDigit) and tonumber(digits)
+    local digits = text.stripPrefix(modem, "modem_")
+    local n = scan.isUnsigned(digits) and tonumber(digits)
     if n and n <= 249 then return 6 + n end
     local h = 0
     for i = 1, #modem do h = (h * 31 + modem:byte(i)) % 250 end
@@ -1163,7 +1163,7 @@ function N.config(st)
     local cfg = { ifaces = {}, routes = {}, forward = st.get("net.forward") == true,
                   rpfilter = N.rpfilter(st.get("net.rpfilter")), hosts = {}, dns = {}, neigh = {} }
     for _, name in ipairs(st.getNames()) do
-        local iface = text.startsWith(name, "net.if.") and name:sub(#"net.if." + 1)
+        local iface = text.stripPrefix(name, "net.if.")
         if iface and iface ~= "" and st.get(name) and st.get(name) ~= "" then cfg.ifaces[iface] = st.get(name) end
     end
     -- a list item's "dev <iface>" at the end: words from the first'th on,

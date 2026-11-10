@@ -38,6 +38,7 @@ local cu = require("cu").init("ping",
     "ping [-q] [-c count] [-i seconds] [-t ttl] [-W seconds] [-w deadline] [-s size] [-I iface|addr] host")
 local net = require("net")
 local netdb = require("netdb")
+local convert = require("convert")
 local opts, operands = cu.getopt({ ... }, "qc:i:t:W:w:s:I:")
 if #operands ~= 1 then cu.usageError() end
 
@@ -45,7 +46,7 @@ if #operands ~= 1 then cu.usageError() end
 -- usage error
 local function number(letter, dflt, least)
     if opts[letter] == nil then return dflt end
-    local n = tonumber(opts[letter])
+    local n = convert.toNumber(opts[letter])
     if not n or n < (least or 0) then cu.usageError("bad -" .. letter .. " " .. opts[letter]) end
     return n
 end

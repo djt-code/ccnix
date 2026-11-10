@@ -18,6 +18,7 @@
 
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 
 local T = {}
 T.IAC, T.DONT, T.DO, T.WONT, T.WILL, T.SB, T.SE = 255, 254, 253, 252, 251, 250, 240
@@ -25,7 +26,7 @@ T.IP, T.AYT, T.NOP = 244, 246, 241
 T.ECHO, T.SGA, T.NAWS = 1, 3, 31
 
 function T.cmd(c, opt) return string.char(255, c, opt) end
-function T.escape(s) return (s:gsub("\255", "\255\255")) end
+function T.escape(s) return (text.replace(s, "\255", "\255\255")) end
 function T.sub(opt, payload) return string.char(255, 250, opt) .. T.escape(payload) .. string.char(255, 240) end
 function T.naws(w, h)
     return T.sub(T.NAWS, string.char(math.floor(w / 256), w % 256, math.floor(h / 256), h % 256))
@@ -45,7 +46,7 @@ function T.parser(h)
         end
         while i <= n do
             if state == "data" then
-                local j = s:find("\255", i, true)
+                local j = text.find(s, "\255", i)
                 if not j then data[#data + 1] = s:sub(i); break end
                 data[#data + 1] = s:sub(i, j - 1)
                 i, state = j + 1, "iac"
@@ -88,16 +89,6 @@ end
 --------------------------------------------------------------------------
 -- Characters and colours
 --------------------------------------------------------------------------
-local function utf8(cp)
-    if cp < 0x80 then return string.char(cp)
-    elseif cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
-    elseif cp < 0x10000 then
-        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
-    end
-    return string.char(0xF0 + math.floor(cp / 262144), 0x80 + math.floor(cp / 4096) % 64,
-        0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
-end
-
 -- The sextant for a 2x3 pattern (bit 0 top left ... bit 5 bottom right).
 local function sextant(p)
     if p == 0 then return 0x20 elseif p == 63 then return 0x2588
@@ -108,8 +99,8 @@ end
 local OUT, IN = {}, {}       -- CC character -> UTF-8; code point -> { char, inverted }
 for c = 0, 255 do
     if c >= 32 and c < 127 then OUT[c] = string.char(c)
-    elseif c >= 160 then OUT[c] = utf8(c)
-    elseif c >= 128 then OUT[c] = utf8(sextant(c - 128))
+    elseif c >= 160 then OUT[c] = convert.utf8(c)
+    elseif c >= 128 then OUT[c] = convert.utf8(sextant(c - 128))
     else OUT[c] = " " end
 end
 for c = 160, 255 do IN[c] = { c } end
@@ -120,7 +111,8 @@ for p = 0, 63 do
     end
 end
 
--- CC text as UTF-8.
+-- CC text as UTF-8: its block graphics as sextants too (convert.toUTF8
+-- takes 128-159 as Latin-1's control characters; a terminal can't show those).
 function T.toUTF8(s)
     local out = {}
     for i = 1, #s do out[i] = OUT[s:byte(i)] end
@@ -170,21 +162,21 @@ function T.render(win, last)
         last.rows, last.w, last.h, last.cursor = {}, w, h, nil
     end
     for y = 1, h do
-        local text, fg, bg = win.getLine(y)
-        local key = text .. fg .. bg
+        local line, fg, bg = win.getLine(y)
+        local key = line .. fg .. bg
         if last.rows[y] ~= key then
             last.rows[y] = key
             out[#out + 1] = "\27[" .. y .. ";1H"
             local cf, cb, x = nil, nil, 1
-            while x <= #text do
+            while x <= #line do
                 local f, b = fg:sub(x, x), bg:sub(x, x)
                 local e = x
-                while e < #text and fg:sub(e + 1, e + 1) == f and bg:sub(e + 1, e + 1) == b do e = e + 1 end
+                while e < #line and fg:sub(e + 1, e + 1) == f and bg:sub(e + 1, e + 1) == b do e = e + 1 end
                 if f ~= cf or b ~= cb then
-                    out[#out + 1] = "\27[38;5;" .. T.XTERM[tonumber(f, 16) or 0] .. ";48;5;" .. T.XTERM[tonumber(b, 16) or 15] .. "m"
+                    out[#out + 1] = "\27[38;5;" .. T.XTERM[convert.toInteger(f, 16) or 0] .. ";48;5;" .. T.XTERM[convert.toInteger(b, 16) or 15] .. "m"
                     cf, cb = f, b
                 end
-                out[#out + 1] = T.toUTF8(text:sub(x, e))
+                out[#out + 1] = T.toUTF8(line:sub(x, e))
                 x = e + 1
             end
         end
@@ -236,7 +228,7 @@ function T.decoder(emit, keysT)
         if final == "~" then
             if params == "200" then paste = {}; return end
             press(TILDE_KEYS[scan.new(params):readWhile(scan.isDigit)])    -- (the number before any ;)
-        elseif params:sub(1, 1) == "<" and (final == "M" or final == "m") then
+        elseif text.startsWith(params, "<") and (final == "M" or final == "m") then
             -- an SGR mouse report: "<" button ";" x ";" y, all three numbers
             local sc = scan.new(params, 2)
             local b = sc:readNumber()
@@ -283,9 +275,9 @@ function T.decoder(emit, keysT)
                 paste[#paste + 1] = ch
                 local tail = table.concat(paste, "", math.max(1, #paste - 5))
                 if tail == "\27[201~" then
-                    local text = table.concat(paste, "", 1, #paste - 6)
+                    local pasted = table.concat(paste, "", 1, #paste - 6)
                     paste = nil
-                    if text ~= "" then emit("paste", text) end
+                    if pasted ~= "" then emit("paste", pasted) end
                 end
             elseif state == "esc" then
                 if ch == "[" then state, buf = "csi", ""
@@ -363,7 +355,7 @@ function T.terminal(win, colour)
     end
     local function sgr(params)
         local p, i = {}, 1
-        for _, v in ipairs(text.split(params, ";", true)) do p[#p + 1] = tonumber(v) or 0 end
+        for _, v in ipairs(text.split(params, ";", true)) do p[#p + 1] = convert.toInteger(v) or 0 end
         if #p == 0 then p[1] = 0 end
         while i <= #p do
             local v = p[i]
@@ -397,8 +389,9 @@ function T.terminal(win, colour)
         win.write((" "):rep(math.max(0, to - from + 1)))
     end
     local function csi(params, final)
-        local priv = params:sub(1, 1) == "?"
-        if priv then params = params:sub(2) end
+        local private = text.stripPrefix(params, "?")     -- (CSI ? ...: a DEC private mode)
+        local priv = private ~= nil
+        params = private or params
         -- the first two numbers: digits, an optional ";", digits (either may be missing)
         local sc = scan.new(params)
         local n1 = sc:readNumber()
@@ -546,7 +539,7 @@ function T.heldLine(t)
         return s
     end
     function l.data(d)
-        d = d:gsub("\n", "\r\n")
+        d = text.replace(d, "\n", "\r\n")
         if l.text ~= "" and not hidden then
             local x, y, n = at[1], at[2], at[3]
             local _, _, now = t.at()

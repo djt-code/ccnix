@@ -43,6 +43,8 @@ local cu = require("cu").init("nc",
         .. " | nc -u -l [-nv] port | nc -z [-nv] [-w seconds] host port[-port]")
 local net = require("net")
 local netdb = require("netdb")
+local text = require("text")
+local convert = require("convert")
 local opts, operands = cu.getopt({ ... }, "ulnvzp:w:")
 local socktype = opts.u and netdb.SOCK_DGRAM or netdb.SOCK_STREAM
 local numeric = opts.n and netdb.AI_NUMERICHOST + netdb.AI_NUMERICSERV or 0
@@ -57,7 +59,7 @@ end
 
 local S, why = net.stack()
 if not S then cu.fail(why, 2); return cu.exit() end
-local wait = opts.w and tonumber(opts.w)
+local wait = opts.w and convert.toNumber(opts.w)
 if opts.w and not wait then cu.usageError("bad -w " .. opts.w) end
 
 -- Run fn, taking Ctrl+T (here, after the input) as the end.
@@ -73,14 +75,13 @@ end
 -- (a service's name stands for its port, alone, not in a range), or nil
 -- after saying why.
 local function portRange(s)
-    local dash = s:find("-", 2, true)
+    local dash = text.find(s, "-", 2)               -- (after the first character)
     if not dash then
         local _, port = lookup(nil, s)
         return port, port
     end
-    local low, high = tonumber(s:sub(1, dash - 1)), tonumber(s:sub(dash + 1))
-    if not (low and high) or low ~= math.floor(low) or high ~= math.floor(high)
-        or low < 1 or high > 65535 or low > high then
+    local low, high = convert.toInteger(s:sub(1, dash - 1)), convert.toInteger(s:sub(dash + 1))
+    if not (low and high) or low < 1 or high > 65535 or low > high then
         cu.fail("bad port range " .. s .. " (low-high, 1-65535)", 2)
         return nil
     end
@@ -122,7 +123,7 @@ if opts.u then
     local function show(data, from, port)
         if opts.v then io.write(string.format("from %s:%s: ", tostring(from), tostring(port))) end
         local s = type(data) == "string" and data or textutils.serialise(data, { compact = true })
-        io.write(s, s:sub(-1) == "\n" and "" or "\n")
+        io.write(s, text.endsWith(s, "\n") and "" or "\n")
     end
     local function printing(sock)
         while true do
@@ -206,7 +207,7 @@ guarded(parallel.waitForAny,
                 if e ~= "closed" then broke = e end
                 return
             end
-            io.write(screen and s:gsub("\r\n", "\n") or s)
+            io.write(screen and (text.replace(s, "\r\n", "\n")) or s)
         end
     end)
 local state = conn:state()

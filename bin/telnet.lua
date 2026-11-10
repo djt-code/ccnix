@@ -127,21 +127,20 @@ local function showBack()
     seen = #hist
     for r = 1, h - 1 do
         local i = #hist + r - back
-        local text, tf, tb
-        if i <= #hist then text, tf, tb = hist[i][1], hist[i][2], hist[i][3]
-        else text, tf, tb = win.getLine(i - #hist) end
-        if #text ~= w then                      -- (kept at another width)
-            text = (text .. (" "):rep(w)):sub(1, w)
-            tf, tb = (tf .. ("0"):rep(w)):sub(1, w), (tb .. ("f"):rep(w)):sub(1, w)
+        local line, tf, tb
+        if i <= #hist then line, tf, tb = hist[i][1], hist[i][2], hist[i][3]
+        else line, tf, tb = win.getLine(i - #hist) end
+        if #line ~= w then                      -- (kept at another width)
+            line, tf, tb = text.padRight(line, w), text.padRight(tf, w, "0"), text.padRight(tb, w, "f")
         end
         native.setCursorPos(1, r)
-        native.blit(text, tf, tb)
+        native.blit(line, tf, tb)
     end
     native.setCursorPos(1, h)
     native.setBackgroundColour(colours.black)
     native.setTextColour(colours.yellow)
     native.clearLine()
-    native.write(("scrollback: " .. back .. " up; Shift+PgUp/PgDn, wheel; a key: back"):sub(1, w))
+    native.write(text.truncate("scrollback: " .. back .. " up; Shift+PgUp/PgDn, wheel; a key: back", w))
     native.setCursorBlink(false)
 end
 local function scrollBy(n) back = back + n; showBack() end
@@ -153,8 +152,8 @@ local function menu()
     native.setBackgroundColour(colours.black)
     native.setTextColour(colours.yellow)
     native.clearLine()
-    native.write(((proc and "telnet: q quit, t interrupt, z stop, other: back")
-        or "telnet: q quit, t interrupt, other: back"):sub(1, w))
+    native.write(text.truncate((proc and "telnet: q quit, t interrupt, z stop, other: back")
+        or "telnet: q quit, t interrupt, other: back", w))
     local quit = false
     while true do
         local ev, a = os.pullEventRaw()
@@ -220,7 +219,7 @@ local ok, e = pcall(parallel.waitForAny,
                     -- each line typed (a CR at its end dropped), Enter after each newline
                     local lines = text.split(ev[2], "\n", true)
                     for k, piece in ipairs(lines) do
-                        if piece ~= "" then typed(text.endsWith(piece, "\r") and piece:sub(1, -2) or piece) end
+                        if piece ~= "" then typed(text.stripSuffix(piece, "\r") or piece) end
                         if k < #lines then enter() end
                     end
                 end

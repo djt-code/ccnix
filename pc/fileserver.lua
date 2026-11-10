@@ -39,12 +39,11 @@ local function ours(label)
     if label == nil or label == "" or label == "jbod" then return true end
     local _, where = text.cutLast(label, " ")         -- the last word: the drive
     if where == nil then return false end
-    local n = text.startsWith(where, "drive_") and where:sub(#"drive_" + 1)
-    return (n and n ~= "" and scan.all(n, scan.isDigit)) or SIDES[where] == true
+    return scan.isUnsigned(text.stripPrefix(where, "drive_")) or SIDES[where] == true
 end
 local function label(name)
     local host = os.getComputerLabel() or ("computer " .. os.getComputerID())
-    local want, have = (host .. " " .. name):sub(1, 32), disk.getLabel(name)
+    local want, have = text.truncate(host .. " " .. name, 32), disk.getLabel(name)
     if have ~= want and ours(have) then disk.setLabel(name, want) end
 end
 
@@ -93,23 +92,23 @@ elseif cmd == "startup" then
     local line = 'shell.run("fileserver mount")'
     if not ccnix then                                   -- this program by its path, less .lua
         local prog = shell.getRunningProgram()
-        if text.endsWith(prog, ".lua") then prog = prog:sub(1, -#".lua" - 1) end
+        prog = text.stripSuffix(prog, ".lua") or prog
         line = string.format('shell.run("%s mount")', "/" .. prog)
     end
     local target = fs.isDir("/startup") and "/startup/10-fileserver.lua" or "/startup.lua"
-    local text = ""
+    local startup = ""
     if fs.exists(target) then
         local f = fs.open(target, "r")
-        text = f.readAll() or ""
+        startup = f.readAll() or ""
         f.close()
     end
-    if text:find(line, 1, true) then
+    if text.contains(startup, line) then
         print(target .. " mounts it already.")
     else
         -- first, before anything that doesn't return (ccsh at boot, the
         -- autostart), which deploy/setup puts at the end
         local f = fs.open(target, "w")
-        f.write(line .. "\n" .. text)
+        f.write(line .. "\n" .. startup)
         f.close()
         print("Added to " .. target .. ": /" .. MOUNT .. " is mounted at every boot.")
     end

@@ -78,13 +78,13 @@ if verbose then
     return cu.exit()
 end
 
+-- each record type host shows: the words before its data, and after
+local SAYS = { A = { " has address ", "" }, CNAME = { " is an alias for ", "." }, PTR = { " domain name pointer ", "." } }
 local said = 0
 for _, rr in ipairs(answers) do
-    local what = rr.type == "A" and " has address " .. rr.data
-        or rr.type == "CNAME" and " is an alias for " .. rr.data .. "."
-        or rr.type == "PTR" and " domain name pointer " .. rr.data .. "."
-    if what then
-        io.write(rr.name, what, "\n")
+    local says = SAYS[rr.type]
+    if says then
+        io.write(rr.name, says[1], rr.data, says[2], "\n")
         said = said + 1
     end
 end

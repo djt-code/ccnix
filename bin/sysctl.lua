@@ -22,6 +22,8 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("sysctl", "sysctl [-n | -d] -a | name[=value]...")
+local text = require("text")
+local convert = require("convert")
 local opts, ops = cu.getopt({ ... }, "adnw")
 if opts.n and opts.d then return cu.usageError("-n or -d, not both") end
 if (opts.a ~= nil) == (#ops > 0) then return cu.usageError() end
@@ -33,7 +35,7 @@ if opts.a then
     table.sort(ops)
 end
 
-local function text(v)
+local function shown(v)
     if v == nil then return "" end
     if type(v) == "table" then return textutils.serialise(v, { compact = true }) end
     return tostring(v)
@@ -45,10 +47,10 @@ local function show(name, after)
     if opts.d then
         io.write(name, ": ", details(name).description or "", "\n")
     elseif opts.n then
-        io.write(text(settings.get(name)), "\n")
+        io.write(shown(settings.get(name)), "\n")
     else
         local v = settings.get(name)
-        io.write(name, " = ", text(v), after or "", "\n")
+        io.write(name, " = ", shown(v), after or "", "\n")
     end
 end
 
@@ -60,24 +62,22 @@ local function valueFor(name, given)
         if given == "true" then return true elseif given == "false" then return false end
         return nil
     end
-    if want == "number" or (want == nil and tonumber(given)) then return tonumber(given) end
+    if want == "number" or (want == nil and convert.toNumber(given)) then return convert.toNumber(given) end
     if want == nil then return given end
 end
 
 local changed = false
 for _, op in ipairs(ops) do
-    local eq = op:find("=", 1, true)
-    local name = eq and op:sub(1, eq - 1) or op
+    local name, given = text.cut(op, "=")      -- name ["=" value]
     if name == "" then
         cu.fail(op .. ": no name")
-    elseif not eq then
+    elseif not given then
         if settings.get(name) == nil and not known[name] then cu.fail(name .. ": unknown key") else show(name) end
-    elseif eq == #op then
+    elseif given == "" then
         settings.unset(name)
         changed = true
         if settings.get(name) == nil then io.write(name, ": not set\n") else show(name, " (its default)") end
     else
-        local given = op:sub(eq + 1)
         local value = valueFor(name, given)
         if value == nil then
             cu.fail(name .. " is a " .. tostring(details(name).type) .. ": not " .. given)
