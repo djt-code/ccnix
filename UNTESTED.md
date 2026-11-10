@@ -30,6 +30,16 @@ section.
     long coloured line (`vim` on a long line, `help` in a narrow window),
     a long IRC message split in two (now at the last space that fits, with
     the rest's spacing kept), the irc nick list and buffer list columns.
+  - **the second pass (one implementation per job):** `mine -3 3 32` and
+    `mine --spacing=4`, `farm`, `mow notorch`, `claude go -5 blocks` (the
+    turtles' options now go through lib/getopt); claude's Lua in lib/syntax's
+    colours; `ccnix setup --autostart=router`; `ps -l` and a panic report
+    (one row layout); `export -p`, `$HOSTNAME` on an unlabelled computer
+    (the ID); telnetd's banner; `ip route`, `netstat -r`, `tcpdump net
+    10.0.0.0/8` (lib/net's prefix math); an IRC `MODE #c +ov a b` both
+    ways; vi `:r` of an empty file (adds nothing, as vim); a Lua page
+    using `text` and `fileio`; jbod on the fileserver (reads through the
+    disk under the pool).
   - **behaviour that changed on purpose:** WHOIS idle reads "5m 3s";
     curl and git refuse an unknown or misused `--option`; httpd listing
     links percent-encode `!$&'()*+,;=:@`; a syslog line's trailing blanks

@@ -1900,8 +1900,11 @@ Items are named or picked by a test: `T.selectItem(what)`,
 holds; `T.findTool("_pickaxe")` finds the equipped or carried tool whose name ends so.
 `T.hasFuel(n)` is the "unlimited or at least n" check, `T.setDir(d)` fixes
 a heading a program has worked out, `T.lookAround()` turns on the spot to
-see all four sides, and `T.sortedKeys(t)` gives a table's keys in a set
-order (so what a program does doesn't depend on `pairs`).
+see all four sides, `T.options(args, long)` reads a program's `--options`
+(lib/getopt's, with every other word, `-3` included, left as an operand),
+and `T.loadMineJob`/`T.saveMineJob` are mine.job's one reader and writer.
+A table's keys in a set order (so what a program does doesn't depend on
+`pairs`) are lib/tables' `tables.sortedKeys(t)`.
 
 ### Big programs: no top-level locals
 
