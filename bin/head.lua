@@ -12,21 +12,19 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("head", "head [-c number | -n number] [file...]")
-local convert = require("convert")
 local scan = require("scan")
 local text = require("text")
 local args = { ... }
 -- the obsolete form: -number is -n number
 local obsolete = args[1] and text.stripPrefix(args[1], "-")
 if obsolete and scan.isUnsigned(obsolete) then args[1] = "-n" .. obsolete end
-local _, files, order = cu.getopt(args, "c:n:")
+local opts, files, order = cu.getopt(args, "c:n:")
 
-local bytes, count = false, 10
-for _, o in ipairs(order) do
-    local n = convert.toInteger(o[2])
-    if not n or n < 0 then cu.usageError("invalid count: " .. o[2]) end
-    bytes, count = o[1] == "c", math.min(n, 0x7fffffff)
-end
+-- whole numbers, 0 or more; the last -c or -n given wins
+local byteCount, lineCount = cu.number(opts, "c", nil, 0, true), cu.number(opts, "n", 10, 0, true)
+local bytes = false
+for _, o in ipairs(order) do bytes = o[1] == "c" end
+local count = math.min(bytes and byteCount or lineCount, 0x7fffffff)
 
 -- Copy the first `count` lines or bytes of h; yield now and then so a
 -- long copy to the screen can't run "too long without yielding".
@@ -47,7 +45,7 @@ local function copy(h)
             left = left - 1
         end
         io.write(s)
-        if left % 256 == 0 then os.queueEvent("head"); os.pullEvent("head") end
+        cu.breathe()
     end
 end
 

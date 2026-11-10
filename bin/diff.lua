@@ -18,7 +18,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("diff", "diff [-c|-e|-f|-u|-C n|-U n] [-bqr] file1 file2")
 local convert = require("convert")
 local path = require("path")
-local scan = require("scan")
+local tables = require("tables")
 local text = require("text")
 local args = { ... }
 local opts, ops, order = cu.getopt(args, "bcefqruC:U:", 2)
@@ -41,22 +41,11 @@ for _, o in ipairs(order) do
     end
 end
 
--- a long job (a big diff, or a lot of output) yields now and then, or
--- CC stops the program for running too long without yielding
-local lastYield = os.clock()
-local function breathe()
-    if os.clock() - lastYield > 2 then
-        os.queueEvent("diff")
-        os.pullEvent("diff")
-        lastYield = os.clock()
-    end
-end
-
-local outs = 0
+-- (a long job, a big diff or a lot of output, yields now and then:
+-- cu.breathe)
 local function out(...)
     io.write(...)
-    outs = outs + 1
-    if outs % 200 == 0 then breathe() end
+    cu.breathe()
 end
 local NOEOL = "\\ No newline at end of file\n"
 
@@ -76,17 +65,14 @@ end
 -- lines without their newlines, the keys they are compared by, and
 -- whether the last line has no newline (its key gets a marker, so "x"
 -- and "x\n" differ)
-local function notSpace(c) return not scan.isSpace(c) end
-
 local function split(s)
-    local L, K = text.split(s, "\n", true), {}
-    local last = table.remove(L)    -- (what comes after the last newline)
-    if last ~= "" then L[#L + 1] = last end
+    local L, K = text.lines(s, true), {}
+    local noeol = s ~= "" and not text.endsWith(s, "\n")
     for i, l in ipairs(L) do
         K[i] = opts.b and text.trimEnd(text.squeeze(l)) or l
     end
-    if last ~= "" then K[#K] = K[#K] .. "\0" end
-    return L, K, last ~= ""
+    if noeol then K[#K] = K[#K] .. "\0" end
+    return L, K, noeol
 end
 
 --------------------------------------------------------------------------
@@ -95,7 +81,6 @@ end
 -- is kept as line j of file2 (and mB[j] = i).
 --------------------------------------------------------------------------
 local A, B, mA, mB
-local steps = 0
 
 -- the middle snake of A(a0..a1] against B(b0..b1], relative to a0, b0
 local function snake(a0, a1, b0, b1)
@@ -104,8 +89,7 @@ local function snake(a0, a1, b0, b1)
     local odd = delta % 2 ~= 0
     local vf, vb = { [1] = 0 }, { [1] = 0 }
     for d = 0, math.ceil((N + M) / 2) do
-        steps = steps + d
-        if steps > 20000 then steps = 0; breathe() end
+        cu.breathe()
         -- forwards from the start, on diagonals k = x - y
         for k = -d, d, 2 do
             local x
@@ -183,19 +167,15 @@ end
 --------------------------------------------------------------------------
 -- Output formats
 --------------------------------------------------------------------------
-local DAY = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
-local MON = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
-
 -- an operand's modification time for the -c and -u headers (UTC); "-" is now
 local function stamp(name)
-    local ms = name ~= "-" and fs.attributes(shell.resolve(name)).modified or os.epoch("utc")
-    local t = os.date("!*t", math.floor(ms / 1000))
+    local ms = name ~= "-" and cu.mtime(shell.resolve(name)) or os.epoch("utc")
+    local s = math.floor(ms / 1000)
     if fmt == "u" then
-        return string.format("%04d-%02d-%02d %02d:%02d:%02d.%09d +0000",
-            t.year, t.month, t.day, t.hour, t.min, t.sec, (ms % 1000) * 1000000)
+        return os.date("!%Y-%m-%d %H:%M:%S", s) .. string.format(".%09d +0000", (ms % 1000) * 1000000)
     end
-    return string.format("%s %s %2d %02d:%02d:%02d %d",
-        DAY[t.wday], MON[t.month], t.day, t.hour, t.min, t.sec, t.year)
+    -- "Sat Nov  7 ...": the day of the month padded with a space, not a 0
+    return os.date("!%a %b ", s) .. string.format("%2d", os.date("!*t", s).day) .. os.date("! %H:%M:%S %Y", s)
 end
 
 -- "s,e" or "s" (sep is " " for -f)
@@ -335,14 +315,11 @@ local function isDir(name) return name ~= "-" and fs.isDir(shell.resolve(name)) 
 
 -- compare two directories by the names in them
 local function diffDirs(d1, d2)
-    local names, seen = {}, {}
+    local names = {}        -- (a set: the names in either)
     for _, d in ipairs({ d1, d2 }) do
-        for _, f in ipairs(fs.list(shell.resolve(d))) do
-            if not seen[f] then seen[f] = true; names[#names + 1] = f end
-        end
+        for _, f in ipairs(fs.list(shell.resolve(d))) do names[f] = true end
     end
-    table.sort(names)
-    for _, f in ipairs(names) do
+    for _, f in ipairs(tables.sortedKeys(names)) do
         local p1, p2 = path.join(d1, f), path.join(d2, f)
         local e1, e2 = fs.exists(shell.resolve(p1)), fs.exists(shell.resolve(p2))
         if not e2 then out("Only in ", d1, ": ", f, "\n"); cu.status = math.max(cu.status, 1)

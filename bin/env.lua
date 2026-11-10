@@ -14,6 +14,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("env", "env [-i] [-u name]... [name=value]... [command [arg...]]")
+local tables = require("tables")
 local text = require("text")
 local args = { ... }
 if not (os.environ and os.setenv) then
@@ -46,10 +47,8 @@ for _, p in ipairs(set) do os.setenv(p[1], p[2]) end
 
 local cmd = operands[i]
 if not cmd then
-    local env, names = os.environ(), {}
-    for k in pairs(env) do names[#names + 1] = k end
-    table.sort(names)
-    for _, k in ipairs(names) do io.write(k, "=", env[k], "\n") end
+    local env = os.environ()
+    for _, k in ipairs(tables.sortedKeys(env)) do io.write(k, "=", env[k], "\n") end
     restore()
     return cu.exit()
 end

@@ -102,6 +102,11 @@ check("diff -c: context format", r.status == 1 and r.out == lines({
     "--- 1,5 ----", "  a", "! B", "  c", "  d", "  e",
     "***************", "*** 8,13 ****", "  h", "  i", "  j", "- k", "  l", "  m",
     "--- 8,14 ----", "  h", "  i", "  j", "  l", "  m", "+ n", "+ new" }), show(r.out))
+W:file("day7.txt", "x\n")
+W.mtime["day7.txt"] = 1794052800000         -- Sat 2026-11-07 12:00:00 UTC: a one-digit day
+r = W:run("diff", "-c", "o.txt", "day7.txt")
+local head7 = lines({ "*** o.txt Wed Oct 28 12:00:00 2026", "--- day7.txt Sat Nov  7 12:00:00 2026" })
+check("diff -c: a one-digit day padded with a space", r.out:sub(1, #head7) == head7, show(r.out))
 r = W:run("diff", "-C", "1", "o.txt", "n.txt")
 check("diff -C 1: one line of context", r.out:match("\n(%*%*%*%*.*)$") == lines({
     "***************", "*** 1,3 ****", "  a", "! b", "  c", "--- 1,3 ----", "  a", "! B", "  c",

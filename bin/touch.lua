@@ -13,6 +13,7 @@
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("touch", "touch [-acm] [-r ref_file | -t time | -d date_time] file...")
+local fileio = require("fileio")
 local scan = require("scan")
 local text = require("text")
 local opts, files = cu.getopt({ ... }, "acmr:t:d:")
@@ -51,12 +52,6 @@ end
 -- bump the modification time of existing files?
 local bump = not (opts.r or opts.t or opts.d) and (opts.m or not opts.a)
 
--- an fs error without its "/path: " prefix
-local function why(e)
-    local _, reason = text.cut(tostring(e), ": ")
-    return reason or tostring(e)
-end
-
 for _, name in ipairs(files) do
     local path = shell.resolve(name)
     if name == "" then
@@ -69,19 +64,18 @@ for _, name in ipairs(files) do
         -- nothing CraftOS can change
     elseif fs.exists(path) then
         if bump then
-            local f, e = io.open(path, "rb")
-            local body = f and f:read("a") or ""
-            if f then f:close(); f, e = io.open(path, "wb") end
-            if f then f:write(body); f:close()
-            else cu.fail(name .. ": " .. why(e)) end
+            -- (written back as it is, which makes its modification time now)
+            local body, e = fileio.read(path, true)
+            if body then body, e = fileio.write(path, body, true) end
+            if not body then cu.fail(name .. ": " .. cu.reason(e)) end
         end
     elseif not opts.c then
         local dir = fs.getDir(path)
         if dir ~= "" and not fs.isDir(dir) then
             cu.fail(name .. ": " .. (fs.exists(dir) and "Not a directory" or "No such file or directory"))
         else
-            local f, e = io.open(path, "wb")
-            if f then f:close() else cu.fail(name .. ": " .. why(e)) end
+            local ok, e = fileio.write(path, "", true)
+            if not ok then cu.fail(name .. ": " .. cu.reason(e)) end
         end
     end
 end

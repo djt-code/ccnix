@@ -40,18 +40,10 @@ end
 local i = nextDiff(1)
 if i <= n then
     if opts.l then
-        local count, lastYield = 0, os.clock()
         while i <= n do
             io.write(string.format("%d %o %o\n", i, a:byte(i), b:byte(i)))
             i = nextDiff(i + 1)
-            -- two big, quite different files: yield now and then, or CC
-            -- stops the program for running too long without yielding
-            count = count + 1
-            if count % 200 == 0 and os.clock() - lastYield > 2 then
-                os.queueEvent("cmp")
-                os.pullEvent("cmp")
-                lastYield = os.clock()
-            end
+            cu.breathe()        -- (two big, quite different files take a while)
         end
     elseif not opts.s then
         local lines = text.count(a:sub(1, i - 1), "\n")

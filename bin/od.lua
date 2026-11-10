@@ -29,17 +29,12 @@ local opts, files, order = cu.getopt({ ... }, "vA:j:N:t:bcdosx")
 -- (not the hex: "b" is a hex digit there).  The number, or nil.
 local MULT = { b = 512, k = 1024, m = 1048576 }
 local function number(s, mult)
-    local hex = text.stripPrefix(s, "0x") or text.stripPrefix(s, "0X")
-    if hex then return scan.isHex(hex) and convert.toInteger(hex, 16) or nil end
-    local body, suffix = s, s:sub(-1)
-    if MULT[suffix] then
-        if not mult then return nil end
-        body = s:sub(1, -2)
-    end
-    local n
-    if text.startsWith(body, "0") then n = convert.toInteger(body, 8)
-    elseif scan.isUnsigned(body) then n = convert.toInteger(body) end
-    return n and n * (MULT[suffix] or 1)
+    local sc = scan.new(s)
+    local digits, base = sc:readCInteger()
+    if not digits then return nil end
+    local suffix = sc:readRest()
+    local factor = suffix == "" and 1 or (mult and base ~= 16 and MULT[suffix])
+    return factor and convert.toInteger(digits, base) * factor or nil
 end
 
 -- the output types, in order: { letter, size }
@@ -95,23 +90,14 @@ if skip > #data then
 end
 data = data:sub(skip + 1, count and skip + count or nil)
 
--- The digits of the little-endian unsigned number in s, in base b: long
--- division over the bytes, so 8-byte values stay exact.
-local DIG = "0123456789abcdef"
+-- The digits of the little-endian unsigned number in s (1 to 8 bytes), in
+-- base b: given to convert.toBase as its two 32-bit halves, so 8-byte
+-- values stay exact.
 local function digits(s, b)
-    local n = { s:byte(1, -1) }
-    local out = {}
-    repeat
-        local rem, zero = 0, true
-        for i = #n, 1, -1 do
-            local v = rem * 256 + n[i]
-            n[i] = math.floor(v / b)
-            rem = v % b
-            if n[i] ~= 0 then zero = false end
-        end
-        out[#out + 1] = DIG:sub(rem + 1, rem + 1)
-    until zero
-    return string.reverse(table.concat(out))
+    local lo, hi = 0, 0
+    for i = math.min(#s, 4), 1, -1 do lo = lo * 256 + s:byte(i) end
+    for i = #s, 5, -1 do hi = hi * 256 + s:byte(i) end
+    return convert.toBase(lo, b, hi)
 end
 
 -- two's complement negation of the little-endian bytes in s
@@ -169,8 +155,7 @@ local addrW = base == "n" and 0 or #string.format(ADDR[base], 0)
 
 local prev, starred = nil, false
 for pos = 1, #data, 16 do
-    -- a big dump takes a while: yield now and then, or CC stops us
-    if pos % 4096 == 1 then os.queueEvent("od"); os.pullEvent("od") end
+    cu.breathe()        -- (a big dump takes a while)
     local block = data:sub(pos, pos + 15)
     if not opts.v and block == prev then
         if not starred then io.write("*\n"); starred = true end

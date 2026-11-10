@@ -53,6 +53,7 @@ r = W:run("df", "-k")
 widest = 0
 for l in r.out:gmatch("[^\n]+") do widest = math.max(widest, #l) end
 check("df -k still fits 39 wide", widest <= 39 and r.out:find("1024-blk", 1, true), show(r.out))
+check("df: no line ends in a blank", not r.out:find(" \n", 1, true), show(r.out))
 r = W:run("df", "-P", "nope", "a")
 check("df missing file: message, status 1, the rest still listed", r.status == 1
     and r.err[1] == "df: nope: No such file or directory" and select(2, r.out:gsub("\n", "")) == 2, show(r.errText))
@@ -114,12 +115,15 @@ check("-name ranges over punctuation, an empty range, -- before the paths",
     show(r.out .. "~" .. r2.errText .. "~" .. r3.out .. r3.errText))
 W:dir("big")
 for n = 1, 450 do W.files["big/f" .. n] = "z" end
-local pulls = 0
-local function count() pulls = pulls + 1 end
-r = W:run("find", "big", "-name", "f450", { onPull = count })
-r2 = W:run("du", "-s", "big", { onPull = count })
-check("a big tree: find and du yield as they go", r.out == "big/f450\n" and r2.out == "450 big\n" and pulls == 4,
-    show(r.out .. r2.out .. pulls))
+-- (cu.breathe yields once a second at most: here the clock runs a second
+-- each time it's read)
+local realClock, tick, pulls, pulls2 = W.os.clock, 0, 0, 0
+W.os.clock = function() tick = tick + 1; return tick end
+r = W:run("find", "big", "-name", "f450", { onPull = function() pulls = pulls + 1 end })
+r2 = W:run("du", "-s", "big", { onPull = function() pulls2 = pulls2 + 1 end })
+W.os.clock = realClock
+check("a big tree: find and du yield as they go", r.out == "big/f450\n" and r2.out == "450 big\n"
+    and pulls > 100 and pulls2 > 100, show(r.out .. r2.out .. pulls .. " " .. pulls2))
 W.fs.delete("big")
 r = W:run("find", "a", "-maxdepth", "-1")
 check("-maxdepth -1: bad number", r.status == 1 and r.err[1] == "find: -maxdepth: bad number -- -1", show(r.errText))

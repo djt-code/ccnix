@@ -8,6 +8,7 @@ package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.pat
 local M = require("mock")
 local SW = require("shellworld")
 local check = M.check
+textutils = textutils or M.textutilsApi()      -- (lib/fileio, which touch uses, and sysctl)
 
 local W = SW.new(PROJ)
 local function show(s)
@@ -179,6 +180,10 @@ check("which unknown: reported, status 1, the rest still shown", r.status == 1
 r = W:run("which")
 check("which with no name: usage error", r.status == 2 and r.err[2] == "usage: which [-a] name...")
 
+-- kill -l: the signal names, sorted (no init needed)
+r = W:run("kill", "-l")
+check("kill -l: the signal names, sorted", r.status == 0 and r.out == "CONT HUP INT KILL STOP TERM TSTP\n", show(r.out .. r.errText))
+
 --------------------------------------------------------------------------
 -- xargs
 --------------------------------------------------------------------------
@@ -270,7 +275,7 @@ check("xargs -s too small: argument line too long, status 1", r.status == 1 and 
 r = W:run("xargs", "-x", "-n", "3", "-s", "11", "echo", { pipe = true, stdin = "aa bb cc\n" })
 check("xargs -x: -n's arguments don't fit, stop", r.status == 1 and r.out == "", show(r.out))
 r = W:run("xargs", "-s", "0")
-check("xargs -s 0: usage error", r.status == 2 and r.err[1] == "xargs: invalid size '0'")
+check("xargs -s 0: usage error", r.status == 2 and r.err[1] == "xargs: bad -s 0")
 r = W:run("xargs", "-p", "-n1", "echo", { stdin = "a b\ny\nn\n" })
 check("xargs -p: y runs, anything else skips", r.status == 0 and r.out == "a\n"
     and r.errText == "echo a ?...echo b ?...", show(r.out) .. " / " .. show(r.errText))
@@ -420,7 +425,6 @@ settings = {
                  value = v == nil and d.default or v, changed = v ~= nil }
     end,
 }
-textutils = textutils or M.textutilsApi()
 r = W:run("sysctl", "-a")
 check("sysctl -a: every setting there is, set or defined, sorted, name = value (a table on one line)", r.status == 0
     and r.out:sub(1, 43) == "host.name = \nmotd.enable = true\nmy.list = {"

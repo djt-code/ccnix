@@ -83,8 +83,8 @@ end
 local whole = #keys == 0
 if whole then keys[1] = { sf = 1, sc = 1, ec = 0, mods = global, bs = global.b, be = false } end
 
-local isBlank = scan.oneOf(" \t")
-local function notBlank(c) return not isBlank(c) end
+local isBlank = scan.isTabOrSpace
+local notBlank = scan.isNot(isBlank)
 
 -- where the blanks from p on in l end: the next non-blank (#l + 1 if none)
 local function pastBlanks(l, p)
@@ -123,16 +123,6 @@ local function at(l, f, n, c, b)
     return math.min(p + c - 1, f[n][2] + 1)
 end
 
--- t with only the characters for which keep(c) holds
-local function keepOnly(t, keep)
-    local out = {}
-    for i = 1, #t do
-        local c = t:sub(i, i)
-        if keep(c) then out[#out + 1] = c end
-    end
-    return table.concat(out)
-end
-
 local function isDictChar(c) return scan.isAlnum(c) or isBlank(c) end     -- (-d)
 
 -- the number at the start of t for -n: blanks, then "-"? digit* ("."
@@ -155,8 +145,8 @@ local function keyText(l, k)
     if k.ef and k.ef <= #f then e = k.ec == 0 and f[k.ef][2] or math.min(at(l, f, k.ef, k.ec, k.be), f[k.ef][2]) end
     if whole and k.mods.b then s = pastBlanks(l, 1) end
     local t = l:sub(s, e)
-    if k.mods.d then t = keepOnly(t, isDictChar) end
-    if k.mods.i then t = keepOnly(t, scan.isPrintable) end
+    if k.mods.d then t = text.keep(t, isDictChar) end
+    if k.mods.i then t = text.keep(t, scan.isPrintable) end
     if k.mods.f then t = t:upper() end
     if k.mods.n then t = leadingNumber(t) end
     return t
@@ -165,8 +155,7 @@ end
 -- read everything, working out each line's keys once
 local lines, kt = {}, {}
 for l in cu.lines(files) do
-    -- yield now and then so a big file can't run "too long without yielding"
-    if #lines % 1000 == 999 then os.queueEvent("sort_yield"); os.pullEvent("sort_yield") end
+    cu.breathe()        -- (a big file takes a while)
     local t = {}
     for n, k in ipairs(keys) do t[n] = keyText(l, k) end
     local n = #lines + 1
@@ -219,11 +208,7 @@ end
 
 if opts.o then
     local h, e = io.open(shell.resolve(opts.o), "wb")
-    -- io.open's message starts with the path and ": ": keep just the reason
-    local why = tostring(e)
-    local _, rest = text.cut(why, ":")
-    why = rest and text.stripPrefix(rest, " ") or why
-    if not h then cu.fail(opts.o .. ": " .. why, 2); return cu.exit() end
+    if not h then cu.fail(opts.o .. ": " .. cu.reason(e), 2); return cu.exit() end
     h:write(table.concat(out))
     h:close()
 else

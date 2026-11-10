@@ -21,11 +21,8 @@ if #files == 0 then files = { "." } end
 
 -- the size of p (shown as `shown`) in blocks, writing a line for each
 -- entry that should get one
-local seen = 0
 local function walk(p, shown, drive, top)
-    -- yield now and then, or a big tree trips "Too long without yielding"
-    seen = seen + 1
-    if seen % 200 == 0 then os.queueEvent("du"); os.pullEvent("du") end
+    cu.breathe()        -- (a big tree takes a while)
     local n
     if fs.isDir(p) then
         n = 0

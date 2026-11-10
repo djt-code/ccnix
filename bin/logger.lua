@@ -32,11 +32,10 @@ local log = L.new(tag, fac, { pid = opts.i == true, perror = opts.s and "stderr"
 if #words > 0 then
     log.log(sev, table.concat(words, " "))
 else
-    local input, n = io.input(), 0
+    local input = io.input()
     for l in function() return cu.readLine(input) end do
         log.log(sev, l)
-        n = n + 1
-        if n % 64 == 0 and input ~= io.stdin then os.queueEvent("logger"); os.pullEvent("logger") end
+        if input ~= io.stdin then cu.breathe() end     -- (the keyboard waits by itself)
     end
 end
 return cu.exit()
