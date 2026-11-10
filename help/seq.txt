@@ -4,7 +4,7 @@ seq: print a sequence of numbers (as GNU's seq; not in POSIX)
 
 Prints the numbers from first (1) to last, increment (1) apart, one a line: `seq 3` is 1 2 3, `seq 0 5 20` 0 5 10 15 20, `seq 5 -1 1` counts down.  Decimals and negative numbers work (`seq -1 0.5 1`); the numbers are printed with as many decimal places as first or increment has. Nothing is printed if last comes before first.
   -s sep
-      between the numbers instead of a newline (one still ends the line).  \t, \n and \\ in it are a tab, a newline and a backslash (GNU's seq leaves that to the shell).
+      between the numbers instead of a newline (one still ends the line).  C's escapes in it count: \t a tab, \n a newline, \\ a backslash, \ooo octal, and \a \b \f \r \v (GNU's seq leaves that to the shell).
   -w
       the same width for all: leading zeros (seq -w 8 10: 08 09 10)
   -f format

@@ -18,53 +18,11 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("printf", "printf format [argument...]")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 local args = { ... }
 if args[1] == "--" then table.remove(args, 1) end
 if #args == 0 then cu.usageError() end
 local format = table.remove(args, 1)
-
-local ESC = { a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v", ["\\"] = "\\" }
-local isOctal = scan.oneOf("01234567")
-
--- up to three octal digits at s's index at ("" if none come)
-local function readOctal(s, at)
-    local sc, digits = scan.new(s, at), ""
-    while #digits < 3 and isOctal(sc:peek()) do digits = digits .. sc:advance() end
-    return digits
-end
-
--- Expand the backslash escapes in s.  For %b (isB) octal is \0ddd and \c
--- stops; returns the text and whether \c was met.
-local function escapes(s, isB)
-    local out, p = {}, 1
-    while p <= #s do
-        local b = s:find("\\", p, true)
-        if not b then out[#out + 1] = s:sub(p); break end
-        out[#out + 1] = s:sub(p, b - 1)
-        local c = s:sub(b + 1, b + 1)
-        -- octal: for %b "0" and up to three digits, else one to three digits
-        local oct
-        if isB then
-            if c == "0" then oct = readOctal(s, b + 2) end
-        else
-            oct = readOctal(s, b + 1)
-            if oct == "" then oct = nil end
-        end
-        if oct then
-            out[#out + 1] = string.char((tonumber(oct ~= "" and oct or "0", 8) or 0) % 256)
-            p = b + 1 + #oct + (isB and 1 or 0)
-        elseif isB and c == "c" then
-            return table.concat(out), true
-        elseif ESC[c] then
-            out[#out + 1] = ESC[c]
-            p = b + 2
-        else
-            out[#out + 1] = "\\"
-            p = b + 1
-        end
-    end
-    return table.concat(out), false
-end
 
 -- The digits of a whole number at the start of body: "0x" and hex digits
 -- (base 16), "0" and octal digits (base 8, the 0 counted in), or decimal
@@ -77,25 +35,10 @@ local function leadingInteger(body)
         if hex ~= "" then return hex, 16, 2 end
     end
     sc:setPos(1)
-    if sc:at("0") then return sc:readWhile(isOctal), 8, 0 end
+    if sc:at("0") then return sc:readWhile(scan.isOctalDigit), 8, 0 end
     local digits = sc:readWhile(scan.isDigit)
     if digits ~= "" then return digits, 10, 0 end
     return nil
-end
-
--- The longest start of s that reads as a decimal number: sign? digit*
--- ("." digit*)? (("e" | "E") sign? digit+)?
-local function decimalPrefix(s)
-    local sc = scan.new(s)
-    local _ = sc:accept("+") or sc:accept("-")
-    sc:readWhile(scan.isDigit)
-    if sc:accept(".") then sc:readWhile(scan.isDigit) end
-    local mantissaEnd = sc:pos()
-    if sc:accept("e") or sc:accept("E") then
-        local _ = sc:accept("+") or sc:accept("-")
-        if sc:readWhile(scan.isDigit) == "" then sc:setPos(mantissaEnd) end    -- (no exponent after all)
-    end
-    return s:sub(1, sc:pos() - 1)
 end
 
 -- The numeric value of argument a (nil: missing, 0); `int` takes whole
@@ -113,24 +56,24 @@ local function num(a, int)
         local sign, body = "", s
         if text.startsWith(s, "+") or text.startsWith(s, "-") then sign, body = s:sub(1, 1), s:sub(2) end
         local d, base, pre = leadingInteger(body)
-        n = d and tonumber(d, base)
+        n = d and convert.toInteger(d, base)
         if n and sign == "-" then n = -n end
         if n and #sign + pre + #d == #s then return n end
     else
-        n = tonumber(s)
+        n = tonumber(s)                 -- (C's strtod takes 0x hex too)
         if n then return n end
-        n = tonumber(decimalPrefix(s))
+        n = scan.new(s):readFloat()     -- (the decimal number s starts with)
     end
     cu.fail(a .. (n and ": not completely converted" or ": expected numeric value"))
     return n or 0
 end
 
--- pad s to the width (flags "-": on the right)
+-- pad s to the width (flags "-": on the right); never cut
 local function pad(s, flags, width)
     width = tonumber(width) or 0
     if #s >= width then return s end
-    if flags:find("-", 1, true) then return s .. string.rep(" ", width - #s) end
-    return string.rep(" ", width - #s) .. s
+    if text.contains(flags, "-") then return text.padRight(s, width) end
+    return text.padLeft(s, width)
 end
 
 -- An integer conversion done by hand, so that it means the same in
@@ -162,14 +105,14 @@ local function integer(conv, flags, width, prec, n)
         if p == 0 and m == 0 then d = "" end
         d = string.rep("0", p - #d) .. d
     end
-    local pre = neg and "-" or flags:find("+", 1, true) and (conv == "d" or conv == "i") and "+"
-        or flags:find(" ", 1, true) and (conv == "d" or conv == "i") and " " or ""
-    if flags:find("#", 1, true) then
+    local pre = neg and "-" or text.contains(flags, "+") and (conv == "d" or conv == "i") and "+"
+        or text.contains(flags, " ") and (conv == "d" or conv == "i") and " " or ""
+    if text.contains(flags, "#") then
         if conv == "o" and d:sub(1, 1) ~= "0" then d = "0" .. d
         elseif (conv == "x" or conv == "X") and m ~= 0 then pre = pre .. "0" .. conv end
     end
     width = tonumber(width) or 0
-    if flags:find("0", 1, true) and not flags:find("-", 1, true) and prec == "" then
+    if text.contains(flags, "0") and not text.contains(flags, "-") and prec == "" then
         d = string.rep("0", width - #pre - #d) .. d
     end
     return pad(pre .. d, flags, width)
@@ -200,8 +143,8 @@ local function once(ai)
     local function nextArg() ai = ai + 1; return args[ai - 1] end
     while p <= #format do
         local pc = format:find("%", p, true)
-        local text = format:sub(p, (pc or #format + 1) - 1)
-        local s, stop = escapes(text, false)
+        local literal = format:sub(p, (pc or #format + 1) - 1)
+        local s, stop = convert.unescape(literal)       -- (the format's escapes: \ooo octal, no \c)
         emit(s)
         if not pc then break end
         local flags, width, dot, prec, conv = readConversion(pc)
@@ -211,7 +154,7 @@ local function once(ai)
         elseif conv == "s" or conv == "b" or conv == "c" then
             local a = nextArg() or ""
             if conv == "b" then
-                a, stop = escapes(a, true)
+                a, stop = convert.unescape(a, true)     -- (%b's: \0ooo octal, \c stops)
             elseif conv == "c" then a = a:sub(1, 1) end
             if dot ~= "" then a = a:sub(1, tonumber(prec) or 0) end
             emit(pad(a, flags, width))

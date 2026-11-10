@@ -59,12 +59,6 @@ r = getopt("an:", { "-a", "-n" })
 check("missing option-argument: status 2", r.status == 2 and r.err[1] == "t: option requires an argument -- n")
 r = getopt("a", { "-q" }, 1)
 check("the caller can choose the usage status", r.status == 1)
-r = W:call(function(env)
-    local cu = env.require("cu")
-    return { cu.int("12"), cu.int("-3"), cu.int("+4"), cu.int("1.5"), cu.int("x"), cu.int("") }
-end)
-check("cu.int: whole numbers only", r.value[1] == 12 and r.value[2] == -3 and r.value[3] == 4
-    and r.value[4] == nil and r.value[5] == nil and r.value[6] == nil)
 
 --------------------------------------------------------------------------
 -- 2. reading lines

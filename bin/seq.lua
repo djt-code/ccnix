@@ -8,8 +8,9 @@
 -- are printed with as many decimal places as first or increment has.
 -- Nothing is printed if last comes before first.
 --   -s sep     between the numbers instead of a newline (one still ends
---              the line).  \t, \n and \\ in it are a tab, a newline and a
---              backslash (GNU's seq leaves that to the shell).
+--              the line).  C's escapes in it count: \t a tab, \n a
+--              newline, \\ a backslash, \ooo octal, and \a \b \f \r \v
+--              (GNU's seq leaves that to the shell).
 --   -w         the same width for all: leading zeros (seq -w 8 10: 08 09 10)
 --   -f format  each number through a printf floating-point format, such as
 --              %.2f, %g or %05.1f (one %e, %f or %g, and %% for a %)
@@ -19,54 +20,43 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("seq", "seq [-w] [-s sep] [-f format] [first [increment]] last")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
 
 -- Options come first; a negative number ends them (seq -2 2) unless it's
 -- -s's or -f's argument (seq -s -1 5).  cu.getopt would take it for an
 -- option, so a "--" goes in before it.
-local function startsNumber(c) return scan.isDigit(c) or c == "." end
--- "-" then a digit or a point: a negative number; "-" then anything else: an option
-local function isNegative(a) return a:sub(1, 1) == "-" and startsNumber(a:sub(2, 2)) end
-local function isOption(a) return a:sub(1, 1) == "-" and #a > 1 and not startsNumber(a:sub(2, 2)) end
+local function isNegativeNumber(a) return text.startsWith(a, "-") and scan.isNumber(a) end
+local function isOption(a) return text.startsWith(a, "-") and #a > 1 and not isNegativeNumber(a) end
 local args, i = { ... }, 1
 while args[i] and isOption(args[i]) and args[i] ~= "--" do
     i = i + ((args[i] == "-s" or args[i] == "-f") and 2 or 1)
 end
-if args[i] and isNegative(args[i]) then table.insert(args, i, "--") end
+if args[i] and isNegativeNumber(args[i]) then table.insert(args, i, "--") end
 local opts, ops = cu.getopt(args, "ws:f:", 1)
 if #ops == 0 then cu.usageError("missing operand", 1) end
 if #ops > 3 then cu.usageError("extra operand '" .. ops[4] .. "'", 1) end
 if opts.w and opts.f then cu.usageError("-f and -w can't go together", 1) end
 
--- number: sign? digit* ("." digit*)? (("e" | "E") sign? digit+)?, with a
--- digit before the e somewhere; its decimal places (the digits after the
--- point, less the exponent), or nil if s isn't one
-local function readPlaces(s)
+-- The decimal places of number s (a decimal, scan.isNumber): the digits
+-- after its point, less its exponent.
+--   number: sign? digit* ("." digit*)? (("e" | "E") sign? digit+)?
+local function decimalPlaces(s)
     local sc = scan.new(s)
     local _ = sc:accept("+") or sc:accept("-")
-    local whole, fraction = sc:readWhile(scan.isDigit), ""
-    if sc:accept(".") then fraction = sc:readWhile(scan.isDigit) end
-    if whole == "" and fraction == "" then return nil end
-    local exp = 0
-    if sc:accept("e") or sc:accept("E") then
-        local sign = 1
-        if sc:accept("-") then sign = -1 else sc:accept("+") end
-        local digits = sc:readWhile(scan.isDigit)
-        if digits == "" then return nil end
-        exp = sign * tonumber(digits)
-    end
-    if not sc:atEnd() then return nil end
-    return #fraction - exp
+    sc:readWhile(scan.isDigit)
+    local fraction = sc:accept(".") and sc:readWhile(scan.isDigit) or ""
+    local exponent = (sc:accept("e") or sc:accept("E")) and sc:readInteger() or 0
+    return #fraction - exponent
 end
 
 -- a number, and its decimal places
 local function number(s)
-    local places = readPlaces(s)
-    local v = places and tonumber(s)
+    local v = convert.toNumber(s)
     if not v or v ~= v or v == math.huge or v == -math.huge then
         cu.fail("invalid floating point argument: '" .. s .. "'")
         cu.exit()
     end
-    return v, math.max(0, places)
+    return v, math.max(0, decimalPlaces(s))
 end
 
 local first, step, last = 1, 1, nil
@@ -119,7 +109,7 @@ local function show(v)
     local s = string.format("%." .. places .. "f", v)
     -- (no "-0": "-0", then a point or not, then only zeros)
     local afterZero = s:sub(3)
-    if text.startsWith(afterZero, ".") then afterZero = afterZero:sub(2) end
+    afterZero = text.stripPrefix(afterZero, ".") or afterZero
     if text.startsWith(s, "-0") and scan.all(afterZero, scan.oneOf("0")) then s = s:sub(2) end
     return s
 end
@@ -127,28 +117,14 @@ local width = opts.w and math.max(#show(first), #show(last)) or 0
 local function padded(v)
     local s = show(v)
     if #s >= width then return s end
-    local sign, digits = "", s
-    if text.startsWith(s, "-") then sign, digits = "-", s:sub(2) end
-    return sign .. ("0"):rep(width - #s) .. digits
+    local digits = text.stripPrefix(s, "-")
+    if digits then return "-" .. text.padLeft(digits, width - 1, "0") end
+    return text.padLeft(s, width, "0")
 end
 
--- -s's text with \t \n \\ made into what they stand for (other pairs kept)
-local SEP_ESCAPES = { t = "\t", n = "\n", ["\\"] = "\\" }
-local function unescape(s)
-    local out, sc = {}, scan.new(s)
-    while not sc:atEnd() do
-        local c = sc:advance()
-        if c == "\\" and not sc:atEnd() then
-            local e = sc:advance()
-            out[#out + 1] = SEP_ESCAPES[e] or c .. e
-        else
-            out[#out + 1] = c
-        end
-    end
-    return table.concat(out)
-end
-
-local sep = opts.s and unescape(opts.s) or "\n"
+-- -s's text with C's escapes (\t \n \\ \ooo ...) made into what they
+-- stand for
+local sep = opts.s and convert.unescape(opts.s) or "\n"
 -- first + k * step, not a running sum, so no error creeps in
 local slack = math.abs(step) * 1e-9
 local n = 0

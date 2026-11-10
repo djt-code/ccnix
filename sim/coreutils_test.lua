@@ -158,6 +158,8 @@ local function ex(name, out, status, ...)
     check(name, o == out and st == status, ("got %q status %s %s"):format(o, tostring(st), r.errText))
 end
 ex("addition", "3\n", 0, "1", "+", "2")
+ex("a + sign: still an integer (scan.isInteger)", "6\n", 0, "+5", "+", "1")
+ex("+0 is zero", "0\n", 1, "+0", "&", "x")
 ex("subtraction to zero: status 1", "0\n", 1, "5", "-", "5")
 ex("precedence: * before +", "7\n", 0, "1", "+", "2", "*", "3")
 ex("parentheses", "9\n", 0, "(", "1", "+", "2", ")", "*", "3")
