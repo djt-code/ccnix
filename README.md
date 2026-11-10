@@ -1963,16 +1963,19 @@ vi's `/` and `:s`). The header of `lib/scan.lua` lists the API.
 `lib/scan` also says what shape a whole string is: `scan.isBlank`,
 `isUnsigned`, `isInteger`, `isNumber` (a decimal, without the leniencies
 of Lua's `tonumber`: no `0x10`, `inf` or blanks), `isNegative`, `isHex`,
-`isName`, `isTime` (`H:MM[:SS]`). The everyday jobs on strings have
-libraries of their own on top of it, so they need no pattern either; each
-header lists its API:
+`isName`, `isTime` (`H:MM[:SS]`), `isDateTime` (ISO 8601), with the
+readers behind them (`readInteger`, `readFloat`, `readCInteger` for C's
+`0x1f`/`017`, `readTime`, `readDateTime`) and `scan.posixClasses`, the one
+table of `[:alpha:]` ... that globs, `tr` and regexes all use. The
+everyday jobs on strings have libraries of their own on top of it, so
+they need no pattern either; each header lists its API:
 
 | Library | For |
 |---|---|
-| `lib/text` | blanks (`trim`, `squeeze`, `words`), pieces (`split(s, ",")`, a trimmed list; `join`; `cut(s, "=")` and `cutLast`; `lines`), ends and insides (`startsWith`, `stripPrefix`, `find` and `contains` as plain text, `count`, `replace`), widths (`padRight`, `padLeft`, `center`, `truncate`, `wrap`) and case (`equalFold`, `capitalize`, `swapCase`) |
-| `lib/convert` | strict readers (`toInteger(s, base)`, `toNumber`), `humanSize`, `duration`, `clock`, `timeOfDay`, bytes (`toHex`/`fromHex`, base64, UTF-8 to CC's Latin-1 and back), C escapes (`unescape`, `escape`), `urlEncode`/`urlDecode`, `html`, `shellQuote` |
-| `lib/getopt` | `getopt.parse(args, "vn:", { output = "o", ["max-time"] = "=" })`: POSIX short options and long ones |
-| `lib/glob` | `*` `?` `[...]` wildcards, with escapes, classes and case folding each optional (IRC masks have neither) |
+| `lib/text` | blanks (`trim`, `squeeze`, `words`, `afterWords`, `hasWord`), pieces (`split(s, ",")`, a trimmed list; `pieces`, untrimmed; `join`; `cut(s, "=")` and `cutLast`; `lines`), ends and insides (`startsWith`, `stripPrefix`, `find` and `contains` as plain text, `containsAny`, `count`, `replace`), widths (`padRight`, `padLeft` as `%-5s` and `%5s`, `center`, `truncate`, `wrap`, which also says where it broke) and case (`equalFold`, `capitalize`, `swapCase`) |
+| `lib/convert` | strict readers (`toInteger(s, base)`, `toNumber`), `compareIntegers` (exact at any length), `humanSize`, `duration`, `clock`, `timeOfDay`, `fromDateTime`, bytes (`toHex`/`fromHex`, base64, UTF-8 to CC's Latin-1 and back), C escapes (`unescape`, `readEscape`, `escape`), `urlEncode`/`urlDecode`, `html`, `shellQuote` |
+| `lib/getopt` | `getopt.parse(args, "vn:", { output = "o", ["max-time"] = "=" })`: POSIX short options and long ones; `parseMixed` for GNU's order (options after operands) |
+| `lib/glob` | `*` `?` `[...]` wildcards with `[:alpha:]` classes, with escapes, classes and case folding each optional (IRC masks have neither) |
 | `lib/path` | `basename`, `dirname` (POSIX's), `join`, `normalize`, `resolve`, `segments`, `extension` |
 
 A grammar bigger than that gets a scanner function of its own, named for

@@ -5,6 +5,36 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## Everything: the text libraries (0.37.0)
+
+- **A regression pass, the second.** Every program now uses lib/scan,
+  lib/text, lib/convert, lib/getopt, lib/glob and lib/path rather than a
+  copy of its own (the turtle programs, git and setup too). Sims pass and
+  each swap was run against the old code on edge cases (about two million
+  of them), but none of it has run in game. The same quick pass as below,
+  plus:
+  - **setup run alone, on a stock CC: Tweaked computer** (no mod): `wget
+    run .../deploy/setup.lua`. It now fetches lib/scan, text, convert,
+    path and getopt into memory before git. Then `ccnix update`, then
+    `ccnix setup` once on an install made before this: that adds the text
+    libraries to a checkout that was cloned with `--only` paths.
+  - **git:** `git pull /ccnix --only lib/` (options after operands), `git
+    log` (the dates, now read by convert.fromDateTime).
+  - **globs:** `ls *.lua`, `ls [[:upper:]]*`, `case b in [a"-"c])` (a
+    quoted `-` in a bracket is now itself: no match), `find . -name
+    "[[:digit:]]*"`, an IRC `/ignore *!*@host`.
+  - **numbers:** `test 99999999999999999999 -gt 99999999999999999998`,
+    `expr +5 + 1` (now 6), `sleep +1`, `printf "%d %x\n" 0x1f 255`, `seq -s
+    "\t" 3`, `tr -d "[:punct:]"`, `touch -d "2026-01-02 03:04:05+02:00" f`.
+  - **text:** `diff -b` on lines with leading blanks, the pager wrapping a
+    long coloured line (`vim` on a long line, `help` in a narrow window),
+    a long IRC message split in two (now at the last space that fits, with
+    the rest's spacing kept), the irc nick list and buffer list columns.
+  - **behaviour that changed on purpose:** WHOIS idle reads "5m 3s";
+    curl and git refuse an unknown or misused `--option`; httpd listing
+    links percent-encode `!$&'()*+,;=:@`; a syslog line's trailing blanks
+    are dropped.
+
 ## Everything: parsing without patterns (0.36.1)
 
 - **A regression pass.** Every program's parsing moved from Lua patterns
@@ -15,8 +45,7 @@ section.
   `[a-c]*`), `$(...)` and a `for` loop; `ip addr`, `ip route`, `ping`
   a name, `host`; `curl` a page from httpd (a Lua page, a query); `git
   pull` / `ccnix update`; a syslog line in /var/log; `sort -n`, `cut
-  -d: -f1`, `printf "%5.2f
-" 3.14159`, `seq 1 3`, `find . -name
+  -d: -f1`, `printf "%5.2f\n" 3.14159`, `seq 1 3`, `find . -name
   "*.lua"`; `telnet` in (keys, mouse, paste); a farm or mine run
   (tool names, its saved job read back after a reboot); setup's
   migration from an old /cc-turtles, if one is left anywhere.
