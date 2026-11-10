@@ -840,7 +840,8 @@ end
 -- missing there is copied in from the repo first.
 function W_:makeRequire(env, dir)
     local W = self
-    local package = { loaded = {}, path = "?;?.lua;?/init.lua;/rom/modules/main/?;/rom/modules/main/?.lua;/rom/modules/main/?/init.lua" }
+    local package = { loaded = {}, preload = {},
+                      path = "?;?.lua;?/init.lua;/rom/modules/main/?;/rom/modules/main/?.lua;/rom/modules/main/?/init.lua" }
     local function find(rel)
         for pat in package.path:gmatch("[^;]+") do
             local p = pat:gsub("%?", rel)
@@ -852,6 +853,12 @@ function W_:makeRequire(env, dir)
     local function require(name)
         if package.loaded[name] ~= nil then return package.loaded[name] end
         if W.modules[name] ~= nil then return W.modules[name] end
+        if package.preload[name] then                         -- (cc.require looks there first too)
+            local r = package.preload[name](name, ":preload:")
+            if r == nil then r = true end
+            package.loaded[name] = r
+            return r
+        end
         local rel = name:gsub("%.", "/")
         local p = find(rel)
         if not p and (dir .. "/"):sub(1, #W.progDir + 1) == W.progDir .. "/" and W:install(rel) then

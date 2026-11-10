@@ -203,11 +203,19 @@ the new ones; a turtle's job files come along.
 By hand, the same is:
 
 ```
-wget https://raw.githubusercontent.com/djt-code/ccnix/main/bin/git.lua /git-boot.lua
-git-boot clone https://github.com/djt-code/ccnix /ccnix
-rm git-boot.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/bin/git.lua /gitboot/bin/git.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/lib/scan.lua /gitboot/lib/scan.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/lib/text.lua /gitboot/lib/text.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/lib/path.lua /gitboot/lib/path.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/lib/convert.lua /gitboot/lib/convert.lua
+wget https://raw.githubusercontent.com/djt-code/ccnix/main/lib/getopt.lua /gitboot/lib/getopt.lua
+gitboot/bin/git clone https://github.com/djt-code/ccnix /ccnix
+rm gitboot
 ccnix/deploy/setup
 ```
+
+(git reads its text with the libraries in `lib/` beside its `bin/`; setup,
+run alone, fetches the same ones into memory for it.)
 
 Later, `git pull` inside the directory fetches only the files that changed.
 `git status` shows the checked-out commit and whether the remote has moved on;

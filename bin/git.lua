@@ -66,104 +66,39 @@ local function die(msg)
     error("", 0)
 end
 
--- Show lines in pager.lua when it can be found (in lib/ beside this bin/;
--- the bootstrap copy of git sits on its own), otherwise a screenful at a
+-- ccnix's lib/, or the one beside this bin/.  (Fetched alone by
+-- deploy/setup, git runs in setup's environment, which has the text
+-- libraries loaded already.)
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path
+local text = require("text")
+local path = require("path")
+local convert = require("convert")
+local getopt = require("getopt")
+
+-- Show lines in pager.lua when it can be found (deploy/setup's copy of
+-- git has the text libraries but no pager), otherwise a screenful at a
 -- time with textutils.pagedPrint.
 local function page(lines)
-    package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path
     local _, pager = pcall(require, "pager")
     if type(pager) == "table" and pager.page then pager.page(lines)
     else textutils.pagedPrint(table.concat(lines, "\n")) end
 end
 
--- Text, a character at a time (this file stands alone, as the bootstrap
--- copy, so these are its own rather than lib/scan's).
-local function inRange(c, lo, hi) return #c == 1 and c:byte() >= lo:byte() and c:byte() <= hi:byte() end
-local function isDigit(c) return inRange(c, "0", "9") end
-local function isAlnum(c) return isDigit(c) or inRange(c, "a", "z") or inRange(c, "A", "Z") end
-local function startsWith(s, prefix) return s:sub(1, #prefix) == prefix end
-local function endsWith(s, suffix) return suffix == "" or s:sub(-#suffix) == suffix end
-
--- the text before the first sep (plain) and after it; s and nil if none
-local function cut(s, sep)
-    local at = s:find(sep, 1, true)
-    if not at then return s, nil end
-    return s:sub(1, at - 1), s:sub(at + #sep)
-end
-
--- the run of digits in s from i on ("" if none)
-local function digitsAt(s, i)
-    local j = i
-    while isDigit(s:sub(j, j)) do j = j + 1 end
-    return s:sub(i, j - 1)
-end
-
--- s without the "/"s at its start (and, if both, its end)
-local function stripSlashes(s, both)
-    while startsWith(s, "/") do s = s:sub(2) end
-    while both and endsWith(s, "/") do s = s:sub(1, -2) end
-    return s
-end
-
--- a path segment as it goes in a URL: letters, digits and -._~ as they
--- are, anything else %XX
-local function encodeSegment(s)
+-- each name in a repo path, as it goes in a URL (%XX for anything but
+-- letters, digits and -._~), the empty ones left out
+local function encodePath(p)
     local out = {}
-    for i = 1, #s do
-        local c = s:sub(i, i)
-        if isAlnum(c) or c == "-" or c == "." or c == "_" or c == "~" then out[i] = c
-        else out[i] = string.format("%%%02X", c:byte()) end
-    end
-    return table.concat(out)
-end
-
--- each segment of path (between "/"s, the empty ones left out) encoded
-local function encodePath(path)
-    local out, rest = {}, path
-    while rest do
-        local seg
-        seg, rest = cut(rest, "/")
-        if seg ~= "" then out[#out + 1] = encodeSegment(seg) end
-    end
+    for _, name in ipairs(path.segments(p)) do out[#out + 1] = convert.urlEncode(name) end
     return table.concat(out, "/")
 end
 
 local unjson = textutils.unserialiseJSON or textutils.unserializeJSON
 local tojson = textutils.serialiseJSON or textutils.serializeJSON
 
--- Seconds since 1970 for an ISO 8601 time ("2026-10-29T21:04:05Z",
--- "...+02:00"), or nil
--- time: digits "-" digits "-" digits "T" digits ":" digits ":" digits
--- ["." digits] [zone]; zone: ("+" | "-") 2 digits [":"] 2 digits (else
--- taken as UTC)
-local function isoTime(s)
-    s = tostring(s)
-    local n, at = {}, 1
-    for k, sep in ipairs({ "-", "-", "T", ":", ":", "" }) do
-        local digits = digitsAt(s, at)
-        if digits == "" or s:sub(at + #digits, at + #digits + #sep - 1) ~= sep then return nil end
-        n[k] = tonumber(digits)
-        at = at + #digits + #sep
-    end
-    if s:sub(at, at) == "." then at = at + 1 end
-    local rest = s:sub(at + #digitsAt(s, at))            -- (past the fraction of a second)
-    local y, mo, d = n[1], n[2], n[3]
-    if mo <= 2 then y, mo = y - 1, mo + 12 end            -- (days from 1970, the civil calendar)
-    local days = 365 * y + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400)
-        + math.floor((153 * (mo - 3) + 2) / 5) + d - 719469
-    local t = days * 86400 + n[4] * 3600 + n[5] * 60 + n[6]
-    local sign, hhmm = rest:sub(1, 1), rest:sub(2)
-    if #hhmm == 5 and hhmm:sub(3, 3) == ":" then hhmm = hhmm:sub(1, 2) .. hhmm:sub(4) end
-    if (sign == "+" or sign == "-") and #hhmm == 4 and #digitsAt(hhmm, 1) == 4 then
-        t = t - (sign == "+" and 1 or -1) * (tonumber(hhmm:sub(1, 2)) * 3600 + tonumber(hhmm:sub(3, 4)) * 60)
-    end
-    return t
-end
-
 -- A response header, whatever its case (servers differ)
 local function header(headers, name)
     for k, v in pairs(headers or {}) do
-        if k:lower() == name then return v end
+        if text.equalFold(k, name) then return v end
     end
 end
 
@@ -248,12 +183,12 @@ end
 -- repo URL: ("http" | "https") "://" host "/" owner "/" repo, then
 -- anything after a "/", "?" or "#": scheme, host, owner, repo; nil if not one
 local function parseRepoURL(url)
-    local scheme = (startsWith(url, "https://") and "https") or (startsWith(url, "http://") and "http")
+    local scheme = (text.startsWith(url, "https://") and "https") or (text.startsWith(url, "http://") and "http")
     if not scheme then return nil end
-    local host, rest = cut(url:sub(#scheme + #"://" + 1), "/")
+    local host, rest = text.cut(url:sub(#scheme + #"://" + 1), "/")
     if host == "" or not rest then return nil end
     local owner
-    owner, rest = cut(rest, "/")
+    owner, rest = text.cut(rest, "/")
     if owner == "" or not rest then return nil end
     local stop = #rest + 1                                -- (the repo ends at a / ? or #)
     for _, mark in ipairs({ "/", "?", "#" }) do
@@ -268,7 +203,7 @@ end
 local function makeRemote(url, token)
     local scheme, host, owner, repo = parseRepoURL(url)
     if not repo then die("Can't parse repo URL: " .. url) end
-    if endsWith(repo, ".git") then repo = repo:sub(1, -5) end
+    if text.endsWith(repo, ".git") then repo = repo:sub(1, -5) end
     local R = { url = scheme .. "://" .. host .. "/" .. owner .. "/" .. repo,
                 host = host, owner = owner, repo = repo, headers = {} }
 
@@ -281,7 +216,7 @@ local function makeRemote(url, token)
         R.branchSha = function(j) return j.commit.sha end
         R.branchDate = function(j)
             local c = j.commit.commit or {}
-            return isoTime((c.committer or {}).date or (c.author or {}).date)
+            return convert.fromDateTime((c.committer or {}).date or (c.author or {}).date)
         end
         R.treeUrl = function(sha, page)
             return R.api .. "/git/trees/" .. sha .. "?recursive=1"
@@ -291,14 +226,14 @@ local function makeRemote(url, token)
                    .. "/" .. sha .. "/" .. encodePath(path)
         end
         R.logUrl = function(branch, n)
-            return R.api .. "/commits?sha=" .. encodeSegment(branch) .. "&per_page=" .. n
+            return R.api .. "/commits?sha=" .. convert.urlEncode(branch) .. "&per_page=" .. n
         end
     else
         R.kind = "forgejo"
         R.api  = scheme .. "://" .. host .. "/api/v1/repos/" .. owner .. "/" .. repo
         if token then R.headers["Authorization"] = "token " .. token end
         R.branchSha = function(j) return j.commit.id end
-        R.branchDate = function(j) return isoTime(j.commit.timestamp) end
+        R.branchDate = function(j) return convert.fromDateTime(j.commit.timestamp) end
         R.treeUrl = function(sha, page)
             return R.api .. "/git/trees/" .. sha .. "?recursive=true&per_page=1000&page=" .. page
         end
@@ -306,7 +241,7 @@ local function makeRemote(url, token)
             return R.api .. "/raw/" .. encodePath(path) .. "?ref=" .. sha
         end
         R.logUrl = function(branch, n)
-            return R.api .. "/commits?sha=" .. encodeSegment(branch) .. "&limit=" .. n .. "&stat=false"
+            return R.api .. "/commits?sha=" .. convert.urlEncode(branch) .. "&limit=" .. n .. "&stat=false"
         end
     end
 
@@ -316,7 +251,7 @@ local function makeRemote(url, token)
 
     -- The branch's commit, and its time (seconds, or nil)
     function R.headCommit(branch)
-        local j = requestJSON(R.api .. "/branches/" .. encodeSegment(branch), R.headers)
+        local j = requestJSON(R.api .. "/branches/" .. convert.urlEncode(branch), R.headers)
         return R.branchSha(j), R.branchDate(j)
     end
 
@@ -367,12 +302,12 @@ local function skipped(state, path)
     if state.only then
         local wanted = false
         for _, o in ipairs(state.only) do
-            if path == o or (o:sub(-1) == "/" and path:sub(1, #o) == o) then wanted = true; break end
+            if path == o or (text.endsWith(o, "/") and text.startsWith(path, o)) then wanted = true; break end
         end
         if not wanted then return true end
     end
     for _, d in ipairs(state.skip or {}) do
-        if path == d or path:sub(1, #d + 1) == d .. "/" then return true end
+        if path == d or text.startsWith(path, d .. "/") then return true end
     end
     return false
 end
@@ -470,26 +405,30 @@ end
 --------------------------------------------------------------------------
 -- Commands
 --------------------------------------------------------------------------
+-- A path in the repo as --skip and --only name it: from the top, no "/"
+-- at its start; a folder for --only keeps the "/" at its end ("sim/").
+local function repoPath(p, folderSlash)
+    local rel = text.join(path.segments(p), "/")
+    if folderSlash and rel ~= "" and text.endsWith(p, "/") then rel = rel .. "/" end
+    return rel
+end
+
+-- the options (anywhere among the operands: git clone url dir --only lib/)
+local LONG = { branch = "b", token = "=", skip = "=", only = "=", all = true, lower = "=" }
+
 local function parseArgs(list)
-    local pos, opts = {}, {}
-    local i = 1
-    while i <= #list do
-        local a = list[i]
-        if a == "-b" or a == "--branch" then opts.branch = list[i + 1]; i = i + 1
-        elseif a == "--token" then opts.token = list[i + 1]; i = i + 1
-        elseif a == "--skip" then
+    local given, pos, order = getopt.parseMixed(list, "b:n:", LONG)
+    if not given then die(pos) end
+    local opts = { branch = given.b, token = given.token, all = given.all, lower = given.lower,
+                   count = given.n and convert.toInteger(given.n) }
+    for _, o in ipairs(order) do                       -- (--skip and --only add up)
+        if o[1] == "skip" then
             opts.skip = opts.skip or {}
-            opts.skip[#opts.skip + 1] = stripSlashes(list[i + 1] or "", true)
-            i = i + 1
-        elseif a == "--only" then
+            opts.skip[#opts.skip + 1] = repoPath(o[2], false)
+        elseif o[1] == "only" then
             opts.only = opts.only or {}
-            opts.only[#opts.only + 1] = stripSlashes(list[i + 1] or "")
-            i = i + 1
-        elseif a == "--all" then opts.all = true
-        elseif a == "--lower" then opts.lower = list[i + 1]; i = i + 1
-        elseif a == "-n" then opts.count = tonumber(list[i + 1]); i = i + 1
-        else pos[#pos + 1] = a end
-        i = i + 1
+            opts.only[#opts.only + 1] = repoPath(o[2], true)
+        end
     end
     return pos, opts
 end
@@ -593,7 +532,7 @@ local function cmdLog(pos, opts)
     local lines = {}
     for _, c in ipairs(commits) do
         local marker = (c.sha == state.commit) and "*" or " "
-        local subject = cut(c.message, "\n")              -- (the first line)
+        local subject = text.cut(c.message, "\n")              -- (the first line)
         lines[#lines + 1] = string.format("%s%s %s", marker, c.sha:sub(1, 7), subject)
         lines[#lines + 1] = string.format("   %s  %s", c.author, c.date:sub(1, 10))
     end

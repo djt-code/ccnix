@@ -13,7 +13,7 @@
 -- what the ROM catches up on goes, and a ROM newer than the branch leaves
 -- nothing to keep.
 local PROJ = ...
-package.path = PROJ .. "/sim/lib/?.lua;" .. package.path
+package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path    -- (the text libraries, as setup gives git them)
 local M = require("mock")
 local json = M.json
 local realPrint = print

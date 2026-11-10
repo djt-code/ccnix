@@ -53,6 +53,13 @@
 --                       digits for minutes and seconds, each 0-59): the
 --                       hours, minutes, seconds (0 if left out) and text;
 --                       nil, nothing stepped over, if it isn't one
+--   sc:readDateTime()   an ISO 8601 date and time: "2026-10-29T21:04:05Z",
+--                       "2026-10-29 21:04:05.5+02:00" (a T or a space
+--                       between, a fraction of a second or not, a zone (Z,
+--                       +hh:mm, -hhmm) or not): a table { year, month, day,
+--                       hour, minute, second, offset } (offset: seconds
+--                       east of UTC; nil with no zone) and the text; nil,
+--                       nothing stepped over, if it isn't one
 --   sc:readQuoted(q)    a string in quotes q (" or '), stepped over: its
 --                       text with the escapes made into what they stand
 --                       for (\n \t \r, and \ before anything else is that
@@ -99,6 +106,7 @@
 --   scan.isName(s)       a name: "x", "_tmp2"
 --   scan.isTime(s)       a time of day as readTime reads one: "9:05",
 --                        "23:59:59"
+--   scan.isDateTime(s)   a date and time as readDateTime reads one
 -- Turning them into values is lib/convert's.
 
 local scan = {}
@@ -252,28 +260,71 @@ function Scanner:readFloat()
     return since(self, from)
 end
 
--- time: digit digit? ":" digit digit (":" digit digit)?, hours 0-23,
--- minutes and seconds 0-59
+-- exactly n digits next, stepped over: their number; nil (nothing
+-- stepped over) if they aren't there
+local function readDigits(sc, n)
+    local from = sc.i
+    for _ = 1, n do
+        if not scan.isDigit(sc:peek()) then sc.i = from; return nil end
+        sc:advance()
+    end
+    return tonumber(sc.text:sub(from, sc.i - 1))
+end
+
+-- the field after sep: exactly two digits in lo..hi
+local function readField(sc, sep, lo, hi)
+    if sep and not sc:accept(sep) then return nil end
+    local n = readDigits(sc, 2)
+    if not n or n < lo or n > hi then return nil end
+    return n
+end
+
+-- time: digit digit? ":" MM (":" SS)?, hours 0-23, minutes and seconds
+-- 0-59
 function Scanner:readTime()
     local from = self.i
-    local function twoDigits()
-        local d = self:peek(1) .. self:peek(2)
-        if not (scan.isDigit(self:peek(1)) and scan.isDigit(self:peek(2))) then return nil end
-        self:advance(2)
-        return tonumber(d)
-    end
     local function fail() self.i = from; return nil end
     local hours = self:readWhile(scan.isDigit)
-    if hours == "" or #hours > 2 or tonumber(hours) > 23 or not self:accept(":") then return fail() end
-    local minutes = twoDigits()
-    if not minutes or minutes > 59 then return fail() end
+    if hours == "" or #hours > 2 or tonumber(hours) > 23 then return fail() end
+    local minutes = readField(self, ":", 0, 59)
+    if not minutes then return fail() end
     local seconds = 0
     if self:at(":") and scan.isDigit(self:peek(2)) then
-        self:advance()
-        seconds = twoDigits()
-        if not seconds or seconds > 59 then return fail() end
+        seconds = readField(self, ":", 0, 59)
+        if not seconds then return fail() end
     end
     return tonumber(hours), minutes, seconds, self.text:sub(from, self.i - 1)
+end
+
+-- datetime: year "-" MM "-" DD ("T" | " ") hh ":" mm ":" ss fraction? zone?
+--   year: 4 digits or more; fraction: ("." | ",") digit+
+--   zone: "Z" | ("+" | "-") hh ":"? mm
+function Scanner:readDateTime()
+    local from = self.i
+    local function fail() self.i = from; return nil end
+    local year = self:readWhile(scan.isDigit)
+    if #year < 4 then return fail() end
+    local t = { year = tonumber(year) }
+    t.month = readField(self, "-", 1, 12)
+    t.day = t.month and readField(self, "-", 1, 31)
+    if not t.day or not (self:accept("T") or self:accept(" ")) then return fail() end
+    t.hour = readField(self, nil, 0, 23)
+    t.minute = t.hour and readField(self, ":", 0, 59)
+    t.second = t.minute and readField(self, ":", 0, 60)              -- (60: a leap second)
+    if not t.second then return fail() end
+    local beforeFraction = self.i
+    if (self:accept(".") or self:accept(",")) and self:readWhile(scan.isDigit) == "" then self.i = beforeFraction end
+    if self:accept("Z") then
+        t.offset = 0
+    elseif self:at("+") or self:at("-") then
+        local beforeZone = self.i
+        local sign = self:advance() == "+" and 1 or -1
+        local hh = readField(self, nil, 0, 23)
+        local _ = hh and self:accept(":")
+        local mm = hh and readField(self, nil, 0, 59)
+        if mm then t.offset = sign * (hh * 3600 + mm * 60) else self.i = beforeZone end
+    end
+    return t, self.text:sub(from, self.i - 1)
 end
 
 local ESCAPES = { n = "\n", t = "\t", r = "\r" }
@@ -352,6 +403,7 @@ function scan.isNumber(s) return whole(s, Scanner.readFloat) end
 function scan.isNegative(s) return scan.isNumber(s) and scan.new(s):readFloat() < 0 end
 function scan.isName(s) return whole(s, Scanner.readName) end
 function scan.isTime(s) return whole(s, Scanner.readTime) end
+function scan.isDateTime(s) return whole(s, Scanner.readDateTime) end
 
 function scan.isHex(s)
     return type(s) == "string" and s ~= "" and scan.all(s, scan.isHexDigit)

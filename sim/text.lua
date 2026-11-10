@@ -104,6 +104,11 @@ same("clock", convert.clock(3723004), "01:02:03.004")
 same("clock: wraps at a day", convert.clock(86400000 + 1), "00:00:00.001")
 same("timeOfDay", convert.timeOfDay("1:02:03"), 3723)
 check("timeOfDay: nil for a bad one", convert.timeOfDay("25:00") == nil)
+same("fromDateTime: the epoch", convert.fromDateTime("1970-01-01T00:00:00Z"), 0)
+same("fromDateTime: a zone east of UTC", convert.fromDateTime("2026-10-29T23:04:05+02:00"), 1793307845)
+same("fromDateTime: no zone is UTC, the fraction dropped", convert.fromDateTime("2026-10-29 21:04:05.9"), 1793307845)
+same("fromDateTime: a leap day", convert.fromDateTime("2024-02-29T00:00:00Z"), 1709164800)
+check("fromDateTime: nil for a bad one", convert.fromDateTime("2026-02-30") == nil)
 
 -- 8. bytes
 same("toHex", convert.toHex("\0\255A"), "00ff41")
@@ -154,6 +159,13 @@ none, err = getopt.parse({ "--nope" }, "v")
 check("getopt: an unknown long one", none == nil and err == "unrecognized option '--nope'", tostring(err))
 none, err = getopt.parse({ "--quiet=1" }, "", { quiet = true })
 check("getopt: a flag given a value", none == nil and err == "option '--quiet' doesn't allow an argument", tostring(err))
+
+opts, ops, order = getopt.parseMixed({ "clone", "url", "--only", "lib/", "dir", "--only=bin/", "-b", "dev", "--", "-x" }, "b:",
+    { only = "=", branch = "b" })
+check("getopt.parseMixed: operands between options, -- still ends them", opts and opts.b == "dev"
+    and list(ops) == "{clone|url|dir|-x}" and #order == 3 and order[1][2] == "lib/" and order[2][2] == "bin/")
+opts, ops = getopt.parse({ "a", "-v" }, "v")
+check("getopt.parse: the first operand ends the options", not opts.v and list(ops) == "{a|-v}")
 
 -- 11. lib/glob
 check("glob: * and ?", glob.match("*.lua", "init.lua") and glob.match("?x", "ax") and not glob.match("*.lua", "init.luac"))

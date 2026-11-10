@@ -67,20 +67,10 @@ end
 local function versionIn(path)
     if not path or not fs.exists(path) or fs.isDir(path) then return nil end
     local f = fs.open(path, "r")
-    local text = f.readAll() or ""
+    local version = f.readLine()                     -- (the file is the version and a newline)
     f.close()
-    -- its first word, between blanks (space, tab, newline...).  Read here
-    -- rather than with lib/scan: ccnix is how a broken lib/ is put right.
-    local function blank(i)
-        local b = text:byte(i)
-        return b == 32 or (b >= 9 and b <= 13)
-    end
-    local from = 1
-    while from <= #text and blank(from) do from = from + 1 end
-    local to = from
-    while to <= #text and not blank(to) do to = to + 1 end
-    if to == from then return nil end
-    return text:sub(from, to - 1)
+    if version == "" then return nil end
+    return version
 end
 local romVersion = versionIn(ROM .. "/deploy/version") or "unversioned"
 

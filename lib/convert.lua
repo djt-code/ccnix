@@ -28,6 +28,9 @@
 --                       epoch): "HH:MM:SS.mmm"
 --   convert.timeOfDay(s)  "H:MM" or "H:MM:SS" (scan.isTime) as seconds
 --                       past midnight; nil if s isn't one
+--   convert.fromDateTime(s)  an ISO 8601 date and time (scan.isDateTime)
+--                       as seconds since 1970 UTC (no zone is UTC; the
+--                       fraction of a second dropped); nil if s isn't one
 --
 -- Bytes:
 --   convert.toHex(s)    each byte as two lower case hex digits
@@ -134,6 +137,21 @@ function convert.timeOfDay(s)
     if not scan.isTime(s) then return nil end
     local h, m, sec = scan.new(s):readTime()
     return h * 3600 + m * 60 + sec
+end
+
+-- days from 1970-01-01 to year-month-day (the civil calendar's arithmetic,
+-- the year counted from March so the leap day comes last)
+local function daysFromEpoch(year, month, day)
+    if month <= 2 then year, month = year - 1, month + 12 end
+    return 365 * year + math.floor(year / 4) - math.floor(year / 100) + math.floor(year / 400)
+        + math.floor((153 * (month - 3) + 2) / 5) + day - 719469
+end
+
+function convert.fromDateTime(s)
+    if not scan.isDateTime(s) then return nil end
+    local t = scan.new(s):readDateTime()
+    return daysFromEpoch(t.year, t.month, t.day) * 86400 + t.hour * 3600 + t.minute * 60 + t.second
+        - (t.offset or 0)
 end
 
 --------------------------------------------------------------------------

@@ -88,27 +88,24 @@ local REPO = "https://github.com/djt-code/ccnix"
 local RAW = "https://raw.githubusercontent.com/djt-code/ccnix/main/"
 local DIR = "/ccnix"
 
--- Reading text, by hand (setup is fetched alone, before there's a lib/
--- with lib/scan in it):
-local function endsWith(s, suffix) return s:sub(-#suffix) == suffix end
-
--- s's lines, the pieces between newlines, empty ones too ("a\nb\n" is
--- "a", "b" and "")
-local function splitLines(s)
-    local out, from = {}, 1
-    while true do
-        local nl = s:find("\n", from, true)
-        if not nl then break end
-        out[#out + 1] = s:sub(from, nl - 1)
-        from = nl + 1
+-- The text libraries (lib/scan and those on it), for setup and for git.
+-- On a ccnix computer, or in a checkout this setup sits in, they're on
+-- disk.  Run alone (wget run), setup fetches them, in memory as it does
+-- git below; git, loaded in setup's environment, finds them there too.
+local TEXT_LIBS = { "scan", "text", "convert", "path", "getopt" }
+package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;")
+    .. package.path
+for _, name in ipairs(TEXT_LIBS) do
+    if not pcall(require, name) then
+        local h, err = http and http.get(RAW .. "lib/" .. name .. ".lua")
+        if not h then error("setup needs lib/" .. name .. ".lua: " .. tostring(err or "HTTP is off"), 0) end
+        package.preload[name] = assert(load(h.readAll(), "@lib/" .. name .. ".lua", "t", _ENV))
+        h.close()
     end
-    out[#out + 1] = s:sub(from)
-    return out
 end
-
-local function isAlnum(c)
-    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
-end
+local scan = require("scan")
+local text = require("text")
+local path = require("path")
 
 -- What each app needs.  A path ending in / is a whole folder.
 local TURTLE = { "turtle/turtlelib.lua", "turtle/home.lua", "turtle/autostart.lua" }
@@ -196,22 +193,19 @@ for _, a in ipairs(apps) do
     if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" or a == "screen" then initBoot = true end
 end
 
--- The paths the named apps need, with their help files, as --only options
-local function paths()
+-- The paths the named apps need, with their help files (and extra's), as
+-- --only options
+local function paths(extra)
     local seen, out = {}, {}
     local function add(p)
         if seen[p] then return end
         seen[p] = true
         out[#out + 1] = "--only"
         out[#out + 1] = p
-        -- a Lua file's name: "bin/ls.lua" is ls
-        local slash = 0
-        for j = 1, #p do
-            if p:sub(j, j) == "/" then slash = j end
+        -- a program's help: "bin/ls.lua" is ls
+        if path.extension(p) == "lua" and not text.startsWith(p, "lib/") then
+            add("help/" .. path.basename(p, ".lua") .. ".txt")
         end
-        local file = p:sub(slash + 1)
-        local name = #file > #".lua" and endsWith(file, ".lua") and file:sub(1, -#".lua" - 1)
-        if name and p:sub(1, 4) ~= "lib/" then add("help/" .. name .. ".txt") end
         if p == "bin/" then add("help/") end
     end
     local function addAll(list)
@@ -223,10 +217,23 @@ local function paths()
     for _, a in ipairs(apps) do
         addAll(APPS[a])
     end
+    addAll(extra or {})
     return out
+end
+-- The paths a checkout at DIR was told to take (its --only), or nil.
+local function savedChoice()
+    local f = fs.open(fs.combine(DIR, ".gitlite"), "r")
+    if not f then return nil end
+    local state = (textutils.unserialiseJSON or textutils.unserializeJSON)(f.readAll() or "")
+    f.close()
+    return type(state) == "table" and type(state.only) == "table" and state.only or nil
 end
 if #apps > 0 then
     for _, o in ipairs(paths()) do cloneArgs[#cloneArgs + 1] = o end
+elseif savedChoice() then
+    -- no apps named: the choice stays, with what every install takes now
+    -- (ALWAYS grows: the text libraries came after many a checkout)
+    for _, o in ipairs(paths(savedChoice())) do cloneArgs[#cloneArgs + 1] = o end
 end
 
 local function die(msg)
@@ -341,10 +348,9 @@ local function configure(repo, romMode)
     -- before (the path lines, the shell's, the autostart's) name the repo
     local function kept(path)
         local lines = {}
-        for _, line in ipairs(splitLines(read(path) or "")) do
-            if not (line:find(repo .. "/", 1, true) or line:find("/cc-turtles/", 1, true)) then lines[#lines + 1] = line end
+        for _, line in ipairs(text.lines(read(path) or "")) do
+            if not (text.contains(line, repo .. "/") or text.contains(line, "/cc-turtles/")) then lines[#lines + 1] = line end
         end
-        if lines[#lines] == "" then lines[#lines] = nil end         -- (the file's own last newline)
         return lines
     end
 
@@ -429,16 +435,16 @@ if fs.exists("/rom/ccnix/.manifest") then
         local function oldRun(line)
             local head, root = "shell.run(", "/cc-turtles/"
             local function isQuote(c) return c == '"' or c == "'" end
-            if line:sub(1, #head) ~= head or not isQuote(line:sub(#head + 1, #head + 1)) then return nil end
+            if not text.startsWith(line, head) or not isQuote(line:sub(#head + 1, #head + 1)) then return nil end
             local i = #head + 2
             if line:sub(i, i + #root - 1) ~= root then return nil end
             i = i + #root
             local j = i                                          -- the folder
-            while j <= #line and isAlnum(line:sub(j, j)) do j = j + 1 end
+            while j <= #line and scan.isAlnum(line:sub(j, j)) do j = j + 1 end
             if j == i or line:sub(j, j) ~= "/" then return nil end
             i = j + 1
             j = i                                                -- the program
-            while j <= #line and (isAlnum(line:sub(j, j)) or line:sub(j, j) == "-") do j = j + 1 end
+            while j <= #line and (scan.isAlnum(line:sub(j, j)) or line:sub(j, j) == "-") do j = j + 1 end
             if j == i then return nil end
             -- the args run to the closing quote and ) that end the line
             if #line < j + 1 or not isQuote(line:sub(-2, -2)) or line:sub(-1) ~= ")" then return nil end
@@ -451,11 +457,11 @@ if fs.exists("/rom/ccnix/.manifest") then
         for _, f in ipairs(files) do
             if fs.exists(f) and not fs.isDir(f) and f ~= "/startup" then
                 local h = fs.open(f, "r")
-                local text = h.readAll() or ""
+                local contents = h.readAll() or ""
                 h.close()
                 local out, changed = {}, false
-                for _, line in ipairs(splitLines(text)) do
-                    if line:find("/cc-turtles", 1, true) then
+                for _, line in ipairs(text.lines(contents)) do
+                    if text.contains(line, "/cc-turtles") then
                         changed = true
                         local prog, rest = oldRun(line)
                         if prog and prog ~= "ip" then out[#out + 1] = 'shell.run("' .. prog .. rest .. '")' end
@@ -465,7 +471,7 @@ if fs.exists("/rom/ccnix/.manifest") then
                 end
                 if changed then
                     local new = table.concat(out, "\n")
-                    while endsWith(new, "\n") do new = new:sub(1, -2) end   -- (no blank lines at the end)
+                    while text.endsWith(new, "\n") do new = new:sub(1, -2) end   -- (no blank lines at the end)
                     if new == "" then fs.delete(f)
                     else local h2 = fs.open(f, "w"); h2.write(new .. "\n"); h2.close() end
                 end
@@ -559,7 +565,7 @@ else
         -- (a job's files there aren't .lua, and turtlelib moves them).
         for _, name in ipairs(fs.list(DIR)) do
             local p = fs.combine(DIR, name)
-            if endsWith(name, ".lua") and not fs.isDir(p) then print("Removing " .. p); fs.delete(p) end
+            if text.endsWith(name, ".lua") and not fs.isDir(p) then print("Removing " .. p); fs.delete(p) end
         end
         local all = false
         for _, a in ipairs(cloneArgs) do all = all or a == "--all" end

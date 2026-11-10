@@ -27,6 +27,10 @@
 --
 -- The options end at "--" (stepped over), at "-" alone and at the first
 -- arg not starting with "-": everything from there is an operand.
+--
+-- getopt.parseMixed(args, spec [, long]) is the same but GNU's way:
+-- operands may come before, between and after the options
+-- ("git clone url dir --only lib/"); only "--" ends the options.
 
 local getopt = {}
 
@@ -48,8 +52,9 @@ local function readLong(a)
     return body:sub(1, eq - 1), body:sub(eq + 1)
 end
 
-function getopt.parse(args, spec, long)
-    local takes, opts, order = readSpec(spec), {}, {}
+-- parse and parseMixed: mixed, operands may come between options
+local function parse(args, spec, long, mixed)
+    local takes, opts, order, operands = readSpec(spec), {}, {}, {}
     long = long or {}
     local i = 1
     local function give(name, value)
@@ -67,8 +72,10 @@ function getopt.parse(args, spec, long)
     while i <= #args do
         local a = args[i]
         if a == "--" then i = i + 1; break end
-        if a:sub(1, 1) ~= "-" or a == "-" then break end
-        if a:sub(1, 2) == "--" then
+        if a:sub(1, 1) ~= "-" or a == "-" then
+            if not mixed then break end
+            operands[#operands + 1] = a
+        elseif a:sub(1, 2) == "--" then
             local name, inline = readLong(a)
             local kind = long[name]
             if kind == nil then return nil, "unrecognized option '--" .. name .. "'" end
@@ -103,9 +110,11 @@ function getopt.parse(args, spec, long)
         i = i + 1
     end
 
-    local operands = {}
     for k = i, #args do operands[#operands + 1] = args[k] end
     return opts, operands, order
 end
+
+function getopt.parse(args, spec, long) return parse(args, spec, long, false) end
+function getopt.parseMixed(args, spec, long) return parse(args, spec, long, true) end
 
 return getopt
