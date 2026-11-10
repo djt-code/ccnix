@@ -95,11 +95,14 @@
 --   scan.isAlpha     a letter            scan.isAlnum     a letter or digit
 --   scan.isNameStart a letter or _       scan.isNameChar  a letter, digit or _
 --   scan.isSpace     space, tab, newline, return, vertical tab, form feed
+--   scan.isTabOrSpace  a space or a tab (C's isblank; the [:blank:] class)
 --   scan.isPunct     printable, not a letter, digit or space: ! " # $ ...
 --   scan.isPrintable space to ~ (32-126)
 --   scan.isGraph     printable, not a space (33-126)
 --   scan.isControl   the control characters: 0-31 and 127
 --   scan.oneOf(chars)    a test: true for any one of the characters in chars
+--   scan.isNot(test)     a test: true where test is false (scan.isNot(scan.isSpace)
+--                        for "not a blank")
 --   scan.posixClasses    the POSIX classes by name, each one of these
 --                        tests: alpha digit alnum upper lower space blank
 --                        (space, tab) punct print graph cntrl xdigit, as
@@ -151,6 +154,7 @@ function scan.isNameChar(c) return scan.isAlnum(c) or c == "_" end
 
 -- the blanks Lua's %s knows: space, \t \n \v \f \r (bytes 9 to 13)
 function scan.isSpace(c) return c == " " or inRange(c, "\t", "\r") end
+function scan.isTabOrSpace(c) return c == " " or c == "\t" end
 
 -- the printable characters (! to ~) that aren't letters or digits
 function scan.isPunct(c) return inRange(c, "!", "~") and not scan.isAlnum(c) end
@@ -169,9 +173,11 @@ function scan.oneOf(chars)
     return function(c) return set[c] == true end
 end
 
+function scan.isNot(test) return function(c) return not test(c) end end
+
 scan.posixClasses = {
     alpha = scan.isAlpha, digit = scan.isDigit, alnum = scan.isAlnum, upper = scan.isUpper,
-    lower = scan.isLower, space = scan.isSpace, blank = scan.oneOf(" \t"), punct = scan.isPunct,
+    lower = scan.isLower, space = scan.isSpace, blank = scan.isTabOrSpace, punct = scan.isPunct,
     print = scan.isPrintable, graph = scan.isGraph, cntrl = scan.isControl, xdigit = scan.isHexDigit,
 }
 

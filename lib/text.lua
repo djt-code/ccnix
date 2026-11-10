@@ -15,6 +15,7 @@
 -- Blanks (scan.isSpace: space, tab, newline, return, vt, ff):
 --   text.trim(s)          s without the blanks at either end
 --   text.trimStart(s)     ... at its start;  text.trimEnd(s)  ... at its end
+--   text.keep(s, test)    s with only the characters for which test(c) holds
 --   text.squeeze(s)       every run of blanks as one space (the ends too:
 --                         trim(squeeze(s)) for neither)
 --   text.words(s)         the words of s between blanks, as a list
@@ -64,6 +65,11 @@
 --                               when cut: truncate("abcdef", 4, "~") is "abc~"
 --                               (a column exactly w wide:
 --                               padRight(truncate(s, w), w))
+--   text.columns(rows [, right])  rows (lists of strings) as lines, each
+--                         cell as wide as its column's widest, one space
+--                         between; right[k] true: column k on the right
+--                         (numbers).  The last cell of a row isn't padded,
+--                         and no line ends in blanks.
 --   text.wrap(s, w)             s as lines of at most w: each broken at
 --                               its last blank that fits with text before
 --                               it (that blank dropped), or, with none, at
@@ -81,6 +87,8 @@
 local scan = require("scan")
 
 local text = {}
+
+local notSpace = scan.isNot(scan.isSpace)
 
 --------------------------------------------------------------------------
 -- Blanks
@@ -104,22 +112,29 @@ function text.words(s)
     local sc, out = scan.new(s), {}
     sc:skipSpaces()
     while not sc:atEnd() do
-        out[#out + 1] = sc:readWhile(function(c) return not scan.isSpace(c) end)
+        out[#out + 1] = sc:readWhile(notSpace)
         sc:skipSpaces()
     end
     return out
+end
+
+function text.keep(s, test)
+    local out = {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        if test(c) then out[#out + 1] = c end
+    end
+    return table.concat(out)
 end
 
 function text.squeeze(s)
     local sc, out = scan.new(s), {}
     while not sc:atEnd() do
         if sc:readWhile(scan.isSpace) ~= "" then out[#out + 1] = " "
-        else out[#out + 1] = sc:readWhile(function(c) return not scan.isSpace(c) end) end
+        else out[#out + 1] = sc:readWhile(notSpace) end
     end
     return table.concat(out)
 end
-
-local function notSpace(c) return not scan.isSpace(c) end
 
 function text.afterWords(s, n)
     local sc = scan.new(s)
@@ -284,6 +299,23 @@ function text.truncate(s, w, mark)
     if #s <= w then return s end
     if #mark >= w then return mark:sub(1, w) end
     return s:sub(1, w - #mark) .. mark
+end
+
+function text.columns(rows, right)
+    local widths, lines = {}, {}
+    for _, r in ipairs(rows) do
+        for k, cell in ipairs(r) do widths[k] = math.max(widths[k] or 0, #cell) end
+    end
+    for _, r in ipairs(rows) do
+        local parts = {}
+        for k, cell in ipairs(r) do
+            if k == #r then parts[k] = cell
+            elseif right and right[k] then parts[k] = text.padLeft(cell, widths[k])
+            else parts[k] = text.padRight(cell, widths[k]) end
+        end
+        lines[#lines + 1] = text.trimEnd(table.concat(parts, " "))
+    end
+    return lines
 end
 
 -- one line (no newlines in it), from s's index `at`, as lines of at most

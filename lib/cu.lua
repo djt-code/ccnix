@@ -19,6 +19,8 @@
 -- failure without printing anything.
 
 local getopt = require("getopt")
+local text = require("text")
+local convert = require("convert")
 
 local cu = {}
 
@@ -73,6 +75,43 @@ end
 --------------------------------------------------------------------------
 -- Is output going to the screen (not redirected by a shell)?
 function cu.isTerminal() return io.output() == io.stdout end
+
+-- An fs or io error without the path it starts with ("x: No such file"
+-- is "No such file"), for a message that names the operand itself.
+function cu.reason(err)
+    local _, rest = text.cut(tostring(err), ": ")
+    return rest or tostring(err)
+end
+
+-- When the file at path was last changed (ms since 1970, as
+-- fs.attributes gives it; older CC calls it modification), or nil.
+function cu.mtime(path)
+    local ok, a = pcall(fs.attributes, path)
+    if ok and a then return a.modified or a.modification end
+    return nil
+end
+
+-- Let CC see a yield now and then in a long loop, or it stops the
+-- program ("Too long without yielding"): call it as often as you like,
+-- it yields once every second at most.
+local lastYield = os.clock()
+function cu.breathe()
+    if os.clock() - lastYield < 1 then return end
+    os.queueEvent("cu_breathe")
+    os.pullEvent("cu_breathe")
+    lastYield = os.clock()
+end
+
+-- The number option -letter in opts (from cu.getopt): its value, or dflt
+-- when it wasn't given; a usage error ("bad -c x") unless it's a number
+-- (whole, with whole) of at least least.
+function cu.number(opts, letter, dflt, least, whole)
+    local v = opts[letter]
+    if v == nil then return dflt end
+    local n = whole and convert.toInteger(v) or (not whole and convert.toNumber(v))
+    if not n or (least and n < least) then cu.usageError("bad -" .. letter .. " " .. tostring(v)) end
+    return n
+end
 
 -- Is the file at `path` hidden from listings: a name starting with a dot,
 -- or, with the fileserver's pool mounted, a member disk's own mount (/disk,

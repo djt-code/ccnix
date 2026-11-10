@@ -232,3 +232,16 @@ same("extension", path.extension("a/b.tar.gz"), "gz")
 same("extension: a dotfile has none", path.extension(".profile"), "")
 same("extension: none", path.extension("Makefile"), "")
 
+
+-- 13. the helpers the second audit asked for
+local tables = require("tables")
+same("keep", text.keep("a1b2", scan.isDigit), "12")
+same("columns: widths, right-aligned numbers, the last cell ragged",
+    table.concat(text.columns({ { "name", "n", "x" }, { "ab", "123", "" } }, { [2] = true }), "|"), "name   n x|ab   123")
+check("isNot and isTabOrSpace", scan.isNot(scan.isSpace)("x") and not scan.isNot(scan.isSpace)(" ")
+    and scan.isTabOrSpace("\t") and not scan.isTabOrSpace("\n"))
+same("sortedKeys: numbers as numbers, then strings", table.concat(tables.sortedKeys({ [10] = 1, [9] = 1, b = 1, a = 1 }), ","), "9,10,a,b")
+same("sortedKeys: a comparator", table.concat(tables.sortedKeys({ a = 1, b = 1 }, function(x, y) return x > y end), ","), "b,a")
+local orig = { a = 1, t = {} }
+local cp = tables.copy(orig)
+check("copy: shallow", cp ~= orig and cp.a == 1 and cp.t == orig.t)

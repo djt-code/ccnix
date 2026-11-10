@@ -61,7 +61,7 @@ local COMMIT = "1111111111111111111111111111111111111111"
 -- what the ROM holds of the repo (the mod puts it all there; this is
 -- what boot, ls and the checks touch)
 local ROM_FILES = { "bin/ls.lua", "bin/rm.lua", "bin/mkdir.lua", "bin/ip.lua", "bin/ccsh.lua", "bin/init.lua", "bin/ccnix.lua", "lib/cu.lua", "lib/scan.lua",
-                    "lib/text.lua", "lib/convert.lua", "lib/getopt.lua", "lib/glob.lua", "lib/path.lua",
+                    "lib/text.lua", "lib/convert.lua", "lib/getopt.lua", "lib/glob.lua", "lib/path.lua", "lib/fileio.lua", "lib/tables.lua",
                     "turtle/autostart.lua", "pc/router.lua", "help/ls.txt", "deploy/boot.lua", "deploy/setup.lua",
                     "deploy/version" }
 local STUB = { ["bin/ip.lua"] = true, ["bin/ccsh.lua"] = true, ["bin/init.lua"] = true,
