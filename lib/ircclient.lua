@@ -37,6 +37,9 @@
 local irc = require("irc")
 local scan = require("scan")
 local text = require("text")
+local convert = require("convert")
+local glob = require("glob")
+local path = require("path")
 
 local C = {}
 C.VERSION = "1.0"
@@ -94,26 +97,14 @@ local COMMANDS = {}             -- the built-in /commands: name -> { fn, usage, 
 --------------------------------------------------------------------------
 -- Small things
 --------------------------------------------------------------------------
-local trim = text.trim
-
--- The first word and the rest (the blanks between left out).
-local function splitWord(s)
-    local sc = scan.new(s)
-    sc:skipSpaces()
-    local word = sc:readWhile(function(c) return not scan.isSpace(c) end)
-    sc:skipSpaces()
-    return word, sc:readRest()
-end
-
-local function words(s) return text.words(s or "") end
-
--- s without a / in front (a command's name typed with one).
-local function noSlash(s) return text.startsWith(s, "/") and s:sub(2) or s end
+-- The first word and the rest, as typed (the blanks between left out).
+local function splitWord(s) return text.words(s)[1] or "", irc.afterWords(s, 1) or "" end
 
 -- A file's name without .lua: the script it holds (nil if it isn't one).
 local function scriptName(file)
-    if #file > 4 and text.endsWith(file, ".lua") then return file:sub(1, -5) end
-    return nil
+    local name = text.stripSuffix(file, ".lua")
+    if name == "" then return nil end
+    return name
 end
 
 -- A setting's name for a network: network.<name>.<key>, the network's
@@ -126,11 +117,19 @@ local function networkKey(name)
 end
 
 -- A numeric reply's command: three digits.
-local function isNumeric(command) return #command == 3 and scan.all(command, scan.isDigit) end
+local function isNumeric(command) return #command == 3 and scan.isUnsigned(command) end
 
--- mIRC colour n around text.
+-- Does the list (words with blanks between) have this word?
+local function hasWord(list, word)
+    for _, w in ipairs(text.words(list)) do
+        if w == word then return true end
+    end
+    return false
+end
+
+-- mIRC colour n around s.
 -- (it ends with \15, plain: a "\3" end would take digits after it as a colour)
-local function colour(n, text) return string.format("\3%02d", n) .. text .. "\15" end
+local function colour(n, s) return string.format("\3%02d", n) .. s .. "\15" end
 C.colour = colour
 
 function C.nickColour(nick)
@@ -142,9 +141,7 @@ end
 local function home()
     local getenv = os.getenv
     local h = getenv and getenv("HOME")
-    local dir = (h and h ~= "") and h or "/"
-    if text.endsWith(dir, "/") then dir = dir:sub(1, -2) end
-    return dir .. "/.irc"
+    return path.join((h and h ~= "") and h or "/", ".irc")
 end
 
 --------------------------------------------------------------------------
@@ -204,30 +201,36 @@ function Client:setting(name)
     return d and d.default
 end
 
--- A value from text, by the setting's kind: the value, or nil and why.
-local function parseValue(kind, text)
-    if kind == "int" then
-        local n = tonumber(text)
-        if not n or n % 1 ~= 0 then return nil, "a whole number, please" end
-        return n
-    elseif kind == "bool" then
-        local t = text:lower()
-        if t == "on" or t == "true" or t == "yes" or t == "1" then return true end
-        if t == "off" or t == "false" or t == "no" or t == "0" then return false end
-        return nil, "on or off, please"
-    end
-    return text
-end
+-- The words a bool setting takes, and what each means.
+local BOOL_WORDS = { on = true, ["true"] = true, yes = true, ["1"] = true,
+    off = false, ["false"] = false, no = false, ["0"] = false }
 
--- Set a setting (text as typed, or nil: back to its default); true, or
--- nil and why.  network.<name>.<key>, alias.<name> are free-form.
-function Client:set(name, text)
+-- Each kind of setting: its value from what's typed, or nil and why.
+local SETTING_KINDS = {
+    int = function(typed)
+        local n = convert.toInteger(typed)
+        if not n then return nil, "a whole number, please" end
+        return n
+    end,
+    bool = function(typed)
+        local v = BOOL_WORDS[typed:lower()]
+        if v == nil then return nil, "on or off, please" end
+        return v
+    end,
+    str = function(typed) return typed end,
+}
+
+local function parseValue(kind, typed) return (SETTING_KINDS[kind] or SETTING_KINDS.str)(typed) end
+
+-- Set a setting (its value as typed, or nil: back to its default); true,
+-- or nil and why.  network.<name>.<key>, alias.<name> are free-form.
+function Client:set(name, typed)
     local d = self.settingDefs[name]
     if not d and not networkKey(name) then return nil, "no setting " .. name end
-    if text == nil then
+    if typed == nil then
         self.values[name] = nil
     else
-        local v, why = parseValue(d and d.kind or "str", text)
+        local v, why = parseValue(d and d.kind or "str", typed)
         if v == nil then return nil, why end
         self.values[name] = v
     end
@@ -246,15 +249,16 @@ function Client:loadConfig()
     if not h then return end
     local contents = h.readAll() or ""
     h.close()
+    -- line = key " = " value, or a "#" comment
     for _, raw in ipairs(text.lines(contents)) do
-        local line = trim(raw)
-        local eq = line:find(" = ", 1, true)
-        if line ~= "" and line:sub(1, 1) ~= "#" and eq then
-            local key, value = line:sub(1, eq - 1), line:sub(eq + 3)
-            if text.startsWith(key, "alias.") then
-                self.aliases[key:sub(7)] = value ~= "" and value or nil
-            elseif text.startsWith(key, "ignore.") then
-                self.ignores[#self.ignores + 1] = { mask = key:sub(8), levels = value }
+        local line = text.trim(raw)
+        local key, value = text.cut(line, " = ")
+        if value and not text.startsWith(line, "#") then
+            local alias, ignore = text.stripPrefix(key, "alias."), text.stripPrefix(key, "ignore.")
+            if alias then
+                self.aliases[alias] = value ~= "" and value or nil
+            elseif ignore then
+                self.ignores[#self.ignores + 1] = { mask = ignore, levels = value }
             else
                 local d = self.settingDefs[key]
                 local v = parseValue(d and d.kind or "str", value)
@@ -486,11 +490,11 @@ end
 
 -- A line into a buffer (nil: the core one).  opts: prefix, prefixColour
 -- (mIRC), level (C.ACTIVITY's), hilight, time.
-function Client:print(buffer, text, opts)
+function Client:print(buffer, body, opts)
     opts = opts or {}
     buffer = buffer or self.core
     local line = { time = opts.time or self:timestamp(), prefix = opts.prefix or "", prefixColour = opts.prefixColour,
-        text = text or "", level = opts.level or "crap", hilight = opts.hilight }
+        text = body or "", level = opts.level or "crap", hilight = opts.hilight }
     local lines = buffer.lines
     lines[#lines + 1] = line
     local most = self:setting("scrollback") or C.SCROLLBACK
@@ -525,18 +529,18 @@ function Client:bell()
 end
 
 -- What the client says itself, in a buffer: "-- text" in light blue.
-function Client:note(buffer, text, level)
-    return self:print(buffer, text, { prefix = "--", prefixColour = 12, level = level or "crap" })
+function Client:note(buffer, body, level)
+    return self:print(buffer, body, { prefix = "--", prefixColour = 12, level = level or "crap" })
 end
 
-function Client:err(buffer, text)
-    return self:print(buffer, text, { prefix = "=!=", prefixColour = 4, level = "error" })
+function Client:err(buffer, body)
+    return self:print(buffer, body, { prefix = "=!=", prefixColour = 4, level = "error" })
 end
 
 --------------------------------------------------------------------------
 -- Buffer methods (for scripts too)
 --------------------------------------------------------------------------
-function Buffer:print(text, opts) return self.client:print(self, text, opts) end
+function Buffer:print(body, opts) return self.client:print(self, body, opts) end
 function Buffer:command(line) return self.client:command(line, self) end
 function Buffer:number() return self.client:bufferNumber(self) end
 
@@ -581,7 +585,7 @@ end
 
 function Client:findServer(name)
     for _, s in ipairs(self.servers) do
-        if s.name:lower() == name:lower() then return s end
+        if text.equalFold(s.name, name) then return s end
     end
     return nil
 end
@@ -607,8 +611,7 @@ function Server:isMe(nick) return self.nick and nick and self:fold(nick) == self
 -- 99 for none.
 function Server:rank(prefix)
     if not prefix or prefix == "" then return 99 end
-    local at = self.prefixSymbols:find(prefix:sub(1, 1), 1, true)
-    return at or 99
+    return text.find(self.prefixSymbols, prefix:sub(1, 1)) or 99
 end
 
 -- Send a raw line (lib/irc builds them); nothing if not connected.
@@ -626,20 +629,17 @@ function Server:message(target, body, command)
     local pieces = {}
     while #body > room do
         -- cut at the last space that fits (one too early in the piece: at the room)
-        local cut = room + 1
-        for k = room, 1, -1 do
-            if body:sub(k, k) == " " then cut = k; break end
-        end
+        local cut = text.findLast(body:sub(1, room), " ") or room + 1
         if cut < room / 2 then cut = room + 1 end
         pieces[#pieces + 1] = body:sub(1, cut - 1)
         body = body:sub(cut)
-        if text.startsWith(body, " ") then body = body:sub(2) end
+        body = text.stripPrefix(body, " ") or body
     end
     pieces[#pieces + 1] = body
     for _, p in ipairs(pieces) do self:send(irc.build(command, target, p)) end
     return pieces
 end
-Server.send_message = function(self, target, text) return self:message(target, text) end
+Server.send_message = function(self, target, body) return self:message(target, body) end
 
 -- A command as typed, for this server (a script's server:command("msg x hi")).
 function Server:command(line)
@@ -764,13 +764,13 @@ function Server:bufferFor(target, nick, make)
     return b
 end
 
-function Server:isHilight(text)
-    local plain = irc.strip(text):lower()
+function Server:isHilight(body)
+    local plain = irc.strip(body):lower()
     local function has(word)
         word = word:lower()
         local from = 1
         while true do
-            local i, j = plain:find(word, from, true)
+            local i, j = text.find(plain, word, from)
             if not i then return false end
             local before, after = plain:sub(i - 1, i - 1), plain:sub(j + 1, j + 1)
             if not scan.isNameChar(before) and not scan.isNameChar(after) then return true end
@@ -778,7 +778,7 @@ function Server:isHilight(text)
         end
     end
     if self.nick and has(self.nick) then return true end
-    for _, w in ipairs(words(self.client:setting("hilight_words"))) do
+    for _, w in ipairs(text.words(self.client:setting("hilight_words") or "")) do
         if has(w) then return true end
     end
     return false
@@ -793,7 +793,7 @@ function Client:ignored(nick, address, level)
     local full = (nick or "") .. "!" .. (address or "")
     for _, ig in ipairs(self.ignores) do
         local mask = irc.containsAny(ig.mask, "!@") and ig.mask or (ig.mask .. "!*")
-        if irc.match(mask, full) and (ig.levels == "all" or (" " .. ig.levels .. " "):find(" " .. level .. " ", 1, true)) then
+        if irc.match(mask, full) and (ig.levels == "all" or hasWord(ig.levels, level)) then
             return true
         end
     end
@@ -811,38 +811,56 @@ end
 
 EVENTS.ERROR = function(s, m) s.client:err(s.buffer, m.params[1] or "ERROR") end
 
-EVENTS.CAP = function(s, m)
-    local sub = (m.params[2] or ""):upper()
+-- SASL PLAIN's account, when the network has one set.
+local function saslAccount(s)
     local user, pass = s:net("sasl_user"), s:net("sasl_pass")
-    if sub == "LS" then
-        -- (302: a "*" before the last param means more lines follow)
+    if user and pass then return user, pass end
+    return nil
+end
+
+-- The capabilities asked for when a server offers them: each with
+-- whether it's wanted on this server.
+local WANTED_CAPS = {
+    ["multi-prefix"] = function() return true end,
+    ["away-notify"] = function() return true end,
+    sasl = function(s) return saslAccount(s) ~= nil end,
+}
+
+-- CAP's subcommands from the server (IRCv3 capability negotiation).
+local CAP_REPLIES = {
+    -- LS: what it offers; ask for the ones wanted (302: a "*" before the
+    -- last param means more lines follow)
+    LS = function(s, m)
         s.capOffered = (s.capOffered or "") .. " " .. (m.params[#m.params] or "")
         if m.params[3] == "*" then return end
         local want = {}
         for _, cap in ipairs(text.words(s.capOffered)) do
             local name = text.cut(cap, "=")
-            if name == "multi-prefix" or name == "away-notify" or (name == "sasl" and user and pass) then
-                want[#want + 1] = name
-            end
+            if WANTED_CAPS[name] and WANTED_CAPS[name](s) then want[#want + 1] = name end
         end
         s.capOffered = nil
-        if #want > 0 then s:send(irc.build("CAP", "REQ", table.concat(want, " "))) else s:send("CAP END") end
-    elseif sub == "ACK" then
-        local acked = " " .. (m.params[#m.params] or "") .. " "
-        if acked:find(" sasl ", 1, true) and user and pass then
+        if #want > 0 then s:send(irc.build("CAP", "REQ", text.join(want, " "))) else s:send("CAP END") end
+    end,
+    -- ACK: what it agreed to; SASL logs in before CAP END
+    ACK = function(s, m)
+        if hasWord(m.params[#m.params] or "", "sasl") and saslAccount(s) then
             s:send("AUTHENTICATE PLAIN")
         else
             s:send("CAP END")
         end
-    elseif sub == "NAK" then
-        s:send("CAP END")
-    end
+    end,
+    NAK = function(s) s:send("CAP END") end,
+}
+
+EVENTS.CAP = function(s, m)
+    local reply = CAP_REPLIES[(m.params[2] or ""):upper()]
+    if reply then reply(s, m) end
 end
 
 EVENTS.AUTHENTICATE = function(s, m)
     if m.params[1] == "+" then
         local user, pass = s:net("sasl_user") or "", s:net("sasl_pass") or ""
-        s:send("AUTHENTICATE " .. irc.base64(user .. "\0" .. user .. "\0" .. pass))
+        s:send("AUTHENTICATE " .. convert.toBase64(user .. "\0" .. user .. "\0" .. pass))
     end
 end
 
@@ -869,21 +887,28 @@ EVENTS["001"] = function(s, m)
     if #chans > 0 then s:send(irc.build("JOIN", table.concat(chans, ","))) end
 end
 
-EVENTS["005"] = function(s, m)
-    for i = 2, #m.params - 1 do
-        local tok = m.params[i]
-        local eq = tok:find("=", 1, true)
-        local key, value = eq and tok:sub(1, eq - 1) or tok, eq and tok:sub(eq + 1) or true
-        s.isupport[key:upper()] = value
-        if key:upper() == "PREFIX" and type(value) == "string" then
-            -- PREFIX=(modes)symbols: (ov)@+
-            local sc = scan.new(value)
-            if sc:accept("(") then
-                local modes, closed = sc:readUntil(")")
-                if closed then s.prefixModes, s.prefixSymbols = modes, sc:readRest() end
-            end
+-- The ISUPPORT tokens the client does more with than keep.
+local ISUPPORT_TOKENS = {
+    -- PREFIX=(modes)symbols: (ov)@+
+    PREFIX = function(s, value)
+        if type(value) ~= "string" then return end
+        local sc = scan.new(value)
+        if sc:accept("(") then
+            local modes, closed = sc:readUntil(")")
+            if closed then s.prefixModes, s.prefixSymbols = modes, sc:readRest() end
         end
-        if key:upper() == "NETWORK" then s.network = value end
+    end,
+    NETWORK = function(s, value) s.network = value end,
+}
+
+EVENTS["005"] = function(s, m)
+    -- each token: KEY or KEY=value
+    for i = 2, #m.params - 1 do
+        local key, value = text.cut(m.params[i], "=")
+        key = key:upper()
+        if value == nil then value = true end
+        s.isupport[key] = value
+        if ISUPPORT_TOKENS[key] then ISUPPORT_TOKENS[key](s, value) end
     end
     s.client:print(s.buffer, table.concat(m.params, " ", 2, #m.params), { prefix = "--", prefixColour = 12 })
 end
@@ -915,10 +940,10 @@ EVENTS.NICK = function(s, m)
             if had then b:setNick(new, had.prefix) end
             if b.kind == "query" and s:fold(b.name) == s:fold(old) then b.name = new; had = true end
             if had or (me and b.kind == "server") then
-                local text = me and ("You're now known as " .. colour(C.nickColour(new), new))
+                local said = me and ("You're now known as " .. colour(C.nickColour(new), new))
                     or (colour(C.nickColour(old), old) .. " is now known as " .. colour(C.nickColour(new), new))
                 if not client:ignored(old, m.user and (m.user .. "@" .. (m.host or "")), "nicks") then
-                    client:print(b, text, { prefix = "--", prefixColour = 12, level = "nicks" })
+                    client:print(b, said, { prefix = "--", prefixColour = 12, level = "nicks" })
                 end
             end
         end
@@ -1022,7 +1047,7 @@ EVENTS.INVITE = function(s, m)
     if client:setting("autojoin_on_invite") and chan then s:send(irc.build("JOIN", chan)) end
 end
 
--- PRIVMSG: CTCP (ACTION, and the questions answered), or a message.
+-- PRIVMSG and NOTICE: CTCP (ACTION, and the questions answered), or a message.
 local CTCP_ANSWERS = {
     VERSION = function(s) return s.client:setting("ctcp_version") end,
     PING = function(_, args) return args end,
@@ -1030,73 +1055,107 @@ local CTCP_ANSWERS = {
     CLIENTINFO = function() return "ACTION CLIENTINFO PING TIME VERSION" end,
 }
 
-local function privmsg(s, m, notice)
-    local client = s.client
-    local target, text, nick = m.params[1], m.params[2] or "", m.nick or m.source or "?"
-    local address = (m.user or "") .. "@" .. (m.host or "")
-    local toChannel = s:isChannel(target)
-    local cmd, args = irc.ctcp(text)
-    if cmd and cmd ~= "ACTION" then
-        if notice then
-            client:print(client.current.server == s and client.current or s.buffer,
-                "CTCP " .. cmd .. " reply from " .. colour(C.nickColour(nick), nick) .. ": " .. args,
-                { prefix = "--", prefixColour = 12, level = "notices" })
-            return
-        end
-        if client:emit("ctcp msg", s, cmd, args, nick, address, target) then return end
-        local answer = CTCP_ANSWERS[cmd]
-        if answer and not client:ignored(nick, address, "ctcps") then
-            s:send(irc.build("NOTICE", nick, irc.ctcpQuote(cmd, answer(s, args))))
-        end
-        client:note(s.buffer, "CTCP " .. cmd .. " from " .. colour(C.nickColour(nick), nick)
-            .. (args ~= "" and (": " .. args) or ""))
-        return
-    end
-    if not m.nick or (not s.registered and not toChannel) then          -- (the server's own NOTICE)
-        client:print(s.buffer, text, { prefix = "-" .. (m.source or s.name) .. "-", prefixColour = 7, level = "notices" })
-        return
-    end
-    local level = toChannel and (cmd == "ACTION" and "actions" or "public") or "private"
-    if client:ignored(nick, address, notice and "notices" or level) then return end
-    local hilight = (toChannel and s:isHilight(text)) or false
-    local b
-    if notice then
-        b = (toChannel and s:bufferFor(target, nick, false)) or client:findBuffer(s, nick)
-            or (client.current.server == s and client.current) or s.buffer
-    else
-        b = s:bufferFor(target, nick, true)
-    end
-    local mode = ""
-    if toChannel and b.kind == "channel" then
-        local entry = b:getNick(nick)
-        mode = entry and entry.prefix:sub(1, 1) or ""
-    end
-    if notice then
-        client:print(b, text, { prefix = "-" .. nick .. "-", prefixColour = 7, level = "notices", hilight = hilight })
-        client:emit("message irc notice", s, text, nick, address, target)
-    elseif cmd == "ACTION" then
-        client:print(b, colour(C.nickColour(nick), nick) .. " " .. args, { prefix = " *", prefixColour = 0, level = level,
-            hilight = hilight })
-        client:emit("message irc action", s, args, nick, address, target)
-    else
-        client:print(b, text, { prefix = nickPrefix(nick, mode), prefixColour = C.nickColour(nick), level = level,
-            hilight = hilight, nick = nick })
-        if toChannel then client:emit("message public", s, text, nick, address, target)
-        else client:emit("message private", s, text, nick, address) end
-    end
+-- What a PRIVMSG or NOTICE is, by what its text holds (a CTCP ACTION,
+-- another CTCP, or plain text) and its command.
+local MESSAGE_KIND = {
+    plain  = { PRIVMSG = "message", NOTICE = "notice" },
+    action = { PRIVMSG = "action", NOTICE = "notice" },
+    ctcp   = { PRIVMSG = "ctcpQuery", NOTICE = "ctcpReply" },
+}
+
+local function messageKind(command, ctcp)
+    local holds = (ctcp == nil and "plain") or (ctcp == "ACTION" and "action") or "ctcp"
+    return MESSAGE_KIND[holds][command]
 end
 
-EVENTS.PRIVMSG = function(s, m) privmsg(s, m, false) end
-EVENTS.NOTICE = function(s, m) privmsg(s, m, true) end
+-- The buffer a notice goes in: its channel's, the sender's query, or
+-- the one on the screen (if it's this server's).
+local function noticeBuffer(s, msg)
+    local client = s.client
+    return (msg.toChannel and s:bufferFor(msg.target, msg.nick, false)) or client:findBuffer(s, msg.nick)
+        or (client.current.server == s and client.current) or s.buffer
+end
+
+-- The buffer a message goes in: its channel's or the sender's query, made if need be.
+local function messageBuffer(s, msg) return s:bufferFor(msg.target, msg.nick, true) end
+
+-- How each kind is handled.  A CTCP has handle(s, msg), all of it; the
+-- others go through the ignores and hilights first, then
+--   levels    the level in a channel and in private (ignores, activity)
+--   buffer(s, msg)              where it's shown
+--   show(s, b, msg, level)      the line, and the script signal
+local MESSAGES = {
+    ctcpReply = { handle = function(s, msg)
+        local client = s.client
+        client:print(client.current.server == s and client.current or s.buffer,
+            "CTCP " .. msg.ctcp .. " reply from " .. colour(C.nickColour(msg.nick), msg.nick) .. ": " .. msg.args,
+            { prefix = "--", prefixColour = 12, level = "notices" })
+    end },
+    ctcpQuery = { handle = function(s, msg)
+        local client, nick = s.client, msg.nick
+        if client:emit("ctcp msg", s, msg.ctcp, msg.args, nick, msg.address, msg.target) then return end
+        local answer = CTCP_ANSWERS[msg.ctcp]
+        if answer and not client:ignored(nick, msg.address, "ctcps") then
+            s:send(irc.build("NOTICE", nick, irc.ctcpQuote(msg.ctcp, answer(s, msg.args))))
+        end
+        client:note(s.buffer, "CTCP " .. msg.ctcp .. " from " .. colour(C.nickColour(nick), nick)
+            .. (msg.args ~= "" and (": " .. msg.args) or ""))
+    end },
+    notice = { levels = { channel = "notices", private = "notices" }, buffer = noticeBuffer,
+        show = function(s, b, msg, level)
+            s.client:print(b, msg.body, { prefix = "-" .. msg.nick .. "-", prefixColour = 7, level = level,
+                hilight = msg.hilight })
+            s.client:emit("message irc notice", s, msg.body, msg.nick, msg.address, msg.target)
+        end },
+    action = { levels = { channel = "actions", private = "private" }, buffer = messageBuffer,
+        show = function(s, b, msg, level)
+            s.client:print(b, colour(C.nickColour(msg.nick), msg.nick) .. " " .. msg.args,
+                { prefix = " *", prefixColour = 0, level = level, hilight = msg.hilight })
+            s.client:emit("message irc action", s, msg.args, msg.nick, msg.address, msg.target)
+        end },
+    message = { levels = { channel = "public", private = "private" }, buffer = messageBuffer,
+        show = function(s, b, msg, level)
+            local mode = ""
+            if msg.toChannel and b.kind == "channel" then
+                local entry = b:getNick(msg.nick)
+                mode = entry and entry.prefix:sub(1, 1) or ""
+            end
+            s.client:print(b, msg.body, { prefix = nickPrefix(msg.nick, mode), prefixColour = C.nickColour(msg.nick),
+                level = level, hilight = msg.hilight, nick = msg.nick })
+            if msg.toChannel then s.client:emit("message public", s, msg.body, msg.nick, msg.address, msg.target)
+            else s.client:emit("message private", s, msg.body, msg.nick, msg.address) end
+        end },
+}
+
+local function privmsg(s, m)
+    local client = s.client
+    local msg = { target = m.params[1], body = m.params[2] or "", nick = m.nick or m.source or "?",
+        address = (m.user or "") .. "@" .. (m.host or "") }
+    msg.toChannel = s:isChannel(msg.target)
+    msg.ctcp, msg.args = irc.ctcp(msg.body)
+    local kind = MESSAGES[messageKind(m.command, msg.ctcp)]
+    if kind.handle then return kind.handle(s, msg) end
+    if not m.nick or (not s.registered and not msg.toChannel) then          -- (the server's own NOTICE)
+        client:print(s.buffer, msg.body, { prefix = "-" .. (m.source or s.name) .. "-", prefixColour = 7, level = "notices" })
+        return
+    end
+    local level = kind.levels[msg.toChannel and "channel" or "private"]
+    if client:ignored(msg.nick, msg.address, level) then return end
+    msg.hilight = (msg.toChannel and s:isHilight(msg.body)) or false
+    kind.show(s, kind.buffer(s, msg), msg, level)
+end
+
+EVENTS.PRIVMSG = privmsg
+EVENTS.NOTICE = privmsg
 
 -- A channel mode's arguments: which letters take one (PREFIX's always;
 -- CHANMODES' lists A always, B always, C when set, D never).
 local function modeTakesArg(s, letter, adding)
-    if s.prefixModes:find(letter, 1, true) then return true end
-    local groups = {}
-    for _, g in ipairs(text.split(s.isupport.CHANMODES or "b,k,l,imnst", ",", true)) do groups[#groups + 1] = g end
-    if (groups[1] or ""):find(letter, 1, true) or (groups[2] or ""):find(letter, 1, true) then return true end
-    if (groups[3] or ""):find(letter, 1, true) then return adding end
+    if text.contains(s.prefixModes, letter) then return true end
+    local groups = text.split(s.isupport.CHANMODES or "b,k,l,imnst", ",", true)
+    local function inGroup(k) return text.contains(groups[k] or "", letter) end
+    if inGroup(1) or inGroup(2) then return true end
+    if inGroup(3) then return adding end
     return false
 end
 
@@ -1132,7 +1191,7 @@ EVENTS.MODE = function(s, m)
         else
             local arg
             if modeTakesArg(s, ch, adding) then arg = m.params[argi]; argi = argi + 1 end
-            local at = s.prefixModes:find(ch, 1, true)
+            local at = text.find(s.prefixModes, ch)
             if at and arg then
                 local entry = b:getNick(arg)
                 if entry then entry.prefix = addPrefix(s, entry.prefix, s.prefixSymbols:sub(at, at), adding) end
@@ -1152,7 +1211,7 @@ EVENTS["353"] = function(s, m)
     if b.namesDone ~= false then b.nicks, b.namesDone = {}, false end
     for _, entry in ipairs(text.words(m.params[4] or "")) do
         local i = 1
-        while i <= #entry and s.prefixSymbols:find(entry:sub(i, i), 1, true) do i = i + 1 end
+        while i <= #entry and text.contains(s.prefixSymbols, entry:sub(i, i)) do i = i + 1 end
         local nick = text.cut(entry:sub(i), "!")    -- (userhost-in-names: nick!user@host)
         b:setNick(nick, entry:sub(1, i - 1))
     end
@@ -1190,7 +1249,7 @@ end
 
 EVENTS["333"] = function(s, m)
     local b = s.client:findBuffer(s, m.params[2] or "")
-    local when = tonumber(m.params[4] or "")
+    local when = convert.toInteger(m.params[4])
     if b then
         s.client:note(b, "Topic set by " .. colour(C.nickColour(m.params[3] or "?"), m.params[3] or "?")
             .. (when and os.date and (" on " .. os.date("%Y-%m-%d %H:%M", when)) or ""), "topics")
@@ -1208,10 +1267,10 @@ end
 EVENTS["329"] = function() end      -- (when the channel was made: not worth a line)
 
 -- WHOIS, in a BitchX-style box in the buffer it was asked from.
-local function whoisLine(s, text)
+local function whoisLine(s, line)
     local w = s.whois
     local b = (w and w.buffer) or s.client.current
-    s.client:print(b, colour(14, "|") .. " " .. text, { prefix = "", level = "crap" })
+    s.client:print(b, colour(14, "|") .. " " .. line, { prefix = "", level = "crap" })
 end
 
 EVENTS["311"] = function(s, m)
@@ -1233,11 +1292,11 @@ EVENTS["330"] = function(s, m) whoisLine(s, "account: " .. (m.params[3] or "")) 
 EVENTS["320"] = function(s, m) whoisLine(s, m.params[3] or "") end
 EVENTS["671"] = function(s, m) whoisLine(s, m.params[3] or "") end
 EVENTS["317"] = function(s, m)
-    local idle = tonumber(m.params[3] or "") or 0
-    local text = "idle: " .. string.format("%dh %dm %ds", math.floor(idle / 3600), math.floor(idle % 3600 / 60), idle % 60)
-    local signon = tonumber(m.params[4] or "")
-    if signon and os.date then text = text .. ", on since " .. os.date("%Y-%m-%d %H:%M", signon) end
-    whoisLine(s, text)
+    local idle = convert.toInteger(m.params[3]) or 0
+    local line = "idle: " .. convert.duration(idle)
+    local signon = convert.toInteger(m.params[4])
+    if signon and os.date then line = line .. ", on since " .. os.date("%Y-%m-%d %H:%M", signon) end
+    whoisLine(s, line)
 end
 EVENTS["318"] = function(s)
     local b = (s.whois and s.whois.buffer) or s.client.current
@@ -1267,7 +1326,7 @@ EVENTS["323"] = function(s) s.client:note(s.listBuffer or s.buffer, "End of the 
 -- WHO's last param, "hops realname": the real name.
 local function realName(last)
     local hops, rest = text.cut(last, " ")
-    if rest and hops ~= "" and scan.all(hops, scan.isDigit) then return rest end
+    if rest and scan.isUnsigned(hops) then return rest end
     return last
 end
 
@@ -1281,60 +1340,59 @@ EVENTS["315"] = function() end
 -- server's.
 EVENTS.numeric = function(s, m)
     local client = s.client
-    local text = table.concat(m.params, " ", 2, #m.params - 1)
-    text = (text ~= "" and (text .. ": ") or "") .. (m.params[#m.params] or "")
-    if #m.params < 2 then text = m.params[1] or "" end
-    local code = tonumber(m.command) or 0
+    local about = table.concat(m.params, " ", 2, #m.params - 1)
+    local line = (about ~= "" and (about .. ": ") or "") .. (m.params[#m.params] or "")
+    if #m.params < 2 then line = m.params[1] or "" end
+    local code = convert.toInteger(m.command) or 0
     if code >= 400 and code < 600 then
         local b = (client.current.server == s) and client.current or s.buffer
-        client:err(b, text)
+        client:err(b, line)
     else
-        client:print(s.buffer, text, { prefix = "--", prefixColour = 12, level = "crap" })
+        client:print(s.buffer, line, { prefix = "--", prefixColour = 12, level = "crap" })
     end
 end
 
 --------------------------------------------------------------------------
 -- What's typed
 --------------------------------------------------------------------------
--- $0 $1... words, $0- $1-... from that word on, $* all, $N nick, $C channel.
+-- What $<character> stands for in an alias ($ and a digit, the words,
+-- is read in expandAlias).
+local ALIAS_VARS = {
+    ["*"] = function(at) at.usedArgs = true; return at.args end,
+    N = function(at) return (at.server and at.server.nick) or at.client:setting("nick") end,
+    C = function(at)
+        local b = at.buffer
+        return (b.kind == "channel" or b.kind == "query") and b.name or ""
+    end,
+    ["$"] = function() return "$" end,
+}
+
+-- alias = { "$" digit [ "-" ] | "$" var | character }
+-- $0 $1... words, $0- $1-... from that word on, $* all, $N nick, $C
+-- channel, $$ a $; a $ before anything else is itself.
 function Client:expandAlias(exp, args, buffer)
-    local w = words(args)
-    local server = buffer.server or self:activeServer(buffer)
-    local out, i = {}, 1
-    local usedArgs = false
-    while i <= #exp do
-        local ch = exp:sub(i, i)
-        if ch == "$" then
-            local nxt = exp:sub(i + 1, i + 1)
-            if scan.isDigit(nxt) then
-                local n = tonumber(nxt)
-                if exp:sub(i + 2, i + 2) == "-" then
-                    out[#out + 1] = table.concat(w, " ", n + 1)
-                    i = i + 3
-                else
-                    out[#out + 1] = w[n + 1] or ""
-                    i = i + 2
-                end
-                usedArgs = true
-            elseif nxt == "*" then
-                out[#out + 1] = args; i = i + 2; usedArgs = true
-            elseif nxt == "N" then
-                out[#out + 1] = (server and server.nick) or self:setting("nick"); i = i + 2
-            elseif nxt == "C" then
-                out[#out + 1] = (buffer.kind == "channel" or buffer.kind == "query") and buffer.name or ""; i = i + 2
-            elseif nxt == "$" then
-                out[#out + 1] = "$"; i = i + 2
-            else
-                out[#out + 1] = ch; i = i + 1
-            end
+    local w = text.words(args)
+    local at = { args = args, buffer = buffer, client = self, server = buffer.server or self:activeServer(buffer) }
+    local sc, out = scan.new(exp), {}
+    while not sc:atEnd() do
+        local ch = sc:advance()
+        local var = sc:peek()
+        if ch == "$" and scan.isDigit(var) then
+            sc:advance()
+            local n = convert.toInteger(var)
+            if sc:accept("-") then out[#out + 1] = table.concat(w, " ", n + 1)
+            else out[#out + 1] = w[n + 1] or "" end
+            at.usedArgs = true
+        elseif ch == "$" and ALIAS_VARS[var] then
+            sc:advance()
+            out[#out + 1] = ALIAS_VARS[var](at)
         else
             out[#out + 1] = ch
-            i = i + 1
         end
     end
     local line = table.concat(out)
-    if not usedArgs and args ~= "" then line = line .. " " .. args end
-    return trim(line)
+    if not at.usedArgs and args ~= "" then line = line .. " " .. args end
+    return text.trim(line)
 end
 
 -- A line as typed in a buffer: a /command, or text for the channel or
@@ -1343,21 +1401,20 @@ function Client:command(line, buffer, depth)
     buffer = buffer or self.current
     depth = depth or 0
     if depth > 10 then return self:err(buffer, "aliases nested too deep") end
-    if line:sub(1, 1) ~= "/" or line:sub(1, 2) == "//" then
-        if line:sub(1, 2) == "//" then line = line:sub(2) end
-        if self:emit("send text", line, buffer.server, buffer) then return end
-        return self:say(buffer, line)
+    local typed = text.stripPrefix(line, "/")
+    if not typed or text.startsWith(typed, "/") then
+        local said = typed or line
+        if self:emit("send text", said, buffer.server, buffer) then return end
+        return self:say(buffer, said)
     end
-    local name, args = splitWord(line:sub(2))
+    local name, args = splitWord(typed)
     name = name:lower()
     if name == "" then return end
     if self:emit("send command", line, buffer.server, buffer) then return end
-    if tonumber(name) then return self:command("/window " .. name, buffer, depth + 1) end
+    if scan.isUnsigned(name) then return self:command("/window " .. name, buffer, depth + 1) end
     local alias = self.aliases[name]
     if alias then
-        local cmds = {}
-        for _, part in ipairs(text.split(alias, ";")) do cmds[#cmds + 1] = part end
-        for _, part in ipairs(cmds) do
+        for _, part in ipairs(text.split(alias, ";")) do
             local expanded = self:expandAlias(part, args, buffer)
             self:command("/" .. expanded, buffer, depth + 1)
         end
@@ -1378,15 +1435,15 @@ function Client:command(line, buffer, depth)
 end
 
 -- Text typed in a buffer: to its channel or query.
-function Client:say(buffer, text)
-    if text == "" then return end
+function Client:say(buffer, typed)
+    if typed == "" then return end
     local s = buffer.server
     if buffer.kind ~= "channel" and buffer.kind ~= "query" then
         return self:err(buffer, "this isn't a channel or query: /join #channel, or /msg nick text")
     end
     if not s or not s.registered then return self:err(buffer, "not connected") end
     if buffer.kind == "channel" and not buffer.joined then return self:err(buffer, "you're not in " .. buffer.name .. " (/join)") end
-    for _, piece in ipairs(s:message(buffer.name, text)) do
+    for _, piece in ipairs(s:message(buffer.name, typed)) do
         local mode = ""
         if buffer.kind == "channel" then
             local entry = buffer:getNick(s.nick)
@@ -1394,7 +1451,7 @@ function Client:say(buffer, text)
         end
         self:print(buffer, piece, { prefix = mode .. s.nick, prefixColour = 0, level = "own", nick = s.nick })
     end
-    self:emit(buffer.kind == "channel" and "message own_public" or "message own_private", s, text, buffer.name)
+    self:emit(buffer.kind == "channel" and "message own_public" or "message own_private", s, typed, buffer.name)
 end
 
 --------------------------------------------------------------------------
@@ -1418,8 +1475,8 @@ local function channelArg(server, buffer, args)
 end
 
 COMMANDS.help = { function(args, _, buffer, client)
-    local name = words(args)[1]
-    if name then name = noSlash(name) end
+    local name = text.words(args)[1]
+    if name then name = text.stripPrefix(name, "/") or name end
     if name then
         name = name:lower()
         local cmd = client.commands[name]
@@ -1453,18 +1510,18 @@ local function serverFor(client, target, port)
     if s then return s end
     local address = client.values["network." .. target .. ".address"]
     if address then
-        local p = tonumber(client.values["network." .. target .. ".port"] or "") or 6667
+        local p = convert.toInteger(client.values["network." .. target .. ".port"]) or 6667
         return client:newServer(target, address, p)
     end
     -- host:port, or a host alone
     local host, p = text.cutLast(target, ":")
-    if not (p and p ~= "" and scan.all(p, scan.isDigit)) then host, p = target, nil end
-    p = tonumber(port or p or "") or 6667
+    if not scan.isUnsigned(p) then host, p = target, nil end
+    p = convert.toInteger(port or p) or 6667
     return client:findServer(host) or client:newServer(host, host, p)
 end
 
 COMMANDS.connect = { function(args, _, buffer, client)
-    local w = words(args)
+    local w = text.words(args)
     if not w[1] then
         local names = client:networks()
         if #names == 0 then return client:err(buffer, "connect where? /connect <host> [port], or /network add <name> <host> [port]") end
@@ -1508,10 +1565,9 @@ function Client:networks()
     return names
 end
 
-COMMANDS.network = { function(args, _, buffer, client)
-    local w = words(args)
-    local sub = (w[1] or "list"):lower()
-    if sub == "list" then
+-- /network's subcommands: fn(w, buffer, client), w the words given.
+local NETWORK_SUBCOMMANDS = {
+    list = function(_, buffer, client)
         local names = client:networks()
         if #names == 0 then return client:note(buffer, "No networks yet: /network add <name> <host> [port]") end
         for _, n in ipairs(names) do
@@ -1521,22 +1577,30 @@ COMMANDS.network = { function(args, _, buffer, client)
         end
         client:note(buffer, "Keys: /set network.<name>.<key>: address port password nick user_name autojoin autoconnect "
             .. "sasl_user sasl_pass commands")
-    elseif sub == "add" then
+    end,
+    add = function(w, buffer, client)
         if not w[3] then return client:err(buffer, "/network add <name> <host> [port]") end
         client:set("network." .. w[2] .. ".address", w[3])
         if w[4] then client:set("network." .. w[2] .. ".port", w[4]) end
         client:note(buffer, "Network " .. w[2] .. " is " .. w[3] .. " " .. (w[4] or "6667") .. ": /connect " .. w[2])
-    elseif sub == "del" or sub == "remove" then
+    end,
+    del = function(w, buffer, client)
         if not w[2] then return client:err(buffer, "/network del <name>") end
         local gone = 0
         for k in pairs(client.values) do
-            if k:find("network." .. w[2] .. ".", 1, true) == 1 then client.values[k] = nil; gone = gone + 1 end
+            if text.startsWith(k, "network." .. w[2] .. ".") then client.values[k] = nil; gone = gone + 1 end
         end
         client:saveConfig()
         client:note(buffer, gone > 0 and ("Network " .. w[2] .. " is forgotten") or ("No network " .. w[2]))
-    else
-        client:err(buffer, "/network [list | add <name> <host> [port] | del <name>]")
-    end
+    end,
+}
+NETWORK_SUBCOMMANDS.remove = NETWORK_SUBCOMMANDS.del
+
+COMMANDS.network = { function(args, _, buffer, client)
+    local w = text.words(args)
+    local sub = NETWORK_SUBCOMMANDS[(w[1] or "list"):lower()]
+    if not sub then return client:err(buffer, "/network [list | add <name> <host> [port] | del <name>]") end
+    sub(w, buffer, client)
 end, "[list | add <name> <host> [port] | del <name>]", "the networks you connect to by name" }
 
 COMMANDS.join = { function(args, server, buffer, client)
@@ -1572,22 +1636,22 @@ end, "[#channel] [message]", "leave a channel and join it again" }
 
 COMMANDS.msg = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local target, text = splitWord(args)
-    if text == "" then return client:err(buffer, "/msg <nick | #channel> <text>") end
-    server:message(target, text)
+    local target, body = splitWord(args)
+    if body == "" then return client:err(buffer, "/msg <nick | #channel> <text>") end
+    server:message(target, body)
     local b = client:findBuffer(server, target)
-    client:print(b or buffer, (b and "" or (colour(14, "->") .. " " .. colour(C.nickColour(target), target) .. ": ")) .. text,
+    client:print(b or buffer, (b and "" or (colour(14, "->") .. " " .. colour(C.nickColour(target), target) .. ": ")) .. body,
         { prefix = b and server.nick or "", prefixColour = 0, level = "own" })
-    client:emit(server:isChannel(target) and "message own_public" or "message own_private", server, text, target)
+    client:emit(server:isChannel(target) and "message own_public" or "message own_private", server, body, target)
 end, "<nick | #channel> <text>", "a message to someone (or a channel), without a query buffer" }
 
 COMMANDS.query = { function(args, server, buffer, client)
     if not server then return client:err(buffer, "not connected") end
-    local nick, text = splitWord(args)
+    local nick, body = splitWord(args)
     if nick == "" then return client:err(buffer, "/query <nick> [text]") end
     local b = client:findBuffer(server, nick) or client:newBuffer(nick, "query", server)
     client:switch(b)
-    if text ~= "" then client:say(b, text) end
+    if body ~= "" then client:say(b, body) end
 end, "<nick> [text]", "a buffer for talking with someone" }
 
 COMMANDS.me = { function(args, server, buffer, client)
@@ -1600,15 +1664,15 @@ end, "<text>", "an action: * you text" }
 
 COMMANDS.notice = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local target, text = splitWord(args)
-    if text == "" then return client:err(buffer, "/notice <nick | #channel> <text>") end
-    server:message(target, text, "NOTICE")
-    client:print(buffer, text, { prefix = "-> -" .. target .. "-", prefixColour = 7, level = "own" })
+    local target, body = splitWord(args)
+    if body == "" then return client:err(buffer, "/notice <nick | #channel> <text>") end
+    server:message(target, body, "NOTICE")
+    client:print(buffer, body, { prefix = "-> -" .. target .. "-", prefixColour = 7, level = "own" })
 end, "<nick | #channel> <text>", "a notice (no automatic replies to it)" }
 
 COMMANDS.ctcp = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local w = words(args)
+    local w = text.words(args)
     if not w[2] then return client:err(buffer, "/ctcp <nick> <command> [args]") end
     local rest = irc.afterWords(args, 2) or ""
     if w[2]:upper() == "PING" and rest == "" then rest = tostring(math.floor(client.clock() * 1000)) end
@@ -1627,21 +1691,21 @@ COMMANDS.version = { function(args, server, buffer, client)
 end, "[nick]", "this client's version, or someone's" }
 
 COMMANDS.nick = { function(args, server, buffer, client)
-    local nick = words(args)[1]
+    local nick = text.words(args)[1]
     if not nick then return client:note(buffer, "Your nick: " .. ((server and server.nick) or client:setting("nick"))) end
     if server and server.conn then server:send(irc.build("NICK", nick)) else client:set("nick", nick) end
 end, "<nick>", "change your nick" }
 
 COMMANDS.topic = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local chan, text = channelArg(server, buffer, args)
+    local chan, topic = channelArg(server, buffer, args)
     if not chan then return client:err(buffer, "/topic [#channel] [new topic]") end
-    if text == "" then
+    if topic == "" then
         local b = client:findBuffer(server, chan)
         if b and b.topic then return client:note(buffer, "Topic for " .. chan .. ": " .. b.topic) end
         return server:send(irc.build("TOPIC", chan))
     end
-    server:send(irc.build("TOPIC", chan, text))
+    server:send(irc.build("TOPIC", chan, topic))
 end, "[#channel] [topic]", "show or set a channel's topic" }
 
 COMMANDS.names = { function(args, server, buffer, client)
@@ -1666,7 +1730,7 @@ COMMANDS.motd = passThrough("MOTD", "", "the server's message of the day")
 COMMANDS.lusers = passThrough("LUSERS", "", "how many are on the server")
 COMMANDS.invite = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local w = words(args)
+    local w = text.words(args)
     local chan = w[2] or (buffer.kind == "channel" and buffer.name)
     if not w[1] or not chan then return client:err(buffer, "/invite <nick> [#channel]") end
     server:send(irc.build("INVITE", w[1], chan))
@@ -1681,7 +1745,7 @@ end, "[#channels]", "the channels on the server" }
 
 COMMANDS.mode = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
-    local first = words(args)[1]
+    local first = text.words(args)[1]
     if not first or (not server:isChannel(first) and not server:isMe(first)) then
         if buffer.kind ~= "channel" then return client:err(buffer, "/mode <#channel | nick> [modes]") end
         args = buffer.name .. (args ~= "" and (" " .. args) or "")
@@ -1694,7 +1758,7 @@ local function modeNicks(sign, letter)
     return { function(args, server, buffer, client)
         if not needServer(server, buffer, client) then return end
         if buffer.kind ~= "channel" then return client:err(buffer, "this is for a channel") end
-        local nicks = words(args)
+        local nicks = text.words(args)
         if #nicks == 0 then return client:err(buffer, "which nicks?") end
         for i = 1, #nicks, 4 do
             local group = { table.unpack(nicks, i, math.min(i + 3, #nicks)) }
@@ -1723,14 +1787,14 @@ end
 COMMANDS.ban = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
     if buffer.kind ~= "channel" then return client:err(buffer, "this is for a channel") end
-    local who = words(args)[1]
+    local who = text.words(args)[1]
     if not who then return server:send("MODE " .. buffer.name .. " +b") end
     server:send("MODE " .. buffer.name .. " +b " .. banMask(buffer, server, who))
 end, "[nick | mask]", "ban someone (no mask: the ban list)" }
 COMMANDS.unban = { function(args, server, buffer, client)
     if not needServer(server, buffer, client) then return end
     if buffer.kind ~= "channel" then return client:err(buffer, "this is for a channel") end
-    local who = words(args)[1]
+    local who = text.words(args)[1]
     if not who then return client:err(buffer, "/unban <mask>") end
     server:send("MODE " .. buffer.name .. " -b " .. banMask(buffer, server, who))
 end, "<mask>", "lift a ban" }
@@ -1742,8 +1806,8 @@ COMMANDS.kb = { function(args, server, buffer, client)
 end, "<nick> [reason]", "ban and kick" }
 
 COMMANDS.away = { function(args, server, buffer, client)
-    local text = args ~= "" and args or client:setting("away_message")
-    for _, s in ipairs(client.servers) do if s.registered then s:send(irc.build("AWAY", text)) end end
+    local message = args ~= "" and args or client:setting("away_message")
+    for _, s in ipairs(client.servers) do if s.registered then s:send(irc.build("AWAY", message)) end end
 end, "[message]", "say you're away, on every server" }
 COMMANDS.back = { function(_, _, _, client)
     for _, s in ipairs(client.servers) do if s.registered then s:send("AWAY") end end
@@ -1764,52 +1828,67 @@ end, "", "close this buffer (and leave its channel)" }
 COMMANDS.echo = { function(args, _, buffer, client) client:print(buffer, args, { level = "crap" }) end,
     "<text>", "show text here (mIRC codes and all)" }
 
--- /window <n> | close | list | move <n> | next | prev (weechat's /buffer too)
+-- /window's subcommands: fn(w, buffer, client), w the words given.
+local function stepBuffer(step)
+    return function(_, _, client)
+        local i = client:bufferNumber(client.current) or 1
+        client:switch(client.buffers[(i - 1 + step) % #client.buffers + 1])
+    end
+end
+local WINDOW_SUBCOMMANDS = {
+    close = function(w, buffer, client)
+        local b = w[2] and client.buffers[convert.toInteger(w[2]) or 0] or buffer
+        local ok, why = client:closeBuffer(b)
+        if not ok then client:err(buffer, why) end
+    end,
+    next = stepBuffer(1),
+    prev = stepBuffer(-1),
+    move = function(w, buffer, client)
+        local to = convert.toInteger(w[2])
+        if not to or to < 1 or to > #client.buffers then return client:err(buffer, "/window move <n>") end
+        table.remove(client.buffers, client:bufferNumber(buffer))
+        table.insert(client.buffers, to, buffer)
+    end,
+    list = function(_, buffer, client)
+        for i, b in ipairs(client.buffers) do
+            client:note(buffer, string.format("%2d. %s%s", i, b.name, b.server and b.kind ~= "server" and (" (" .. b.server.name .. ")") or ""))
+        end
+    end,
+}
+
+-- /window <n> | name | close | list | move <n> | next | prev (weechat's /buffer too)
 COMMANDS.window = { function(args, _, buffer, client)
-    local w = words(args)
+    local w = text.words(args)
     local sub = (w[1] or "list"):lower()
-    local n = tonumber(sub)
+    local n = convert.toInteger(sub)
     if n then
         local b = client.buffers[n]
         if not b then return client:err(buffer, "no buffer " .. n) end
         return client:switch(b)
-    elseif sub == "close" then
-        local b = w[2] and client.buffers[tonumber(w[2]) or 0] or buffer
-        local ok, why = client:closeBuffer(b)
-        if not ok then client:err(buffer, why) end
-    elseif sub == "next" or sub == "prev" then
-        local i = client:bufferNumber(client.current) or 1
-        local step = sub == "next" and 1 or -1
-        client:switch(client.buffers[(i - 1 + step) % #client.buffers + 1])
-    elseif sub == "move" then
-        local to = tonumber(w[2] or "")
-        if not to or to < 1 or to > #client.buffers then return client:err(buffer, "/window move <n>") end
-        table.remove(client.buffers, client:bufferNumber(buffer))
-        table.insert(client.buffers, to, buffer)
-    elseif sub == "list" then
-        for i, b in ipairs(client.buffers) do
-            client:note(buffer, string.format("%2d. %s%s", i, b.name, b.server and b.kind ~= "server" and (" (" .. b.server.name .. ")") or ""))
-        end
-    else
-        local b
-        for _, x in ipairs(client.buffers) do if x.name:lower() == sub then b = x end end
-        if not b then return client:err(buffer, "/window <n | name | close | list | move <n> | next | prev>") end
-        client:switch(b)
     end
+    if WINDOW_SUBCOMMANDS[sub] then return WINDOW_SUBCOMMANDS[sub](w, buffer, client) end
+    local b
+    for _, x in ipairs(client.buffers) do if text.equalFold(x.name, sub) then b = x end end
+    if not b then return client:err(buffer, "/window <n | name | close | list | move <n> | next | prev>") end
+    client:switch(b)
 end, "<n | name | close [n] | list | move <n> | next | prev>", "go to, close or move buffers" }
 COMMANDS.buffer = COMMANDS.window
 COMMANDS.next = { function(_, _, buffer, client) client:command("/window next", buffer) end, "", "the next buffer" }
 COMMANDS.prev = { function(_, _, buffer, client) client:command("/window prev", buffer) end, "", "the buffer before" }
 
+-- /set's wildcards: * and ?, in any case (no [ ] or \: names are plain)
+local SETTING_PATTERN = { escapes = false, classes = false, fold = string.lower }
+
 COMMANDS.set = { function(args, _, buffer, client)
     local name, value = splitWord(args)
-    if name == "" or name:find("*", 1, true) then
+    if name == "" or glob.hasWildcards(name, SETTING_PATTERN) then
+        local wanted = name == "" and function() return true end or glob.compile(name, SETTING_PATTERN)
         local names = {}
         for k in pairs(client.settingDefs) do names[#names + 1] = k end
         for k in pairs(client.values) do if not client.settingDefs[k] then names[#names + 1] = k end end
         table.sort(names)
         for _, k in ipairs(names) do
-            if name == "" or irc.match(name, k) then
+            if wanted(k) then
                 local v = client:setting(k)
                 if type(v) == "boolean" then v = v and "on" or "off" end
                 client:note(buffer, colour(14, k) .. " = " .. tostring(v == nil and "" or v)
@@ -1845,14 +1924,16 @@ COMMANDS.alias = { function(args, _, buffer, client)
         for _, n in ipairs(names) do client:note(buffer, colour(14, "/" .. n) .. " = /" .. client.aliases[n]) end
         return
     end
-    name = noSlash(name:lower())
+    name = name:lower()
+    name = text.stripPrefix(name, "/") or name
     if exp == "" then return client:note(buffer, "/" .. name .. " = " .. (client.aliases[name] or "(none)")) end
-    client.aliases[name] = noSlash(exp)
+    client.aliases[name] = text.stripPrefix(exp, "/") or exp
     client:saveConfig()
     client:note(buffer, "/" .. name .. " = /" .. client.aliases[name])
 end, "[name [expansion]]", "a command of your own: $0 $1- $* $N $C; ; between commands" }
 COMMANDS.unalias = { function(args, _, buffer, client)
-    local name = noSlash((words(args)[1] or ""):lower())
+    local name = (text.words(args)[1] or ""):lower()
+    name = text.stripPrefix(name, "/") or name
     if not client.aliases[name] then return client:err(buffer, "no alias " .. name) end
     client.aliases[name] = nil
     client:saveConfig()
@@ -1871,9 +1952,9 @@ COMMANDS.ignore = { function(args, _, buffer, client)
     client:note(buffer, "Ignoring " .. mask .. " (" .. (levels ~= "" and levels or "all") .. ")")
 end, "[mask [levels]]", "ignore someone: levels public private notices actions joins parts quits nicks ctcps, or all" }
 COMMANDS.unignore = { function(args, _, buffer, client)
-    local mask = words(args)[1]
+    local mask = text.words(args)[1]
     for i, ig in ipairs(client.ignores) do
-        if mask and ig.mask:lower() == mask:lower() then
+        if mask and text.equalFold(ig.mask, mask) then
             table.remove(client.ignores, i)
             client:saveConfig()
             return client:note(buffer, "Not ignoring " .. ig.mask .. " now")
@@ -1886,7 +1967,7 @@ COMMANDS.lastlog = { function(args, _, buffer, client)
     if args == "" then return client:err(buffer, "/lastlog <text>") end
     local want, found = args:lower(), {}
     for _, line in ipairs(buffer.lines) do
-        if irc.strip(line.text):lower():find(want, 1, true) or line.prefix:lower():find(want, 1, true) then
+        if text.contains(irc.strip(line.text):lower(), want) or text.contains(line.prefix:lower(), want) then
             found[#found + 1] = line
         end
     end
@@ -1897,34 +1978,44 @@ COMMANDS.lastlog = { function(args, _, buffer, client)
     end
 end, "<text>", "the lines in this buffer holding text (the last 20)" }
 
-COMMANDS.script = { function(args, _, buffer, client)
-    local w = words(args)
-    local sub = (w[1] or "list"):lower()
-    if sub == "list" then
+-- /script's subcommands: fn(w, buffer, client), w the words given.
+local SCRIPT_SUBCOMMANDS = {
+    list = function(_, buffer, client)
         local loaded = {}
         for name, sc in pairs(client.scripts) do loaded[#loaded + 1] = name .. (sc.info.version and (" " .. sc.info.version) or "") end
         table.sort(loaded)
-        client:note(buffer, "Loaded: " .. (#loaded > 0 and table.concat(loaded, ", ") or "none"))
-        client:note(buffer, "There to load: " .. table.concat(client:availableScripts(), ", "))
-    elseif sub == "load" or sub == "reload" then
+        client:note(buffer, "Loaded: " .. (#loaded > 0 and text.join(loaded, ", ") or "none"))
+        client:note(buffer, "There to load: " .. text.join(client:availableScripts(), ", "))
+    end,
+    load = function(w, buffer, client)
         if not w[2] then return client:err(buffer, "/script load <name>") end
         if client.scripts[w[2]] then client:unloadScript(w[2]) end
         local ok, why = client:loadScript(w[2])
         if ok then client:note(buffer, "Loaded " .. w[2]) else client:err(buffer, why) end
-    elseif sub == "unload" then
+    end,
+    unload = function(w, buffer, client)
         if not w[2] or not client.scripts[w[2]] then return client:err(buffer, "no script " .. tostring(w[2]) .. " loaded") end
         client:unloadScript(w[2])
         client:note(buffer, "Unloaded " .. w[2])
-    elseif sub == "autorun" then
+    end,
+    autorun = function(w, buffer, client)
         if not w[2] then return client:err(buffer, "/script autorun <name>") end
-        local list = words(client:setting("scripts"))
+        local list = text.words(client:setting("scripts") or "")
         for _, n in ipairs(list) do if n == w[2] then return client:note(buffer, w[2] .. " loads at the start already") end end
         list[#list + 1] = w[2]
-        client:set("scripts", table.concat(list, " "))
+        client:set("scripts", text.join(list, " "))
         client:note(buffer, w[2] .. " loads at the start now")
-    else
-        client:err(buffer, "/script [list | load <name> | unload <name> | reload <name> | autorun <name>]")
+    end,
+}
+SCRIPT_SUBCOMMANDS.reload = SCRIPT_SUBCOMMANDS.load
+
+COMMANDS.script = { function(args, _, buffer, client)
+    local w = text.words(args)
+    local sub = SCRIPT_SUBCOMMANDS[(w[1] or "list"):lower()]
+    if not sub then
+        return client:err(buffer, "/script [list | load <name> | unload <name> | reload <name> | autorun <name>]")
     end
+    sub(w, buffer, client)
 end, "[list | load | unload | reload | autorun <name>]", "Lua scripts (irssi's way): scripts/ in ~/.irc, and those that come with it" }
 
 --------------------------------------------------------------------------
@@ -1997,8 +2088,8 @@ function Client:scriptApi(sc)
     api.settings_get_int = function(n) return tonumber(client:setting(n)) end
     api.settings_get_bool = function(n) return client:setting(n) == true end
     api.settings_set = function(n, v) return client:set(n, v ~= nil and tostring(v) or nil) end
-    function api.print(text, buffer, level)
-        return client:print(buffer or client.core, tostring(text), { level = level or "crap" })
+    function api.print(body, buffer, level)
+        return client:print(buffer or client.core, tostring(body), { level = level or "crap" })
     end
     function api.timeout_add(ms, fn)
         local t = client:timeoutAdd(ms, fn, false, sc)
@@ -2024,7 +2115,8 @@ function Client:scriptApi(sc)
     function api.switch(buffer) client:switch(buffer) end
     api.strip, api.colour, api.parse, api.build = irc.strip, C.colour, irc.parse, irc.build
     api.casefold, api.match, api.nick_colour = irc.casefold, irc.match, C.nickColour
-    api.words, api.split, api.trim = text.words, text.split, text.trim
+    -- (lib/text's, as a script can't require it)
+    api.words, api.split, api.trim, api.join, api.contains = text.words, text.split, text.trim, text.join, text.contains
     return api
 end
 
@@ -2087,7 +2179,7 @@ function Client:start()
             if n then names[#names + 1] = n end
         end
     end
-    for _, n in ipairs(words(self:setting("scripts"))) do names[#names + 1] = n end
+    for _, n in ipairs(text.words(self:setting("scripts") or "")) do names[#names + 1] = n end
     for _, n in ipairs(names) do
         if not self.scripts[n] then
             local ok, why = self:loadScript(n)

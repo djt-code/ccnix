@@ -129,9 +129,9 @@ end
 -- Lines as rows
 --------------------------------------------------------------------------
 -- A line's text as cells: characters and their blit colours.
-local function cellsOf(text, defaultFg, out)
+local function cellsOf(message, defaultFg, out)
     out = out or { ch = {}, fg = {}, bg = {} }
-    for _, r in ipairs(irc.runs(text)) do
+    for _, r in ipairs(irc.runs(message)) do
         local fg = r.fg and irc.MIRC_BLIT[r.fg] or defaultFg
         local bg = r.bg and irc.MIRC_BLIT[r.bg] or BG
         if r.reverse then fg, bg = bg, fg end
@@ -176,19 +176,16 @@ end
 
 -- The prefix cut or padded to pw columns, right-aligned (weechat's "+"
 -- when cut).
-local function fitPrefix(prefix, pw)
-    if #prefix > pw then return prefix:sub(1, pw - 1) .. "+" end
-    return (" "):rep(pw - #prefix) .. prefix
-end
+local function fitPrefix(prefix, pw) return text.padLeft(text.truncate(prefix, pw, "+"), pw) end
 
 -- A line's rows for a chat this wide: each { text, fg, bg }, width long.
 function UI:rowsOf(line, width, pw, showTime)
     if line._w == width and line._pw == pw and line._st == showTime then return line._rows end
     local lead = { ch = {}, fg = {}, bg = {} }
-    local function push(text, fg, bg)
-        for i = 1, #text do
+    local function push(cells, fg, bg)
+        for i = 1, #cells do
             local n = #lead.ch + 1
-            lead.ch[n], lead.fg[n], lead.bg[n] = text:sub(i, i), fg, bg or BG
+            lead.ch[n], lead.fg[n], lead.bg[n] = cells:sub(i, i), fg, bg or BG
         end
     end
     if showTime and line.time ~= "" then push(line.time .. " ", "8") end
@@ -196,10 +193,10 @@ function UI:rowsOf(line, width, pw, showTime)
     local pfg = blitColour(line.prefixColour, "0")
     if pw > 0 then
         local p = fitPrefix(line.prefix, pw)
+        local sym = line.nick and text.stripSuffix(line.prefix, line.nick)
         if line.hilight then push(p, "f", "4")
-        elseif line.nick and #line.prefix > #line.nick and line.prefix ~= "" then
+        elseif sym and sym ~= "" then
             -- a mode symbol before the nick: its own colour
-            local sym = line.prefix:sub(1, #line.prefix - #line.nick)
             local pad = #p - #line.prefix
             if pad >= 0 then
                 push((" "):rep(pad), pfg)
@@ -247,16 +244,14 @@ end
 --------------------------------------------------------------------------
 -- Drawing
 --------------------------------------------------------------------------
-local function pad(s, w) return (s .. (" "):rep(w)):sub(1, w) end
-
-function UI:blitAt(x, y, text, fg, bg)
+function UI:blitAt(x, y, chars, fg, bg)
     self.t.setCursorPos(x, y)
-    self.t.blit(text, fg, bg)
+    self.t.blit(chars, fg, bg)
 end
 
 -- Text with mIRC codes as one bar row, w wide, on bg.
-function UI:barRow(x, y, w, text, fg, bg)
-    local cells = cellsOf(text, fg)
+function UI:barRow(x, y, w, message, fg, bg)
+    local cells = cellsOf(message, fg)
     local ch, f, b = {}, {}, {}
     for i = 1, w do
         local c = cells.ch[i]
@@ -286,7 +281,7 @@ function UI:statusText()
     local client, b = self.client, self.client.current
     local s = b.server or client:activeServer(b)
     local parts = {}
-    local function item(text) parts[#parts + 1] = ircclient.colour(9, "[") .. text .. ircclient.colour(9, "]") end
+    local function item(shown) parts[#parts + 1] = ircclient.colour(9, "[") .. shown .. ircclient.colour(9, "]") end
     item(os.date and os.date("%H:%M") or "")
     if s then
         local nick = s.nick or client:setting("nick")
@@ -307,8 +302,8 @@ function UI:statusText()
     if #act > 0 then item("Act: " .. table.concat(act, ",")) end
     if s and s.lag and s.lag >= 0.5 then item(string.format("Lag %.1f", s.lag)) end
     for _, it in ipairs(client.statusItems) do
-        local ok, text = pcall(it.fn, b)
-        if ok and text and text ~= "" then item(tostring(text)) end
+        local ok, shown = pcall(it.fn, b)
+        if ok and shown and shown ~= "" then item(tostring(shown)) end
     end
     if b.scroll > 0 then item(ircclient.colour(8, "-MORE(" .. b.scroll .. ")-")) end
     return " " .. table.concat(parts, " ")
@@ -346,7 +341,7 @@ function UI:drawBuflist()
     for i, b in ipairs(client.buffers) do
         if y > self.bottom then break end
         local indent = (b.kind == "channel" or b.kind == "query") and " " or ""
-        local label = pad(indent .. i .. "." .. b.name, bw - 1)
+        local label = text.padRight(indent .. i .. "." .. b.name, bw - 1)
         local fg = ACT_COLOUR[b.activity] or "8"
         local bg = BG
         if b == client.current then fg, bg = "f", "8" end
@@ -375,10 +370,9 @@ function UI:drawNicklist()
         if n then
             local sym = n.prefix:sub(1, 1)
             local symFg = sym == "@" and "5" or (sym == "+" and "4" or "0")
-            local name = n.nick:sub(1, nw - 2)
             local fg = irc.MIRC_BLIT[ircclient.nickColour(n.nick)]
-            local text = "|" .. (sym ~= "" and sym or " ") .. pad(name, nw - 2)
-            self:blitAt(x, y, text, "7" .. symFg .. fg:rep(nw - 2), (BG):rep(nw))
+            local row = "|" .. (sym ~= "" and sym or " ") .. text.padRight(n.nick, nw - 2)
+            self:blitAt(x, y, row, "7" .. symFg .. fg:rep(nw - 2), (BG):rep(nw))
             self.nicklistRows[y] = n.nick
         else
             self:blitAt(x, y, "|" .. (" "):rep(nw - 1), "7" .. ("0"):rep(nw - 1), (BG):rep(nw))
@@ -430,19 +424,19 @@ function UI:candidates(word, first)
     local out, seen = {}, {}
     local lw = word:lower()
     local function add(c)
-        if c:lower():sub(1, #lw) == lw and not seen[c:lower()] then
+        if text.startsWith(c:lower(), lw) and not seen[c:lower()] then
             seen[c:lower()] = true
             out[#out + 1] = c
         end
     end
-    if first and word:sub(1, 1) == "/" then
+    if first and text.startsWith(word, "/") then
         local names = {}
         for n in pairs(client.commands) do names[#names + 1] = n end
         for n in pairs(client.aliases) do names[#names + 1] = n end
         table.sort(names)
-        lw = lw:sub(2)
+        lw = text.stripPrefix(lw, "/")
         for _, n in ipairs(names) do
-            if n:sub(1, #lw) == lw and not seen[n] then seen[n] = true; out[#out + 1] = "/" .. n end
+            if text.startsWith(n, lw) and not seen[n] then seen[n] = true; out[#out + 1] = "/" .. n end
         end
         return out
     end
@@ -468,8 +462,7 @@ function UI:complete(e)
         c.i = c.i % #c.list + 1
     else
         local line, pos = e.line, e.pos
-        local from = pos
-        while from > 0 and line:sub(from, from) ~= " " do from = from - 1 end
+        local from = text.findLast(line:sub(1, pos), " ") or 0
         local word = line:sub(from + 1, pos)
         local first = from == 0
         local list = self:candidates(word, first)
@@ -479,11 +472,11 @@ function UI:complete(e)
     end
     local pick = c.list[c.i]
     local suffix = " "
-    if c.first and pick:sub(1, 1) ~= "/" and not (self.client.current.server and self.client.current.server:isChannel(pick)) then
+    if c.first and not text.startsWith(pick, "/") and not (self.client.current.server and self.client.current.server:isChannel(pick)) then
         suffix = ": "
     end
-    local text = c.before .. pick .. suffix
-    e:set(text .. c.after, #text)
+    local typed = c.before .. pick .. suffix
+    e:set(typed .. c.after, #typed)
     c.line, c.pos = e.line, e.pos
 end
 

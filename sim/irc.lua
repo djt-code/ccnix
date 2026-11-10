@@ -14,6 +14,8 @@
 local PROJ = ...
 package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
+local scan = require("scan")
+local text = require("text")
 local check = M.check
 
 -- CC:Tweaked's key codes and colours
@@ -57,8 +59,8 @@ fs.list = function(dir)
     local out = {}
     dir = fs.combine(dir)
     for p in pairs(S.files) do
-        local d, n = p:match("^(.*)/([^/]+)$")
-        if d == dir then out[#out + 1] = n end
+        local d, n = text.cutLast(p, "/")
+        if n and d == dir then out[#out + 1] = n end
     end
     table.sort(out)
     return out
@@ -103,6 +105,12 @@ check("fromUTF8: Latin-1 shows as itself, the rest as ?; toUTF8 back",
     irc.fromUTF8("caf\195\169 \226\130\172") == "caf\233 ?" and irc.toUTF8("caf\233") == "caf\195\169"
     and irc.fromUTF8("ok\233") == "ok\233")
 check("base64 (SASL PLAIN)", irc.base64("\0bob\0pw") == "AGJvYgBwdw==" and irc.base64("ab") == "YWI=")
+check("match: a nick's \\ [ ] are plain characters (no escapes, no classes), folded as rfc1459",
+    irc.match("nick\\*!*@*", "Nick|Away!u@h") and irc.match("[x]*", "{x}!u@h") and irc.match("\\*", "|x")
+    and not irc.match("[a-z]*", "b") and irc.match("[a-z]*", "[A-Z]!x@y") and not irc.match("a\\b", "a*b"))
+check("match: ascii casemapping keeps [ and { apart; compileMask is the same test, made once",
+    not irc.match("[x]", "{x}", "ascii") and irc.match("[X]", "[x]", "ascii")
+    and irc.compileMask("*!*@*.LAB")("bob!b@host.lab") and not irc.compileMask("b?b")("bb"))
 
 --------------------------------------------------------------------------
 -- 2. lib/mc
@@ -308,7 +316,7 @@ check("MC: PLAYERS, TIME, WEATHER (none: says why)", bob.has("1 in the game: Ste
     and bob.has("Can't tell: no environment detector"), bob.dump("MC"))
 al2.clear()
 al2.say("PRIVMSG NickServ :VERIFY steve")
-local code = fakeGame.told[1] and fakeGame.told[1]:match("CONFIRM (%d+)")
+local code = fakeGame.told[1] and text.words(select(2, text.cut(fakeGame.told[1], "CONFIRM ")) or "")[1]
 al2.say("PRIVMSG NickServ :CONFIRM " .. tostring(code))
 bob.clear()
 bob.say("WHOIS alice")
@@ -363,8 +371,8 @@ local client = ircclient.new({ noConfig = true, connect = connector, home = "/.i
     speaker = false })
 function client_event(...) client:event(...) end
 local function lastLine(b) local l = b.lines[#b.lines]; return l and irc.strip(l.text) or "" end
-local function bufferHas(b, text)
-    for _, l in ipairs(b.lines) do if irc.strip(l.text):find(text, 1, true) then return l end end
+local function bufferHas(b, part)
+    for _, l in ipairs(b.lines) do if text.contains(irc.strip(l.text), part) then return l end end
     return nil
 end
 
@@ -419,12 +427,48 @@ client:command("/whois dan2")
 pump()
 check("client: WHOIS drawn as a box", bufferHas(chan, ".--[ dan2 ]") and bufferHas(chan, "| dan@10.1.1.9")
     and bufferHas(chan, "`---"))
+check("client: WHOIS's idle time as a duration (0s; 5m 3s ...)", bufferHas(chan, "| idle: 0s, on since "))
 client:command("/topic a new topic")
 pump()
 check("client: /topic sets it (an operator? no: 482 shown as an error)", bufferHas(chan, "You're not channel operator"))
 dan.say("MODE #ccnix +v cc7")
 pump()
 check("client: MODE +v: the prefix in the nick list", chan:getNick("cc7").prefix == "+")
+
+-- PRIVMSG and NOTICE by kind (MESSAGE_KIND, MESSAGES)
+dan.say("PRIVMSG #ccnix :\1ACTION waves\1")
+dan.say("NOTICE #ccnix :heads up")
+dan.say("NOTICE cc7 :\1VERSION mIRC 6\1")
+pump()
+local action, notice = bufferHas(chan, "dan2 waves"), bufferHas(chan, "heads up")
+check("client: an ACTION as * nick text, a channel NOTICE as -nick-, a CTCP reply said",
+    action and action.prefix == " *" and action.level == "actions"
+    and notice and notice.prefix == "-dan2-" and notice.level == "notices"
+    and (bufferHas(client.current, "CTCP VERSION reply from dan2: mIRC 6") or bufferHas(lab.buffer, "CTCP VERSION reply from dan2: mIRC 6")))
+
+-- CAP (CAP_REPLIES, WANTED_CAPS) and SASL, with a server that only records
+local capNet, capSent = { sasl_user = "bob", sasl_pass = "pw" }, {}
+local capServer = { net = function(_, k) return capNet[k] end, send = function(_, l) capSent[#capSent + 1] = l end }
+local EV = ircclient.EVENTS
+EV.CAP(capServer, irc.parse(":irc.x CAP * LS * :multi-prefix sasl=PLAIN,EXTERNAL"))
+EV.CAP(capServer, irc.parse(":irc.x CAP * LS :away-notify chghost"))
+EV.CAP(capServer, irc.parse(":irc.x CAP * ACK :multi-prefix sasl away-notify"))
+EV.AUTHENTICATE(capServer, irc.parse("AUTHENTICATE +"))
+EV.CAP(capServer, irc.parse(":irc.x CAP * NAK :sasl"))
+check("client: CAP LS over two lines, REQ for the wanted ones; ACK with sasl: AUTHENTICATE PLAIN; NAK: END",
+    capSent[1] == "CAP REQ :multi-prefix sasl away-notify" and capSent[2] == "AUTHENTICATE PLAIN"
+    and capSent[3] == "AUTHENTICATE " .. irc.base64("bob\0bob\0pw") and capSent[4] == "CAP END", text.join(capSent, " | "))
+capNet, capSent = {}, {}
+EV.CAP(capServer, irc.parse(":irc.x CAP * LS :sasl chghost"))
+EV.CAP(capServer, irc.parse(":irc.x CAP * FOO :bar"))
+check("client: without a SASL account, sasl isn't wanted (CAP END); an unknown subcommand is nothing",
+    #capSent == 1 and capSent[1] == "CAP END", text.join(capSent, " | "))
+
+-- /set with wildcards (lib/glob: * and ?, any case)
+client:command("/set REAL*")
+client:command("/set ?ick")
+check("client: /set with * or ? lists the settings matching",
+    bufferHas(client.current, "real_name = ") and bufferHas(client.current, "nick = cc7"))
 
 -- scripts
 dan.clear()
@@ -566,7 +610,7 @@ check("ui: readline's keys: Ctrl+U cuts the line", ui.ed.line == "")
 ui:event("key", keys.leftCtrl); ui:event("key", keys.c); ui:event("char", "c"); ui:event("key_up", keys.leftCtrl)
 ui:event("key", keys.b); ui:event("char", "b")
 ui:event("char", "x")
-check("ui: Ctrl+C then b puts in bold's code", ui.ed.line == "\2x", (ui.ed.line:gsub("%c", function(c) return "^" .. c:byte() end)))
+check("ui: Ctrl+C then b puts in bold's code", ui.ed.line == "\2x", require("convert").escape(ui.ed.line))
 ui:event("key", keys.leftCtrl); ui:event("key", keys.u); ui:event("key_up", keys.leftCtrl)
 ui:event("key", keys.leftAlt); ui:event("key", keys.one); ui:event("char", "1"); ui:event("key_up", keys.leftAlt)
 check("ui: Alt+1: the core buffer (the 1 not typed)", client.current == client.core and ui.ed.line == "")
@@ -593,7 +637,7 @@ check("ui: End (the line empty): back at the bottom", chan.scroll == 0 and rowHa
 client:print(chan, "a long line that has to wrap because it is much wider than the chat area of this little screen")
 ui:draw()
 local r1 = rowHas(win, "a long line", 2, 17)
-check("ui: a long line wraps under its text (the nick column kept clear)", r1 and win.row(r1 + 1):sub(1, 15):match("^%s+$"),
+check("ui: a long line wraps under its text (the nick column kept clear)", r1 and scan.isBlank(win.row(r1 + 1):sub(1, 15)),
     "\n" .. win.screen())
 
 local wide = window(100, 30)

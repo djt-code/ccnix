@@ -75,8 +75,6 @@ function S.hash(password, salt)
     return string.format("%08x", h)
 end
 
-local function words(s) return text.words(s or "") end
-
 --------------------------------------------------------------------------
 -- Attaching
 --------------------------------------------------------------------------
@@ -95,7 +93,7 @@ function S.attach(srv, opts)
 
     local NickServ, ChanServ, MC
     local function fold(s) return srv:fold(s) end
-    local function tell(svc, c, text) srv:notice(svc, c, text) end
+    local function tell(svc, c, body) srv:notice(svc, c, body) end
 
     local function account(c) return c.account and db.nicks[fold(c.account)] end
 
@@ -148,7 +146,7 @@ function S.attach(srv, opts)
     --           or AOP) or be its "founder"; run then gets its record
     --           and the channel (nil if empty) after the arguments
     --   when    shown and run only while this is true (MC: what the game has)
-    --   run(c, args, text)   args: the words after the command
+    --   run(c, args, line)   args: the words after the command; line all of it
     ------------------------------------------------------------------
     local bridge                -- the bridge channel, once MC is in it
 
@@ -238,7 +236,7 @@ function S.attach(srv, opts)
                 local online = mc.players()
                 if online then
                     local found
-                    for _, p in ipairs(online) do if p:lower() == player:lower() then found = p end end
+                    for _, p in ipairs(online) do if text.equalFold(p, player) then found = p end end
                     if not found then return tell(NickServ, c, player .. " isn't in the game now.") end
                     player = found
                 end
@@ -266,6 +264,9 @@ function S.attach(srv, opts)
             srv:setMode(ChanServ, chan, spec, a[2] or c.nick)
         end
     end
+
+    -- AOP's changes: whether each puts a nick on the list
+    local AOP_CHANGES = { ADD = true, DEL = false }
 
     local CS = {
         REGISTER = { usage = "#chan", about = "keep a channel you're an operator in", min = 1, needs = "account",
@@ -304,14 +305,15 @@ function S.attach(srv, opts)
                     local names = {}
                     for k in pairs(rec.aop) do names[#names + 1] = db.nicks[k] and db.nicks[k].nick or k end
                     table.sort(names)
-                    return tell(ChanServ, c, rec.name .. " AOP: " .. (#names > 0 and table.concat(names, " ") or "(none)"))
+                    return tell(ChanServ, c, rec.name .. " AOP: " .. (#names > 0 and text.join(names, " ") or "(none)"))
                 end
-                if not a[3] or (sub ~= "ADD" and sub ~= "DEL") then return tell(ChanServ, c, "Syntax: AOP #chan ADD|DEL|LIST [nick]") end
+                local adding = AOP_CHANGES[sub]
+                if not a[3] or adding == nil then return tell(ChanServ, c, "Syntax: AOP #chan ADD|DEL|LIST [nick]") end
                 if access(rec, c) ~= "founder" then return tell(ChanServ, c, "Only " .. rec.name .. "'s founder can do that.") end
-                if sub == "ADD" and not db.nicks[fold(a[3])] then return tell(ChanServ, c, a[3] .. " isn't a registered nick.") end
-                rec.aop[fold(a[3])] = (sub == "ADD") or nil
+                if adding and not db.nicks[fold(a[3])] then return tell(ChanServ, c, a[3] .. " isn't a registered nick.") end
+                rec.aop[fold(a[3])] = adding or nil
                 save()
-                tell(ChanServ, c, a[3] .. (sub == "ADD" and " is on " or " is off ") .. rec.name .. "'s AOP list.")
+                tell(ChanServ, c, a[3] .. (adding and " is on " or " is off ") .. rec.name .. "'s AOP list.")
             end },
     }
 
@@ -323,7 +325,7 @@ function S.attach(srv, opts)
                 local list, why = ask("players")
                 if not list then return tell(MC, c, "Can't tell who's on: " .. (why or "no game")) end
                 table.sort(list)
-                tell(MC, c, #list == 0 and "Nobody is in the game." or (#list .. " in the game: " .. table.concat(list, ", ")))
+                tell(MC, c, #list == 0 and "Nobody is in the game." or (#list .. " in the game: " .. text.join(list, ", ")))
             end },
         WEATHER = { usage = "", about = "rain, thunder or clear",
             run = function(c)
@@ -331,8 +333,8 @@ function S.attach(srv, opts)
                 tell(MC, c, wx and ("The weather: " .. wx .. ".") or ("Can't tell: " .. (why or "no game")))
             end },
         TELL = { usage = "<player> <text>", about = "a whisper to a player in the game", min = 2, needs = "game",
-            run = function(c, a, text)
-                local ok, why = ask("tell", a[1], irc.strip(irc.afterWords(text, 2)), c.nick)
+            run = function(c, a, line)
+                local ok, why = ask("tell", a[1], irc.strip(irc.afterWords(line, 2)), c.nick)
                 tell(MC, c, ok and ("Told " .. a[1] .. ".") or ("Can't: " .. (why or "no game")))
             end },
     }
@@ -354,9 +356,9 @@ function S.attach(srv, opts)
     -- A service: a user whose messages are commands, checked against its
     -- table (enough arguments, what the sender must be), then run.
     local function addService(nick, realname, intro, commands)
-        local function handle(c, text)
+        local function handle(c, line)
             local svc = srv:find(nick)
-            local w = words(text)
+            local w = text.words(line)
             local name = (w[1] or "HELP"):upper()
             local args = { table.unpack(w, 2) }
             if name == "HELP" then return help(svc, c, intro, commands) end
@@ -372,7 +374,7 @@ function S.attach(srv, opts)
                 if not rec then return tell(svc, c, why) end
                 return cmd.run(c, args, rec, srv:channel(rec.name))
             end
-            cmd.run(c, args, text)
+            cmd.run(c, args, line)
         end
         return srv:addService(nick, realname, handle)
     end
@@ -427,11 +429,11 @@ function S.attach(srv, opts)
     if bridgeName and bridgeName ~= "" then
         bridge = srv:join(MC, bridgeName)
         if not bridge.topic then bridge.topic, bridge.topicBy, bridge.topicAt = "The Minecraft chat. /msg MC HELP", "MC", srv.time() end
-        srv:on("message", function(c, chan, text, notice)
+        srv:on("message", function(c, chan, body, notice)
             if chan ~= bridge or c == MC or notice or not (mc and mc.has.chat) then return end
-            local cmd, args = irc.ctcp(text)
+            local cmd, args = irc.ctcp(body)
             if cmd == "ACTION" then mc.say("* " .. c.nick .. " " .. irc.strip(args))
-            elseif not cmd then mc.say(irc.strip(text), c.nick) end
+            elseif not cmd then mc.say(irc.strip(body), c.nick) end
         end)
     end
 
