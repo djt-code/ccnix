@@ -70,26 +70,11 @@ function P.wrap(lines, w)
     for i, l in ipairs(lines) do
         first[i] = #rows + 1
         local body, fg = textOf(l), type(l) == "table" and l[2] or nil
-        local function row(a, b)
+        local _, spans = text.wrap(body, w)
+        for _, span in ipairs(spans) do
+            local a, b = span[1], span[2]
             rows[#rows + 1] = fg and { body:sub(a, b), fg:sub(a, b) } or body:sub(a, b)
         end
-        local pos, n, added = 1, #body, false
-        while n - pos + 1 > w do
-            local chunk = body:sub(pos, pos + w)
-            -- break at the chunk's last space, if there's text before it
-            local before, after = text.cutLast(chunk, " ")
-            if after and not scan.isBlank(before) then
-                local cut = #before + 1                         -- (where the space is)
-                row(pos, pos + cut - 2)
-                pos = pos + cut
-                while body:sub(pos, pos) == " " do pos = pos + 1 end
-            else
-                row(pos, pos + w - 1)
-                pos = pos + w
-            end
-            added = true
-        end
-        if pos <= n or not added then row(pos, n) end
     end
     return rows, first
 end

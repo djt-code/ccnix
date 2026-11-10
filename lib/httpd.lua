@@ -79,14 +79,6 @@ H.DEFAULT_TYPE = "application/octet-stream"
 --------------------------------------------------------------------------
 -- Bits
 --------------------------------------------------------------------------
--- s's pieces between each sep, the empty ones left out (not trimmed)
-local function pieces(s, sep)
-    local out = {}
-    for _, piece in ipairs(text.split(s, sep, true)) do
-        if piece ~= "" then out[#out + 1] = piece end
-    end
-    return out
-end
 
 -- s (anything: tostring'd) with & < > " ' as HTML entities (pages' html())
 function H.html(s) return convert.html(tostring(s)) end
@@ -95,7 +87,7 @@ function H.html(s) return convert.html(tostring(s)) end
 function H.parseQuery(q)
     local args = {}
     -- query: pair ("&" pair)*; pair: name ["=" value], + a space in each
-    for _, pair in ipairs(pieces(q or "", "&")) do
+    for _, pair in ipairs(text.pieces(q or "", "&")) do
         local k, v = text.cut(pair, "=")
         args[convert.urlDecode(k, true)] = convert.urlDecode(v or "", true)
     end

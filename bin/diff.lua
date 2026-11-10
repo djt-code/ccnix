@@ -78,25 +78,12 @@ end
 -- and "x\n" differ)
 local function notSpace(c) return not scan.isSpace(c) end
 
--- l for -b: the blanks at its end dropped, every other run of them one space
-local function squeezeBlanks(l)
-    local out, sc = {}, scan.new(l)
-    while not sc:atEnd() do
-        if sc:readWhile(scan.isSpace) ~= "" then
-            if not sc:atEnd() then out[#out + 1] = " " end
-        else
-            out[#out + 1] = sc:readWhile(notSpace)
-        end
-    end
-    return table.concat(out)
-end
-
 local function split(s)
     local L, K = text.split(s, "\n", true), {}
     local last = table.remove(L)    -- (what comes after the last newline)
     if last ~= "" then L[#L + 1] = last end
     for i, l in ipairs(L) do
-        K[i] = opts.b and squeezeBlanks(l) or l
+        K[i] = opts.b and text.trimEnd(text.squeeze(l)) or l
     end
     if last ~= "" then K[#K] = K[#K] .. "\0" end
     return L, K, last ~= ""

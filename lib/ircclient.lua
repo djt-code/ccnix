@@ -120,12 +120,7 @@ end
 local function isNumeric(command) return #command == 3 and scan.isUnsigned(command) end
 
 -- Does the list (words with blanks between) have this word?
-local function hasWord(list, word)
-    for _, w in ipairs(text.words(list)) do
-        if w == word then return true end
-    end
-    return false
-end
+local hasWord = text.hasWord
 
 -- mIRC colour n around s.
 -- (it ends with \15, plain: a "\3" end would take digits after it as a colour)
@@ -626,16 +621,7 @@ Server.send_raw = Server.send
 function Server:message(target, body, command)
     command = command or "PRIVMSG"
     local room = 400 - #target
-    local pieces = {}
-    while #body > room do
-        -- cut at the last space that fits (one too early in the piece: at the room)
-        local cut = text.findLast(body:sub(1, room), " ") or room + 1
-        if cut < room / 2 then cut = room + 1 end
-        pieces[#pieces + 1] = body:sub(1, cut - 1)
-        body = body:sub(cut)
-        body = text.stripPrefix(body, " ") or body
-    end
-    pieces[#pieces + 1] = body
+    local pieces = text.wrap(body, room)              -- (at the last space that fits)
     for _, p in ipairs(pieces) do self:send(irc.build(command, target, p)) end
     return pieces
 end

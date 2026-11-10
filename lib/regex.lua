@@ -21,22 +21,6 @@ local text = require("text")
 local regex = {}
 local byte, char = string.byte, string.char
 
--- The [:class:] names, as tests on a one-character string (ASCII, as in
--- the C locale).
-local CLASS = {
-    alpha = scan.isAlpha,
-    digit = scan.isDigit,
-    alnum = scan.isAlnum,
-    upper = scan.isUpper,
-    lower = scan.isLower,
-    space = scan.isSpace,
-    blank = scan.oneOf(" \t"),
-    punct = scan.isPunct,
-    cntrl = scan.isControl,
-    xdigit = scan.isHexDigit,
-    graph = function(c) return scan.isAlnum(c) or scan.isPunct(c) end,
-    print = scan.isPrintable,
-}
 
 --------------------------------------------------------------------------
 -- Parsing: the pattern becomes a tree of nodes
@@ -94,7 +78,7 @@ local function parse(pat, ere, icase)
             if peek() == "[" and peek(1) == ":" then
                 local close = text.find(pat, ":]", pos + 2)
                 if not close then fail("brackets ([ ]) not balanced") end
-                local f = CLASS[pat:sub(pos + 2, close - 1)]
+                local f = scan.posixClasses[pat:sub(pos + 2, close - 1)]
                 if not f then fail("invalid character class") end
                 for b = 0, 255 do if f(char(b)) then set[b] = true end end
                 pos = close + 2

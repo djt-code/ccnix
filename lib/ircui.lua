@@ -341,7 +341,7 @@ function UI:drawBuflist()
     for i, b in ipairs(client.buffers) do
         if y > self.bottom then break end
         local indent = (b.kind == "channel" or b.kind == "query") and " " or ""
-        local label = text.padRight(indent .. i .. "." .. b.name, bw - 1)
+        local label = text.padRight(text.truncate(indent .. i .. "." .. b.name, bw - 1), bw - 1)
         local fg = ACT_COLOUR[b.activity] or "8"
         local bg = BG
         if b == client.current then fg, bg = "f", "8" end
@@ -371,7 +371,7 @@ function UI:drawNicklist()
             local sym = n.prefix:sub(1, 1)
             local symFg = sym == "@" and "5" or (sym == "+" and "4" or "0")
             local fg = irc.MIRC_BLIT[ircclient.nickColour(n.nick)]
-            local row = "|" .. (sym ~= "" and sym or " ") .. text.padRight(n.nick, nw - 2)
+            local row = "|" .. (sym ~= "" and sym or " ") .. text.padRight(text.truncate(n.nick, nw - 2), nw - 2)
             self:blitAt(x, y, row, "7" .. symFg .. fg:rep(nw - 2), (BG):rep(nw))
             self.nicklistRows[y] = n.nick
         else

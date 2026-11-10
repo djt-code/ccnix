@@ -45,26 +45,10 @@ end
 local function integer(s) return convert.toInteger(s) or bad(s .. ": integer expression expected") end
 local function no() return false end
 
--- integer: sign? "0"* digits: the digits, without the sign and the
--- leading zeros
-local function magnitude(s)
-    local sc = scan.new(s)
-    local _ = sc:accept("+") or sc:accept("-")
-    sc:readWhile(scan.oneOf("0"))
-    return sc:rest()
-end
-
--- compare two integers as text, -1, 0 or 1, so that numbers past 2^53
--- (where Lua's doubles lose digits) still compare exactly
+-- compare two integers exactly, -1, 0 or 1 (an error if one isn't)
 local function icmp(a, b)
     integer(a); integer(b)
-    local da, db = magnitude(a), magnitude(b)
-    local na, nb = scan.isNegative(a), scan.isNegative(b)
-    if na ~= nb then return na and -1 or 1 end
-    local c = 0
-    if #da ~= #db then c = #da < #db and -1 or 1
-    elseif da ~= db then c = da < db and -1 or 1 end
-    return na and -c or c
+    return convert.compareIntegers(a, b)
 end
 
 local UNARY = {

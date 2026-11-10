@@ -395,11 +395,12 @@ case '*' in "*") echo star;; esac; X='a*'; case abc in $X) echo glob;; esac; cas
 case x in (x) ;; esac; echo "e=$?"; case nothing in a) echo a;; esac; echo "n=$?"]])
 check("case: | and globs, the first match; a quoted pattern is literal, an unquoted $X a glob; (pat); empty; no match 0",
     r.out == "AZ apple\ntxt b.txt\nAZ Zed\nelse other\nstar\nglob\ne=0\nn=0\n", show(r.out))
-r = sh([[case '[ab]' in [ab]) echo set;; *) echo other;; esac; case b in [a"-"c]) echo range;; esac
+r = sh([[case '[ab]' in [ab]) echo set;; *) echo other;; esac; case b in [a-c]) echo range;; esac
+case b in [a"-"c]) echo no;; *) echo "not a range";; esac; case - in [a"-"c]) echo dash;; esac
 case '[a]' in "["a]) echo quoted;; esac; case a in "["a]) echo no;; *) echo plain;; esac
 case 'a?' in a\?) echo escaped;; esac; case ab in a\?) echo no;; *) echo literal;; esac]])
-check("case: a glob doesn't also match its own text; quoted [ and ? are themselves, a bracket's insides as they are",
-    r.out == "other\nrange\nquoted\nplain\nescaped\nliteral\n", show(r.out))
+check("case: a glob doesn't also match its own text; quoted [ ? and - are themselves (in a bracket too: [a\"-\"c] is a, - or c)",
+    r.out == "other\nrange\nnot a range\ndash\nquoted\nplain\nescaped\nliteral\n", show(r.out))
 r = sh([[greet() { echo "hi $1 ($#)"; }; greet bob; greet "a b" c; f() { return 3; echo no; }; f; echo $?
 x=1; g() { local x=2; echo "in $x"; }; g; echo "out $x"
 c() { if test $1 -gt 0; then echo $1; c $(expr $1 - 1); fi; }; c 3

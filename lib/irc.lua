@@ -205,26 +205,8 @@ function I.casefold(s, mapping)
 end
 
 -- Does s hold any one of the characters in chars?
-function I.containsAny(s, chars)
-    for i = 1, #chars do
-        if text.contains(s, chars:sub(i, i)) then return true end
-    end
-    return false
-end
-
--- The text after the first n words (and the blanks after them), as it
--- is: afterWords("TELL steve hi there", 2) is "hi there"; nil if there
--- aren't n words and something after.
-function I.afterWords(s, n)
-    local sc = scan.new(s)
-    sc:skipSpaces()
-    for _ = 1, n do
-        if sc:readWhile(function(c) return not scan.isSpace(c) end) == "" then return nil end
-        sc:skipSpaces()
-    end
-    local rest = sc:readRest()
-    return rest ~= "" and rest or nil
-end
+I.containsAny = text.containsAny
+I.afterWords = text.afterWords
 
 function I.isChannel(name, types)
     if type(name) ~= "string" or name == "" then return false end

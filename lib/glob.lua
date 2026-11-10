@@ -16,7 +16,10 @@
 --   class:   "[" ("!" | "^")? "]"? member* "]"   (a ] first is a member;
 --                                                 with no closing ], "[" is
 --                                                 itself)
---   member:  c "-" c (a range, by byte) | c
+--   member:  "[:" name ":]"   a POSIX class: alpha digit alnum upper lower
+--                             space blank punct print graph cntrl xdigit
+--            c "-" c          a range, by byte
+--            c                (c may be "" and a character, as outside)
 -- Nothing special about "/" or a leading ".": the shell and find, which
 -- care, split paths and look at dots themselves.
 --
@@ -30,34 +33,50 @@
 -- glob.match(pattern, s [, opts])  the same, once
 -- glob.hasWildcards(pattern [, opts])  true if pattern has a * ? or class
 --                     that isn't escaped (so it's more than a plain name)
--- glob.escape(s)      s with \ before each * ? [ ] and \, so it matches
---                     only itself
+-- glob.escape(s)      s with \ before each * ? [ ] \ - ! and ^, so it
+--                     matches only itself, inside a class too (a shell
+--                     escapes its quoted characters so)
+
+local scan = require("scan")
 
 local glob = {}
 
 local ANY, ONE = { any = true }, { one = true }
 
--- A class starting at pattern's index k (the "["): the item and the index
--- of its "]"; nil if no "]" closes it.
-local function readClass(pattern, k)
-    local j = k + 1
-    local neg = pattern:sub(j, j) == "!" or pattern:sub(j, j) == "^"
-    if neg then j = j + 1 end
-    local e = pattern:sub(j, j) == "]" and j + 1 or j        -- (a ] first is a member)
-    while e <= #pattern and pattern:sub(e, e) ~= "]" do e = e + 1 end
-    if e > #pattern then return nil end
-    local ranges, m = {}, j
-    while m < e do
-        local lo = pattern:byte(m)
-        if pattern:sub(m + 1, m + 1) == "-" and m + 2 < e then
-            ranges[#ranges + 1] = { lo, pattern:byte(m + 2) }
-            m = m + 3
+-- one member character: "\" and the character after it (when escapes are
+-- on), or the character
+local function readMemberChar(sc, opts)
+    if opts.escapes ~= false and sc:at("\\") and sc:peek(2) ~= "" then sc:advance() end
+    return sc:advance()
+end
+
+-- A class starting at pattern's index k (the "["): the item, a list of
+-- tests on one character, and the index of its "]"; nil if no "]"
+-- closes it.
+local function readClass(pattern, k, opts)
+    local sc = scan.new(pattern, k + 1)
+    local neg = sc:accept("!") or sc:accept("^")
+    local tests, first = {}, true
+    while not sc:atEnd() do
+        if sc:at("]") and not first then return { tests = tests, neg = neg }, sc:pos() end
+        first = false
+        local close = sc:at("[:") and pattern:find(":]", sc:pos() + 2, true)
+        local named = close and scan.posixClasses[pattern:sub(sc:pos() + 2, close - 1)]
+        if named then
+            tests[#tests + 1] = named
+            sc:setPos(close + 2)
         else
-            ranges[#ranges + 1] = { lo, lo }
-            m = m + 1
+            local lo = readMemberChar(sc, opts)
+            if sc:at("-") and sc:peek(2) ~= "]" and sc:peek(2) ~= "" then
+                sc:advance()
+                local hi = readMemberChar(sc, opts)
+                tests[#tests + 1] = function(c) return c >= lo and c <= hi end
+            else
+                tests[#tests + 1] = function(c) return c == lo end
+            end
         end
     end
-    return { ranges = ranges, neg = neg }, e
+    return nil
 end
 
 -- The pattern as a list of items, and whether any is a wildcard.
@@ -66,7 +85,7 @@ local function readItems(pattern, opts)
     while k <= #pattern do
         local c = pattern:sub(k, k)
         local class, close
-        if c == "[" and opts.classes ~= false then class, close = readClass(pattern, k) end
+        if c == "[" and opts.classes ~= false then class, close = readClass(pattern, k, opts) end
         if c == "*" then items[#items + 1] = ANY; wild = true
         elseif c == "?" then items[#items + 1] = ONE; wild = true
         elseif class then items[#items + 1] = class; wild = true; k = close
@@ -85,9 +104,9 @@ end
 local function takes(item, ch)
     if item.lit then return ch == item.lit end
     if item.one then return true end
-    local b, inside = ch:byte(), false
-    for _, r in ipairs(item.ranges) do
-        if b >= r[1] and b <= r[2] then inside = true; break end
+    local inside = false
+    for _, test in ipairs(item.tests) do
+        if test(ch) then inside = true; break end
     end
     return inside ~= item.neg
 end
@@ -131,7 +150,8 @@ function glob.hasWildcards(pattern, opts)
     return wild
 end
 
-local SPECIAL = { ["*"] = true, ["?"] = true, ["["] = true, ["]"] = true, ["\\"] = true }
+local SPECIAL = { ["*"] = true, ["?"] = true, ["["] = true, ["]"] = true, ["\\"] = true,
+                  ["-"] = true, ["!"] = true, ["^"] = true }
 
 function glob.escape(s)
     local out = {}

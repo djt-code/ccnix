@@ -44,11 +44,19 @@
 --                       nothing stepped over) if no name starts here
 --   sc:readNumber()     decimal digits: the number and its text; nil if no
 --                       digit is next
+--   sc:readDigits(n)    exactly n decimal digits: their number; nil (and
+--                       nothing stepped over) if fewer come
 --   sc:readInteger()    a sign (+ or -, or none) then digits: the number
 --                       and its text; nil, nothing stepped over, if none
 --   sc:readFloat()      a decimal number: a sign, digits with a point
 --                       ("12", "1.5", ".5", "5."), then an exponent
 --                       ("e-3") or not; the number and its text, or nil
+--   sc:readCInteger()   an integer as C writes one: "0x" and hex digits
+--                       (base 16), "0" and octal digits (base 8), or
+--                       decimal digits; the digits, the base and the text
+--                       ("0x1f" gives "1f", 16, "0x1f"); nil if no digit
+--                       is next.  convert.toInteger(digits, base) is its
+--                       value.
 --   sc:readTime()       a time of day, H:MM or H:MM:SS (hours 0-23, two
 --                       digits for minutes and seconds, each 0-59): the
 --                       hours, minutes, seconds (0 if left out) and text;
@@ -89,8 +97,13 @@
 --   scan.isSpace     space, tab, newline, return, vertical tab, form feed
 --   scan.isPunct     printable, not a letter, digit or space: ! " # $ ...
 --   scan.isPrintable space to ~ (32-126)
+--   scan.isGraph     printable, not a space (33-126)
 --   scan.isControl   the control characters: 0-31 and 127
 --   scan.oneOf(chars)    a test: true for any one of the characters in chars
+--   scan.posixClasses    the POSIX classes by name, each one of these
+--                        tests: alpha digit alnum upper lower space blank
+--                        (space, tab) punct print graph cntrl xdigit, as
+--                        [:alpha:] names them in a glob, tr or a regex
 --
 -- What shape a whole string is, each true only when all of s is that
 -- thing (no blanks around it; false for anything not a string):
@@ -143,6 +156,7 @@ function scan.isSpace(c) return c == " " or inRange(c, "\t", "\r") end
 function scan.isPunct(c) return inRange(c, "!", "~") and not scan.isAlnum(c) end
 
 function scan.isPrintable(c) return inRange(c, " ", "~") end
+function scan.isGraph(c) return inRange(c, "!", "~") end
 
 function scan.isControl(c)
     local b = byteOf(c)
@@ -154,6 +168,12 @@ function scan.oneOf(chars)
     for i = 1, #chars do set[chars:sub(i, i)] = true end
     return function(c) return set[c] == true end
 end
+
+scan.posixClasses = {
+    alpha = scan.isAlpha, digit = scan.isDigit, alnum = scan.isAlnum, upper = scan.isUpper,
+    lower = scan.isLower, space = scan.isSpace, blank = scan.oneOf(" \t"), punct = scan.isPunct,
+    print = scan.isPrintable, graph = scan.isGraph, cntrl = scan.isControl, xdigit = scan.isHexDigit,
+}
 
 --------------------------------------------------------------------------
 -- The scanner
@@ -260,23 +280,39 @@ function Scanner:readFloat()
     return since(self, from)
 end
 
--- exactly n digits next, stepped over: their number; nil (nothing
--- stepped over) if they aren't there
-local function readDigits(sc, n)
-    local from = sc.i
+-- digits{n}
+function Scanner:readDigits(n)
+    local from = self.i
     for _ = 1, n do
-        if not scan.isDigit(sc:peek()) then sc.i = from; return nil end
-        sc:advance()
+        if not scan.isDigit(self:peek()) then self.i = from; return nil end
+        self:advance()
     end
-    return tonumber(sc.text:sub(from, sc.i - 1))
+    return tonumber(self.text:sub(from, self.i - 1))
 end
 
 -- the field after sep: exactly two digits in lo..hi
 local function readField(sc, sep, lo, hi)
     if sep and not sc:accept(sep) then return nil end
-    local n = readDigits(sc, 2)
+    local n = sc:readDigits(2)
     if not n or n < lo or n > hi then return nil end
     return n
+end
+
+-- cinteger: ("0x" | "0X") hexdigit+ | "0" octaldigit* | digit+
+function Scanner:readCInteger()
+    local from = self.i
+    if self:accept("0x") or self:accept("0X") then
+        local hex = self:readWhile(scan.isHexDigit)
+        if hex ~= "" then return hex, 16, self.text:sub(from, self.i - 1) end
+        self.i = from                                   -- ("0x" alone: the 0, octal)
+    end
+    if self:at("0") then
+        local octal = self:readWhile(scan.isOctalDigit)
+        return octal, 8, octal
+    end
+    local digits = self:readWhile(scan.isDigit)
+    if digits == "" then return nil end
+    return digits, 10, digits
 end
 
 -- time: digit digit? ":" MM (":" SS)?, hours 0-23, minutes and seconds

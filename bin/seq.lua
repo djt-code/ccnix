@@ -116,7 +116,6 @@ end
 local width = opts.w and math.max(#show(first), #show(last)) or 0
 local function padded(v)
     local s = show(v)
-    if #s >= width then return s end
     local digits = text.stripPrefix(s, "-")
     if digits then return "-" .. text.padLeft(digits, width - 1, "0") end
     return text.padLeft(s, width, "0")

@@ -50,72 +50,6 @@ if #paths == 0 then paths = { "." } end
 local function bad(msg) cu.usageError(msg, 1) end
 
 --------------------------------------------------------------------------
--- globs: lib/glob's, after the POSIX classes ([:alpha:] ...) in a bracket
--- expression are written out as the ranges they stand for
---------------------------------------------------------------------------
--- each class as members of a lib/glob bracket expression.  Each ends with
--- a range, so a "-" after it can't make a range of its own, and none
--- starts with "!", "^", "]" or "-".
-local CLASS_MEMBERS = {
-    alpha = "a-zA-Z", digit = "0-9", alnum = "a-zA-Z0-9", upper = "A-Z", lower = "a-z",
-    space = " \t-\r", punct = ":-@!-/[-`{-~", xdigit = "a-fA-F0-9", cntrl = "\127\0-\31",
-}
-
--- A bracket expression of find's at k in pat (the "["), with its classes
--- written out: its text for lib/glob, and the index of its "]"; nil if no
--- "]" ends it.
---   bracket: "[" ("!" | "^")? item item* "]"     (a "]" first is an item)
---   item:    "[:" letter+ ":]" | c "-" c | c
-local function bracket(pat, k)
-    local sc = scan.new(pat, k + 1)
-    local out = { "[" }
-    if sc:at("!") or sc:at("^") then out[#out + 1] = sc:advance() end
-    local first = true
-    while not sc:atEnd() and (first or not sc:at("]")) do
-        local from = sc:pos()
-        local name = sc:accept("[:") and sc:readWhile(scan.isAlpha)
-        if name and CLASS_MEMBERS[name] and sc:accept(":]") then
-            out[#out + 1] = CLASS_MEMBERS[name]
-        else
-            sc:setPos(from)
-            local c = sc:advance()
-            if sc:at("-") and sc:peek(2) ~= "" and sc:peek(2) ~= "]" then
-                out[#out + 1] = c .. sc:advance(2)              -- (a range)
-            else
-                out[#out + 1] = c
-            end
-        end
-        first = false
-    end
-    if sc:atEnd() then return nil end
-    out[#out + 1] = "]"
-    return table.concat(out), sc:pos()
-end
-
--- find's glob pat (* ? [set] and \ quoting) as a test on a whole name
-local function compileGlob(pat)
-    local out, k = {}, 1
-    while k <= #pat do
-        local c = pat:sub(k, k)
-        local set, close
-        if c == "[" then set, close = bracket(pat, k) end
-        if set then
-            out[#out + 1] = set
-            k = close
-        elseif c == "[" then
-            out[#out + 1] = "\\["                    -- (no "]" ends it: itself)
-        elseif c == "\\" and k < #pat then
-            out[#out + 1] = pat:sub(k, k + 1)
-            k = k + 1
-        else
-            out[#out + 1] = c
-        end
-        k = k + 1
-    end
-    return glob.compile(table.concat(out))
-end
-
---------------------------------------------------------------------------
 -- the expression: parsed into functions of the entry e
 --------------------------------------------------------------------------
 local hasAction, depthFirst, xdev = false, false, false
@@ -177,11 +111,11 @@ end
 
 local primary = {}
 function primary.name()
-    local matches = compileGlob(nextArg("-name"))
+    local matches = glob.compile(nextArg("-name"))
     return function(e) return matches(e.name) end
 end
 function primary.path()
-    local matches = compileGlob(nextArg("-path"))
+    local matches = glob.compile(nextArg("-path"))
     return function(e) return matches(e.path) end
 end
 -- -type's letters, each as a test on an entry (CraftOS has no block or

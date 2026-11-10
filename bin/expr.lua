@@ -43,30 +43,10 @@ local function str(n)
 end
 local function zero(s) return s == "" or convert.toInteger(s) == 0 end
 
--- integer: sign? "0"* digits: the digits, without the sign and the
--- leading zeros
-local function magnitude(s)
-    local sc = scan.new(s)
-    local _ = sc:accept("+") or sc:accept("-")
-    sc:readWhile(scan.oneOf("0"))
-    return sc:rest()
-end
-
--- compare two integers as text, -1, 0 or 1, exact at any length
-local function icmp(a, b)
-    local da, db = magnitude(a), magnitude(b)
-    local na, nb = scan.isNegative(a), scan.isNegative(b)
-    if na ~= nb then return na and -1 or 1 end
-    local c = 0
-    if #da ~= #db then c = #da < #db and -1 or 1
-    elseif da ~= db then c = da < db and -1 or 1 end
-    return na and -c or c
-end
-
 local function compare(test)
     return function(a, b)
         local x, y = a, b
-        if scan.isInteger(a) and scan.isInteger(b) then x, y = icmp(a, b), 0 end
+        if scan.isInteger(a) and scan.isInteger(b) then x, y = convert.compareIntegers(a, b), 0 end
         return test(x, y) and "1" or "0"
     end
 end

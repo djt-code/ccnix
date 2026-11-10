@@ -18,6 +18,10 @@
 --                       (2-36, 10 if none; letters either case), as an
 --                       integer; nil if s isn't one
 --   convert.toNumber(s) s, a decimal number (scan.isNumber), or nil
+--   convert.compareIntegers(a, b)  -1, 0 or 1 as integer a (scan.isInteger)
+--                       is below, equal to or above b, exactly at any
+--                       length (past 2^53 too, where Lua's numbers lose
+--                       digits); nil if either isn't an integer
 --
 -- Sizes and times:
 --   convert.humanSize(bytes)   1023, 1.5K, 23K, 4.0M ...: one decimal below
@@ -50,6 +54,11 @@
 --                       %b, echo -e) octal is \0ooo, and \c ends the
 --                       text: then it returns the text and true.  A
 --                       backslash before anything else stays as it is.
+--   convert.readEscape(sc [, echo])  the one escape at scanner sc (at its
+--                       "\"), as unescape reads it: what it stands for,
+--                       stepped over; "\c" (echo) gives nil and true;
+--                       nil (nothing stepped over) if what follows the
+--                       backslash isn't an escape
 --   convert.escape(s)   the other way: \\, \n \t \r ..., and \ooo for the
 --                       other control characters
 --   convert.urlEncode(s)  each byte but letters, digits and - _ . ~ as %XX
@@ -79,14 +88,34 @@ function convert.toInteger(s, base)
     if type(s) ~= "string" then return nil end
     local sc, sign = scan.new(s), 1
     if sc:accept("-") then sign = -1 else sc:accept("+") end
-    if sc:atEnd() then return nil end
-    local n = 0
-    while not sc:atEnd() do
-        local d = digitValue(sc:advance())
+    local digits = sc:rest()
+    if digits == "" then return nil end
+    for i = 1, #digits do
+        local d = digitValue(digits:sub(i, i))
         if not d or d >= base then return nil end
-        n = n * base + d
     end
-    return sign * n
+    -- (tonumber, which turns to a float before an integer would wrap)
+    if base == 10 then return sign * tonumber(digits) end
+    return sign * tonumber(digits, base)
+end
+
+-- an integer's digits, without its sign and leading zeros ("" for 0)
+local function magnitude(s)
+    local sc = scan.new(s)
+    local _ = sc:accept("+") or sc:accept("-")
+    sc:readWhile(scan.oneOf("0"))
+    return sc:rest()
+end
+
+function convert.compareIntegers(a, b)
+    if not (scan.isInteger(a) and scan.isInteger(b)) then return nil end
+    local da, db = magnitude(a), magnitude(b)
+    local na, nb = da ~= "" and a:sub(1, 1) == "-", db ~= "" and b:sub(1, 1) == "-"
+    if na ~= nb then return na and -1 or 1 end
+    local c = 0
+    if #da ~= #db then c = #da < #db and -1 or 1
+    elseif da ~= db then c = da < db and -1 or 1 end
+    return na and -c or c
 end
 
 function convert.toNumber(s)
@@ -293,22 +322,26 @@ local function readOctal(sc)
     return digits
 end
 
+function convert.readEscape(sc, echo)
+    if not sc:at("\\") or sc:peek(2) == "" then return nil end
+    local from = sc:pos()
+    sc:advance()
+    if echo and sc:accept("c") then return nil, true end
+    if C_ESCAPES[sc:peek()] then return C_ESCAPES[sc:advance()] end
+    if (echo and sc:accept("0")) or (not echo and scan.isOctalDigit(sc:peek())) then
+        local digits = readOctal(sc)
+        return string.char((tonumber(digits ~= "" and digits or "0", 8)) % 256)
+    end
+    sc:setPos(from)
+    return nil
+end
+
 function convert.unescape(s, echo)
     local sc, out = scan.new(s), {}
     while not sc:atEnd() do
-        local c = sc:advance()
-        if c ~= "\\" or sc:atEnd() then
-            out[#out + 1] = c
-        elseif echo and sc:accept("c") then
-            return table.concat(out), true
-        elseif C_ESCAPES[sc:peek()] then
-            out[#out + 1] = C_ESCAPES[sc:advance()]
-        elseif (echo and sc:accept("0")) or (not echo and scan.isOctalDigit(sc:peek())) then
-            local digits = readOctal(sc)
-            out[#out + 1] = string.char((tonumber(digits ~= "" and digits or "0", 8)) % 256)
-        else
-            out[#out + 1] = "\\"                    -- (\ before anything else stays)
-        end
+        local c, stop = convert.readEscape(sc, echo)
+        if stop then return table.concat(out), true end
+        out[#out + 1] = c or sc:advance()           -- (\ before anything else stays)
     end
     return table.concat(out), false
 end

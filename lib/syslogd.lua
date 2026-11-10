@@ -67,15 +67,6 @@ end
 local function notSpace(c) return not scan.isSpace(c) end
 local function isFacilityChar(c) return c ~= "." and not scan.isSpace(c) end
 
--- the pieces of s between each sep, the empty ones left out (not trimmed)
-local function pieces(s, sep)
-    local out = {}
-    for _, piece in ipairs(text.split(s, sep, true)) do
-        if piece ~= "" then out[#out + 1] = piece end
-    end
-    return out
-end
-
 -- a selector: facilities "." severity, the facilities anything but "."
 -- and blanks, the severity non-blanks (blanks around it allowed).  The
 -- two, or nil
@@ -92,11 +83,11 @@ end
 
 local function parseSelectors(s)
     local sels = {}
-    for _, part in ipairs(pieces(s, ";")) do
+    for _, part in ipairs(text.pieces(s, ";")) do
         local facs, lvl = readSelector(part)
         if not facs then return nil, "bad selector \"" .. part .. "\"" end
         local sel = { facs = {} }
-        for _, f in ipairs(pieces(facs, ",")) do
+        for _, f in ipairs(text.pieces(facs, ",")) do
             if f == "*" then sel.all = true
             else
                 local n = L.facility(f)

@@ -22,44 +22,6 @@ local function inRange(mo, d, h, mi, s)
     mo, d, h, mi, s = tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(s)
     return mo and mo >= 1 and mo <= 12 and d >= 1 and d <= 31 and h <= 23 and mi <= 59 and s <= 60
 end
--- exactly n digits next in scanner sc, stepped over; nil if they aren't there
-local function readDigits(sc, n)
-    local digits = ""
-    for _ = 1, n do
-        if not scan.isDigit(sc:peek()) then return nil end
-        digits = digits .. sc:advance()
-    end
-    return digits
-end
-
--- -d's date: digit digit digit digit+ "-" MM "-" DD ("T" | " ") hh ":" mm ":"
--- SS, then the rest; the five fields and the rest, or nil
-local function readDate(text)
-    local sc = scan.new(text)
-    if #sc:readWhile(scan.isDigit) < 4 or not sc:accept("-") then return nil end
-    local mo = readDigits(sc, 2)
-    if not mo or not sc:accept("-") then return nil end
-    local d = readDigits(sc, 2)
-    if not d or not (sc:accept("T") or sc:accept(" ")) then return nil end
-    local h = readDigits(sc, 2)
-    if not h or not sc:accept(":") then return nil end
-    local mi = readDigits(sc, 2)
-    if not mi or not sc:accept(":") then return nil end
-    local s = readDigits(sc, 2)
-    if not s then return nil end
-    return mo, d, h, mi, s, sc:rest()
-end
-
--- what may follow -d's seconds: ("." | "," digit+)? "Z"?
-local function isDateEnd(rest)
-    local sc = scan.new(rest)
-    if sc:accept(".") or sc:accept(",") then
-        if sc:readWhile(scan.isDigit) == "" then return false end
-    end
-    sc:accept("Z")
-    return sc:atEnd()
-end
-
 -- how many digits -t's [[CC]YY]MMDDhhmm can have
 local T_LENGTHS = { [8] = true, [10] = true, [12] = true }
 
@@ -77,9 +39,8 @@ if opts.t then
     end
 end
 if opts.d then
-    -- YYYY-MM-DDThh:mm:SS[.frac][Z] (a space can stand for the T)
-    local mo, d, h, mi, s, rest = readDate(opts.d)
-    if not (mo and inRange(mo, d, h, mi, s) and isDateEnd(rest)) then
+    -- YYYY-MM-DDThh:mm:SS[.frac][zone] (a space can stand for the T)
+    if not scan.isDateTime(opts.d) then
         cu.usageError("invalid date format '" .. opts.d .. "'")
     end
 end

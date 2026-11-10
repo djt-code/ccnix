@@ -9,6 +9,7 @@ package.path = PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.pat
 local M = require("mock")
 local check = M.check
 local text = require("text")
+local scan = require("scan")
 local convert = require("convert")
 local getopt = require("getopt")
 local glob = require("glob")
@@ -28,7 +29,10 @@ same("trim", text.trim("  a b \t\r\n"), "a b")
 same("trim: all blanks", text.trim("   "), "")
 same("trimStart", text.trimStart("  a b  "), "a b  ")
 same("trimEnd", text.trimEnd("  a b  "), "  a b")
-same("squeeze: runs of blanks as one space", text.squeeze("  a \t b\n\nc "), "a b c")
+same("squeeze: runs of blanks as one space, the ends too", text.squeeze("  a \t b\n\nc "), " a b c ")
+same("afterWords: the rest as it is", text.afterWords("TELL steve hi  there", 2), "hi  there")
+check("afterWords: nil when nothing follows", text.afterWords("TELL steve ", 2) == nil and text.afterWords("x", 2) == nil)
+check("hasWord", text.hasWord("sasl tls", "tls") and not text.hasWord("sasltls", "tls"))
 same("words: split at blanks", list(text.words("  set nu\tts=4  ")), "{set|nu|ts=4}")
 check("words of nothing but blanks: none", #text.words(" \t ") == 0 and #text.words("") == 0)
 
@@ -47,6 +51,7 @@ local b3, a3 = text.cut("nosep", ":")
 check("cut: no separator: s and nil", b3 == "nosep" and a3 == nil)
 same("lines: LF, CR LF, a last line without one", list(text.lines("a\r\nb\n\nc")), "{a|b||c}")
 same("lines: a newline at the end starts no line", list(text.lines("a\nb\n")), "{a|b}")
+same("lines, keepReturns", list(text.lines("a\r\nb\n", true)), "{a\r|b}")
 
 -- 3. ends and insides
 check("startsWith, endsWith", text.startsWith("network.lab", "network.") and not text.startsWith("net", "network")
@@ -59,6 +64,7 @@ local f1, f2 = text.find("a.b.c", ".")
 check("find: plain, not a pattern", f1 == 2 and f2 == 2)
 local l1 = text.findLast("a.b.c", ".")
 check("findLast", l1 == 4)
+check("containsAny", text.containsAny("n!u@h", "!@") and not text.containsAny("nick", "!@"))
 check("contains: % and . as themselves", text.contains("100%.", "%.") and not text.contains("100x", "%."))
 same("count: not overlapping", text.count("aaaa", "aa"), 2)
 same("count: of nothing", text.count("abc", ""), 0)
@@ -69,7 +75,8 @@ same("replace: a % in new is itself", (text.replace("x", "x", "%1")), "%1")
 
 -- 4. widths
 same("padRight", text.padRight("ok", 6) .. "|", "ok    |")
-same("padRight: longer is cut", text.padRight("abcdef", 3), "abc")
+same("padRight: longer stays as it is (as %-3s)", text.padRight("abcdef", 3), "abcdef")
+same("a column exactly w wide", text.padRight(text.truncate("abcdef", 3), 3) .. text.padRight("a", 3) .. "|", "abca  |")
 same("padLeft with a fill", text.padLeft(7, 3, "0"), "007")
 same("center", "[" .. text.center("ab", 6) .. "]", "[  ab  ]")
 same("truncate with a mark", text.truncate("abcdef", 4, "~"), "abc~")
@@ -77,6 +84,10 @@ same("truncate: short enough stays", text.truncate("abc", 4, "~"), "abc")
 same("wrap: at blanks", list(text.wrap("the quick brown fox", 10)), "{the quick|brown fox}")
 same("wrap: a long word is broken", list(text.wrap("abcdefghij xy", 4)), "{abcd|efgh|ij|xy}")
 same("wrap: newlines end lines, empty ones stay", list(text.wrap("a\n\nb", 5)), "{a||b}")
+same("wrap: blanks inside kept, the one broken at dropped", list(text.wrap("a  b c d", 4)), "{a  b|c d}")
+local _, spans = text.wrap("ab cd\nef", 3)
+check("wrap: where each line is in s", #spans == 3 and spans[1][1] == 1 and spans[1][2] == 2 and spans[2][1] == 4
+    and spans[2][2] == 5 and spans[3][1] == 7 and spans[3][2] == 8)
 
 -- 5. case
 check("equalFold", text.equalFold("NickServ", "nickserv") and not text.equalFold("a", "ab"))
@@ -89,6 +100,14 @@ check("toInteger: other bases", convert.toInteger("ff", 16) == 255 and convert.t
     and convert.toInteger("777", 8) == 511 and convert.toInteger("101", 2) == 5)
 check("toInteger: the whole string or nil", convert.toInteger("12x") == nil and convert.toInteger(" 1") == nil
     and convert.toInteger("") == nil and convert.toInteger("-") == nil and convert.toInteger("8", 8) == nil)
+check("toInteger: past 2^63, a float, not wrapped", convert.toInteger("99999999999999999999") == 1e20)
+check("compareIntegers: exact at any length", convert.compareIntegers("99999999999999999999", "99999999999999999998") == 1
+    and convert.compareIntegers("-007", "-7") == 0 and convert.compareIntegers("-0", "+0") == 0
+    and convert.compareIntegers("-12", "3") == -1 and convert.compareIntegers("x", "1") == nil)
+local esc = scan.new([[\tx]])
+check("readEscape: one, stepped over", convert.readEscape(esc) == "\t" and esc:peek() == "x")
+esc = scan.new([[\qx]])
+check("readEscape: not one: nil, nothing stepped over", convert.readEscape(esc) == nil and esc:pos() == 1)
 check("toNumber", convert.toNumber("1.5e3") == 1500 and convert.toNumber("-.5") == -0.5
     and convert.toNumber("0x10") == nil and convert.toNumber("inf") == nil and convert.toNumber(" 1") == nil)
 
@@ -172,6 +191,10 @@ check("glob: * and ?", glob.match("*.lua", "init.lua") and glob.match("?x", "ax"
 check("glob: * matches nothing too", glob.match("a*", "a") and glob.match("*", ""))
 check("glob: classes", glob.match("[a-c]x", "bx") and not glob.match("[a-c]x", "dx") and glob.match("[!a-c]x", "dx")
     and glob.match("[]]", "]") and glob.match("[^0-9]", "a"))
+check("glob: POSIX classes", glob.match("[[:digit:]]x", "7x") and glob.match("[![:alpha:]]", "1")
+    and not glob.match("[[:upper:][:digit:]]", "a") and glob.match("[[:graph:]]", "!"))
+check("glob: escapes inside a class", glob.match("[\\]a]", "]") and glob.match("[\\]a]", "a") and glob.match("[a\\-z]", "-")
+    and not glob.match("[a\\-z]", "m"))
 check("glob: an unclosed [ is itself", glob.match("[ab", "[ab"))
 check("glob: \\ escapes", glob.match("\\*", "*") and not glob.match("\\*", "x"))
 check("glob: many stars stay fast", glob.match("*a*a*a*a*a*b", ("a"):rep(60)) == false)

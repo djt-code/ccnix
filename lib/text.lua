@@ -15,21 +15,30 @@
 -- Blanks (scan.isSpace: space, tab, newline, return, vt, ff):
 --   text.trim(s)          s without the blanks at either end
 --   text.trimStart(s)     ... at its start;  text.trimEnd(s)  ... at its end
---   text.squeeze(s)       trimmed, every run of blanks inside as one space
+--   text.squeeze(s)       every run of blanks as one space (the ends too:
+--                         trim(squeeze(s)) for neither)
 --   text.words(s)         the words of s between blanks, as a list
+--   text.afterWords(s, n) the rest of s after its first n words and the
+--                         blanks after them, as it is: afterWords("TELL
+--                         steve hi  there", 2) is "hi  there"; nil if
+--                         nothing comes after n words
+--   text.hasWord(s, word) word is one of s's words: hasWord("sasl tls", "tls")
 --
 -- Pieces:
 --   text.split(s, sep)    the pieces of s between each sep, each trimmed,
 --                         the empty ones left out.  text.split(s, sep, true)
 --                         keeps them as they are, empty ones and blanks too.
+--   text.pieces(s, sep)   the pieces of s between each sep that aren't
+--                         empty, as they are (blanks kept)
 --   text.join(list, sep)  the items (tostring'd) with sep between them
 --                         ("" if no sep)
 --   text.cut(s, sep)      the text before the first sep and after it:
 --                         text.cut("host:6667", ":") is "host", "6667";
 --                         s and nil when there's no sep
 --   text.cutLast(s, sep)  the same at the last sep
---   text.lines(s)         s's lines (after LF or CR LF; a last line without
---                         one too), as a list
+--   text.lines(s [, keepReturns])  s's lines (after LF or CR LF; a last
+--                         line without one too), as a list; with
+--                         keepReturns a CR before the LF stays in its line
 --
 -- Ends and insides:
 --   text.startsWith(s, prefix), text.endsWith(s, suffix)
@@ -40,20 +49,29 @@
 --                         on): its first and last index, or nil
 --   text.findLast(s, part)        the same for the last one
 --   text.contains(s, part)        true if part is in s
+--   text.containsAny(s, chars)    true if any one of the characters in
+--                         chars is in s: containsAny(mask, "!@")
 --   text.count(s, part)   how many times part is in s, not overlapping
 --   text.replace(s, old, new [, n])   s with each old (the first n, if n)
 --                         made new; and how many were
 --
 -- Widths (in characters, as CC's terminals count them):
---   text.padRight(s, w [, ch])  s, then ch (a space) up to w wide;
---                               longer s is cut to w
---   text.padLeft(s, w [, ch])   the same with the padding before
+--   text.padRight(s, w [, ch])  s, then ch (a space) up to w wide, as
+--                               %-ws does: a longer s stays as it is
+--   text.padLeft(s, w [, ch])   the same with the padding before (%ws)
 --   text.center(s, w)           s in the middle of w
 --   text.truncate(s, w [, mark])  s cut to w, mark (none) at its end
 --                               when cut: truncate("abcdef", 4, "~") is "abc~"
---   text.wrap(s, w)             s as lines of at most w, broken at blanks
---                               (a word longer than w is broken where it
---                               must); each newline in s ends a line
+--                               (a column exactly w wide:
+--                               padRight(truncate(s, w), w))
+--   text.wrap(s, w)             s as lines of at most w: each broken at
+--                               its last blank that fits with text before
+--                               it (that blank dropped), or, with none, at
+--                               w; the rest of s as it is (runs of blanks
+--                               kept).  Each newline in s ends a line.
+--                               Second, for each line, where it is in s:
+--                               { first, last } (to cut a colour string
+--                               the same way)
 --
 -- Case (ASCII, as string.upper and string.lower):
 --   text.equalFold(a, b)  a and b the same but for case
@@ -92,7 +110,34 @@ function text.words(s)
     return out
 end
 
-function text.squeeze(s) return table.concat(text.words(s), " ") end
+function text.squeeze(s)
+    local sc, out = scan.new(s), {}
+    while not sc:atEnd() do
+        if sc:readWhile(scan.isSpace) ~= "" then out[#out + 1] = " "
+        else out[#out + 1] = sc:readWhile(function(c) return not scan.isSpace(c) end) end
+    end
+    return table.concat(out)
+end
+
+local function notSpace(c) return not scan.isSpace(c) end
+
+function text.afterWords(s, n)
+    local sc = scan.new(s)
+    sc:skipSpaces()
+    for _ = 1, n do
+        if sc:readWhile(notSpace) == "" then return nil end
+        sc:skipSpaces()
+    end
+    local rest = sc:readRest()
+    return rest ~= "" and rest or nil
+end
+
+function text.hasWord(s, word)
+    for _, w in ipairs(text.words(s)) do
+        if w == word then return true end
+    end
+    return false
+end
 
 --------------------------------------------------------------------------
 -- Pieces
@@ -129,6 +174,14 @@ function text.split(s, sep, keep)
     return out
 end
 
+function text.pieces(s, sep)
+    local out = {}
+    for _, piece in ipairs(text.split(s, sep, true)) do
+        if piece ~= "" then out[#out + 1] = piece end
+    end
+    return out
+end
+
 function text.join(list, sep)
     local parts = {}
     for i = 1, #list do parts[i] = tostring(list[i]) end
@@ -147,10 +200,10 @@ function text.cutLast(s, sep)
     return s:sub(1, at - 1), s:sub(at + #sep)
 end
 
-function text.lines(s)
+function text.lines(s, keepReturns)
     local out = {}
     for _, piece in ipairs(text.split(s, "\n", true)) do
-        out[#out + 1] = text.stripSuffix(piece, "\r") or piece
+        out[#out + 1] = (not keepReturns and text.stripSuffix(piece, "\r")) or piece
     end
     if out[#out] == "" then out[#out] = nil end     -- (the newline at the end ends a line; it doesn't start one)
     return out
@@ -174,6 +227,13 @@ function text.stripSuffix(s, suffix)
 end
 
 function text.contains(s, part) return s:find(part, 1, true) ~= nil end
+
+function text.containsAny(s, chars)
+    for i = 1, #chars do
+        if s:find(chars:sub(i, i), 1, true) then return true end
+    end
+    return false
+end
 
 function text.count(s, part)
     if part == "" then return 0 end
@@ -205,20 +265,17 @@ end
 
 function text.padRight(s, w, ch)
     s = tostring(s)
-    if #s >= w then return s:sub(1, w) end
     return s .. (ch or " "):rep(w - #s)
 end
 
 function text.padLeft(s, w, ch)
     s = tostring(s)
-    if #s >= w then return s:sub(1, w) end
     return (ch or " "):rep(w - #s) .. s
 end
 
 function text.center(s, w)
     s = tostring(s)
-    if #s >= w then return s:sub(1, w) end
-    local left = math.floor((w - #s) / 2)
+    local left = math.max(0, math.floor((w - #s) / 2))
     return (" "):rep(left) .. s .. (" "):rep(w - #s - left)
 end
 
@@ -229,26 +286,32 @@ function text.truncate(s, w, mark)
     return s:sub(1, w - #mark) .. mark
 end
 
--- one line (no newlines in it) as lines of at most w
-local function wrapLine(line, w, out)
-    local cur = ""
-    for _, word in ipairs(text.words(line)) do
-        while #word > w do                              -- (too long for any line: broken)
-            if cur ~= "" then out[#out + 1] = cur; cur = "" end
-            out[#out + 1] = word:sub(1, w)
-            word = word:sub(w + 1)
-        end
-        if cur == "" then cur = word
-        elseif #cur + 1 + #word <= w then cur = cur .. " " .. word
-        else out[#out + 1] = cur; cur = word end
+-- one line (no newlines in it), from s's index `at`, as lines of at most
+-- w, each with where it is in s
+local function wrapLine(line, at, w, out, spans)
+    local function emit(from, to)
+        out[#out + 1] = line:sub(from, to)
+        spans[#spans + 1] = { at + from - 1, at + to - 1 }
     end
-    out[#out + 1] = cur
+    local from = 1
+    while #line - from + 1 > w do
+        local cut                                       -- (the last blank that fits, text before it)
+        for k = from + w, from + 1, -1 do
+            if scan.isSpace(line:sub(k, k)) and not scan.isBlank(line:sub(from, k - 1)) then cut = k; break end
+        end
+        if cut then emit(from, cut - 1); from = cut + 1
+        else emit(from, from + w - 1); from = from + w end
+    end
+    emit(from, #line)
 end
 
 function text.wrap(s, w)
-    local out = {}
-    for _, line in ipairs(text.split(s, "\n", true)) do wrapLine(line, math.max(1, w), out) end
-    return out
+    local out, spans, at = {}, {}, 1
+    for _, line in ipairs(text.split(s, "\n", true)) do
+        wrapLine(line, at, math.max(1, w), out, spans)
+        at = at + #line + 1
+    end
+    return out, spans
 end
 
 --------------------------------------------------------------------------

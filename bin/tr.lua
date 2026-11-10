@@ -23,6 +23,7 @@
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("tr", "tr [-c|-C] [-ds] string1 [string2]")
 local scan = require("scan")
+local convert = require("convert")
 local text = require("text")
 local opts, ops = cu.getopt({ ... }, "cCds")
 local comp = opts.c or opts.C
@@ -30,24 +31,16 @@ local want = (opts.d and opts.s or not opts.d and not opts.s) and 2 or 1
 if opts.s and not opts.d and #ops == 2 then want = 2 end
 if #ops ~= want then cu.usageError(#ops < want and "missing operand" or "extra operand") end
 
-local ESC = { ["\\"] = "\\", a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v" }
--- the classes, each a test on one character (bytes 0 to 127 are tried)
-local function isGraph(c) return scan.isPrintable(c) and c ~= " " end
-local CLASS = { alnum = scan.isAlnum, alpha = scan.isAlpha, blank = scan.oneOf(" \t"),
-    cntrl = scan.isControl, digit = scan.isDigit,
-    graph = isGraph, lower = scan.isLower, print = scan.isPrintable, punct = scan.isPunct,
-    space = scan.isSpace, upper = scan.isUpper, xdigit = scan.isHexDigit }
-
--- one character (escapes allowed) at i: the character and the next index
+-- one character (escapes allowed: convert.readEscape's, and \ before
+-- anything else is that thing) at i: the character and the next index
 local function char(s, i)
-    local c = s:sub(i, i)
-    if c ~= "\\" or i == #s then return c, i + 1 end
-    -- \ooo: one to three octal digits
-    local sc, oct = scan.new(s, i + 1), ""
-    while #oct < 3 and scan.isOctalDigit(sc:peek()) do oct = oct .. sc:advance() end
-    if oct ~= "" then return string.char(tonumber(oct, 8) % 256), i + 1 + #oct end
-    c = s:sub(i + 1, i + 1)
-    return ESC[c] or c, i + 2
+    local sc = scan.new(s, i)
+    local c = convert.readEscape(sc)
+    if not c then
+        if sc:at("\\") and sc:peek(2) ~= "" then sc:advance() end
+        c = sc:advance()
+    end
+    return c, sc:pos()
 end
 
 -- "[:" letters ":]" at i: the class's name, or nil
@@ -76,9 +69,9 @@ local function parse(s, second)
         local c, j = char(s, i + 1)     -- for [c*n]
         local q, k = char(s, i + 2)     -- for [=c=]
         if name then
-            if not CLASS[name] then cu.usageError("invalid class: " .. name, 1) end
+            if not scan.posixClasses[name] then cu.usageError("invalid class: " .. name, 1) end
             for b = 0, 127 do
-                if CLASS[name](string.char(b)) then t[#t + 1] = string.char(b) end
+                if scan.posixClasses[name](string.char(b)) then t[#t + 1] = string.char(b) end
             end
             i = i + #name + 4
         elseif s:sub(i, i + 1) == "[=" and s:sub(k, k + 1) == "=]" then

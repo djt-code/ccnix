@@ -29,16 +29,9 @@ local format = table.remove(args, 1)
 -- digits.  The digits, the base, and how long a prefix came before them;
 -- nil if body starts with none of these.
 local function leadingInteger(body)
-    local sc = scan.new(body)
-    if sc:accept("0x") or sc:accept("0X") then
-        local hex = sc:readWhile(scan.isHexDigit)
-        if hex ~= "" then return hex, 16, 2 end
-    end
-    sc:setPos(1)
-    if sc:at("0") then return sc:readWhile(scan.isOctalDigit), 8, 0 end
-    local digits = sc:readWhile(scan.isDigit)
-    if digits ~= "" then return digits, 10, 0 end
-    return nil
+    local digits, base, written = scan.new(body):readCInteger()
+    if not digits then return nil end
+    return digits, base, #written - #digits
 end
 
 -- The numeric value of argument a (nil: missing, 0); `int` takes whole
@@ -71,7 +64,6 @@ end
 -- pad s to the width (flags "-": on the right); never cut
 local function pad(s, flags, width)
     width = tonumber(width) or 0
-    if #s >= width then return s end
     if text.contains(flags, "-") then return text.padRight(s, width) end
     return text.padLeft(s, width)
 end

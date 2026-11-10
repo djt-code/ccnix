@@ -1100,38 +1100,14 @@ local function fields(parts, whole)
     return out
 end
 
--- The end of the bracket expression whose "[" is chars[k]: the index of
--- its "]", or nil if none ends it (lib/glob's rule: after a "!" or "^",
--- a "]" first is a member; then the first "]" closes it).
-local function bracketEnd(chars, k)
-    local j = k + 1
-    if chars[j] == "!" or chars[j] == "^" then j = j + 1 end
-    local e = chars[j] == "]" and j + 1 or j
-    while chars[e] and chars[e] ~= "]" do e = e + 1 end
-    return chars[e] and e or nil
-end
-
 -- A glob (one path segment, or a case pattern) as a function that says
 -- whether a whole string matches it (lib/glob's * ? [...]); nil if it has
 -- no wildcards.  chars are its characters, magic[k] true where chars[k] is
--- unquoted: only an unquoted * ? or [ is a wildcard, so the others are
--- escaped.  A bracket expression is passed on as it is, quoted characters
--- and all (lib/glob reads no escapes inside one).
+-- unquoted: the quoted ones are escaped (glob.escape), so only what was
+-- typed bare is a wildcard, in a bracket expression too.
 local function globMatcher(chars, magic)
-    local pattern, k = {}, 1
-    while k <= #chars do
-        local c = chars[k]
-        local close = magic[k] and c == "[" and bracketEnd(chars, k)
-        if close then
-            for m = k, close do pattern[#pattern + 1] = chars[m] end
-            k = close
-        elseif magic[k] and (c == "*" or c == "?") then
-            pattern[#pattern + 1] = c
-        else
-            pattern[#pattern + 1] = glob.escape(c)
-        end
-        k = k + 1
-    end
+    local pattern = {}
+    for k, c in ipairs(chars) do pattern[k] = magic[k] and c or glob.escape(c) end
     pattern = table.concat(pattern)
     if not glob.hasWildcards(pattern) then return nil end
     return glob.compile(pattern)
