@@ -245,3 +245,16 @@ same("sortedKeys: a comparator", table.concat(tables.sortedKeys({ a = 1, b = 1 }
 local orig = { a = 1, t = {} }
 local cp = tables.copy(orig)
 check("copy: shallow", cp ~= orig and cp.a == 1 and cp.t == orig.t)
+local fileio = require("fileio")
+textutils = textutils or { unserialiseJSON = function(d) if d == '{"k":1}' then return { k = 1 } end error("not JSON") end }
+local fake = { files = { ["/a"] = "x" } }
+local fakeFs = {
+    exists = function(p) return fake.files[p] ~= nil end, isDir = function() return false end,
+    open = function(p, mode)
+        if mode == "w" then return { write = function(d) fake.files[p] = d end, close = function() end } end
+        return fake.files[p] and { readAll = function() return fake.files[p] end, close = function() end } or nil
+    end,
+}
+local on = fileio.on(fakeFs)
+check("fileio.on: read, write and readJSON over another fs", on.read("/a") == "x" and on.read("/b") == nil
+    and on.write("/j", '{"k":1}') and on.readJSON("/j") and on.readJSON("/j").k == 1 and on.readJSON("/a") == nil)

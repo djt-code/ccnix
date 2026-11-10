@@ -23,6 +23,7 @@ What a script has, besides everything a program has:
   here         this script's folder ("/www/cgi"): for files of its own (fs.combine(here, "notes.db")), which the script root never serves
   fs           the filesystem, as everywhere
   text         lib/text, strings as wholes (the top of lib/text.lua lists it all): text.trim(req.params.name or ""), text.split(s, ","), text.startsWith(s, "x")
+  fileio       lib/fileio over fs: fileio.read(p) (the file's text, or nil), fileio.write(p, data), fileio.readJSON(p)
 
 A script can also return what to send: a string (the page), or status, headers, body: `return 404, {}, "no such note"`.
 

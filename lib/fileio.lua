@@ -12,39 +12,49 @@
 --                       replaced); true, or nil and why
 --   fileio.readJSON(path)  the file read as JSON: a table, or nil (no file,
 --                       not JSON, or JSON that isn't an object or array)
+--   fileio.on(fsApi)    the same three over another filesystem: one with
+--                       fs's exists, isDir and open (httpd's opts.fs, the
+--                       disk under lib/jbod's pool)
 --
--- Each goes through the fs that's there when it's called, so a program
--- that patches fs (lib/jbod) is seen through; one that needs the disk
--- underneath keeps its own handle on it.
+-- The plain ones go through the global fs as it is when they're called,
+-- so a program that patches fs (lib/jbod) is seen through.
 
-local fileio = {}
+-- the three functions over fsOf(), the filesystem to use at each call
+local function over(fsOf)
+    local io_ = {}
 
-function fileio.read(path, binary)
-    if not fs.exists(path) then return nil, path .. ": No such file" end
-    if fs.isDir(path) then return nil, path .. ": Is a directory" end
-    local h, err = fs.open(path, binary and "rb" or "r")
-    if not h then return nil, err or (path .. ": can't open it") end
-    local data = h.readAll() or ""
-    h.close()
-    return data
+    function io_.read(path, binary)
+        local fsx = fsOf()
+        if not fsx.exists(path) then return nil, path .. ": No such file" end
+        if fsx.isDir(path) then return nil, path .. ": Is a directory" end
+        local h, err = fsx.open(path, binary and "rb" or "r")
+        if not h then return nil, err or (path .. ": can't open it") end
+        local data = h.readAll() or ""
+        h.close()
+        return data
+    end
+
+    function io_.write(path, data, binary)
+        local h, err = fsOf().open(path, binary and "wb" or "w")
+        if not h then return nil, err or (path .. ": can't write it") end
+        h.write(data)
+        h.close()
+        return true
+    end
+
+    function io_.readJSON(path)
+        local data = io_.read(path)
+        if not data then return nil end
+        local ok, value = pcall(textutils.unserialiseJSON or textutils.unserializeJSON, data)
+        if ok and type(value) == "table" then return value end
+        return nil
+    end
+
+    return io_
 end
 
-function fileio.write(path, data, binary)
-    local h, err = fs.open(path, binary and "wb" or "w")
-    if not h then return nil, err or (path .. ": can't write it") end
-    h.write(data)
-    h.close()
-    return true
-end
+local fileio = over(function() return fs end)
 
-local unjson = textutils.unserialiseJSON or textutils.unserializeJSON
-
-function fileio.readJSON(path)
-    local data = fileio.read(path)
-    if not data then return nil end
-    local ok, value = pcall(unjson, data)
-    if ok and type(value) == "table" then return value end
-    return nil
-end
+function fileio.on(fsApi) return over(function() return fsApi end) end
 
 return fileio

@@ -14,21 +14,14 @@ local MAX_NAME, MAX_TEXT, KEEP = 40, 500, 100
 -- the file the first time
 local function entries()
     if not state.entries then
-        local list
-        if fs.exists(DB) then
-            local h = fs.open(DB, "r")
-            list = textutils.unserialize(h.readAll() or "")
-            h.close()
-        end
+        local list = textutils.unserialize(fileio.read(DB) or "")
         state.entries = type(list) == "table" and list or {}
     end
     return state.entries
 end
 
 local function save(list)
-    local h = fs.open(DB, "w")
-    h.write(textutils.serialize(list))
-    h.close()
+    fileio.write(DB, textutils.serialize(list))
 end
 
 local list = entries()

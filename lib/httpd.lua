@@ -55,6 +55,7 @@ local convert = require("convert")
 local path = require("path")
 local httpc = require("httpc")
 local tables = require("tables")
+local fileio = require("fileio")
 
 local H = {}
 H.SERVER = "ccnix-httpd"
@@ -346,11 +347,11 @@ function H.static(opts)
     local index = opts.index or { "index.html", "index.htm" }
     local listing = opts.listing ~= false
 
+    local files = fileio.on(fs)
+
     local function file(p)
-        local h = fs.open(p, "rb")
-        if not h then return H.page(403, "That can't be read.") end
-        local data = h.readAll() or ""
-        h.close()
+        local data = files.read(p, true)
+        if not data then return H.page(403, "That can't be read.") end
         return 200, { ["Content-Type"] = H.TYPES[path.extension(p):lower()] or H.DEFAULT_TYPE }, data
     end
 
@@ -550,13 +551,7 @@ function H.lua(opts)
         if fs.exists(index) and not fs.isDir(index) then return index, "/", table.concat(segs, "/") end
     end
 
-    local function read(p)
-        local h = fs.open(p, "r")
-        if not h then return nil end
-        local source = h.readAll() or ""
-        h.close()
-        return source
-    end
+    local read = fileio.on(fs).read
 
     local function template(p)
         local source = read(p)
@@ -591,7 +586,7 @@ function H.lua(opts)
         local env = setmetatable({}, { __index = _G })
         states[script] = states[script] or {}
         env.req, env.state, env.html, env.router = req, states[script], H.html, H.router
-        env.here, env.fs, env.text = "/" .. fs.getDir(script), fs, text
+        env.here, env.fs, env.text, env.fileio = "/" .. fs.getDir(script), fs, text, fileio.on(fs)
         function env.write(...)
             for i = 1, select("#", ...) do out[#out + 1] = tostring((select(i, ...))) end
         end
