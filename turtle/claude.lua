@@ -48,7 +48,8 @@
 --
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and
--- the files: fs, io, loadfile and dofile read anything but the API key,
+-- ccnix's libraries for text and the world (text, scan, convert, path,
+-- glob, regex, tables, fileio, getopt, mc), and the files: fs, io, loadfile and dofile read anything but the API key,
 -- and write only under /claude/ (so it can't rewrite the programs or the
 -- startup).  No http or shell.
 --
@@ -131,19 +132,31 @@ if not http then say("red", "HTTP is disabled on this server."); return end
 --------------------------------------------------------------------------
 -- What the model is told
 --------------------------------------------------------------------------
-local SYSTEM = [[
+local SYSTEM = [==[
 You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside the turtle. You act by calling the `lua` tool with Lua code (Lua 5.2 as CC runs it), which runs on the turtle; what it prints and returns comes back to you. Nothing happens unless you call a tool.
 
 Coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`: it started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is, and stay right only if you move and turn through T: T.forward(), T.back(), T.up(), T.down(), T.turnLeft(), T.turnRight(), T.face(d), T.moveDir(d) (d a heading, "up" or "down"), T.toY(y), T.goTo(x, z) (routes to a column at the current height, learning obstacles). Never call turtle.forward/back/up/down/turnLeft/turnRight yourself: T.pos would be wrong from then on. T.forward() and the others only dig blocks listed in T.diggable (empty to start): to dig, call turtle.dig(), turtle.digUp() or turtle.digDown() first, or set T.diggable["minecraft:stone"] = true for what it may dig on the way. Moves cost one fuel each; T.refuelTo(n) burns fuel items from the inventory.
 
 Also useful: T.look(d) / T.digDir(d) / T.placeDir(d) (inspect, dig, place in a direction, facing it first); turtle.inspect(), turtle.inspectUp(), turtle.inspectDown() -> ok, {name=..., state=...}; turtle.detect/detectUp/detectDown(); turtle.select(slot), turtle.getItemDetail(slot), turtle.getItemCount(slot); T.selectItem(name), T.countItem(name), T.freeSlots(), T.tidyInventory(); turtle.place/placeUp/placeDown(), turtle.drop/dropUp/dropDown(n), turtle.suck/suckUp/suckDown(n); turtle.getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds); T.posString(). Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps or programs you keep between goals.
 
-Each tool call is a slow network round trip, so do several steps per call: write loops, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls. Call `status` to see where the turtle is, what's around it and what it carries. Never dig or break chests, barrels, hoppers or computers, and don't break blocks you weren't asked to. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]]
+More of turtlelib: T.goHome() goes back to (0,0,0); T.inventoryFull(); T.dumpDown() empties the inventory into the container below (tools and the items in T.keep, torches to start, stay); T.containerCounts(side) -> { [name] = count } of a chest beside, above or below ("front", "top", "bottom"); T.restockFrom(side, name, target) takes items from it until the turtle has target of them; T.dropSide(side, n), T.suckSide(side, n), T.inspectSide(side); T.hasMineJob() and T.loadMineJob() -> { width, height, length, spacing, homes, state } tell whether the `mine` program has a job under way (leave it alone unless asked).
+
+Libraries: `local text = require("text")` and so on give ccnix's own; use them rather than writing string code by hand or using Lua patterns.
+- text: trim(s), trimStart, trimEnd, squeeze (runs of blanks as one space), words(s) -> list, split(s, sep [, keep]) -> trimmed pieces (keep: as they are, empty ones too), join(list, sep), cut(s, sep) / cutLast(s, sep) -> before, after, lines(s), startsWith, endsWith, stripPrefix, stripSuffix, find(s, part [, from]) / findLast (plain text), contains(s, part), containsAny(s, chars), count(s, part), replace(s, old, new) (plain text, never a pattern), padRight(s, w) / padLeft / center / truncate(s, w), columns(rows [, right]) -> aligned lines, wrap(s, w) -> lines, equalFold(a, b), capitalize, swapCase.
+- scan: the character tests (isDigit, isAlpha, isSpace, isUpper, isPrintable, ...) and whole-string checks: isBlank, isInteger, isNumber, isNegative, isUnsigned, isHex, isName, isTime ("H:MM[:SS]"), isDateTime (ISO 8601); scan.new(s) is a scanner for small parsers (peek, advance, accept(c), readWhile(test), readName, readInteger, readFloat, readQuoted(q), readUntil(c), rest, atEnd).
+- convert: toInteger(s [, base]) and toNumber(s) (strict: nil unless all of s is one), toBase(n, base), humanSize(bytes), duration(seconds) -> "1h 2m 5s", clock(ms), timeOfDay("14:05") -> seconds, fromDateTime(iso) -> epoch seconds, toHex/fromHex, toBase64/fromBase64, toUTF8/fromUTF8, escape/unescape (C's backslash escapes), urlEncode/urlDecode, html, shellQuote.
+- path: basename(p [, suffix]), dirname, join(a, b, ...), normalize, resolve(dir, p), segments, extension, isAbsolute.
+- glob: match(pattern, s) with * ? [a-z] [[:alpha:]] (a whole-string match; good for block names: glob.match("minecraft:*_ore", name)), compile(pattern) -> a test, hasWildcards, escape.
+- regex: regex.compile(pattern, { ere = true, icase = true }) -> re, or nil and why; re:test(s [, whole]), re:find(s [, init]) -> start, stop, captures (POSIX regular expressions).
+- tables: sortedKeys(t), copy(t). fileio: read(path), write(path, data) (under /claude/ only), readJSON(path). getopt: parse(args, "ab:") -> options, operands.
+- mc: require("mc").new() -> the world through what's attached (Advanced Peripherals' chat box, player detector, environment detector): time(), weather(), players(), say(text, from) into the game's chat, tell(player, text, from); a function whose peripheral isn't there returns nil and why.
+
+Each tool call is a slow network round trip, so do several steps per call: write loops, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls. Call `status` to see where the turtle is, what's around it and what it carries. Never dig or break chests, barrels, hoppers or computers, and don't break blocks you weren't asked to. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -400,14 +413,19 @@ end
 API.loadfile = codeLoadfile
 API.dofile = function(path) return assert(codeLoadfile(path))() end
 
--- `require` in the code: CraftOS's cc.* modules, and only those.  They're
--- loaded afresh from /rom with a world of their own: the code's fs and io
--- (cc.image.nft's load and cc.require's loaders read files), and the
--- code's globals as cc.require's _G, not the real ones.
+-- `require` in the code: CraftOS's cc.* modules, and ccnix's libraries
+-- for text, paths, conversions and the world (lib/), and only those.
+-- They're loaded afresh with a world of their own: the code's fs and io
+-- (cc.image.nft's load, cc.require's loaders and lib/fileio read files),
+-- and the code's globals as cc.require's _G, not the real ones.
 local CC_MODULES = {
     ["cc.audio.dfpwm"] = true, ["cc.base64"] = true, ["cc.completion"] = true, ["cc.expect"] = true,
     ["cc.image.nft"] = true, ["cc.pretty"] = true, ["cc.require"] = true,
     ["cc.shell.completion"] = true, ["cc.strings"] = true,
+}
+local CCNIX_MODULES = {
+    scan = true, text = true, convert = true, getopt = true, glob = true, path = true,
+    regex = true, tables = true, fileio = true, mc = true,
 }
 local modWorld = {
     fs = codeFs,
@@ -420,13 +438,26 @@ local modWorld = {
 }
 setmetatable(modWorld, { __index = _G })
 local loadedMods = {}
+
+-- A ccnix library's chunk, from where this program's own require finds
+-- it (package.path's places in order, ccnix's lib/ first)
+local function loadLib(name)
+    for _, place in ipairs(text.split(package.path, ";")) do
+        local chunk = loadfile(text.replace(place, "?", name), "t", modWorld)
+        if chunk then return chunk end
+    end
+    return nil, name .. " isn't on this computer"
+end
+
 local function ccRequire(name)
-    if type(name) ~= "string" or not CC_MODULES[name] then
-        error("require: only CraftOS's modules here: " .. table.concat(tables.sortedKeys(CC_MODULES), ", "), 2)
+    if type(name) ~= "string" or not (CC_MODULES[name] or CCNIX_MODULES[name]) then
+        error("require: only these here: " .. table.concat(tables.sortedKeys(CC_MODULES), ", ")
+            .. ", and ccnix's " .. table.concat(tables.sortedKeys(CCNIX_MODULES), ", "), 2)
     end
     if loadedMods[name] == nil then
         local path = "/rom/modules/main/" .. text.replace(name, ".", "/") .. ".lua"   -- cc.image.nft -> cc/image/nft
-        local chunk, err = loadfile(path, "t", modWorld)
+        local chunk, err
+        if CCNIX_MODULES[name] then chunk, err = loadLib(name) else chunk, err = loadfile(path, "t", modWorld) end
         if not chunk then error("require: " .. tostring(err), 2) end
         local m = chunk(name, path)
         loadedMods[name] = m == nil and true or m

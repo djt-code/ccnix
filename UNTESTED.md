@@ -5,6 +5,19 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## claude: ccnix's libraries in its code (0.38.0)
+
+- **The code's `require` loads ccnix's libraries:** text, scan, convert,
+  path, glob, regex, tables, fileio, getopt and mc, beside the cc.*
+  modules, and the system prompt lists what's in them (and more of
+  turtlelib: goHome, dumpDown, the chest helpers, the mine job). Try
+  `claude list the ores around you by name, sorted` (it should reach for
+  glob.match and tables.sortedKeys), `claude keep notes in
+  /claude/notes.txt` (fileio.write there works; anywhere else, and a read
+  of claude.key, give nil and why), and, with a chat box attached, `claude
+  say hello in the chat` (mc.say). `require("turtlelib")` and
+  `require("fs")` are still refused, naming what it may have.
+
 ## Everything: the text libraries (0.37.0)
 
 - **A regression pass, the second.** Every program now uses lib/scan,

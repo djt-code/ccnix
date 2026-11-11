@@ -84,6 +84,9 @@ check("the request names the model, effort, cached system prompt and the three t
     r1 and r1.body.model == "claude-opus-5-5" and r1.body.output_config.effort == "medium"
         and r1.body.system[1].cache_control.type == "ephemeral"
         and #r1.body.tools == 3 and r1.body.tools[1].name == "lua" and r1.body.tools[1].input_schema.required[1] == "code")
+check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
+    r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
+        and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
 check("the goal is the first user message", r1 and r1.body.messages[1].role == "user"
     and r1.body.messages[1].content == "go two forward and one right")
 local res2 = resultsIn(2)
@@ -239,19 +242,35 @@ check("q gives the prompt back, the next key left for it", Tm.events[1] and Tm.e
 check("everything still printed as before", Mine.logHas("note line 30") and Mine.logHas("^Ready%.$"))
 term, Tm = nil, nil
 
--- 10. require: only CraftOS's cc.* modules (they're tried for real under
---     the ROM; here there's no /rom, so only the refusals)
+-- 10. require: CraftOS's cc.* modules (they're tried for real under the
+--     ROM; here there's no /rom) and ccnix's libraries, and only those;
+--     the libraries see the code's files, not the real ones
 fresh({ "" })
-HTTP.queue = {
-    reply({ toolUse("lua", { code = "return require('turtlelib')" }) }, "tool_use"),
-    reply({ toolUse("lua", { code = "return require('fs')" }) }, "tool_use"),
-    reply({ text("Checked.") }, "end_turn"),
+Mine.files["notes.txt"] = "a, b ,c"
+local REQ_CODES = {
+    "return require('turtlelib')",
+    "return require('fs')",
+    [[local text = require("text"); return table.concat(text.split("a, b ,c", ","), "|")]],
+    [[local glob, convert = require("glob"), require("convert"); return glob.match("minecraft:*_ore", "minecraft:iron_ore"), convert.toInteger("ff", 16), convert.duration(3725)]],
+    [[local fileio = require("fileio"); return fileio.read("claude.key"), fileio.write("startup.lua", "x"), fileio.read("notes.txt")]],
+    [[fs.makeDir("claude"); local fileio = require("fileio"); return fileio.write("claude/f.txt", "kept"), require("text") == require("text")]],
 }
+HTTP.queue = {}
+for i, c in ipairs(REQ_CODES) do HTTP.queue[i] = reply({ toolUse("lua", { code = c }) }, "tool_use") end
+HTTP.queue[#REQ_CODES + 1] = reply({ text("Checked.") }, "end_turn")
 run("poke at require")
-local q1, q2 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
-check("require of anything but a cc module is an error result naming what it can have",
-    q1 and q1.is_error and tostring(q1.content):find("only CraftOS's modules") and tostring(q1.content):find("cc.strings", 1, true)
-        and q2 and q2.is_error, q1 and q1.content)
+local function reqOut(i) local r = resultsIn(i + 1)["toolu_" .. i]; return r and tostring(r.content) or "", r and r.is_error end
+local q1, e1 = reqOut(1)
+local _, e2 = reqOut(2)
+check("require of anything else is an error result naming what it can have",
+    e1 and q1:find("only these here") and q1:find("cc.strings", 1, true) and q1:find("text", 1, true) and e2, q1)
+check("ccnix's libraries load in the code: text, glob, convert",
+    reqOut(3) == "-> a|b|c" and reqOut(4) == "-> true\n-> 255\n-> 1h 2m 5s", reqOut(3) .. " / " .. reqOut(4))
+local f5 = reqOut(5)
+check("fileio in the code reads through the code's files: not the key, no writing outside /claude/",
+    f5:find("^%-> nil\n%-> nil\n") and f5:find("a, b ,c", 1, true) and Mine.files["startup.lua"] == nil, f5)
+check("fileio writes under /claude/; a library is loaded once",
+    reqOut(6) == "-> true\n-> true" and Mine.files["claude/f.txt"] == "kept", reqOut(6))
 
 -- 11. the files: anything but the key can be read, only /claude/ written
 fresh({ "" })
