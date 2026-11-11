@@ -301,18 +301,6 @@ section.
 - **`syslog.maxSize` with K/M** (0.21.0): `set syslog.maxSize 2M`, and a log
   rotating at that size.
 
-## Fileserver
-
-- **Tab completion in /jbod** (0.25.1). On a fileserver with the pool at
-  `/jbod`, Tab in the CraftOS shell and in ccsh completes `/jbod`, its
-  folders and the files in them (`cd /jb<Tab>`, `cat /jbod/docs/<Tab>`,
-  `cd <Tab>` inside `/jbod` offers `../`). This now goes through CraftOS's
-  own `fs.complete`, loaded again from `/rom/apis/fs.lua` over the patched
-  fs; the sims only cover a stand-in of that file and jbod's fallback.
-
-- **Disk labels** (0.18.1): each pooled disk labelled `<computer label>
-  <drive>`; labels it didn't set left alone.
-
 ## screen
 
 - **screen over telnet** (0.36.0). On A with init: `telnet A` from B,
@@ -429,6 +417,10 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — Fileserver on ROM 0.39.0 (FS, 4 disks pooled at `/jbod`):
+  Tab completion of `/jbod`, its files and `..` in ccsh and in CraftOS's
+  own shell; each pooled disk labelled `FS drive_N`.
 
 - 2026-11-11 — `/ccnix rom update` asks before the reload (ccnix-mod
   0.22.2): it pulled, offered [Load it], and loading brought the server's
