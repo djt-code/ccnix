@@ -288,12 +288,9 @@ section.
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
   API's hourly limit for the server's address runs out, it says until when.
 
-- **A disk's startup in place of the computer's** (0.25.1): with
-  `shell.allow_disk_startup` on and a disk holding `startup.lua` in a
-  drive, the disk's should run instead of the computer's.  Failed
-  2026-11-11 on Lab-B (ROM 0.39.0, init.boot and ccsh.login on): the
-  computer's `/startup.lua` and `startup/` ran, not the disk's (see Known
-  issues).  Also still to try: a plain Computer with `init.boot`.
+- **CraftOS's startup after ccnix on a plain Computer** with `init.boot`
+  (0.30.1: boot draws in a window first, so init has something to copy):
+  the startup files' output and the MOTD above the prompt.
 
 - **`wget run …/deploy/setup.lua` on a bare old install** (0.20.0): a
   computer that still has only `/cc-turtles` (from before ccnix): moved to
@@ -435,13 +432,15 @@ section.
 
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
-- 2026-11-11, Lab-B: a disk's `startup.lua` didn't run in place of the
-  computer's startup files under init (`shell.allow_disk_startup` true,
-  `/disk/startup.lua` readable).  boot.lua's choice is CraftOS's (disks as
-  `peripheral.getNames()` lists them first); why the disk wasn't taken is
-  being looked at.
 
 ## Tested
+
+- 2026-11-11 — A disk's startup in place of the computer's (ROM 0.39.0,
+  Lab-B, `shell.allow_disk_startup` on): "from the disk" alone, the
+  computer's `/startup.lua` skipped, under init with ccsh and under
+  stock CraftOS alike.  The first try looked like a failure: a plain
+  `/disk` folder on the computer (left by the `>` bug before 0.33.0) had
+  pushed the floppy's mount to `/disk2`, so the file was never on it.
 
 - 2026-11-11 — CraftOS's startup after ccnix, under init (ROM 0.39.0,
   Lab-B, `init.boot` and `ccsh.login` on), test 5's third try: `/startup.lua`
