@@ -394,8 +394,13 @@ section.
   address), Mode (TUN or NAT), Untagged, Exchange (untagged, or tagged as
   back.1), Standing by. Click into the VLANs box and type slowly: the
   refresh each second no longer moves the cursor. Escape, Done, or the
-  block broken closes it; the 8-block rule can only be tried with `/tp`
-  (a screen open takes the movement keys).
+  block broken closes it.
+- **Walking with the dialog open** (ccnix-mod 0.24.0, the client's jar):
+  with no box focused, W/A/S/D, jump, sneak and sprint move the player
+  (the view stays still: the mouse is the dialog's); walking 8 blocks off
+  closes it. Clicking into a box stops that (typing W types W); clicking
+  anywhere else (the panel, a label, a button) leaves the box and walking
+  works again. Space with nothing focused jumps, and presses no button.
 - **The configurator on a cable** (ccnix-mod 0.23.0). Right-click a CC
   cable or wired modem with it: chat lists the cable network (cables,
   modems, gateway blocks), what its modems share by the names computers
