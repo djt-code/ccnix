@@ -395,6 +395,9 @@ end
 function currentLang()
     if not vimMode or not opt.syntax then return nil end
     if langSet ~= nil then return langSet or nil end
+    -- by the name and the first line, again when that changes (a #! typed
+    -- into a new file colours it at once)
+    if detectedBy ~= lines[1] then detected, detectedBy = syntax.detect(path, lines[1]), lines[1] end
     return detected
 end
 
@@ -1439,7 +1442,7 @@ function loadFile(arg)
     synValid, synStates, synFg = 1, {}, {}
     ver = nextVer()
     savedVer = ver
-    crlf, langSet, detected, noLines = false, nil, nil, true
+    crlf, langSet, detected, detectedBy, noLines = false, nil, nil, nil, true
     opt.readonly = false
     name, path = arg, arg and resolve(arg) or nil
     if not path then return end
@@ -1464,7 +1467,6 @@ function loadFile(arg)
         opt.readonly = fs.isReadOnly(path)
         say('"' .. arg .. '" [New]')
     end
-    detected = syntax.detect(path, lines[1])
 end
 
 function writeFile(target, bang, a1, a2, whole)
@@ -1485,7 +1487,7 @@ function writeFile(target, bang, a1, a2, whole)
     if whole and (p == path or not path) then
         if not path then
             name, path = target, p
-            detected = syntax.detect(path, lines[1])
+            detectedBy = nil
         end
         savedVer = ver
     end

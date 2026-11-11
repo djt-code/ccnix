@@ -271,6 +271,10 @@ edit("local x = \"s\" -- c\n", ":q<CR>", { vim = true, colour = true })
 sc = beforeQuit()
 check("vim colours Lua: keyword, string, comment", sc and sc.fg[1]:sub(1, 18) == "4444400000eee0dddd", sc and sc.fg[1])
 check("and the ~ lines blue", sc and sc.fg[2]:sub(1, 1) == "b", sc and sc.fg[2])
+edit("", "i#!/ccnix/bin/ccsh<CR>x=1 # c<C-c>:q!<CR>", { vim = true, colour = true, name = "new" })
+sc = beforeQuit()
+check("a #! typed into a new file with no extension colours it as shell at once", sc and sc.fg[2]:sub(1, 7) == "3320ddd",
+    sc and sc.fg[2])
 edit("#!/ccnix/bin/ccsh\necho $HOME | grep x # c\n", ":q<CR>", { vim = true, colour = true, name = "run" })
 sc = beforeQuit()
 check("a #! ccsh script gets the shell's colours", sc and sc.fg[2]:sub(1, 25) == "99990333330100000000ddd00", sc and sc.fg[2])
@@ -304,7 +308,11 @@ check("numbers: hex, exponents", syntax.line("lua", "0x1F 1e-3") == "222202222",
 check("string.format: the library is cyan, the field isn't", syntax.line("lua", "string.format") == "9999990000000",
     (syntax.line("lua", "string.format")))
 check("sh: a quoted string spans lines", select(2, syntax.line("sh", "echo 'a")) ~= nil)
-check("sh: NAME=value, then a reserved word", syntax.line("sh", "X=1 if") == "330044", (syntax.line("sh", "X=1 if")))
+check("sh: NAME=value (a number), then a reserved word", syntax.line("sh", "X=1 if") == "332044", (syntax.line("sh", "X=1 if")))
+local subst = syntax.line("sh", "x=1; echo $x ${x} $(ls) # note")
+check("sh: the ) of a $( coloured as the $( is", subst == "332109999033033330330030dddddd", subst)
+subst = syntax.line("sh", "echo $(echo (a)) )")
+check("sh: and only that one (a builtin inside it, a ( ) of its own)", subst == "999903399990101301", subst)
 check("detect", syntax.detect("a.lua") == "lua" and syntax.detect("x.sh") == "sh" and syntax.detect("startup") == "lua"
     and syntax.detect("run", "#!/ccnix/bin/ccsh") == "sh" and syntax.detect("notes.txt") == nil and syntax.detect(".profile") == "sh")
 for _, case in ipairs({ { "ft=sh", "sh" }, { "ft=bash", "sh" }, { "ft=lua", "lua" }, { "ft=off", "" },

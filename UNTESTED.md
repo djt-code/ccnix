@@ -104,31 +104,24 @@ section.
 
 ## Editors
 
-- **Ctrl+C in `vi`, the rest** (0.29.1). The hint fits on a turtle (39
-  columns); over telnet Ctrl+C does the same.
+- **Ctrl+C in `vi`, the rest** (0.29.1). Over telnet Ctrl+C does the
+  same.
 
-- **vi and vim parse with lib/scan** (0.27.1, no change meant). `vim` on a
-  big Lua file (lib/vi.lua, about 2,000 lines): `G`, then scroll back up;
-  the colours look as before (keywords, strings, `--[[ ]]` comments, `0x1F`
-  and `1e-3` numbers, `string.format` with the field plain) and it doesn't
-  feel slower (the colourer now builds a small scanner per line). `vim` on
-  a ccsh script: `$x`, `${x}`, `$(`, `NAME=value`, comments after `;`,
-  quotes over several lines. Ex commands: `:2,4d`, `:.,+2>`, `:/pat/;+1d`,
-  `:'a,'bm$`, `:%s#a/b#X#g`, `:s/x/y/` then `:&&` and `&`, `:g!/keep/d`,
-  `:set ts=8 nu? noai invnu`, `:d a 3`, `:ka`, and an /.exrc with blank
-  lines and a CRLF ending. Normal mode: `*` and `#` on a word and from just
-  before one, Ctrl+A on `x = -7`, `~` over mixed case, `%` from before a
+- **vi and vim parse with lib/scan, the rest** (0.27.1, no change
+  meant). `vim` on a ccsh script: quotes over several lines, comments
+  after `;`. Ex commands: `:.,+2>`, `:/pat/;+1d`, `:'a,'bm$`, `:s/x/y/`
+  then `:&&` and `&`, `:set ts=8 nu? noai invnu`, `:d a 3`, `:ka`, and an
+  /.exrc with blank lines and a CRLF ending. Normal mode: `#` on a word,
+  `*` from just before one, Ctrl+A on `x = -7`, `%` from before a
   bracket.
 
-- **vi's bottom line on a narrow screen** (0.40.2). On a pocket computer
-  (26 columns), `i` shows all of `-- INSERT --` and the ruler, and `R` all
-  of `-- REPLACE --`: the `i` or `R` that started it no longer stays shown
-  (it took the room); with a long line number the ruler drops its padding.
-  On a turtle (39) the same. In normal mode, `2d` still shows `2d` while
-  it waits for the motion.
-- **`vim`, the rest** (0.25.0). A ccsh script with `#!/ccnix/bin/ccsh`
-  gets the shell's colours; on a basic computer it's plain vi; `:set
-  hls`.
+- **Shell colours as a #! is typed** (0.40.3). `vim /new` (no
+  extension), then `i` and `#!/ccnix/bin/ccsh` on the first line: the
+  lines below colour as ccsh at once, not as Lua until reopened; delete
+  the `#!` and they go back to Lua. In `x=1; echo $(echo (a)) )` the `1` is
+  magenta, and the `)` of the `$(` is light blue as the `$(` is (the
+  `(a)` and the last `)` orange).
+- **`vim`, the rest** (0.25.0). On a basic computer it's plain vi.
 - **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
   (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
   keys work.
@@ -416,6 +409,15 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — vi and vim on ROM 0.40.2: on a pocket computer and a
+  turtle `-- INSERT --` and `-- REPLACE --` whole beside the ruler, and the
+  Ctrl+C hint fits; `vim` on lib/vi.lua (2,041 lines) coloured and not
+  slow, `G` and the wheel; `:set hls` and `/x` with search wrapping;
+  `:2,3d`, `u`, `:g!/keep/d`, `:%s#a#X#g`; Ctrl+A on X1, `~`, `*`. Esc
+  closes the computer's screen, as CC does: Ctrl+C or Ctrl+[ leave insert
+  mode. Seen then, fixed in 0.40.3: a #! typed into a new file with no
+  extension coloured as Lua until it was saved and opened again.
 
 - 2026-11-11 — vi on ROM 0.40.1: Ctrl+A on a number, `yyp`, `dd`, `p`,
   `.` repeating Ctrl+A, `:%s/x/y/g` ("2 substitutions on 2 lines"), the

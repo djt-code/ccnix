@@ -285,6 +285,9 @@ local function shLine(line, state)
     local sc = scan.new(line)
     local p = painter(sc)
     local cmdpos = true
+    -- the brackets still open on this line, each true for a $( (its ")" is
+    -- coloured as it is) or false for a plain "("
+    local opens = {}
     -- the inside of a double-quoted string, from the scanner: true when it
     -- ended (its quote stepped over), false if it ran off the line
     local function dq()
@@ -344,8 +347,16 @@ local function shLine(line, state)
         elseif ch == "$" and dollarLength(sc) > 0 then
             -- after $( a new command starts
             cmdpos = sc:peek(2) == "("
+            if cmdpos then opens[#opens + 1] = true end
             sc:advance(dollarLength(sc))
             p.paintFrom(start, C.var)
+        elseif ch == "(" or ch == ")" then
+            -- a command follows either, but for the end of a $( (a word goes on)
+            sc:advance()
+            local subst = false
+            if ch == "(" then opens[#opens + 1] = false else subst = table.remove(opens) or false end
+            p.paintFrom(start, subst and C.var or C.op)
+            cmdpos = not subst
         elseif isOpChar(ch) then
             -- operators; a command follows them, except after < and >
             local op = sc:readWhile(isOpChar)
@@ -361,7 +372,7 @@ local function shLine(line, state)
             if assign > 0 and cmdpos then
                 -- NAME=value: an assignment, and a command may still follow
                 p.paint(start, start + assign - 1, C.var)
-                p.paintFrom(start + assign, C.text)
+                p.paintFrom(start + assign, scan.isUnsigned(word:sub(assign + 1)) and C.constant or C.text)
             else
                 local c = C.text
                 if cmdpos and SH_KEYWORDS[word] then c = C.keyword
