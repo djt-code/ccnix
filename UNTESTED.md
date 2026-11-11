@@ -288,16 +288,12 @@ section.
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
   API's hourly limit for the server's address runs out, it says until when.
 
-- **The rest of CraftOS's startup after ccnix** (0.25.1, rewritten from the
-  documented behaviour). With `ccsh.login` (or `init.boot`) set from the
-  ROM, the computer's `/startup.lua` or `/startup/` folder still runs before
-  ccsh; with `shell.allow_disk_startup` on and a disk holding `startup.lua`
-  in a drive, the disk's startup runs instead of the computer's; the MOTD
-  shows with `motd.enable` on.  Tried 2026-11-06 on 0.30.0 under init:
-  none of it showed, as init's console window started blank over it.
-  0.30.1 copies the screen into the console (and on a plain Computer
-  boot draws in a window first, so there's something to copy).  Try again
-  on Lab-A/B, and on a plain Computer with `init.boot`.
+- **A disk's startup in place of the computer's** (0.25.1): with
+  `shell.allow_disk_startup` on and a disk holding `startup.lua` in a
+  drive, the disk's should run instead of the computer's.  Failed
+  2026-11-11 on Lab-B (ROM 0.39.0, init.boot and ccsh.login on): the
+  computer's `/startup.lua` and `startup/` ran, not the disk's (see Known
+  issues).  Also still to try: a plain Computer with `init.boot`.
 
 - **`wget run …/deploy/setup.lua` on a bare old install** (0.20.0): a
   computer that still has only `/cc-turtles` (from before ccnix): moved to
@@ -439,8 +435,20 @@ section.
 
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
+- 2026-11-11, Lab-B: a disk's `startup.lua` didn't run in place of the
+  computer's startup files under init (`shell.allow_disk_startup` true,
+  `/disk/startup.lua` readable).  boot.lua's choice is CraftOS's (disks as
+  `peripheral.getNames()` lists them first); why the disk wasn't taken is
+  being looked at.
 
 ## Tested
+
+- 2026-11-11 — CraftOS's startup after ccnix, under init (ROM 0.39.0,
+  Lab-B, `init.boot` and `ccsh.login` on), test 5's third try: `/startup.lua`
+  then `startup/a` and `startup/b` printed above the ccsh prompt and stayed
+  there (0.30.0 had drawn them over blank); with `motd.enable` on, the
+  tip of the day before them.  `/ccnix rom update` and [Load it] brought
+  the server's ROM to 0.39.0 (mod 0.22.2 on the client and the server).
 
 - 2026-11-06 — Background output while typing (0.30.0, by `ccnix update`
   on Lab-A): `ping -c 5 10.0.0.1 &`, then commands typed while replies
