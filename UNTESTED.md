@@ -382,17 +382,6 @@ section.
   back.1), Standing by. Click into the VLANs box and type slowly: the
   refresh each second no longer moves the cursor. Escape, Done, or the
   block broken closes it.
-- **Walking with the dialog open** (ccnix-mod 0.25.1, the client's jar;
-  0.24.0 and 0.25.0 didn't walk: NeoForge counts the movement keys let go
-  while any screen is open, so the dialog gives them a context of its own
-  while it's open): in the gateway and the cable dialogs, with no box
-  focused, W/A/S/D, jump, sneak and sprint move the player (the view stays
-  still: the mouse is the dialog's); walking 8 blocks off closes it.
-  Clicking into a box stops that (typing W types W); clicking anywhere else
-  (the panel, a label, a button) leaves the box and walking works again.
-  Space with nothing focused jumps, and presses no button. After closing
-  it, the keys work as ever in game, in chat (W types) and in the controls
-  screen (no new clash shown).
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -426,6 +415,12 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — The mod on 0.25.1: walking with the gateway dialog open
+  (W/A/S/D with no box focused), closing it by walking off, typing in a
+  box doesn't move, a click off the box walks again; the keys as ever
+  after it closes; no ccnix clash in Controls (the red ones there are
+  another mod's rail keys).
 
 - 2026-11-11 — The mod on 0.25.0, ROM 0.40.1: the mod list's author "Dan
   Theisen [WI7FI]"; the cable network dialog on a short network (2 cables,
