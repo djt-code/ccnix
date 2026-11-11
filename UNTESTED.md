@@ -122,35 +122,29 @@ section.
 
 ## ccsh
 
-- **Background output while typing, the rest** (0.30.0). A two-row PS1
-  (`PS1='\h\n\$ '`) comes back whole; a full-screen program in the
-  background isn't disturbed; the same over telnet.
-- **Ctrl+C left to programs that use it, the rest** (0.29.1). `paint x`
-  keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
-  (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
-  stop on Ctrl+C; all of it again on a computer without init.
+- **Background output while typing, the rest** (0.30.0). A full-screen
+  program in the background isn't disturbed; the same over telnet.
+- **Ctrl+C left to programs that use it, the rest** (0.29.1). In `telnet
+  <host>` Ctrl+C reaches the far side's program (a `ping` there stops), not
+  the local telnet; all of it again on a computer without init.
 - **The line editor, the rest** (0.28.0, lib/readline). `read x` at the
   keyboard has the same keys; Ctrl+C there stops the rest of the line.
 - **Tab and long lines, the rest** (0.28.0): the completion in grey on a
   basic computer; Up/Down cycle the suggestions. A coloured prompt redraws
   correctly after Ctrl+L. AltGr (Ctrl+Alt) characters on a non-US layout
   type normally and trigger no bindings.
-- **Ctrl+C, the rest** (0.28.0): at a `>` continuation prompt it drops the
-  whole command; a computer without init; under init it doesn't reach
+- **Ctrl+C, the rest** (0.28.0): a computer without init; under init it doesn't reach
   ccsh itself when ccsh was started from ccsh. In telnet under init,
   Ctrl+C goes to the remote side and the local telnet keeps running.
 - **The editor over telnetd** (0.28.0): the same keys from a real terminal
   client (PuTTY, xterm); Alt+B/F arrive as Esc+letter; Ctrl+C at the remote
   prompt drops the line.
-- **`$$`, the rest** (0.27.0). `kill -0 $$` succeeds; `(echo $$)` and `echo
-  $$ &` print the same pid. Without init (plain CraftOS), `$$` is the
+- **`$$`, the rest** (0.27.0). Without init (plain CraftOS), `$$` is the
   computer ID and `$PPID` empty.
-- **`&>>` and the other `${...}` forms** (0.27.0). `echo x &>> f`
-  appends; a stock program's printError output lands in f with `&>`.
-  `echo ${U:=x}; echo $U`, `echo ${PS1:+set}`, `echo ${U:?gone}`: at the
-  prompt the last prints `ccsh: U: gone`, skips the rest of the line and
-  gives `$?` 1; in a script it ends the script with status 1. Plain
-  `unset f` leaves a function.
+- **`&>>` and the other `${...}` forms, the rest** (0.27.0). A stock
+  program's printError output lands in f with `&>`. `${U:?gone}` in a
+  script ends the script with status 1. Plain `unset f` leaves a
+  function.
 
 ## Processes and services
 
@@ -396,6 +390,14 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — ccsh on ROM 0.40.3: Ctrl+C stops `ping` and `tail -f`, and
+  at a `>` prompt drops the command; `paint` keeps Ctrl+C; `kill -0 $$`
+  gives 0; `(echo $$)`, `echo $$ &` and `echo $$` the same pid; `&>` then
+  `&>>` into a file; `${U:=x}`, `${PS1:+set}`, `${NOPE:?gone}` (the message,
+  the rest of the line skipped, `$?` 1); a two-row PS1 whole after a
+  background `ping`'s output, with what was typed kept; `unset PS1` back
+  to the default.
 
 - 2026-11-11 — ROM 0.40.3: a #! typed into a new file colours it as ccsh
   at once, the `)` of a `$(` light blue, `1` after `x=` magenta.  The ccsh
