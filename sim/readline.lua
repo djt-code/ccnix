@@ -181,6 +181,12 @@ local function withOutput(before, writer, after)
     return evs
 end
 local guarded = RL.guard(term)
+-- (CraftOS's textutils.pagedPrint copies the terminal with pairs(), and
+-- term.redirect refuses a copy missing any method)
+local copied, missing = {}, {}
+for k, v in pairs(guarded) do copied[k] = v end
+for k in pairs(term) do if copied[k] == nil then missing[#missing + 1] = k end end
+check("the guard's methods are its own keys: a pairs() copy has them all", #missing == 0, table.concat(missing, " "))
 local line = edit(withOutput("ab", function()
     guarded.write("PING 10.1.1.99")
     guarded.setCursorPos(1, 2)

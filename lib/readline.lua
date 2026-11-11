@@ -248,9 +248,13 @@ local function takePromptOff(t)
 end
 
 -- A terminal that is t, but takes the line being typed off the screen
--- before anything is written to it.  For the commands a shell runs.
+-- before anything is written to it.  For the commands a shell runs.  t's
+-- methods are its own keys too, not only through __index: CraftOS's
+-- textutils.pagedPrint copies the terminal with pairs() and redirects to
+-- the copy, which has to have them all.
 function R.guard(t)
     local g = setmetatable({}, { __index = t })
+    for k, v in pairs(t) do g[k] = v end
     for _, name in ipairs({ "write", "blit", "clear", "clearLine", "scroll" }) do
         local f = t[name]
         if f then

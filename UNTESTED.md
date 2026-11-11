@@ -5,18 +5,16 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## help in the pager; the pager keeps the scrollback (0.40.0)
+## Paged output under ccsh (0.40.1)
 
-- **`help` is ccnix's** (bin/help.lua; boot aliases it): `help git` opens
-  in the pager (space, j/k, the wheel, G to the end, q), wrapped to the
-  screen; a short page is just printed; `help index` lists the topics in
-  columns; `help nope` says there's no page (status 1); Tab completes a
-  topic. After q, Shift+PgUp (or the wheel at the prompt) shows the
-  `help git` command line still in the scrollback (CraftOS's viewer drew
-  over it).
-- **The pager scrolls the screen up before it draws** (`more`, `git log`,
-  claude's reading back): what was on the screen, the command that
-  opened it too, stays in the console's scrollback.
+- **CraftOS programs that page their output** (`textutils.pagedPrint` and
+  `pagedTabulate`: CraftOS's own `help index` did, ccnix's doesn't now)
+  failed under ccsh with "Redirect object is missing method getSize": the
+  terminal ccsh gives a command had its methods only through a metatable,
+  and pagedPrint copies it with pairs().  Try `lua` then
+  `textutils.pagedTabulate({"a"}, {"b"})` and `textutils.pagedPrint(("x
+"):rep(40))`:
+  "Press any key to continue" and no error.
 
 ## claude: http, the network, programs, memory, the web (0.39.0)
 
@@ -401,16 +399,18 @@ section.
   closes it. Clicking into a box stops that (typing W types W); clicking
   anywhere else (the panel, a label, a button) leaves the box and walking
   works again. Space with nothing focused jumps, and presses no button.
-- **The configurator on a cable** (ccnix-mod 0.23.0). Right-click a CC
-  cable or wired modem with it: chat lists the cable network (cables,
-  modems, gateway blocks), what its modems share by the names computers
-  use (`drive_0  drive  Disk Drive at ...`), what sits beside a modem
-  without being shared (a computer using it, with its label), and any
-  chunk the cable runs into that isn't loaded. A modem clicked this way
-  isn't turned on or off.
-- **The mod list's text** (ccnix-mod 0.23.0): the description names NAT
-  mode as well as TUN; the credits name Natanael Copa, Rich Felker and
-  Daniel Stenberg as inspirations.
+- **The cable network dialog** (ccnix-mod 0.25.0; 0.23.0 said it in
+  chat). Right-click a CC cable or wired modem with the configurator: a
+  dialog like the gateway's, with Cables, Modems and Gateway blocks; a
+  "Shared on it" section (each peripheral by the name computers use, its
+  type, the block and where; the pointer says `peripheral.wrap("...")`);
+  "Beside its modems, not shared" (computers using a modem, with their
+  labels); and, in amber, "Into chunks that aren't loaded" (each chunk and
+  the cable that runs into it). A network with many peripherals scrolls
+  with the wheel (a bar at the right). You can walk while it's open; it
+  closes 8 blocks away, or when the clicked cable goes. Client and server
+  both need 0.25.0 (a new packet): an older one is refused.
+- **The mod list's author** (ccnix-mod 0.25.0): "Dan Theisen [WI7FI]".
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -444,6 +444,15 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — The mod on 0.23.0, ROM 0.40.0: the mod list's description
+  (NAT and TUN) and credits (the inspirations); the gateway dialog laid
+  out right (the label column, Gateway, Mode, Untagged, Exchange, Standing
+  by), its tooltips, the native VLAN saved ("Saved"), the cursor left
+  where it was in a box across refreshes; the configurator on a cable
+  listing 198 cables and the unloaded chunk it ran into (in chat then: a
+  dialog since 0.25.0); `help git` in the pager with its trademark note,
+  and after q its command line still in the scrollback; `help index` in columns, `help gi<Tab>` completing.
 
 - 2026-11-11 — The mod, on 0.22.2: the mod list's Credits (CC: Tweaked,
   Daniel Ratcliffe, NeoForge, etlua); the Network Tester's recipe (iron,
