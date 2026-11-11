@@ -5,6 +5,28 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## claude: http, the network, programs, memory, the web (0.39.0)
+
+- **http in the code**, preferred over ccnix's stack: `claude fetch
+  https://example.com and tell me its title` (CC's http.get; the host must
+  be in `http.rules`). With `ip up` on a networked turtle, `claude get
+  http://<a 10.x host>/ with httpc` and `claude what's my address`
+  (`status` shows the network's addresses).
+- **run_program:** `claude read mine's manual, then mine a 3 by 3 tunnel
+  10 long here` (it should pass `--here`, the output should come back, and
+  `claude where are you` afterwards should agree with `.turtlepos`).
+  Ctrl+T while `mine` runs should stop claude too, the position saved.
+- **memory:** `claude remember that the fuel chest is behind the start`,
+  quit, run `claude where's the fuel?` (it should look in its memory
+  first). The notes are in `/claude/memories/`.
+- **web search and fetch:** `claude look up the crafting recipe for a
+  mining turtle` (shown as `--- web search: ...`; the answer may quote its
+  source). Needs web search turned on for the API key's organization.
+- **status:** the equipped tools, attached peripherals, the label, and a
+  `mine` job under way after Ctrl+T in `mine`.
+- **A long session** (60k+ tokens): `claude.log` should show "context: N
+  old tool results cleared" and the session should carry on sensibly.
+
 ## claude: ccnix's libraries in its code (0.38.0)
 
 - **The code's `require` loads ccnix's libraries:** text, scan, convert,

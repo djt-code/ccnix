@@ -391,7 +391,29 @@ function M.fsApi(S)
         isDir = function(p) return S.dirs[combine(p)] ~= nil end,
         makeDir = function(p) S.dirs[combine(p)] = true end,
         isReadOnly = function() return false end,
-        delete = function(p) p = combine(p); S.files[p], S.dirs[p] = nil, nil end,
+        getSize = function(p) return #(S.files[combine(p)] or "") end,
+        -- the names in a folder: its files' and folders' next part, sorted
+        list = function(p)
+            p = combine(p)
+            local seen, out = {}, {}
+            local function add(key)
+                local rest = p == "" and key or (key:sub(1, #p + 1) == p .. "/" and key:sub(#p + 2))
+                local name = rest and rest:match("^[^/]+")
+                if name and not seen[name] then seen[name] = true; out[#out + 1] = name end
+            end
+            for k in pairs(S.files) do add(k) end
+            for k in pairs(S.dirs) do add(k) end
+            table.sort(out)
+            return out
+        end,
+        -- (a folder with all that's in it, as CC's does)
+        delete = function(p)
+            p = combine(p)
+            S.files[p], S.dirs[p] = nil, nil
+            for _, t in ipairs({ S.files, S.dirs }) do
+                for k in pairs(t) do if k:sub(1, #p + 1) == p .. "/" then t[k] = nil end end
+            end
+        end,
         copy = function(a, b) S.files[combine(b)] = S.files[combine(a)] end,
         move = function(a, b) a, b = combine(a), combine(b); S.files[b], S.files[a] = S.files[a], nil end,
         open = function(p, mode)
@@ -604,12 +626,15 @@ function M.sse(msg)
         if b.type == "text" then
             ev({ type = "content_block_start", index = idx, content_block = { type = "text", text = "" } })
             for _, p in ipairs(pieces(b.text, 5)) do ev({ type = "content_block_delta", index = idx, delta = { type = "text_delta", text = p } }) end
+            for _, c in ipairs(b.citations or {}) do   -- a quoted web page each
+                ev({ type = "content_block_delta", index = idx, delta = { type = "citations_delta", citation = c } })
+            end
         elseif b.type == "thinking" then
             ev({ type = "content_block_start", index = idx, content_block = { type = "thinking", thinking = "", signature = "" } })
             for _, p in ipairs(pieces(b.thinking, 5)) do ev({ type = "content_block_delta", index = idx, delta = { type = "thinking_delta", thinking = p } }) end
             ev({ type = "content_block_delta", index = idx, delta = { type = "signature_delta", signature = b.signature } })
-        elseif b.type == "tool_use" then
-            ev({ type = "content_block_start", index = idx, content_block = { type = "tool_use", id = b.id, name = b.name, input = {} } })
+        elseif b.type == "tool_use" or b.type == "server_tool_use" then
+            ev({ type = "content_block_start", index = idx, content_block = { type = b.type, id = b.id, name = b.name, input = {} } })
             local input = json.encode(b.input or {})
             if input ~= "[]" and input ~= "{}" then
                 for _, p in ipairs(pieces(input, 7)) do ev({ type = "content_block_delta", index = idx, delta = { type = "input_json_delta", partial_json = p } }) end
@@ -620,7 +645,7 @@ function M.sse(msg)
         ev({ type = "content_block_stop", index = idx })
     end
     ev({ type = "message_delta", delta = { stop_reason = msg.stop_reason, stop_details = msg.stop_details },
-         usage = { output_tokens = msg.usage and msg.usage.output_tokens } })
+         usage = { output_tokens = msg.usage and msg.usage.output_tokens }, context_management = msg.context_management })
     ev({ type = "message_stop" })
     return table.concat(out)
 end

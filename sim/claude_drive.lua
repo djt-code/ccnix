@@ -18,6 +18,8 @@ http = HTTP.api
 local answers = M.consoleApi(Mine, {})
 local run = M.runner(Mine, PROJ .. "/turtle/claude.lua", {
     stats = function() return "moves: " .. Mine.moves .. ", turns: " .. Mine.turns .. ", API calls: " .. #HTTP.requests end,
+    -- (Ctrl+T, as scenario 17 stops it)
+    stopped = function(err) if tostring(err) == "Terminated" then return "stopped (Terminated)" end end,
 })
 
 -- Canned replies, as the API sends them.
@@ -80,10 +82,19 @@ local r1 = HTTP.requests[1]
 check("posted to the Messages API with the key and version headers",
     r1 and r1.url == "https://api.anthropic.com/v1/messages" and r1.headers["x-api-key"] == "sk-test-key"
         and r1.headers["anthropic-version"] ~= nil, r1 and tostring(r1.url))
-check("the request names the model, effort, cached system prompt and the three tools",
+local toolNames = {}
+for i, t in ipairs(r1 and r1.body.tools or {}) do toolNames[i] = t.name .. (t.type and ("=" .. t.type) or "") end
+check("the request names the model, effort, cached system prompt and the tools: its own four, memory, web search and fetch",
     r1 and r1.body.model == "claude-opus-5-5" and r1.body.output_config.effort == "medium"
         and r1.body.system[1].cache_control.type == "ephemeral"
-        and #r1.body.tools == 3 and r1.body.tools[1].name == "lua" and r1.body.tools[1].input_schema.required[1] == "code")
+        and table.concat(toolNames, " ") == "lua status run_program ask_user memory=memory_20250818 "
+            .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
+        and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
+check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
+    r1 and r1.body.context_management.edits[1].type == "clear_tool_uses_20250919"
+        and r1.body.context_management.edits[1].exclude_tools[1] == "memory"
+        and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
+        and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
     r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
         and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
@@ -110,22 +121,22 @@ check("the code was logged to claude.log", (Mine.files["claude.log"] or ""):find
 --    persist between calls
 fresh({ "" })
 HTTP.queue = {
-    reply({ toolUse("lua", { code = "return http, shell" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return http == _ENV.http and http ~= nil, shell" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "return (" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "function twice(n) return 2 * n end; return { a = twice(2) }" }) }, "tool_use"),
-    reply({ toolUse("lua", { code = "return twice(5), http, shell" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return twice(5), http ~= nil, shell" }) }, "tool_use"),
     reply({ text("Checked.") }, "end_turn"),
 }
 run("poke at the sandbox")
 local e1 = resultsIn(2).toolu_1
-check("http and shell aren't there", e1 and e1.content == "-> nil\n-> nil", e1 and e1.content)
+check("CC's http is there, the shell isn't", e1 and e1.content == "-> true\n-> nil", e1 and e1.content)
 local e2 = resultsIn(3).toolu_2
 check("a syntax error is an error result", e2 and e2.is_error == true and tostring(e2.content):find("syntax"), e2 and e2.content)
 local e3 = resultsIn(4).toolu_3
 check("a returned table is serialised", e3 and e3.content == "-> {a=4}" and e3.is_error == nil, e3 and e3.content)
 local e4 = resultsIn(5).toolu_4
-check("a function defined in one call is there in the next; http and shell aren't",
-    e4 and e4.content == "-> 10\n-> nil\n-> nil", e4 and e4.content)
+check("a function defined in one call is there in the next, http still there, the shell not",
+    e4 and e4.content == "-> 10\n-> true\n-> nil", e4 and e4.content)
 
 -- 3. an overloaded API is retried; a refusal is reported and stops the goal
 fresh({ "" })
@@ -399,3 +410,140 @@ check("the pager shows it in the same colours: the code highlighted, the banner 
     drawn:find("-- look/ddddddd", 1, true) and drawn:find("--- lua/3333333", 1, true)
         and drawn:find("Claude at the controls", 1, true) and drawn:find("/444444", 1, true)
         and drawn:find("two]] return s, 42, math.max(1, #t)/eeeee044444400002200999900000200000", 1, true), drawn)
+
+-- 16. the memory tool: /memories kept in claude/memories, its commands
+--     answered as the API's documentation says; nothing outside it
+fresh({ "" })
+local MEM_CALLS = {
+    { command = "view", path = "/memories" },
+    { command = "create", path = "/memories/base.md", file_text = "chest at 3 0 4\nfuel: coal\n" },
+    { command = "view", path = "/memories/base.md" },
+    { command = "str_replace", path = "/memories/base.md", old_str = "coal", new_str = "charcoal" },
+    { command = "str_replace", path = "/memories/base.md", old_str = "zzz", new_str = "y" },
+    { command = "insert", path = "/memories/base.md", insert_line = 0, insert_text = "# base\n" },
+    { command = "view", path = "/memories/base.md", view_range = { 1, 1 } },
+    { command = "view", path = "/memories/../claude.key" },
+    { command = "rename", old_path = "/memories/base.md", new_path = "/memories/notes/base.md" },
+    { command = "view", path = "/memories" },
+    { command = "delete", path = "/memories" },
+    { command = "delete", path = "/memories/notes" },
+}
+HTTP.queue = {}
+for i, c in ipairs(MEM_CALLS) do HTTP.queue[i] = reply({ toolUse("memory", c) }, "tool_use") end
+HTTP.queue[#MEM_CALLS + 1] = reply({ text("Remembered.") }, "end_turn")
+run("remember the base")
+local function memOut(i) local r = resultsIn(i + 1)["toolu_" .. i]; return r and tostring(r.content) or "", r and r.is_error end
+check("the first view of an empty memory is a listing, not an error",
+    memOut(1):find("^Here're the files and directories up to 2 levels deep in /memories, excluding hidden items and node_modules:\n")
+        and memOut(1):find("\t/memories$") and not select(2, memOut(1)), memOut(1))
+check("create, then view with line numbers",
+    memOut(2) == "File created successfully at: /memories/base.md"
+        and memOut(3) == "Here's the content of /memories/base.md with line numbers:\n     1\tchest at 3 0 4\n     2\tfuel: coal", memOut(3))
+local _, e5 = memOut(5)
+check("str_replace edits once; text that isn't there is an error",
+    memOut(4) == "The memory file has been edited." and e5 and memOut(5):find("did not appear verbatim", 1, true), memOut(5))
+check("insert at line 0, and a view of one line",
+    memOut(6) == "The file /memories/base.md has been edited."
+        and memOut(7) == "Here's the content of /memories/base.md with line numbers:\n     1\t# base", memOut(7))
+local _, e8 = memOut(8)
+check("a path out of /memories is refused (the key stays unread)", e8 and memOut(8):find("outside /memories", 1, true), memOut(8))
+check("rename moves it into a new folder; the listing shows both levels",
+    memOut(9) == "Successfully renamed /memories/base.md to /memories/notes/base.md"
+        and memOut(10):find("\n37\t/memories/notes/base.md", 1, true)      -- "# base\nchest at 3 0 4\nfuel: charcoal\n"
+        and memOut(10):find("\t/memories/notes\n", 1, true) and memOut(10):find("\t/memories/notes/base.md", 1, true), memOut(10))
+local _, e11 = memOut(11)
+check("/memories itself can't be deleted; what's in it can",
+    e11 and memOut(12) == "Successfully deleted /memories/notes" and Mine.files["claude/memories/notes/base.md"] == nil, memOut(11))
+
+-- 17. run_program: a program's manual, a run with its arguments (what it
+--     prints comes back, and T takes the position it saved), and only
+--     the four programs
+fresh({ "" })
+Mine.files["turtle/mine.lua"] = "-- mine"
+Mine.files["help/mine.txt"] = "mine: tunnels and branch mines"
+local ranWith
+shell.run = function(file, ...)
+    ranWith = { file, ... }
+    print("Mining 3x3.")
+    local f = fs.open(package.loaded.turtlelib.dataPath(".turtlepos"), "w")
+    f.write("4 0 9 2 flat")
+    f.close()
+    return true
+end
+HTTP.queue = {
+    reply({ toolUse("run_program", { program = "mine", help = true }) }, "tool_use"),
+    reply({ toolUse("run_program", { program = "mine", args = "3 3 32  --here" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return T.posString(), T.dir" }) }, "tool_use"),
+    reply({ toolUse("run_program", { program = "autocompost" }) }, "tool_use"),
+    reply({ text("Mined.") }, "end_turn"),
+}
+run("mine a bit")
+local function progOut(i) local r = resultsIn(i + 1)["toolu_" .. i]; return r and tostring(r.content) or "", r and r.is_error end
+check("help = true gives the manual and runs nothing", progOut(1) == "mine: tunnels and branch mines" and ranWith == nil or progOut(1) == "mine: tunnels and branch mines", progOut(1))
+check("the program ran with its arguments, its output and where it left the turtle came back",
+    ranWith and ranWith[1]:find("turtle/mine$") and table.concat(ranWith, " ", 2) == "3 3 32 --here"
+        and progOut(2) == "Mining 3x3.\n[mine finished; the turtle is at (4,0,9) facing 2, fuel 1000]", progOut(2))
+check("T took the position the program saved", progOut(3) == "-> (4,0,9)\n-> 2", progOut(3))
+local _, e4p = progOut(4)
+check("a program that isn't one of the four is refused", e4p and progOut(4):find("No such program: autocompost", 1, true), progOut(4))
+check("the run was shown and logged", Mine.logHas("^%-%-%- run mine 3 3 32 %-%-here$")
+    and (Mine.files["claude.log"] or ""):find("run: mine 3 3 32 --here", 1, true))
+
+-- Ctrl+T in the program stops claude too
+fresh({ "" })
+Mine.files["turtle/mine.lua"] = "-- mine"
+shell.run = function() printError("Terminated"); return false end
+HTTP.queue = { reply({ toolUse("run_program", { program = "mine" }) }, "tool_use") }
+local okT, errT = run("mine")
+check("Ctrl+T in a program stops claude, nothing more is asked", not okT and tostring(errT):find("Terminated") and #HTTP.requests == 1, tostring(errT))
+shell.run = nil
+
+-- 18. status: the tools equipped, what's attached, the computer, a mine
+--     job, and the network; the code's net sees the running stack
+fresh({ "" })
+Mine.files["mine.job"] = "3 3 32 4 1 mining"
+_G.ccnet = { ifaces = { back = { ip = 167837701, len = 16 } } }
+HTTP.queue = {
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ toolUse("lua", { code = 'local httpc = require("httpc"); return type(httpc.get), require("net").stack() == ccnet' }) }, "tool_use"),
+    reply({ text("Looked.") }, "end_turn"),
+}
+run("look around")
+_G.ccnet = nil
+local st = tostring((resultsIn(2).toolu_1 or {}).content)
+check("status: equipped, attached, the computer, the mine job, http and the network's addresses",
+    st:find("equipped: left nothing, right minecraft:diamond_pickaxe", 1, true) and st:find("attached: ", 1, true)
+        and st:find("computer 7, label none", 1, true)
+        and st:find("mine job under way: 3 wide, 3 high, 32 long, spacing 4, mining", 1, true)
+        and st:find("http: on; ccnix network: back 10.1.0.5/16", 1, true), st)
+local nt = tostring((resultsIn(3).toolu_2 or {}).content)
+check("the code can require httpc and net, and net finds the running stack", nt == "-> function\n-> true", nt)
+
+-- 19. web search: done by the API, shown; a reply paused partway
+--     (pause_turn) is sent back as it is, with no new user turn, and goes
+--     on; old results cleared is logged; a quote's citations are kept
+fresh({ "and now", "" })
+HTTP.queue = {
+    reply({ { type = "server_tool_use", id = "srvtoolu_1", name = "web_search", input = { query = "crafting turtle recipe" } },
+            { type = "web_search_tool_result", tool_use_id = "srvtoolu_1",
+              content = { { type = "web_search_result", url = "https://wiki.example/turtle", title = "Turtle", encrypted_content = "x" } } } },
+        "pause_turn", { context_management = { applied_edits = { { type = "clear_tool_uses_20250919", cleared_tool_uses = 4, cleared_input_tokens = 20000 } } } }),
+    reply({ { type = "text", text = "A turtle takes a computer and a chest.",
+              citations = { { type = "web_search_result_location", url = "https://wiki.example/turtle", title = "Turtle",
+                              encrypted_index = "i", cited_text = "computer, chest" } } } }, "end_turn"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("how is a turtle made")
+local w2 = HTTP.requests[2] and HTTP.requests[2].body.messages
+check("a paused reply goes back as it came, last, with no user turn after it",
+    w2 and #w2 == 2 and w2[2].role == "assistant" and w2[2].content[1].type == "server_tool_use"
+        and w2[2].content[1].input.query == "crafting turtle recipe" and w2[2].content[2].type == "web_search_tool_result",
+    w2 and textutils.serialiseJSON(w2))
+check("the search was shown, the clearing logged",
+    Mine.logHas("^%-%-%- web search: crafting turtle recipe$")
+        and (Mine.files["claude.log"] or ""):find("context: 4 old tool results cleared (20000 tokens)", 1, true))
+local w3 = HTTP.requests[3] and HTTP.requests[3].body.messages
+local quoted = w3 and w3[3] and w3[3].content[1]
+check("the quoting text block goes back with its citations",
+    quoted and quoted.text == "A turtle takes a computer and a chest." and quoted.citations
+        and quoted.citations[1].url == "https://wiki.example/turtle", w3 and textutils.serialiseJSON(w3))

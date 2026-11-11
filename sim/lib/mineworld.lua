@@ -535,6 +535,16 @@ peripheral.getMethods = function(side)
     for name, f in pairs(p) do if type(f) == "function" then m[#m + 1] = name end end
     return m
 end
+-- the sides with something on them: an upgrade with a peripheral, a chest
+peripheral.getNames = function()
+    local out = {}
+    for _, side in ipairs({ "bottom", "front", "left", "right", "top" }) do
+        if peripheral.getType(side) or ((side == "front" or side == "top" or side == "bottom") and peripheral.wrap(side)) then
+            out[#out + 1] = side
+        end
+    end
+    return out
+end
 peripheral.call = function(side, name, ...)
     local p = peripheral.wrap(side)
     if not (p and p[name]) then error("No such method " .. name, 0) end
@@ -546,6 +556,8 @@ textutils = textutils or M.textutilsApi()   -- (lib/fileio, under turtlelib, rea
 shell = M.shellApi("mine.lua")
 sleep = function() end
 os.startTimer = function() return 1 end
+os.getComputerID = function() return 7 end
+os.getComputerLabel = function() return nil end
 os.pullEvent = function() error("waited for an event: the turtle should never wait here") end
 
 -- what watchsim.lua draws: the world and the turtle, and the slices of a

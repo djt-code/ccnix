@@ -47,12 +47,27 @@
 -- are marked for prompt caching.  The totals are printed when a goal ends.
 --
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
--- `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and
--- ccnix's libraries for text and the world (text, scan, convert, path,
--- glob, regex, tables, fileio, getopt, mc), and the files: fs, io,
--- loadfile and dofile read anything but the API key, and write only under
--- /claude/ (so it can't rewrite the programs or the startup).  No http or
--- shell.
+-- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
+-- ...) and ccnix's libraries for text, the network and the world (text,
+-- scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb,
+-- httpc, mc), and the files: fs, io, loadfile and dofile read anything
+-- but the API key, and write only under /claude/ (so it can't rewrite the
+-- programs or the startup).  No shell.
+--
+-- The other tools:
+--   status       where it is, fuel, what's around, what it carries, the
+--                tools equipped, what's attached, a mine job, the network
+--   run_program  runs one of ccnix's turtle programs (mine, farm, mow,
+--                home) with arguments, or reads its manual (help/)
+--   ask_user     asks you, at the prompt
+--   memory       its notes, kept between sessions in /claude/memories/
+--                (the API's memory tool: view, create, str_replace,
+--                insert, delete, rename, only under that folder)
+--   web_search, web_fetch   run on Anthropic's side, not the turtle's
+--                (each costs a little; at most a few a reply)
+-- Old tool results are cleared from the conversation once it's long (the
+-- API's context editing), the memory tool's kept; a reply paused partway
+-- through its web searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
@@ -74,7 +89,9 @@ local okPager, pager = pcall(require, "pager")
 if not (okPager and type(pager) == "table" and pager.page) then pager = nil end
 local convert = require("convert")
 local fileio = require("fileio")
+local path = require("path")
 local syntax = require("syntax")
+local sysenv = require("sysenv")
 local tables = require("tables")
 
 -- Colour on an advanced computer or turtle, plain text on the others.
@@ -95,6 +112,14 @@ local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
 local RETRIES = 4               -- on rate limits, overload and outages
 local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in CC; the
                                 -- reply is streamed, so a long one keeps coming
+local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
+local WEB_USES = 5              -- web searches, and fetches, at most per reply
+local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
+-- Old tool results cleared once the conversation is this long (tokens in),
+-- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST
+local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 60000, 6, 10000
+-- The turtle programs run_program may run
+local PROGRAMS = { mine = true, farm = true, mow = true, home = true }
 
 --------------------------------------------------------------------------
 -- Arguments
@@ -134,7 +159,7 @@ if not http then say("red", "HTTP is disabled on this server."); return end
 -- What the model is told
 --------------------------------------------------------------------------
 local SYSTEM = [==[
-You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside the turtle. You act by calling the `lua` tool with Lua code (Lua 5.2 as CC runs it), which runs on the turtle; what it prints and returns comes back to you. Nothing happens unless you call a tool.
+You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside the turtle. You act mostly by calling the `lua` tool with Lua code (Lua 5.2 as CC runs it), which runs on the turtle; what it prints and returns comes back to you. Nothing happens unless you call a tool.
 
 Coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`: it started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is, and stay right only if you move and turn through T: T.forward(), T.back(), T.up(), T.down(), T.turnLeft(), T.turnRight(), T.face(d), T.moveDir(d) (d a heading, "up" or "down"), T.toY(y), T.goTo(x, z) (routes to a column at the current height, learning obstacles). Never call turtle.forward/back/up/down/turnLeft/turnRight yourself: T.pos would be wrong from then on. T.forward() and the others only dig blocks listed in T.diggable (empty to start): to dig, call turtle.dig(), turtle.digUp() or turtle.digDown() first, or set T.diggable["minecraft:stone"] = true for what it may dig on the way. Moves cost one fuel each; T.refuelTo(n) burns fuel items from the inventory.
 
@@ -151,13 +176,20 @@ Libraries: `local text = require("text")` and so on give ccnix's own; use them r
 - regex: regex.compile(pattern, { ere = true, icase = true }) -> re, or nil and why; re:test(s [, whole]), re:find(s [, init]) -> start, stop, captures (POSIX regular expressions).
 - tables: sortedKeys(t), copy(t). fileio: read(path), write(path, data) (under /claude/ only), readJSON(path). getopt: parse(args, "ab:") -> options, operands.
 - mc: require("mc").new() -> the world through what's attached (Advanced Peripherals' chat box, player detector, environment detector): time(), weather(), players(), say(text, from) into the game's chat, tell(player, text, from); a function whose peripheral isn't there returns nil and why.
+- httpc, net, netdb: ccnix's own network stack over modems (IPv4, UDP, TCP, DNS), when it's up (`status` says): httpc.get(url) / httpc.post(url, body, headers) / httpc.request({ url, method, body, headers, follow, timeout }) -> { status, headers, body } or nil and why (http:// only, no TLS); net.connect(host, port) -> a TCP connection (conn:send(s), conn:read(timeout), conn:close()); net.udp(); netdb.getaddrinfo(name).
 
-Each tool call is a slow network round trip, so do several steps per call: write loops, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls. Call `status` to see where the turtle is, what's around it and what it carries. Never dig or break chests, barrels, hoppers or computers, and don't break blocks you weren't asked to. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
+Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.readAll(), h.getResponseCode(), h.close(); or nil, why and the error response; http.post(url, body, headers); http.request for more): it is real HTTP and HTTPS from the server to the internet, as far as the server's allow-list lets it. Use ccnix's stack (httpc, net) for what only it reaches: addresses on the CC network (10.x.x.x and names there), raw TCP or UDP, or when http is disabled or refuses the host. Web pages for research are better fetched with web_fetch (below), which reads them for you.
+
+Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start). Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
+
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it tidy. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+
+Each tool call is a slow network round trip, so do several steps per call: write loops, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls. Call `status` to see where the turtle is, what's around it, what it carries and has attached, and whether the network is up. Never dig or break chests, barrels, hoppers or computers, and don't break blocks you weren't asked to. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -166,8 +198,21 @@ local TOOLS = {
     },
     {
         name = "status",
-        description = "Where the turtle is (position, heading), its fuel, what's in front, above and below it, and what it carries.",
+        description = "Where the turtle is (position, heading), its fuel, what's in front, above and below it, what it carries, the tools it has equipped, the peripherals attached, the computer's label, whether `mine` has a job under way, and whether http and ccnix's network are up (its addresses).",
         input_schema = { type = "object", properties = {} },
+    },
+    {
+        name = "run_program",
+        description = "Run one of ccnix's turtle programs: mine, farm, mow or home, with its arguments as you'd type them (\"3 3 32 --spacing 4\"), and wait until it ends; what it prints comes back, with where the turtle is afterwards. With help = true, its manual comes back instead and nothing runs.",
+        input_schema = {
+            type = "object",
+            properties = {
+                program = { type = "string", enum = tables.sortedKeys(PROGRAMS) },
+                args = { type = "string", description = "The arguments, as on a command line." },
+                help = { type = "boolean", description = "Read the program's manual instead of running it." },
+            },
+            required = { "program" },
+        },
     },
     {
         name = "ask_user",
@@ -178,6 +223,9 @@ local TOOLS = {
             required = { "question" },
         },
     },
+    { type = "memory_20250818", name = "memory" },
+    { type = "web_search_20260209", name = "web_search", max_uses = WEB_USES },
+    { type = "web_fetch_20260209", name = "web_fetch", max_uses = WEB_USES },
 }
 
 --------------------------------------------------------------------------
@@ -211,13 +259,19 @@ end
 
 -- everything printed goes through here: claude's notes, the code, what
 -- the code and turtlelib print, each line kept in the colour it's printed in
-print = function(...)
+-- print's arguments as the one line it prints
+local function joined(...)
     local parts = {}
     for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end
-    local line = table.concat(parts, " ")
+    return table.concat(parts, " ")
+end
+
+print = function(...)
+    local line = joined(...)
     keep(line, COLOUR and string.rep(blit(term.getTextColour()), #line) or nil)
     return screenPrint(...)
 end
+local keepPrint = print                -- (the run programs' print goes here too)
 
 -- The colour of a blit digit ("e" -> colours.red)
 local function colourOf(digit) return math.floor(2 ^ convert.toInteger(digit, 16)) end
@@ -317,6 +371,19 @@ end
 --------------------------------------------------------------------------
 -- The tools
 --------------------------------------------------------------------------
+-- T at the position turtlelib saved (claude's, or a program's), if any;
+-- true if there was one
+local function takeSavedPos()
+    local saved = T.loadPos()
+    if not saved then return false end
+    T.pos.x, T.pos.y, T.pos.z, T.dir, T.mode = saved.x, saved.y, saved.z, saved.dir, saved.mode or "flat"
+    return true
+end
+
+-- lib/net, for showing the running stack's addresses (nil without it)
+local okNet, net = pcall(require, "net")
+if not (okNet and type(net) == "table") then net = nil end
+
 local function log(line)
     local f = fs.open(LOG_FILE, "a")
     if f then f.writeLine(line); f.close() end
@@ -397,16 +464,21 @@ local codeIo = {
 }
 
 -- What the code may use: the turtle, the library, the world's peripherals,
--- the files as above and the plain Lua bits.  Not http or shell.
+-- CC's http, the files as above and the plain Lua bits.  Not the shell.
 local API = {
-    turtle = turtle, T = T, peripheral = peripheral, os = os, textutils = textutils,
+    turtle = turtle, T = T, peripheral = peripheral, http = http, os = os, textutils = textutils,
     math = math, string = string, table = table, sleep = sleep,
     fs = codeFs, io = codeIo,
     pairs = pairs, ipairs = ipairs, next = next, select = select, type = type,
     tostring = tostring, tonumber = tonumber, unpack = unpack or table.unpack,
     pcall = pcall, error = error, assert = assert,
 }
-local env = setmetatable({}, { __index = API })
+-- The code's globals: API's, and the running network stack as it is now
+-- (lib/net keeps it in _G.ccnet, and the code's libraries see env as _G)
+local env = setmetatable({}, { __index = function(_, k)
+    if k == "ccnet" then return rawget(_G, "ccnet") end
+    return API[k]
+end })
 local function codeLoadfile(path, mode, e)
     if isKey(path) then return nil, tostring(path) .. ": " .. NO_READ end
     return loadfile(path, mode, e or env)
@@ -415,7 +487,8 @@ API.loadfile = codeLoadfile
 API.dofile = function(path) return assert(codeLoadfile(path))() end
 
 -- `require` in the code: CraftOS's cc.* modules, and ccnix's libraries
--- for text, paths, conversions and the world (lib/), and only those.
+-- for text, paths, conversions, the network and the world (lib/), and
+-- only those.
 -- They're loaded afresh with a world of their own: the code's fs and io
 -- (cc.image.nft's load, cc.require's loaders and lib/fileio read files),
 -- and the code's globals as cc.require's _G, not the real ones.
@@ -426,7 +499,7 @@ local CC_MODULES = {
 }
 local CCNIX_MODULES = {
     scan = true, text = true, convert = true, getopt = true, glob = true, path = true,
-    regex = true, tables = true, fileio = true, mc = true,
+    regex = true, tables = true, fileio = true, mc = true, net = true, netdb = true, httpc = true,
 }
 local modWorld = {
     fs = codeFs,
@@ -456,11 +529,11 @@ local function ccRequire(name)
             .. ", and ccnix's " .. table.concat(tables.sortedKeys(CCNIX_MODULES), ", "), 2)
     end
     if loadedMods[name] == nil then
-        local path = "/rom/modules/main/" .. text.replace(name, ".", "/") .. ".lua"   -- cc.image.nft -> cc/image/nft
+        local romFile = "/rom/modules/main/" .. text.replace(name, ".", "/") .. ".lua"   -- cc.image.nft -> cc/image/nft
         local chunk, err
-        if CCNIX_MODULES[name] then chunk, err = loadLib(name) else chunk, err = loadfile(path, "t", modWorld) end
+        if CCNIX_MODULES[name] then chunk, err = loadLib(name) else chunk, err = loadfile(romFile, "t", modWorld) end
         if not chunk then error("require: " .. tostring(err), 2) end
-        local m = chunk(name, path)
+        local m = chunk(name, romFile)
         loadedMods[name] = m == nil and true or m
     end
     return loadedMods[name]
@@ -472,9 +545,7 @@ local function runLua(code)
     local out = {}
     local realPrint = print
     local function capture(...)
-        local parts = {}
-        for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end
-        local line = table.concat(parts, " ")
+        local line = joined(...)
         realPrint(line)
         out[#out + 1] = line
     end
@@ -511,15 +582,253 @@ local function status()
         local it = turtle.getItemDetail(s)
         if it then items[#items + 1] = string.format("%d: %d %s", s, it.count, it.name) end
     end
-    return string.format("at %s facing %d (0=+z 1=+x 2=-z 3=-x), fuel %s\nfront: %s  above: %s  below: %s\nslots: %s\nselected slot %d",
-        T.posString(), T.dir, tostring(turtle.getFuelLevel()),
-        at(turtle.inspect), at(turtle.inspectUp), at(turtle.inspectDown),
-        #items > 0 and table.concat(items, ", ") or "empty", turtle.getSelectedSlot()), false
+    local lines = {
+        string.format("at %s facing %d (0=+z 1=+x 2=-z 3=-x), fuel %s", T.posString(), T.dir, tostring(turtle.getFuelLevel())),
+        string.format("front: %s  above: %s  below: %s", at(turtle.inspect), at(turtle.inspectUp), at(turtle.inspectDown)),
+        "slots: " .. (#items > 0 and table.concat(items, ", ") or "empty"),
+        "selected slot " .. turtle.getSelectedSlot(),
+    }
+    -- (only where CC can tell without swapping tools in and out)
+    if turtle.getEquippedLeft then
+        local l, r = turtle.getEquippedLeft(), turtle.getEquippedRight()
+        lines[#lines + 1] = string.format("equipped: left %s, right %s", l and l.name or "nothing", r and r.name or "nothing")
+    end
+    local attached = {}
+    for _, side in ipairs(peripheral.getNames()) do
+        attached[#attached + 1] = side .. " " .. tostring(peripheral.getType(side))
+    end
+    lines[#lines + 1] = "attached: " .. (#attached > 0 and table.concat(attached, ", ") or "nothing")
+    lines[#lines + 1] = string.format("computer %d, label %s", os.getComputerID(), os.getComputerLabel() or "none")
+    local job = T.loadMineJob()
+    if job then
+        lines[#lines + 1] = string.format("mine job under way: %d wide, %d high, %s long, spacing %d, %s",
+            job.width, job.height, job.length and tostring(job.length) or "no end", job.spacing, job.state)
+    end
+    local addrs = {}
+    local S = rawget(_G, "ccnet")
+    for _, name in ipairs(S and tables.sortedKeys(S.ifaces) or {}) do
+        local ifc = S.ifaces[name]
+        local ip = type(ifc.ip) == "number" and net and net.ipString(ifc.ip) or tostring(ifc.ip)
+        addrs[#addrs + 1] = string.format("%s %s/%s", name, ip, tostring(ifc.len))
+    end
+    lines[#lines + 1] = "http: " .. (http and "on" or "off") .. "; ccnix network: "
+        .. (S and (#addrs > 0 and table.concat(addrs, ", ") or "up, no addresses") or "down")
+    return table.concat(lines, "\n"), false
 end
 
 local function askUser(question)
     say("yellow", "Claude asks: " .. tostring(question))
     return ask("> "), false
+end
+
+--------------------------------------------------------------------------
+-- The memory tool: the API's /memories, kept in MEMORY_DIR.  Its commands
+-- and replies are the ones the API's documentation gives.
+--------------------------------------------------------------------------
+local MEMORY_ROOT = "/memories"
+
+-- The file or folder on disk for a /memories path, and the path tidied;
+-- nil for anything outside /memories (.. and all)
+local function memoryFile(p)
+    if type(p) ~= "string" then return nil end
+    local tidy = path.normalize(p)
+    if tidy == MEMORY_ROOT then return MEMORY_DIR, tidy end
+    local rest = text.stripPrefix(tidy, MEMORY_ROOT .. "/")
+    if not rest then return nil end
+    return MEMORY_DIR .. "/" .. rest, tidy
+end
+
+local function sizeOf(file)
+    if not fs.isDir(file) then return fs.getSize(file) end
+    local n = 0
+    for _, name in ipairs(fs.list(file)) do n = n + sizeOf(file .. "/" .. name) end
+    return n
+end
+
+-- The lines "size<TAB>path" of a folder and what's in it, two levels
+-- deep, hidden things (and node_modules) left out
+local function listing(file, shownAs, depth, out)
+    out[#out + 1] = convert.humanSize(sizeOf(file)) .. "\t" .. shownAs
+    if not fs.isDir(file) or depth == 2 then return out end
+    local names = fs.list(file)
+    table.sort(names)
+    for _, name in ipairs(names) do
+        if not text.startsWith(name, ".") and name ~= "node_modules" then
+            listing(file .. "/" .. name, shownAs .. "/" .. name, depth + 1, out)
+        end
+    end
+    return out
+end
+
+-- A file's lines, without the newline at its end
+local function linesOf(content)
+    return text.split(text.stripSuffix(content, "\n") or content, "\n", true)
+end
+
+local MEMORY = {}
+
+function MEMORY.view(file, shownAs, input)
+    if not fs.exists(file) then
+        if file ~= MEMORY_DIR then return "The path " .. shownAs .. " does not exist. Please provide a valid path.", true end
+        fs.makeDir(file)                -- the first look, at nothing yet
+    end
+    if fs.isDir(file) then
+        return "Here're the files and directories up to 2 levels deep in " .. shownAs
+            .. ", excluding hidden items and node_modules:\n" .. table.concat(listing(file, shownAs, 0, {}), "\n")
+    end
+    local lines = linesOf(fileio.read(file) or "")
+    local from, to = 1, #lines
+    local range = input.view_range
+    if type(range) == "table" and type(range[1]) == "number" and type(range[2]) == "number" then
+        from, to = math.max(1, range[1]), range[2] == -1 and #lines or math.min(#lines, range[2])
+    end
+    local out = { "Here's the content of " .. shownAs .. " with line numbers:" }
+    for i = from, to do out[#out + 1] = string.format("%6d\t%s", i, lines[i]) end
+    return table.concat(out, "\n")
+end
+
+function MEMORY.create(file, shownAs, input)
+    if type(input.file_text) ~= "string" then return "Error: create needs file_text", true end
+    if fs.isDir(file) then return "Error: " .. shownAs .. " is a directory", true end
+    fs.makeDir(fs.getDir(file))
+    local ok, why = fileio.write(file, input.file_text)
+    if not ok then return "Error: " .. tostring(why), true end
+    return "File created successfully at: " .. shownAs
+end
+
+function MEMORY.str_replace(file, shownAs, input)
+    if not fs.exists(file) or fs.isDir(file) then
+        return "Error: The path " .. shownAs .. " does not exist. Please provide a valid path.", true
+    end
+    local content, old = fileio.read(file) or "", tostring(input.old_str or "")
+    local found = text.count(content, old)
+    if found == 0 then
+        return "No replacement was performed, old_str `" .. old .. "` did not appear verbatim in " .. shownAs .. ".", true
+    elseif found > 1 then
+        local at, from = {}, 1
+        while true do
+            local s, e = text.find(content, old, from)
+            if not s then break end
+            at[#at + 1] = tostring(text.count(content:sub(1, s - 1), "\n") + 1)
+            from = e + 1
+        end
+        return "No replacement was performed. Multiple occurrences of old_str `" .. old .. "` in lines: "
+            .. table.concat(at, ", ") .. ". Please ensure it is unique", true
+    end
+    fileio.write(file, (text.replace(content, old, tostring(input.new_str or ""), 1)))
+    return "The memory file has been edited."
+end
+
+function MEMORY.insert(file, shownAs, input)
+    if not fs.exists(file) or fs.isDir(file) then return "Error: The path " .. shownAs .. " does not exist", true end
+    local lines = text.split(fileio.read(file) or "", "\n", true)
+    local at = input.insert_line
+    if type(at) ~= "number" or at ~= math.floor(at) or at < 0 or at > #lines then
+        return "Error: Invalid `insert_line` parameter: " .. tostring(at)
+            .. ". It should be within the range of lines of the file: [0, " .. #lines .. "]", true
+    end
+    local new = tostring(input.insert_text or "")
+    table.insert(lines, at + 1, text.stripSuffix(new, "\n") or new)
+    fileio.write(file, table.concat(lines, "\n"))
+    return "The file " .. shownAs .. " has been edited."
+end
+
+function MEMORY.delete(file, shownAs)
+    if file == MEMORY_DIR then return "Error: " .. MEMORY_ROOT .. " itself can't be deleted", true end
+    if not fs.exists(file) then return "Error: The path " .. shownAs .. " does not exist", true end
+    fs.delete(file)
+    return "Successfully deleted " .. shownAs
+end
+
+-- (rename's paths are old_path and new_path, not path)
+function MEMORY.rename(_, _, input)
+    local from, fromShown = memoryFile(input.old_path)
+    local to, toShown = memoryFile(input.new_path)
+    if not (from and to) then return "Error: both paths must be in " .. MEMORY_ROOT, true end
+    if from == MEMORY_DIR then return "Error: " .. MEMORY_ROOT .. " itself can't be renamed", true end
+    if not fs.exists(from) then return "Error: The path " .. fromShown .. " does not exist", true end
+    if fs.exists(to) then return "Error: The destination " .. toShown .. " already exists", true end
+    fs.makeDir(fs.getDir(to))
+    fs.move(from, to)
+    return "Successfully renamed " .. fromShown .. " to " .. toShown
+end
+
+local function memory(input)
+    local command = MEMORY[input.command]
+    if not command then return "Error: unknown command " .. tostring(input.command), true end
+    local file, shownAs = MEMORY_DIR, MEMORY_ROOT
+    if input.command ~= "rename" then
+        file, shownAs = memoryFile(input.path)
+        if not file then return "Error: " .. tostring(input.path) .. " is outside " .. MEMORY_ROOT, true end
+    end
+    say("lightBlue", "--- memory: " .. input.command .. " " .. tostring(input.path or input.old_path))
+    log("memory: " .. textutils.serialiseJSON(input))
+    return command(file, shownAs, input)
+end
+
+--------------------------------------------------------------------------
+-- run_program: ccnix's turtle programs
+--------------------------------------------------------------------------
+-- A program's manual (help/<name>.txt: ccnix's, else the checkout's), or nil
+local function manualOf(name)
+    local rel = "help/" .. name .. ".txt"
+    local file = ccnix and ccnix.find and ccnix.find(rel)
+    if not file and shell and shell.getRunningProgram then file = sysenv.repoRoot() .. "/" .. rel end
+    return file and fileio.read(file) or nil
+end
+
+local function runProgram(input)
+    local name = tostring(input.program or "")
+    if not PROGRAMS[name] then
+        return "No such program: " .. name .. " (" .. table.concat(tables.sortedKeys(PROGRAMS), ", ") .. ")", true
+    end
+    if input.help then
+        local manual = manualOf(name)
+        if not manual then return "No manual for " .. name .. " on this computer.", true end
+        return clip(manual)
+    end
+    local file = sysenv.findProgram("turtle/" .. name)
+    if not (file and shell and shell.run) then return name .. " isn't on this computer.", true end
+    local words = text.words(tostring(input.args or ""))
+    local line = #words > 0 and (name .. " " .. text.join(words, " ")) or name
+    say("lightBlue", "--- run " .. line)
+    log("run: " .. line)
+    if CONFIRM then
+        local a = ask("Run it? [y/N] ")
+        if not text.startsWith(a:lower(), "y") then
+            say("orange", "--- not run")
+            return "The user declined to run this program.", true
+        end
+    end
+    -- what it prints and its errors, kept for the model and shown as the
+    -- code's output is (its own program, so through the real globals)
+    local out, stopped = {}, false
+    local savedPrint, savedPrintError = _G.print, _G.printError
+    _G.print = function(...)
+        out[#out + 1] = joined(...)
+        return keepPrint(...)
+    end
+    _G.printError = function(...)
+        local said = joined(...)
+        out[#out + 1] = said
+        if said == "Terminated" then stopped = true end
+        if COLOUR then term.setTextColour(colours.red) end
+        keepPrint(said)
+        if COLOUR then term.setTextColour(colours.lightGrey) end
+    end
+    T.savePos()                         -- where it starts from, for it to read
+    if COLOUR then term.setTextColour(colours.lightGrey) end
+    local ok, ran = pcall(shell.run, file, table.unpack(words))
+    if COLOUR then term.setTextColour(colours.white) end
+    _G.print, _G.printError = savedPrint, savedPrintError
+    if stopped then error("Terminated", 0) end
+    if not ok then error(ran, 0) end
+    takeSavedPos()                      -- where it left the turtle
+    out[#out + 1] = string.format("[%s %s; the turtle is at %s facing %d, fuel %s]", name,
+        ran and "finished" or "failed", T.posString(), T.dir, tostring(turtle.getFuelLevel()))
+    local all = clip(table.concat(out, "\n"))
+    log("result:\n" .. all)
+    return all, not ran
 end
 
 local function runTool(name, input)
@@ -551,8 +860,12 @@ local function runTool(name, input)
         return out, isErr
     elseif name == "status" then
         return status()
+    elseif name == "run_program" then
+        return runProgram(input)
     elseif name == "ask_user" then
         return askUser(input.question)
+    elseif name == "memory" then
+        return memory(input)
     end
     return "No such tool: " .. tostring(name), true
 end
@@ -580,6 +893,16 @@ local function body()
         -- a refusal by the safety classifiers is retried on a fallback
         -- model server-side (see the API docs: server-side fallback)
         fallbacks = "default",
+        -- a long session's old tool results are cleared server-side
+        -- (the newest kept, the memory tool's never), so each round trip
+        -- doesn't carry all of them (see the API docs: context editing)
+        context_management = { edits = { {
+            type = "clear_tool_uses_20250919",
+            trigger = { type = "input_tokens", value = CLEAR_TRIGGER },
+            keep = { type = "tool_uses", value = KEEP_TOOL_USES },
+            clear_at_least = { type = "input_tokens", value = CLEAR_AT_LEAST },
+            exclude_tools = { "memory" },
+        } } },
     }, { allow_repetitions = true })
 end
 
@@ -587,7 +910,7 @@ local HEADERS = {
     ["Content-Type"] = "application/json",
     ["x-api-key"] = KEY,
     ["anthropic-version"] = API_VERSION,
-    ["anthropic-beta"] = "server-side-fallback-2026-07-01",
+    ["anthropic-beta"] = "server-side-fallback-2026-07-01,context-management-2025-06-27",
 }
 
 -- The events' data in a streamed reply: what follows each "data: ", up to
@@ -625,23 +948,30 @@ local function fromEvents(stream)
             local d, p = e.delta, parts[e.index + 1]
             local field = DELTA_FIELD[d.type]
             local piece = d.text or d.thinking or d.signature or d.partial_json
-            if field and piece then
+            if d.type == "citations_delta" and d.citation then
+                -- a web page a text block quotes: one more for its list
+                p.citations = p.citations or {}
+                table.insert(p.citations, d.citation)
+            elseif field and piece then
                 p[field] = p[field] or {}
                 table.insert(p[field], piece)
             end
         elseif t == "content_block_stop" and msg and parts[e.index + 1] then
             local b = msg.content[e.index + 1]
             for field, pieces in pairs(parts[e.index + 1]) do
-                local s = table.concat(pieces)
-                if field == "input" then
-                    b.input = textutils.unserialiseJSON(s) or {}
+                if field == "citations" then
+                    b.citations = type(b.citations) == "table" and b.citations or {}
+                    for _, c in ipairs(pieces) do table.insert(b.citations, c) end
+                elseif field == "input" then
+                    b.input = textutils.unserialiseJSON(table.concat(pieces)) or {}
                 else
-                    b[field] = (b[field] or "") .. s
+                    b[field] = (b[field] or "") .. table.concat(pieces)
                 end
             end
         elseif t == "message_delta" and msg then
             msg.stop_reason = e.delta and e.delta.stop_reason
             msg.stop_details = e.delta and e.delta.stop_details
+            msg.context_management = e.context_management or msg.context_management
             msg.usage = msg.usage or {}
             for k, v in pairs(e.usage or {}) do msg.usage[k] = v end
         elseif t == "error" then
@@ -742,7 +1072,7 @@ end
 local function converse(goal)
     addUser(goal, "Not run: the goal ended before this call was answered.")
     log("goal: " .. goal)
-    local steps, overBudget, cutOff = 0, false, false
+    local steps, overBudget, cutOff, pauses = 0, false, false, 0
     while true do
         local reply, err = request()
         if not reply then
@@ -758,8 +1088,22 @@ local function converse(goal)
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(b.text); log("claude: " .. b.text) end
             if b.type == "thinking" and (b.thinking or "") ~= "" then log("thinking: " .. b.thinking) end
+            if b.type == "server_tool_use" then         -- a web search or fetch, done by the API
+                local what = (b.name == "web_fetch" and "web fetch: " or "web search: ")
+                    .. tostring((b.input or {}).url or (b.input or {}).query or "")
+                say("lightBlue", "--- " .. what)
+                log(what)
+            end
         end
-        if reply.stop_reason == "tool_use" then
+        for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
+            log(string.format("context: %d old tool results cleared (%d tokens)",
+                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0))
+        end
+        if reply.stop_reason == "pause_turn" and pauses < PAUSES then
+            -- the API stopped partway through its own tools (web searches):
+            -- sent back as it is, it carries on where it was
+            pauses = pauses + 1
+        elseif reply.stop_reason == "tool_use" then
             local results = {}
             for _, b in ipairs(reply.content) do
                 if b.type == "tool_use" then
@@ -798,12 +1142,7 @@ end
 -- Main
 --------------------------------------------------------------------------
 local function main()
-    local saved = T.loadPos()
-    if saved then
-        T.pos.x, T.pos.y, T.pos.z, T.dir, T.mode = saved.x, saved.y, saved.z, saved.dir, saved.mode or "flat"
-    else
-        T.startAtHome(true)
-    end
+    if not takeSavedPos() then T.startAtHome(true) end
     say("yellow", string.format("Claude at the controls (%s, effort %s). Turtle at %s facing %d, fuel %s.",
         MODEL, EFFORT, T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     if goal == "" then

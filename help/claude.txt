@@ -26,7 +26,20 @@ Setup:
 
 What it costs: every round trip (one tool call) sends the whole conversation, so a long job is many calls; the system prompt and tools are marked for prompt caching.  The totals are printed when a goal ends.
 
-The code has the turtle, turtlelib, peripherals, the plain Lua bits, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and ccnix's libraries for text and the world (text, scan, convert, path, glob, regex, tables, fileio, getopt, mc), and the files: fs, io, loadfile and dofile read anything but the API key, and write only under /claude/ (so it can't rewrite the programs or the startup).  No http or shell.
+The code has the turtle, turtlelib, peripherals, the plain Lua bits, CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and ccnix's libraries for text, the network and the world (text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc, mc), and the files: fs, io, loadfile and dofile read anything but the API key, and write only under /claude/ (so it can't rewrite the programs or the startup).  No shell.
+
+The other tools:
+  status
+      where it is, fuel, what's around, what it carries, the tools equipped, what's attached, a mine job, the network
+  run_program
+      runs one of ccnix's turtle programs (mine, farm, mow, home) with arguments, or reads its manual (help/)
+  ask_user
+      asks you, at the prompt
+  memory
+      its notes, kept between sessions in /claude/memories/ (the API's memory tool: view, create, str_replace, insert, delete, rename, only under that folder)
+  web_search, web_fetch
+      run on Anthropic's side, not the turtle's (each costs a little; at most a few a reply)
+Old tool results are cleared from the conversation once it's long (the API's context editing), the memory tool's kept; a reply paused partway through its web searches is carried on.
 
 Position: it picks up turtlelib's saved position (.turtlepos) if there is one, so `home` still works afterwards; otherwise here is (0,0,0) facing +z.
 

@@ -1120,12 +1120,22 @@ claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--co
 claude dig a 3 by 3 tunnel 20 blocks ahead and come back
 ```
 
-Claude (the model, over the Anthropic API) drives the turtle. It gets one
-tool that matters, `lua`: the code it writes runs on the turtle with
-`turtle`, `peripheral` and `turtlelib` as `T` in scope, and whatever the
-code prints or returns goes back to it. Two more tools: `status` (where it
-is, fuel, what's in front, above and below, the inventory) and `ask_user`
-(it asks you at the keyboard). It works at the goal call by call, says what
+Claude (the model, over the Anthropic API) drives the turtle. Its main
+tool is `lua`: the code it writes runs on the turtle with `turtle`,
+`peripheral`, `http` and `turtlelib` as `T` in scope, and whatever the
+code prints or returns goes back to it. The others:
+
+| Tool | What it does |
+| --- | --- |
+| `status` | where it is, fuel, what's in front, above and below, the inventory, the tools equipped, what's attached, the label, a `mine` job under way, whether `http` and ccnix's network are up (and its addresses) |
+| `run_program` | runs `mine`, `farm`, `mow` or `home` with arguments and waits for it (their output comes back, and the position they saved is taken up), or reads the program's manual from `help/` |
+| `ask_user` | it asks you at the keyboard |
+| `memory` | the API's memory tool: notes kept between sessions in `/claude/memories/` (view, create, str_replace, insert, delete, rename, nothing outside that folder) |
+| `web_search`, `web_fetch` | look things up on the internet; they run on Anthropic's side, not the turtle's, cost a little each, and at most 5 of each are used per reply |
+
+Once a session is long, old tool results are cleared from what's sent
+(the API's context editing; the memory tool's are kept), and a reply the
+API pauses partway through its web searches is carried on. It works at the goal call by call, says what
 it did when it stops, and then waits for the next thing to do; an empty
 line quits. When more comes out than fits on the screen, it opens in the
 pager before the next prompt, at the first line you haven't seen (the
@@ -1163,9 +1173,15 @@ but the API key (through `fs`, `io`, `loadfile` or `dofile`), write only
 under `/claude/` (its notes, maps, programs between goals), and `require`
 CraftOS's `cc.*` modules (`cc.strings`, `cc.pretty`, `cc.base64`,
 `cc.expect`, `cc.completion`, `cc.shell.completion`, `cc.image.nft`,
-`cc.audio.dfpwm`, `cc.require`); it can't reach `http` or `shell`, so a
-slip can't leak the key or rewrite the programs. Everything it reads goes
-to the API, so keep secrets other than the key (a `.gitlite` with a
+`cc.audio.dfpwm`, `cc.require`) and ccnix's libraries (`text`, `scan`,
+`convert`, `path`, `glob`, `regex`, `tables`, `fileio`, `getopt`, `mc`, and
+the network's `net`, `netdb` and `httpc`, which find the running stack).
+It has CC's `http` and is told to prefer it, real HTTP and HTTPS from the
+server as far as `http.rules` allows, over ccnix's stack, which it uses for
+the CC network's own addresses. It can't reach `shell` (only the four
+programs, through `run_program`), so a slip can't rewrite the programs, and
+it never sees the key. Everything it reads can go to the API, or anywhere
+`http` reaches, so keep secrets other than the key (a `.gitlite` with a
 token) off the turtle. It can do anything the turtle can, though, so keep valuables out of reach
 the first few times, and `claude.log` keeps every piece of code it ran
 and what came back.
