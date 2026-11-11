@@ -49,9 +49,10 @@
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and
 -- ccnix's libraries for text and the world (text, scan, convert, path,
--- glob, regex, tables, fileio, getopt, mc), and the files: fs, io, loadfile and dofile read anything but the API key,
--- and write only under /claude/ (so it can't rewrite the programs or the
--- startup).  No http or shell.
+-- glob, regex, tables, fileio, getopt, mc), and the files: fs, io,
+-- loadfile and dofile read anything but the API key, and write only under
+-- /claude/ (so it can't rewrite the programs or the startup).  No http or
+-- shell.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
