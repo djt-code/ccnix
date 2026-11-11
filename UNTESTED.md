@@ -176,34 +176,21 @@ section.
 
 ## Network
 
-- **`ip host del`** (0.34.0). `ip host gone 10.1.2.9`, `ping gone` (the
-  address), `ip host del gone`: the list leaves it out, `ping gone` can't
-  find it, and `ip host del gone` again says "no host gone" with status 1.
-  Deleting the last one leaves `sysctl net.hosts` unset.
-
-- **ping, the rest** (0.29.0). Ctrl+T on a `ping` running inside a
-  background job brought to the front (`fg`); `ping -c 0 -q`; `ping -s
-  65507` through the gateway, in NAT mode (the gateway's own address) and
-  in TUN mode (a real host): replies show bytes=N with no "(sent ...)" or
-  "changed" note.
+- **ping, the rest** (0.29.0). `ping -s 65507` through the gateway, in
+  NAT mode (the gateway's own address) and in TUN mode (a real host):
+  replies show bytes=N with no "(sent ...)" or "changed" note.
 - **`ip route get` and `ip neigh`, the rest** (0.29.0). `ip route get` for
   a name; the INCOMPLETE entry gone about 3 s after the last try.
 - **`netstat -s` on a router** (0.29.0) after some forwarding and a forged
   source: drops by reason, and the router screen's forwarded/dropped/spoofed
   agreeing with it.
-- **The DNS cache, the rest** (0.29.0). An NXDOMAIN listed in `ip dns
-  cache`; after `ip dns flush`, the next `host -v` says "Received from".
 - **`nc`, the rest** (0.29.0). The far side's telnetd shows no error for
-  the empty connection `nc -z` makes; `nc -w 3 <host> 23` (no `-z`) to a
-  host that's down gives up after 3 s.
+  the empty connection `nc -z` makes.
 
-- **`ip neigh add` / `ip neigh del`** (ccnix 0.24.0). On a lab computer,
-  `ip neigh add <addr> lladdr <mac>` for a host on its network, with the
-  network down and again up: `ip neigh` shows it `permanent`; a ping to that
-  host sends no ARP request (`tcpdump -i <iface> arp` shows no who-has); it
-  survives `ip down` / `ip up` and a reboot (setting `net.neigh`); a wrong
-  MAC breaks pings to that host; `ip neigh del <addr>` brings ARP back.
-  `dev <iface>` for an address off every interface's network.
+- **`ip neigh add` / `ip neigh del`, the rest** (ccnix 0.24.0). Added
+  with the network down; a wrong MAC breaks pings to that host; `ip neigh
+  del <addr>` brings ARP back; `dev <iface>` for an address off every
+  interface's network.
 - **Source checking on the host's TUN chain** (`ccnix0-src`): needs
   `gateway.sourceCheck` off, then a forged source from inside is dropped by
   the host instead.
@@ -390,6 +377,17 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — The network on ROM 0.40.3 (Lab-B): `ip host gone <addr>`,
+  `ping gone`, `ip host del gone` (gone from the list, "Name or service
+  not known"), and again: "no host gone", status 1.  `ip neigh add` of the
+  router's address: `permanent`, no who-has from Lab-B for it while
+  pinging past it (the router's own who-has for Lab-B seen), kept over `ip
+  down`/`ip up` and a reboot.  `ip dns cache` listing an NXDOMAIN, `ip dns
+  flush`, then `host -v` "Received from".  `ping -c 0 -q` quiet until
+  Ctrl+C, then the summary (-c 0 is no limit, as in BSD's ping); Ctrl+T on
+  a `ping &` brought back with `fg`; `nc -w 3` to a host that's down gives
+  up after 3 s.
 
 - 2026-11-11 — ccsh on ROM 0.40.3: Ctrl+C stops `ping` and `tail -f`, and
   at a `>` prompt drops the command; `paint` keeps Ctrl+C; `kill -0 $$`
