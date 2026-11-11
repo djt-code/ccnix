@@ -115,12 +115,6 @@ section.
   `*` from just before one, Ctrl+A on `x = -7`, `%` from before a
   bracket.
 
-- **Shell colours as a #! is typed** (0.40.3). `vim /new` (no
-  extension), then `i` and `#!/ccnix/bin/ccsh` on the first line: the
-  lines below colour as ccsh at once, not as Lua until reopened; delete
-  the `#!` and they go back to Lua. In `x=1; echo $(echo (a)) )` the `1` is
-  magenta, and the `)` of the `$(` is light blue as the `$(` is (the
-  `(a)` and the last `)` orange).
 - **`vim`, the rest** (0.25.0). On a basic computer it's plain vi.
 - **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
   (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
@@ -135,19 +129,12 @@ section.
   keeps Ctrl+C; in `telnet <host>` Ctrl+C reaches the far side's program
   (a `ping` there stops), not the local telnet; `ping <host>` and `tail -f`
   stop on Ctrl+C; all of it again on a computer without init.
-- **The line editor, the rest** (0.28.0, lib/readline). Ctrl+B/F, Home/End
-  and the arrows; Alt+B/F/D and Alt+Backspace (first check that the game
-  sends Alt key events at all); Ctrl+K; Ctrl+P/N and Up/Down; Ctrl+D
-  deleting on a line with text. `read x` at the keyboard has the same
-  keys; Ctrl+C there stops the rest of the line.
-- **Ctrl+R, the rest** (0.28.0): tap it again for an older match; Ctrl+G
-  or an arrow to leave the search.
-- **Tab and long lines** (0.28.0): the completion shows in grey after the
-  cursor on a colour computer and on a basic one; Up/Down cycle the
-  suggestions. A line longer than the screen scrolls sideways on a turtle
-  (39 wide) and a computer (51 wide). PS1 with `\n`, and a coloured
-  prompt, redraw correctly after Ctrl+L. AltGr (Ctrl+Alt) characters on a
-  non-US layout type normally and trigger no bindings.
+- **The line editor, the rest** (0.28.0, lib/readline). `read x` at the
+  keyboard has the same keys; Ctrl+C there stops the rest of the line.
+- **Tab and long lines, the rest** (0.28.0): the completion in grey on a
+  basic computer; Up/Down cycle the suggestions. A coloured prompt redraws
+  correctly after Ctrl+L. AltGr (Ctrl+Alt) characters on a non-US layout
+  type normally and trigger no bindings.
 - **Ctrl+C, the rest** (0.28.0): at a `>` continuation prompt it drops the
   whole command; a computer without init; under init it doesn't reach
   ccsh itself when ccsh was started from ccsh. In telnet under init,
@@ -409,6 +396,14 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — ROM 0.40.3: a #! typed into a new file colours it as ccsh
+  at once, the `)` of a `$(` light blue, `1` after `x=` magenta.  The ccsh
+  line editor: Ctrl+B/F, Home/End and the arrows, Alt+B/F/D and
+  Alt+Backspace (the game sends Alt), Ctrl+K, Ctrl+D, Ctrl+P/N; Ctrl+R
+  and again for an older match, Ctrl+G or an arrow to leave; the grey
+  completion on a colour computer; a long line scrolling sideways on a
+  turtle; a two-row PS1 (`\h\n\$ `) whole after Ctrl+L.
 
 - 2026-11-11 — vi and vim on ROM 0.40.2: on a pocket computer and a
   turtle `-- INSERT --` and `-- REPLACE --` whole beside the ruler, and the
