@@ -5,17 +5,6 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## Paged output under ccsh (0.40.1)
-
-- **CraftOS programs that page their output** (`textutils.pagedPrint` and
-  `pagedTabulate`: CraftOS's own `help index` did, ccnix's doesn't now)
-  failed under ccsh with "Redirect object is missing method getSize": the
-  terminal ccsh gives a command had its methods only through a metatable,
-  and pagedPrint copies it with pairs().  Try `lua` then
-  `textutils.pagedTabulate({"a"}, {"b"})` and `textutils.pagedPrint(("x
-"):rep(40))`:
-  "Press any key to continue" and no error.
-
 ## claude: http, the network, programs, memory, the web (0.39.0)
 
 - **http in the code**, preferred over ccnix's stack: `claude fetch
@@ -393,24 +382,17 @@ section.
   back.1), Standing by. Click into the VLANs box and type slowly: the
   refresh each second no longer moves the cursor. Escape, Done, or the
   block broken closes it.
-- **Walking with the dialog open** (ccnix-mod 0.24.0, the client's jar):
-  with no box focused, W/A/S/D, jump, sneak and sprint move the player
-  (the view stays still: the mouse is the dialog's); walking 8 blocks off
-  closes it. Clicking into a box stops that (typing W types W); clicking
-  anywhere else (the panel, a label, a button) leaves the box and walking
-  works again. Space with nothing focused jumps, and presses no button.
-- **The cable network dialog** (ccnix-mod 0.25.0; 0.23.0 said it in
-  chat). Right-click a CC cable or wired modem with the configurator: a
-  dialog like the gateway's, with Cables, Modems and Gateway blocks; a
-  "Shared on it" section (each peripheral by the name computers use, its
-  type, the block and where; the pointer says `peripheral.wrap("...")`);
-  "Beside its modems, not shared" (computers using a modem, with their
-  labels); and, in amber, "Into chunks that aren't loaded" (each chunk and
-  the cable that runs into it). A network with many peripherals scrolls
-  with the wheel (a bar at the right). You can walk while it's open; it
-  closes 8 blocks away, or when the clicked cable goes. Client and server
-  both need 0.25.0 (a new packet): an older one is refused.
-- **The mod list's author** (ccnix-mod 0.25.0): "Dan Theisen [WI7FI]".
+- **Walking with the dialog open** (ccnix-mod 0.25.1, the client's jar;
+  0.24.0 and 0.25.0 didn't walk: NeoForge counts the movement keys let go
+  while any screen is open, so the dialog gives them a context of its own
+  while it's open): in the gateway and the cable dialogs, with no box
+  focused, W/A/S/D, jump, sneak and sprint move the player (the view stays
+  still: the mouse is the dialog's); walking 8 blocks off closes it.
+  Clicking into a box stops that (typing W types W); clicking anywhere else
+  (the panel, a label, a button) leaves the box and walking works again.
+  Space with nothing focused jumps, and presses no button. After closing
+  it, the keys work as ever in game, in chat (W types) and in the controls
+  screen (no new clash shown).
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -444,6 +426,14 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — The mod on 0.25.0, ROM 0.40.1: the mod list's author "Dan
+  Theisen [WI7FI]"; the cable network dialog on a short network (2 cables,
+  2 modems, the computers beside them with their labels, the empty
+  "Shared on it" note) and on the 198-cable run (the amber unloaded chunk,
+  the tooltips); typing W in the gateway dialog's boxes.  Under ccsh,
+  `textutils.pagedTabulate({"a"}, {"b"})` in `lua` with no error, and
+  CraftOS's `help index`.  Walking with a dialog open didn't (0.25.1).
 
 - 2026-11-11 — The mod on 0.23.0, ROM 0.40.0: the mod list's description
   (NAT and TUN) and credits (the inspirations); the gateway dialog laid
