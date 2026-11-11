@@ -141,11 +141,18 @@ if not ending then
     shell.setPath(path)
     help.setPath(helpPath)
     -- CraftOS's ls and rm are aliases (for list and delete), and an alias
-    -- wins over the path: ours take their place; and mkdir's, ahead of it
-    -- on the path
-    for _, name in ipairs({ "ls", "rm", "mkdir" }) do
+    -- wins over the path: ours take their place; and mkdir's and help's,
+    -- ahead of them on the path
+    for _, name in ipairs({ "ls", "rm", "mkdir", "help" }) do
         local prog = find("bin/" .. name .. ".lua")
         if prog then shell.setAlias(name, prog) end
+    end
+    -- help's topics complete on Tab, as CraftOS's help's do
+    local helpProg = find("bin/help.lua")
+    if helpProg then
+        shell.setCompletionFunction(helpProg:sub(2), function(_, index, typed)
+            if index == 1 then return help.completeTopic(typed) end
+        end)
     end
     shell.setAlias("nano", "edit")      -- CraftOS's editor, by the name people reach for
     if stale then

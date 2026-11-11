@@ -35,6 +35,7 @@ Anywhere (bin/):
   git: minimal git client for CC:Tweaked
   grep: print the lines that match a pattern (POSIX grep)
   head: copy the first part of files to standard output (POSIX head)
+  help: the help pages, in ccnix's pager
   host: ask DNS for a name's addresses, or an address's name
   httpd: a web server: the files under a folder, over HTTP (lib/httpd.lua)
   init: processes and services: the first process

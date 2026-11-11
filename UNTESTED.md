@@ -5,6 +5,19 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## help in the pager; the pager keeps the scrollback (0.40.0)
+
+- **`help` is ccnix's** (bin/help.lua; boot aliases it): `help git` opens
+  in the pager (space, j/k, the wheel, G to the end, q), wrapped to the
+  screen; a short page is just printed; `help index` lists the topics in
+  columns; `help nope` says there's no page (status 1); Tab completes a
+  topic. After q, Shift+PgUp (or the wheel at the prompt) shows the
+  `help git` command line still in the scrollback (CraftOS's viewer drew
+  over it).
+- **The pager scrolls the screen up before it draws** (`more`, `git log`,
+  claude's reading back): what was on the screen, the command that
+  opened it too, stays in the console's scrollback.
+
 ## claude: http, the network, programs, memory, the web (0.39.0)
 
 - **http in the code**, preferred over ccnix's stack: `claude fetch
@@ -373,17 +386,26 @@ section.
 
 ## The mod
 
-- **The Network Tester and the gateway's new dialog** (ccnix-mod 0.19.0).
-  Craft the tester in Survival (iron, glass pane, iron / iron, redstone,
-  iron / cable in the middle): it shows in the recipe book's equipment
-  tab. Right-click a gateway empty-handed: the action bar says it takes a
-  tester; with the tester (main hand, or off hand with the main empty) the
-  dialog opens: a grey container panel, a green lamp and Working (amber
-  Standing by on a spare block). With `ping` running through it the frame
-  counts climb each second with a rate beside them; the pointer over MACs
-  heard lists them all. Type in the VLANs box and wait: the refresh leaves
-  the text alone; Enter saves ("Saved" in green). Walk away (8 blocks) or
-  break the block: it closes. An old client is refused by the new server.
+- **The Network Configurator** (ccnix-mod 0.23.0; it was the Network
+  Tester). An old Network Tester in an inventory is a Network Configurator
+  after the update. On a gateway, the dialog's labels fit their column
+  ("From other blocks" no longer runs into its value), long values wrap
+  instead of being cut, and the rows say one thing each: Gateway (the
+  address), Mode (TUN or NAT), Untagged, Exchange (untagged, or tagged as
+  back.1), Standing by. Click into the VLANs box and type slowly: the
+  refresh each second no longer moves the cursor. Escape, Done, or the
+  block broken closes it; the 8-block rule can only be tried with `/tp`
+  (a screen open takes the movement keys).
+- **The configurator on a cable** (ccnix-mod 0.23.0). Right-click a CC
+  cable or wired modem with it: chat lists the cable network (cables,
+  modems, gateway blocks), what its modems share by the names computers
+  use (`drive_0  drive  Disk Drive at ...`), what sits beside a modem
+  without being shared (a computer using it, with its label), and any
+  chunk the cable runs into that isn't loaded. A modem clicked this way
+  isn't turned on or off.
+- **The mod list's text** (ccnix-mod 0.23.0): the description names NAT
+  mode as well as TUN; the credits name Natanael Copa, Rich Felker and
+  Daniel Stenberg as inspirations.
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -417,6 +439,18 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — The mod, on 0.22.2: the mod list's Credits (CC: Tweaked,
+  Daniel Ratcliffe, NeoForge, etlua); the Network Tester's recipe (iron,
+  glass pane, iron / iron, redstone, iron / cable); empty-handed on a
+  gateway the action bar asks for the tester; with it, the dialog: green
+  Working on the working block, amber Standing by on the spare, frame
+  counts climbing with their rates while `ping` ran, the MACs heard on
+  the pointer; what's typed in the VLANs box kept across refreshes.  Seen
+  then, fixed in 0.23.0: a label running into its value, values cut
+  short, the refresh moving the box's cursor.  `help git` and `help
+  tcpdump` shown; the prompt that ran `help git` was missing from the
+  scrollback (CraftOS's help viewer draws over the screen): ccnix 0.40.0.
 
 - 2026-11-11 — Fileserver on ROM 0.39.0 (FS, 4 disks pooled at `/jbod`):
   Tab completion of `/jbod`, its files and `..` in ccsh and in CraftOS's

@@ -141,6 +141,20 @@ check("on a colour screen: coloured lines blitted in their colours on black, pla
 v = press(coloured)
 check("on a plain screen: the same lines as plain text", v[1].row1 == "plain 1" and T.text(2) == "red 2")
 
+-- 3b. what was on the screen goes up, as if scrolled off (so the console's
+--     scrollback keeps the command that opened it), not drawn over
+for r = 1, 13 do T.rows[r] = string.rep(" ", 39) end
+T.rows[1] = string.format("%-39s", "earlier output")
+T.rows[2] = string.format("%-39s", "$ more notes")
+T.x, T.y, T.scrolledOff = 1, 3, {}
+press(text)
+check("the screen above the cursor is scrolled up before the viewer draws",
+    #T.scrolledOff == 2 and T.scrolledOff[1] == "earlier output" and T.scrolledOff[2] == "$ more notes",
+    table.concat(T.scrolledOff, "|"))
+T.x, T.y, T.scrolledOff = 5, 1, {}
+press(text)
+check("a cursor partway along its row: that row goes up too", #T.scrolledOff == 1, #T.scrolledOff)
+
 -- 4. more: files one after another in the pager (cat just copies them)
 local SW = require("shellworld")
 local W = SW.new(PROJ)
@@ -163,3 +177,20 @@ check("not to the screen: copied like cat", r.out == "first\n" .. b and #r.event
 r = W:run("cat", "a.txt", "nope", "b.txt")
 check("cat copies the files with no paging", r.out == "first\n" .. b and r.status == 1
     and r.err[1] == "cat: nope: No such file or directory")
+
+-- 5. help: the help pages through the pager (CraftOS's help API, a stand-in)
+help = {
+    lookup = function(t) return t == "git" and "/rom/help/git.txt" or nil end,
+    topics = function() return { "ls", "git", "cat" } end,
+}
+W:file("rom/help/git.txt", "git: a small client\n")
+r = W:run("help", "git")
+check("help prints a page that fits", r.out == "git: a small client\n" and r.status == 0, (r.out:gsub("\n", "|")))
+r = W:run("help", "nope")
+check("no page: says so, status 1", r.err[1] == "help: No help available for nope" and r.status == 1, r.err[1])
+r = W:run("help", "index", { pipeOut = true })
+check("help index, not to the screen: the topics a line each, sorted", r.out == "cat\ngit\nls\n", (r.out:gsub("\n", "|")))
+r = W:run("help", "index")
+check("help index on the screen: a heading, then the topics in columns",
+    r.out == "Help topics available:\ncat  git  ls\n", (r.out:gsub("\n", "|")))
+help = nil

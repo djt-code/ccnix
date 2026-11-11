@@ -1,0 +1,8 @@
+help: the help pages, in ccnix's pager
+
+  help [topic]
+  help index
+
+Shows a help page (intro if none is named): the ones CraftOS has, and ccnix's (help/, which boot adds to the help path).  A page that fits on the screen is printed; a longer one opens in the pager (pager.lua: space/PgDn a page, j/k or the arrows a line, the mouse wheel, g/G the top and the end, q to quit), wrapped to the screen.  The pager scrolls what was on the screen up first, so the console's scrollback keeps the command that opened it.  `help index` lists the topics.  When the output isn't the screen, the page is copied out as it is.
+
+It takes the place of CraftOS's help (boot makes `help` this), whose viewer drew over the screen and cleared it on the way out.  Markdown pages (.md) are shown as their text.

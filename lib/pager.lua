@@ -17,7 +17,9 @@
 -- Text that fits on the screen is just printed.  Anything longer or wider
 -- opens in a viewer: every line but the bottom one shows text, the bottom
 -- one says where you are.  Lines aren't wrapped unless asked; scroll
--- sideways instead.
+-- sideways instead.  What was on the screen when it opened is scrolled up
+-- first, not drawn over, so the console's scrollback still has it (the
+-- command that opened it too).
 --
 --   mouse wheel           3 lines up / down
 --   space, f, PgDn        a page down (the screen less one line)
@@ -120,6 +122,12 @@ function P.page(src, opts)
     -- console's scrollback
     local kernel = rawget(_G, "proc")
     local claimed, owned = type(kernel) == "table" and kernel.ownScrollback and kernel.ownScrollback(true)
+    -- What's on the screen above the cursor (the command that opened this,
+    -- and before it) goes up, as if scrolled off the top, rather than
+    -- being drawn over: so the console's scrollback (under init) keeps it.
+    local cx, cy = term.getCursorPos()
+    local used = cx > 1 and cy or cy - 1
+    if used > 0 and term.scroll then term.scroll(used) end
     while true do
         w, h = term.getSize()
         if opts.wrap and wrappedAt ~= w then

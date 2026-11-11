@@ -704,7 +704,7 @@ end
 -- { "key", keys.up } (an error when there is none: the program waited for
 -- a key nobody pressed).  keys holds the CC key codes the programs use.
 function M.termApi(w, h)
-    local T = { rows = {}, inverse = {}, events = {}, x = 1, y = 1, w = w, h = h }
+    local T = { rows = {}, inverse = {}, events = {}, x = 1, y = 1, w = w, h = h, scrolledOff = {} }
     for r = 1, h do T.rows[r] = string.rep(" ", w) end
     local bg = "black"
     colours = colours or { black = "black", white = "white" }
@@ -719,6 +719,15 @@ function M.termApi(w, h)
         setTextColour = function() end,
         isColour = function() return false end,
         clearLine = function() T.rows[T.y] = string.rep(" ", T.w); T.inverse[T.y] = bg == "white" end,
+        -- (the rows going off the top kept in T.scrolledOff, as the console's scrollback keeps them)
+        scroll = function(n)
+            for _ = 1, n do
+                T.scrolledOff[#T.scrolledOff + 1] = (table.remove(T.rows, 1):gsub("%s+$", ""))
+                T.rows[T.h] = string.rep(" ", T.w)
+                for r = 1, T.h - 1 do T.inverse[r] = T.inverse[r + 1] end
+                T.inverse[T.h] = nil
+            end
+        end,
         write = function(s)
             s = tostring(s)
             local row = T.rows[T.y]
