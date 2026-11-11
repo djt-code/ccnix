@@ -406,11 +406,6 @@ section.
   (a route around the exchange) and `10.1.0.0/25 via 10.1.0.2` refused;
   a computer straight on the exchange (no router) reaches the internet.
 
-- **`/ccnix rom update` asks before the reload** (ccnix-mod 0.16.0): it only
-  pulls, then warns that loading pauses the server (with the last reload's
-  time) and offers `[Load it]`; `confirm` reloads; nothing new, no reload.
-  On 0.15.39 the reload ran at once and paused the server about 15 s.
-
 - **Credits in the mod list** (ccnix-mod 0.15.39): the ccnix entry in the
   mod list shows the new Credits text (from `credits=` in mods.toml).
 - **The ansible EULA gate** (ccnix-mod 0.15.39): a run with
@@ -435,6 +430,9 @@ section.
 
 ## Tested
 
+- 2026-11-11 — `/ccnix rom update` asks before the reload (ccnix-mod
+  0.22.2): it pulled, offered [Load it], and loading brought the server's
+  ROM to 0.39.0.
 - 2026-11-11 — A disk's startup in place of the computer's (ROM 0.39.0,
   Lab-B, `shell.allow_disk_startup` on): "from the disk" alone, the
   computer's `/startup.lua` skipped, under init with ccsh and under
