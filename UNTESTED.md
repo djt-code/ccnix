@@ -104,9 +104,8 @@ section.
 
 ## Editors
 
-- **Ctrl+C in `vi`, the rest** (0.29.1). On a `:` line it drops the line;
-  on a saved file the hint says "Type :q and Enter to exit"; the hint fits
-  on a turtle (39 columns); over telnet Ctrl+C does the same.
+- **Ctrl+C in `vi`, the rest** (0.29.1). The hint fits on a turtle (39
+  columns); over telnet Ctrl+C does the same.
 
 - **vi and vim parse with lib/scan** (0.27.1, no change meant). `vim` on a
   big Lua file (lib/vi.lua, about 2,000 lines): `G`, then scroll back up;
@@ -121,10 +120,12 @@ section.
   before one, Ctrl+A on `x = -7`, `~` over mixed case, `%` from before a
   bracket.
 
-- **`vi`, the rest** (0.25.0). Ctrl+A adds one to a number; `dd`, `p`,
-  `.`, `:%s/a/b/g` behave as in vi. Mouse wheel scrolls, a click moves
-  the cursor, Ctrl+V pastes. On a turtle (39 columns) and a pocket
-  computer (26) the bottom line still fits.
+- **vi's bottom line on a narrow screen** (0.40.2). On a pocket computer
+  (26 columns), `i` shows all of `-- INSERT --` and the ruler, and `R` all
+  of `-- REPLACE --`: the `i` or `R` that started it no longer stays shown
+  (it took the room); with a long line number the ruler drops its padding.
+  On a turtle (39) the same. In normal mode, `2d` still shows `2d` while
+  it waits for the motion.
 - **`vim`, the rest** (0.25.0). A ccsh script with `#!/ccnix/bin/ccsh`
   gets the shell's colours; on a basic computer it's plain vi; `:set
   hls`.
@@ -415,6 +416,13 @@ section.
   copy cut short.
 
 ## Tested
+
+- 2026-11-11 — vi on ROM 0.40.1: Ctrl+A on a number, `yyp`, `dd`, `p`,
+  `.` repeating Ctrl+A, `:%s/x/y/g` ("2 substitutions on 2 lines"), the
+  mouse wheel, a click moving the cursor, Ctrl+V pasting; Ctrl+C on a `:`
+  line drops it, and on a saved file says "Type :q and Enter to exit".
+  Seen then, fixed in 0.40.2: on a pocket computer `-- INSERT --` cut to
+  `-- INSERT`, the `i` that started insert mode still shown.
 
 - 2026-11-11 — The mod on 0.25.1: walking with the gateway dialog open
   (W/A/S/D with no box focused), closing it by walking off, typing in a

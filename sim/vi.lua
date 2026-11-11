@@ -283,6 +283,14 @@ check("the ruler shows line and column", sc and sc.rows[H]:find("1,1") ~= nil, s
 edit("x\n", "i")
 sc = beforeQuit()
 check("-- INSERT -- shows in insert mode", bottomHas("^%-%- INSERT %-%-") ~= nil)
+check("and not the i that started it", not bottomHas("^%-%- INSERT.* i  "), bottomHas("^%-%- INSERT"))
+W = 26; blank()    -- a pocket computer
+edit("x\n", "i")
+check("on a pocket computer, all of -- INSERT -- and the ruler", bottomHas("^%-%- INSERT %-%- +1,1 +All$") ~= nil,
+    bottomHas("INSERT"))
+edit("x\n", "R")
+check("and of -- REPLACE --", bottomHas("^%-%- REPLACE %-%- 1,1 +All$") ~= nil, bottomHas("REPLACE"))
+W = 51; blank()
 
 -- 8. syntax.lua on its own
 local syntax = require("syntax")

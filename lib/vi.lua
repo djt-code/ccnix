@@ -428,7 +428,9 @@ function matchesOf(y)
     return out
 end
 
-function ruler()
+-- The line and column, and where the view is; tight leaves out the padding
+-- between them (for a narrow screen).
+function ruler(tight)
     local s = lines[cy]
     local col
     if #s == 0 then col = "0-1"
@@ -442,7 +444,7 @@ function ruler()
     elseif top <= 1 then where = "Top"
     elseif top + v - 1 >= #lines then where = "Bot"
     else where = math.floor((top - 1) * 100 / (#lines - v)) .. "%" end
-    return string.format("%-8s %s", cy .. "," .. col, where)
+    return string.format(tight and "%s %s" or "%-8s %s", cy .. "," .. col, where)
 end
 
 function render()
@@ -498,7 +500,9 @@ function render()
     else
         local left = msg or (mode == "insert" and "-- INSERT --") or (mode == "replace" and "-- REPLACE --") or ""
         local right = ruler()
-        if showcmd ~= "" then right = showcmd .. "  " .. right end
+        if #left + 1 + #right > w then right = ruler(true) end
+        -- (the keys of a command still being typed: not once it's put vi in insert mode)
+        if showcmd ~= "" and mode == "normal" then right = showcmd .. "  " .. right end
         if #right >= w or (msg and #msg + #right + 1 > w) then right = "" end    -- a long message gets the line
         local room = w - #right - (right ~= "" and 1 or 0)
         left = left:sub(1, room)
