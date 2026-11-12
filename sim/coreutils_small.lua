@@ -442,6 +442,13 @@ check("sysctl name=value: as each one's type has it (a string-typed one keeps 42
 r = W:run("sysctl", "motd.enable=yes")
 check("a value of the wrong type: refused, status 1, nothing saved", r.status == 1 and VALS["motd.enable"] == false
     and saved == 1 and r.err[1] == "sysctl: motd.enable is a boolean: not yes", show(r.errText))
+VALS["my.switch"] = true
+r = W:run("sysctl", "my.switch=yes", "my.count=lots", "my.word=42")
+check("an undefined setting holding true/false or a number keeps that kind (text stays free): refused, status 1",
+    r.status == 1 and VALS["my.switch"] == true and VALS["my.count"] == 12 and VALS["my.word"] == 42
+    and r.err[1] == "sysctl: my.switch is a boolean: not yes" and r.err[2] == "sysctl: my.count is a number: not lots",
+    show(r.errText))
+VALS["my.switch"], VALS["my.word"], saved = nil, "hello there", 1
 r = W:run("sysctl", "motd.enable=", "my.list=")
 check("sysctl name=: back to the default, or not set with none; saved", r.status == 0 and VALS["motd.enable"] == nil
     and VALS["my.list"] == nil and saved == 2 and r.out == "motd.enable = false (its default)\nmy.list: not set\n", show(r.out))

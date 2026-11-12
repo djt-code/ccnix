@@ -14,7 +14,9 @@
 -- and ignored (a name=value is a change anyway).
 --
 -- A setting defined with a type takes a value of that type: true or
--- false, a number, or the text as it is.  One without is read as true,
+-- false, a number, or the text as it is.  One without (ccnix's own) that
+-- holds true/false or a number takes only that kind again (name= first
+-- clears it, to give it another kind); else a value is read as true,
 -- false or a number when it looks like one, else as the text.  A table
 -- is shown as textutils.serialise writes it, on one line.
 -- Exit status: 0; 1 if a name to show doesn't exist, or a value is of
@@ -52,9 +54,19 @@ local function show(name, after)
     end
 end
 
+-- The type a value must have: the defined one, else (ccnix's settings
+-- aren't defined) that of the true/false or number it holds now, so a
+-- slip like `ccsh.login=yes` doesn't turn a switch into text; nil: any.
+local function typeOf(name)
+    local want = details(name).type
+    if want then return want end
+    local now = type(settings.get(name))
+    if now == "boolean" or now == "number" then return now end
+end
+
 -- given, as the setting's type has it; nil if it isn't one
 local function valueFor(name, given)
-    local want = details(name).type
+    local want = typeOf(name)
     if want == "string" then return given end
     if want == "boolean" or (want == nil and (given == "true" or given == "false")) then
         if given == "true" then return true elseif given == "false" then return false end
@@ -78,7 +90,7 @@ for _, op in ipairs(ops) do
     else
         local value = valueFor(name, given)
         if value == nil then
-            cu.fail(name .. " is a " .. tostring(details(name).type) .. ": not " .. given)
+            cu.fail(name .. " is a " .. tostring(typeOf(name)) .. ": not " .. given)
         else
             settings.set(name, value)
             changed = true

@@ -148,26 +148,10 @@ numbers, the text tools and the network tools. Still to try:
 
 ## Setup and boot
 
-- **0.33.0, from test 5's second try:** init copies the screen before
-  making its console window (0.30.1 made the window first, which drew it
-  blank, so the startup files' output was still lost).  Retry 5.1-5.4.
-- **The mouse wheel scrolls the console's scrollback** (0.33.0), at the
-  prompt and under programs that don't scroll with it (ping, cat); vi,
-  vim, more, git log and edit/nano keep the wheel; the wheel down at the
-  live screen still reaches the program.
-- **Up through the history doesn't loop** (0.33.0): a recalled line shows
-  no grey completion, so Up goes on back.
-- **`> /disk/f` with no disk in** (0.33.0): `ccsh: /disk/f: No such file
-  or directory`, status 1, and no `/disk` folder made (CC's fs.open makes
-  folders; 0.32.0 and before made one).  `> /rom/x`: Read-only file
-  system; `> /rom`: Is a directory.
-
-- **`sysctl`** (0.32.0): `sysctl -a`, `sysctl name`, `-n`, `-d`, an unknown
-  name (status 1); `sysctl name=value` (a boolean setting refusing `yes`),
-  `sysctl name=` back to its default, kept across a reboot; `help sysctl`.
-- **ccsh's `set`** (0.32.0, POSIX's): `set` lists the variables; `set --
-  a b` then `echo $1 $2`; `set -x`, `set -e` in a script, `set -u`, `set
-  -f`, `set -o`, `echo $-`.  CraftOS's `set` is still there outside ccsh.
+- **sysctl keeps a switch a switch** (0.43.3): `sysctl ccsh.login=yes`
+  refused ("ccsh.login is a boolean: not yes"), status 1; `sysctl
+  ccsh.login=true` fine. `sysctl syslog.maxSize=2M` then a log rotating
+  at that size.
 
 - **`ccnix update` on many computers at once** (0.30.2): GitHub answered
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
@@ -179,8 +163,6 @@ numbers, the text tools and the network tools. Still to try:
   (`git pull` then `deploy/setup` on such a turtle worked.)
 - **`ccnix setup` on a server with the ccnix mod** (0.20.0): settings and
   apps chosen through the ROM's setup.
-- **`syslog.maxSize` with K/M** (0.21.0): `set syslog.maxSize 2M`, and a log
-  rotating at that size.
 
 ## screen
 
@@ -243,6 +225,16 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.2: a /startup.lua's output kept on the console
+  under init; the wheel scrolls the console's scrollback (ping's output
+  waits below while it's open), vi keeps the wheel; Up through the
+  history doesn't loop; `> /nodir/f` (no folder made), `> /rom/x`, `>
+  /rom` errors; `sysctl -a`, `-n`, `-d`, an unknown name (1), `name=2M`,
+  `name=` (not set); ccsh's `set --`, `-x`, `$-`, `-o`, `-f`, `-e` in a
+  script (status 1), `-u`.  Not right: `sysctl ccsh.login=yes` was taken
+  as the text "yes" (ccnix's settings aren't defined with a type; fixed
+  in 0.43.3).
 
 - 2026-11-12 — ROM 0.43.2: irc's hilightwin (a "hilight" buffer with the
   hilight and the kick), autorejoin (kicked, back at once), `/script
