@@ -418,8 +418,8 @@ function M.fsApi(S)
         move = function(a, b) a, b = combine(a), combine(b); S.files[b], S.files[a] = S.files[a], nil end,
         open = function(p, mode)
             p = combine(p)
-            if mode == "w" or mode == "a" then
-                local buf = { mode == "a" and S.files[p] or nil }
+            if mode == "w" or mode == "a" or mode == "wb" or mode == "ab" then       -- (binary modes write the same bytes)
+                local buf = { (mode == "a" or mode == "ab") and S.files[p] or nil }
                 return {
                     write = function(s) buf[#buf + 1] = s end,
                     writeLine = function(s) buf[#buf + 1] = s .. "\n" end,

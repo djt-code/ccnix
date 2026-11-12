@@ -1,5 +1,6 @@
 farm.map
 .turtlepos
+.map/
 sim/logs/
 claude.key
 claude.log

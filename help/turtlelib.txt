@@ -8,6 +8,7 @@ Provides:
   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that no dig through the turtle API goes into, and a refusal to dig chests, barrels, shulker boxes, spawners and ComputerCraft blocks (T.cfg.digContainers lifts it)
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
+  * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -44,6 +45,8 @@ T.clearPos()
 
 T.startAtHome(force)
     Call at the start of a job: the turtle is at home, facing forward. If a saved position says otherwise, returns it instead of resetting so the program can warn the user.
+
+    Where it does reset, the spot the turtle stands on becomes (0,0,0) in a new frame; the map (T.map, if one is kept) is told where that spot was in the old one, so it stays right. With no saved position (the file was deleted) and no T.clearPos before it, nobody knows where that was, and the map is marked unaligned (T.alignMap).
 
 == The turtle API, wrapped once ==
 
@@ -95,6 +98,8 @@ T.posString()
 
 T.setDir(d)
     The heading is really d (a program worked it out from what's round the turtle: the saved one can be off after a stop between a turn and its save, or a turtle put back by hand).
+
+    That turns the frame the turtle counts in about where it stands, so the map (T.map, if one is kept) is told.
 
 T.lookAround()
     What's beside the turtle, by quarter turns to the right of the way it faces: seen[a] is the inspect data at a turns, or false for air.
@@ -447,3 +452,119 @@ T.refuelFrom(side, target)
 
 T.need(name)
     The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+
+tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
+
+Loaded by turtlelib the first time one of these is used (T.scan, T.map, T.setOrigin, ...), and from the start on a turtle that already has a map on disk, so that digs and moves made by any program keep it right.  Coordinates in the calls are the turtle's own (the frame it counts in: (0,0,0) where its job started, facing +z, +x to its right).
+
+Frames.  The turtle's frame isn't fixed: `--here`, T.setHomeHere, T.clearPos and a run with no saved position make wherever it stands (0,0,0) again.  So the map keeps a frame of its own, the one it was started in, and the transform (a shift and quarter turns) from the turtle's current frame to it.  Whenever turtlelib re-zeroes it tells this module where that spot was, and the transform is updated, so what the map holds stays where it is.  If the frame was lost without that (the saved position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder (.map/frame).
+
+The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
+
+A cell's "when" is the time its cube was last seen, in seconds (os.epoch "utc").
+
+== Frames and the world ==
+
+T.frameChanged(old, new)
+    Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.
+
+    turtlelib calls it when a program re-zeroes (T.setHomeHere, --here, T.clearPos then a start) or corrects the heading (T.setDir), so what the map holds stays where it is. With old nil, nobody knows where the spot was: a map holding cubes is marked unaligned. False and why if the map is unaligned now or was already.
+
+T.alignMap(dx, dy, dz, turns)
+    Say how the turtle's frame sits in the map's, and mark the map aligned. Returns true, or nil and why.
+
+    A point (x, y, z) of the turtle's frame is the map's after turning `turns` quarter turns to the right (about the vertical axis, from (0,0,0)) and then adding (dx, dy, dz). Use it after a lost position, when you know where the turtle is relative to something in the map.
+
+T.origin()
+    The turtle's frame in the world: { x, y, z, facing, aligned }, the world cell of its (0,0,0) and the compass way its +z points. Nil and why if T.setOrigin hasn't been told.
+
+    facing is "north", "east", "south" or "west".
+
+T.setOrigin(x, y, z, facing)
+    Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns true and T.origin()'s table, or nil and why.
+
+    Also n/e/s/w, or -z/+x/+z/-x. Called with no arguments it asks GPS for the cell and works out the facing from a geo scan; with x, y, z only, it finds the facing from a scan.
+
+T.toWorld(a, b, c)
+    Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+
+T.toLocal(a, b, c)
+    Convert a world point (a table with x, y, z, or three numbers) to the turtle's frame: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+
+== The map ==
+
+T.map.get(x, y, z)
+    What the map holds at x, y, z (turtle frame): the block's name, its state table if inspected, and when it was last seen (seconds); nil and why if never seen.
+
+    Air is "minecraft:air". An unaligned map gives nil and why too.
+
+T.map.set(x, y, z, name, state)
+    Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)
+
+T.map.top(x, z)
+    The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none.
+
+T.map.find(pattern, box, limit)
+    The cells in the box (whole map if none) whose block name matches the glob, nearest first: a list of {x, y, z, name}, and true if cut to `limit` (default 500).
+
+    The glob may leave out the namespace ("*_stairs", "stone"). Nil and why if the map is unaligned.
+
+T.map.count(pattern, box)
+    How many cells inside the box (the whole map if none) hold a block whose name matches the glob (as in T.map.find). Nil and why if the map is unaligned.
+
+T.map.heights(box)
+    A height map of the box (17 by 17 about the turtle if none) as text: each column's highest solid y, "." where none is known.
+
+    Rows run from the box's high z down to its low z, columns from low x to high. Nil and why if the map is unaligned.
+
+T.map.slice(y, box)
+    The layer at height y in the box (17 by 17 about the turtle if none) as text, a character a cell, with a legend of the symbols.
+
+    "." is air, "?" never seen, "~" water, "^" lava, any other symbol a block listed after. Rows run from the box's high z down to its low z, columns from low x to high. Nil and why if the map is unaligned.
+
+T.map.flush()
+    Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
+
+T.map.stats()
+    What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+
+T.map.clear()
+    Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+
+T.map.frame()
+    The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).
+
+T.map.toMap(x, y, z)
+    A point of the turtle's frame in the map's: mx, my, mz (T.map.frame says how they relate).
+
+T.map.fromMap(mx, my, mz)
+    A point of the map's frame in the turtle's: x, y, z.
+
+T.map.cube(cx, cy, cz)
+    The cube at cx, cy, cz (map frame) as its 4096 bytes and its palette, for code that reads many cells at once; nil if there is none.
+
+    A cell's cube is its map coordinate divided by 16, rounded down. string.byte(bytes, (ly * 16 + lz) * 16 + lx + 1) is the cell at lx, ly, lz in the cube: 0 never seen, 1 air, 2 and up palette[code - 1].
+
+== Scans ==
+
+T.scan(r, opts)
+    Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
+
+    opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air). The info table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan. The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools down. The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading. A radius over 8 costs a lot of fuel (16 once cost about 5300), so it's refused unless forced.
+
+T.scanBox(box, opts)
+    Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
+
+    It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less. Refuses a box that takes over 27 scans unless opts.force. failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+
+== Inspecting ==
+
+T.inspectAt(x, y, z, opts)
+    Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
+
+    The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on).
+
+T.inspectAll(list, opts)
+    T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.
+
+    Each time it goes next to the nearest one (greedy, not the shortest tour), and looks at any other cell beside it from there.

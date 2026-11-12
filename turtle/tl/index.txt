@@ -128,3 +128,31 @@ T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back fa
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+Frames and the world:
+T.frameChanged(old, new) - Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.
+T.alignMap(dx, dy, dz, turns) - Say how the turtle's frame sits in the map's, and mark the map aligned. Returns true, or nil and why.
+T.origin() - The turtle's frame in the world: { x, y, z, facing, aligned }, the world cell of its (0,0,0) and the compass way its +z points. Nil and why if T.setOrigin hasn't been told.
+T.setOrigin(x, y, z, facing) - Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns true and T.origin()'s table, or nil and why.
+T.toWorld(a, b, c) - Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+T.toLocal(a, b, c) - Convert a world point (a table with x, y, z, or three numbers) to the turtle's frame: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+The map:
+T.map.get(x, y, z) - What the map holds at x, y, z (turtle frame): the block's name, its state table if inspected, and when it was last seen (seconds); nil and why if never seen.
+T.map.set(x, y, z, name, state) - Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)
+T.map.top(x, z) - The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none.
+T.map.find(pattern, box, limit) - The cells in the box (whole map if none) whose block name matches the glob, nearest first: a list of {x, y, z, name}, and true if cut to `limit` (default 500).
+T.map.count(pattern, box) - How many cells inside the box (the whole map if none) hold a block whose name matches the glob (as in T.map.find). Nil and why if the map is unaligned.
+T.map.heights(box) - A height map of the box (17 by 17 about the turtle if none) as text: each column's highest solid y, "." where none is known.
+T.map.slice(y, box) - The layer at height y in the box (17 by 17 about the turtle if none) as text, a character a cell, with a legend of the symbols.
+T.map.flush() - Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
+T.map.stats() - What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+T.map.clear() - Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+T.map.frame() - The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).
+T.map.toMap(x, y, z) - A point of the turtle's frame in the map's: mx, my, mz (T.map.frame says how they relate).
+T.map.fromMap(mx, my, mz) - A point of the map's frame in the turtle's: x, y, z.
+T.map.cube(cx, cy, cz) - The cube at cx, cy, cz (map frame) as its 4096 bytes and its palette, for code that reads many cells at once; nil if there is none.
+Scans:
+T.scan(r, opts) - Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
+T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
+Inspecting:
+T.inspectAt(x, y, z, opts) - Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
+T.inspectAll(list, opts) - T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.

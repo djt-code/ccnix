@@ -21,6 +21,11 @@
 --     chunk controller, T.pull: a count of one item out of a chest, and
 --     a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is
 --     ever dropped on the ground for
+--   * the map and the frames (tl.world, loaded when first used): T.scan, the
+--     geo scanner's blocks in the turtle's own frame, kept in a map on disk
+--     (T.map.get/find/heights/slice, ...) that digs, placements and moves update,
+--     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
+--     for block states; a re-zeroed frame (--here) keeps the map right
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -192,22 +197,48 @@ function T.loadPos()
     return { x = tonumber(x), y = tonumber(y), z = tonumber(z), dir = tonumber(d), mode = mode }
 end
 
+-- The folder of the map (tl.world) in the data folder.  Its being there is how
+-- the code below knows there is a map whose frame a re-zeroing would move.
+T.MAP_DIR = ".map"
+
+-- Tell the map (if there is one) that the frame the turtle counts in changed: the spot
+-- that was `old` ({ x, y, z, dir }, or nil if that isn't known) is now `new` (default
+-- the start, 0,0,0 facing 0).  Without a map on disk this does nothing, and loads nothing.
+local function frameMoved(old, new)
+    if not fs.exists(T.dataPath(T.MAP_DIR)) then return end
+    if old and old.x == 0 and old.y == 0 and old.z == 0 and old.dir == 0 and not new then return end
+    local changed = T.need("frameChanged")
+    if changed then pcall(changed, old, new) end
+end
+
+-- Where the turtle was when T.clearPos last forgot it: the frame it left, for the map
+local cleared
+
 -- Delete the saved position file: the next job starts from home as (0,0,0).
 function T.clearPos()
     local p = T.dataPath(POS_FILE)
+    cleared = T.loadPos() or { x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = T.dir }
     if fs.exists(p) then fs.delete(p) end
 end
 
 -- Call at the start of a job: the turtle is at home, facing forward.
 -- If a saved position says otherwise, returns it instead of resetting so
 -- the program can warn the user.
+--
+-- Where it does reset, the spot the turtle stands on becomes (0,0,0) in a new frame; the
+-- map (T.map, if one is kept) is told where that spot was in the old one, so it stays
+-- right.  With no saved position (the file was deleted) and no T.clearPos before it,
+-- nobody knows where that was, and the map is marked unaligned (T.alignMap).
 function T.startAtHome(force)
     local saved = T.loadPos()
     if saved and not force and (saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
         return saved
     end
+    local old = saved or cleared
+    cleared = nil
     T.pos.x, T.pos.y, T.pos.z, T.dir = 0, 0, 0, 0
     T.savePos()
+    frameMoved(old)
     return nil
 end
 
@@ -556,7 +587,13 @@ end
 -- The heading is really d (a program worked it out from what's round the
 -- turtle: the saved one can be off after a stop between a turn and its
 -- save, or a turtle put back by hand).
+--
+-- That turns the frame the turtle counts in about where it stands, so the map (T.map, if
+-- one is kept) is told.
 function T.setDir(d)
+    if d ~= T.dir then
+        frameMoved({ x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = T.dir }, { x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = d })
+    end
     T.dir = d
     T.savePos()
 end
@@ -2365,7 +2402,12 @@ end
 -- model's code's).  Each copy of turtlelib loads its own copy of a module,
 -- as each program has its own require.
 --------------------------------------------------------------------------
-T.registry = {}
+T.registry = {
+    -- tl.world: the map, the frames and the scanner
+    map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
+    setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
+    alignMap = "tl.world", frameChanged = "tl.world",
+}
 local loadingModule = {}
 
 -- The function T.<name>: as it is, or from the module the registry names,
@@ -2403,5 +2445,9 @@ setmetatable(T, { __index = function(_, name)
     if f then return f end
     return function() error(why, 2) end
 end })
+
+-- A map on disk is kept right by every program that digs, places or moves, so its module
+-- listens from the start (without a map, nothing is loaded).
+if turtle and fs and fs.exists(T.dataPath(T.MAP_DIR)) then pcall(T.need, "map") end
 
 return T

@@ -5,6 +5,53 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.world: the map, the frames, scans and inspects (ADR-0008 phase 2)
+
+- **A scan in the turtle's frame**: `T.scan(8)` in claude's code with the Geo
+  Scanner in the inventory (a chunk controller on one side, a pickaxe on the
+  other): the scanner goes on for the scan and the pickaxe comes back, the
+  result is `{ ["x,y,z"] = name }`, and the blocks are where `T.look` agrees
+  they are from each of the four headings. The info table's `fuel` is what
+  the scan cost on this server. `T.scan(9)` is refused; `{ force = true }`
+  allows it. If the scanner reports its cooldown another way than an error
+  return, the retry (5 asks, a second apart) may not trigger: see what it
+  says.
+- **Entries without r/u/f**: the scan relies on each entry carrying `r`, `u`
+  and `f` (Advanced Peripherals 0.8, as mine.lua uses); an older one gets "the
+  scan's entries carry no r, u and f".
+- **Air in the map**: the cells inside a scan that the scanner lists no block
+  for are noted as air (`opts.air = false` leaves that out). If the scanner
+  leaves out some blocks (the castle turtle thought stairs and slabs), the map
+  will say air there; `T.inspectAt` is the check.
+- **The map on disk**: after a scan, look in the data folder (`/ccnix/turtle`
+  on a ROM turtle) for `.map/` with `frame` and files named `cx_cy_cz`, each a
+  few KB. `T.map.stats()` says cubes, bytes and the cap (the smaller of 512 KB
+  and a quarter of the disk; `sysctl map.maxBytes=...` changes the first).
+  Walk, dig and place with other programs (`mine`, `farm`): the map follows,
+  written in batches (a minute of work may leave a few changes unwritten if the
+  turtle is stopped with Ctrl+T: `T.map.flush()` writes them).
+- **The frames**: scan, walk off, run `mine --here` (or `T.setHomeHere()`),
+  scan again: `T.map.get` in the new frame should still agree with the first
+  scan, and `T.map.frame()` shows the quarter turns and shift. Delete
+  `.turtlepos` and start a program: `T.map.get` answers "the map is
+  unaligned" until `T.alignMap(dx, dy, dz, turns)` (or `T.map.clear()`).
+  (`T.setDir`, which mine's heading check and farm's map check use, is a frame
+  change too and is handled the same way.)
+- **The origin**: `T.setOrigin(x, y, z, "north")` with the coordinates from F3,
+  then `T.toWorld(...)` against what F3 says at another place; `T.setOrigin(x,
+  y, z)` (the facing from a scan) and `T.setOrigin()` (GPS too, if the world
+  has one) should give the same facing as the F3 one. The scanner's x and z are
+  the world's, mirrored against the turtle's right: the facing is worked out
+  from that and was only checked against the mock.
+- **Inspecting**: `T.inspectAt` on a stair or a slab: its `facing`, `half` and
+  `shape` come back and are kept (`T.map.get` after a restart). A cell
+  boxed in by solid blocks is "couldn't get next to"; there is no way round
+  yet (that is the path module).
+- **scanBox**: `T.scanBox({0, 0, 0, 30, 10, 10}, { move = { dig = true } })`
+  makes two or three scans, walking to each centre.
+- **Views**: `print(T.map.heights(box))` and `print(T.map.slice(y, box))` on a
+  scanned area read sensibly (rows run from the high z down to the low z).
+
 ## turtlelib's reference and claude's prompt (ADR-0008 phase 1, 0.46.0)
 
 - **The index in the prompt**: start `claude` on a turtle with the ROM (or an
