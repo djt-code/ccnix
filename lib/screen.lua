@@ -248,16 +248,26 @@ function Display:detach()
     self.s.displays[self.pid] = nil
 end
 
--- The status bar: the windows (* the current, - the one before), then
--- the session's name and the time at the right.
+-- The windows' labels on the status bar (* the current, - the one
+-- before), and the columns each takes: { win, text, from, to }.
+function Display:labels()
+    local s, out, x = self.s, {}, 2
+    for _, win in ipairs(s.windows) do
+        local mark = (win == s.current and "*") or (win == s.previous and "-") or " "
+        local label = win.n .. mark .. s:title(win)
+        out[#out + 1] = { win = win, text = label, from = x, to = x + #label - 1 }
+        x = x + #label + 2
+    end
+    return out
+end
+
+-- The status bar: the windows' labels, then the session's name and the
+-- time at the right.
 function Display:statusText()
     if self.msg and self.clock() < self.msgUntil then return " " .. self.msg end
     local s = self.s
     local parts = {}
-    for _, win in ipairs(s.windows) do
-        local mark = (win == s.current and "*") or (win == s.previous and "-") or " "
-        parts[#parts + 1] = win.n .. mark .. s:title(win)
-    end
+    for _, l in ipairs(self:labels()) do parts[#parts + 1] = l.text end
     local left = " " .. table.concat(parts, "  ")
     local right = "[" .. s.name .. "] " .. (os.date and os.date("%H:%M") or "") .. " "
     local room = self.w - #right
@@ -485,7 +495,15 @@ function Display:event(name, ...)
     -- everything else is the window's
     if name == "key" or name == "key_up" or name == "char" or name == "paste" or text.startsWith(name, "mouse_") then
         local rows = self.status and self.h - 1 or self.h
-        if text.startsWith(name, "mouse_") and c and c > rows then return nil end   -- (on the status bar)
+        if text.startsWith(name, "mouse_") and c and c > rows then
+            -- on the status bar: a click on a window's label goes to it
+            if name == "mouse_click" and not (self.msg and self.clock() < self.msgUntil) then
+                for _, l in ipairs(self:labels()) do
+                    if b >= l.from and b <= l.to then s:select(l.win) end
+                end
+            end
+            return nil
+        end
         self.proc.input(s.current.tty, name, ...)
     end
     return nil

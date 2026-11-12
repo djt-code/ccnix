@@ -239,6 +239,9 @@ section.
 
 ## screen
 
+- **A click on a window in the status bar** (0.42.0) goes to it; a
+  click between the labels does nothing.  And `ps aux` (BSD's letters)
+  lists as `ps -l` does.
 - **The rest of screen** (0.36.0). Ctrl+A a gives ccsh its Ctrl+A;
   `screen -x` from the console while B has it: both show it, both type
   into it; a different-sized screen resizes the windows. `sysctl
@@ -246,10 +249,10 @@ section.
 
 ## IRC
 
-- **ircd as a service, the rest** (0.35.0). `service stop ircd` with a
-  client connected: the client sees "Server shutting down". `service
-  disable ircd`, reboot: not running. `sysctl ircd.oper=pw`, `service
-  restart ircd`, then `/quote OPER x pw` from a client gives +o.
+- **ircd as a service, the rest** (0.35.0). `service disable ircd`,
+  reboot: not running. `sysctl ircd.oper=pw` (ircd, with the d),
+  `service restart ircd`, then `/quote OPER x pw` from a client (x: any
+  operator name) gives +o and "You are now an IRC operator".
 - **irc, the rest** (0.35.0). A third client: hilights chime on a
   speaker if one is attached; Alt+A to the buffer with something new.
 - **irc on a monitor or a wide screen** (0.35.0). On a computer with an
@@ -257,10 +260,6 @@ section.
   advanced monitor): the buffer list on the left, the nick list on the
   right; a click on a buffer goes there. A pocket computer: no time,
   shorter nick column, still readable.
-- **NickServ and ChanServ** (0.35.0). `/ns register pw`, `/quit`, back
-  as the same nick without identifying: after 60 s you're Guest1. Back
-  again, `/ns identify pw`: kept. `/cs register #ccnix` (while @), all
-  leave, rejoin: the topic's kept and the founder is opped by ChanServ.
 - **The Minecraft bridge** (0.35.0). An Advanced Peripherals Chat Box
   beside A (and a Player Detector): `/join #minecraft` from B, say
   something: it shows in the game's chat as [nick] text. Say something
@@ -277,13 +276,11 @@ section.
   with the network reaching out: `irc irc.libera.chat` (plain 6667),
   /join a channel; `/set network.<name>.sasl_user` and `sasl_pass` for
   SASL.
-- **Scripts** (0.35.0). `/script list`; `/script load slap`, `/slap bob`;
-  `/script load hilightwin` (a hilight buffer gathers hilights);
-  `/script load autorejoin`, get kicked: back in 3 s; a script of your
-  own in /.irc/scripts (`help irc-scripts`' hello example);
-  `/script autorun slap`, restart irc: loaded at the start.
-- **Reconnecting** (0.35.0). Stop ircd while B is in channels: B says
-  disconnected and counts 30 s; start ircd: B is back in its channels.
+- **Scripts, the rest** (0.35.0). `/script load hilightwin` (a hilight
+  buffer gathers hilights); `/script load autorejoin`, get kicked: back
+  in 3 s; a script of your own in /.irc/scripts (`help irc-scripts`'
+  hello example); `/script autorun slap`, restart irc: loaded at the
+  start.
 - **readline's editor** (0.35.0): ccsh's prompt is unchanged (Ctrl+A/E,
   Ctrl+R, Tab completion, history), since read() is now built on it.
 
@@ -345,6 +342,17 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — IRC on ROM 0.41.2 (ircd on Lab-A, irc on Lab-B and in
+  screen on Lab-A): `/ns register`, back without identifying: Guest1
+  after 60 s; back again with `/ns identify`: kept.  `/topic`, `/cs
+  register #ccnix`, `/part`, `/join`: the topic kept, ChanServ opped the
+  founder.  `/script load slap`, `/slap`.  `service stop ircd`: "Closing
+  link ... (Server shutting down)", "Connecting again in 30 seconds",
+  `service start ircd`: back in #ccnix.  A screen session started over
+  telnet taken up on Lab-A's console with `screen -r`.  OPER refused:
+  the password was set as irc.oper, not ircd.oper.  Asked for then: a
+  click on screen's status bar to switch, `ps aux` (0.42.0).
 
 - 2026-11-11 — ROM 0.41.2: irc's Tab offers the others before your own
   nick; Ctrl+C b shows a reversed B in the line, bold white in the chat.

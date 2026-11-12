@@ -95,6 +95,12 @@ local function cols(row)
     return { pid = tonumber(pid), ppid = tonumber(ppid), pgid = tonumber(pgid), tty = tty, stat = stat }
 end
 
+-- 0. ps aux (BSD's letters, no dash): as ps -l; a word of other letters is still refused
+local rb = sh([[ps aux]])
+check("ps aux: taken as ps -l (the PPID column there)", rb.out:find("PPID", 1, true) ~= nil and rowOf(rb.out, "ps aux") ~= nil, show(rb.out))
+rb = sh([[ps auq]])
+check("ps auq: refused, q isn't one of BSD's", rb.out:find("PID", 1, true) == nil, show(rb.out))
+
 -- 1. a program is a process: a child of the shell's, on its terminal
 local r = sh([[ps -l]])
 local me, shellRow = cols(rowOf(r.out, "ps -l")), cols(rowOf(r.out, "ccsh"))

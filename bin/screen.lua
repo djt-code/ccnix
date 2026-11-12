@@ -26,7 +26,7 @@
 -- Ctrl+T itself detaches, and so does the terminal hanging up.
 -- Shift+PgUp is the scrollback too.  The status bar at the bottom shows
 -- the windows (* the one shown, - the one before), the session's name and
--- the time.  A window whose command ends closes; the session ends with
+-- the time; a click on a window there goes to it.  A window whose command ends closes; the session ends with
 -- its last window.  Ctrl+C and Ctrl+Z go to the window.
 --
 -- Settings: screen.prefix (the command key's letter: a; b for tmux's),
