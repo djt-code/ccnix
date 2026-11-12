@@ -67,10 +67,14 @@ What's there to build on:
   (`takeScan`), and crafting through the workbench peripheral, stashing
   into a chest and filling the grid from it (`craftSteps`,
   `craftSupplies`). These become the shared modules, not copies of them.
-- mine and mow dig only through turtlelib (no `turtle.dig` of their
-  own); farm digs crops directly (13 places). So a protected-area check
-  at turtlelib's dig is seen by mine and mow at once, and by farm once
-  its digs go through it.
+- No program moves or turns the turtle except through turtlelib (checked:
+  none calls turtle.forward/back/up/down/turnLeft/turnRight). Digging and
+  placing is mixed: mine places once and digs only through turtlelib,
+  farm digs crops and places at 19 places, mow places once, and claude's
+  model calls turtle.dig() and turtle.place() straight, as its prompt
+  tells it to (the sandbox hands it the real `turtle` table). So a check
+  put in T.digDir alone would miss most digs; one put on the turtle API
+  itself, once, catches them all (below).
 - The sims: mineworld, farmworld, the mock and the sandbox; mine has dozens
   of scenarios whose moves, chest contents and output are compared run to
   run.
@@ -85,10 +89,14 @@ What can't be done from Lua:
   upgrade. Equipping one costs two swaps; `T.withPeripheral` makes that
   one call and safe. In the world, a chat box or scanner on a wired modem
   at home works without swaps, but only while the turtle is there.
-- **Pushing items into a turtle over a wired network.** Not known to work:
-  whether a chest's `pushItems` can name a turtle as the target is to be
-  tried in game before anything relies on it. Taking one item from a chest
-  beside the turtle (`T.pull`) doesn't need it.
+- **Pushing items into a turtle over a wired network.** A turtle is a
+  peripheral (`turtle_N`) only to a full-block wired modem touching it;
+  a chest's `pushItems` can name it then and only then, and a turtle
+  can't carry a wired modem. So the chest wall at home could push into a
+  parked turtle; nothing else can. `T.pull` (the chest's `pushItems` to
+  itself, putting the wanted stack first, then `suck`: what `T.takeInto`
+  and mine's restock do today, and the castle turtle's `fetch`) is the
+  general case and needs no network.
 
 ## Options considered
 
@@ -114,8 +122,10 @@ What can't be done from Lua:
 next to turtlelib. ccnix's boot already puts `turtle/` on the path, and
 Lua's `require` turns the dot into a folder. setup's turtle file list
 gets `turtle/tl/` (a whole folder). `T` loads a module the first time one
-of its functions is used, so a program that never crafts never loads the
-recipes.
+of its functions is used (a metatable on T: a name T lacks is looked up
+in a list of which module defines it, that module is required and fills
+T in; a module's own `require("turtlelib")` gets the same T, loaded
+already), so a program that never crafts never loads the recipes.
 
 Every function returns what happened: `true`, or `false` / `nil` and a
 reason a person can read ("blocked by minecraft:obsidian at 3,12,-4",
@@ -129,12 +139,25 @@ Nothing prints unless asked to (the programs print; claude reads results).
   (lava, fire and doors by default), and on failure the reason, the
   block and where. When a straight run is blocked it asks the path module
   (below) for a route, if one's loaded or `opts.path` is set.
+- **The turtle API wrapped, once.** When turtlelib loads it replaces
+  `turtle.dig/digUp/digDown`, `turtle.place/placeUp/placeDown` and the
+  six moves and turns with versions that know the cell they act on (from
+  T.pos and T.dir), keeping the originals for its own use. A dig into a
+  protected area, a chest or a computer returns false and why; a move
+  that succeeds updates T.pos and saves it; every dig and placement is
+  told to the map and the journals. So the rule "never call
+  turtle.forward yourself: T.pos would be wrong" goes away, farm's crop
+  digs and claude's `turtle.dig()` are covered without a line changed in
+  them, and the sims' mock `turtle` is wrapped the same way. T.forward
+  and the rest keep their extras (fuel, diggable, attacking) on top of
+  the raw calls. (Checked: no program calls the moves or turns directly,
+  so nothing double-counts.)
 - **Protected areas:** `T.protect(name, x1, y1, z1, x2, y2, z2)`,
   `T.unprotect(name)`, `T.protected(x, y, z)`. Kept in a data file so
-  every program sees the same list. turtlelib's dig (`clearWay`,
-  `T.digDir` and the rest) refuses a block inside one, as it refuses
-  chests and computers today. farm's direct digs move to turtlelib's so it
-  sees them too.
+  every program on the turtle sees the same list. A job may work inside
+  an area it owns: `T.build`, `T.replace`, `T.harvest` and `T.moveTo`
+  take `inside = name`. Protection is only as right as T.pos; the
+  wrapped moves are what keep that right.
 - `T.withPeripheral(name, fn)` (and `T.equipPeripheral(name)` returning a
   restore): equips the item on the side that doesn't hold the chunk
   controller (or a side named in `T.cfg.keepSide`), waits until it shows
@@ -145,22 +168,34 @@ Nothing prints unless asked to (the programs print; claude reads results).
   slots. And `T.junk`: a junk chest's place (`T.setJunkChest(x, y, z,
   side)`) and a junk test, where nothing crafted by `T.craft` this job and
   nothing in `T.keep` is junk; `T.dumpJunk()` goes there and back.
-- `T.dig*` and `T.place*` report each change to the map and the journals
-  (below) through a hook list, so a module can listen without turtlelib
-  knowing it.
 
 ### `tl.world`: the map and the frames
 
-- **Frames.** The turtle's frame is what it is now. The world frame is an
-  origin: the world position and compass facing of the turtle's
-  (0,0,0). `T.setOrigin(x, y, z, facing)`; `gps.locate` when there's a GPS
-  network; the facing worked out from one scan (scanBlocks gives world
-  `x/z` and turtle `r/f` for the same block). Then `T.toWorld(p)` and
-  `T.toLocal(p)` convert. Kept in a data file, not in notes.
+- **Frames.** The turtle's frame is what it is now, and it isn't fixed:
+  `--here`, `T.setHomeHere`, `T.clearPos` and a run with no saved
+  position all make the spot the turtle stands on (0,0,0) again. So the
+  map keeps a frame of its own, the one it was started in, with the
+  transform (shift and quarter turns) from the turtle's current frame;
+  whenever a program re-zeroes, turtlelib knows the old position and
+  heading of that very spot and updates the transform. A frame lost
+  without that (the position file deleted) leaves the map kept but
+  marked unaligned, until `T.alignMap(dx, dy, dz, turns)` or a fresh
+  start. The world frame is one more transform: `T.setOrigin(x, y, z,
+  facing)` from the player, `gps.locate` when there's a GPS network, and
+  the facing worked out from one scan (scanBlocks gives world `x/z` and
+  turtle `r/f` for the same block). `T.toWorld(p)` and `T.toLocal(p)`
+  convert. All of it in a data file, not in notes.
 - **The map:** what scans saw and what the turtle dug, placed and
-  inspected, by cell, with when. Kept in a file per 16-block cube of
-  space under the data folder, loaded when used, written when changed.
-  Queries: `map.get(x, y, z)` -> name, state (if inspected), when;
+  inspected, by cell. Kept in a file per 16-block cube of space under
+  the data folder: a palette of the names the cube holds and one byte a
+  cell (4 KB a cube, written in binary mode), the cube's "seen when" per
+  scan rather than per cell, and inspected states as a short list beside
+  (a state per cell would cost more than the cube). Names per cell as
+  text would be thirty times the size, and CC charges a file at least
+  500 bytes (`MountConstants.MINIMUM_FILE_SIZE`) and a folder the same,
+  so many small files are the wrong shape too. Cubes are loaded when
+  used and written when changed. Queries: `map.get(x, y, z)` -> name,
+  state (if inspected), when;
   `map.top(x, z)`; `map.find(glob, box)`; `map.count(glob, box)`;
   `map.heights(box)` and `map.slice(y, box)` as compact text.
 - **Scans:** `T.scan(r)` -> `{ ["x,y,z"] = name }` in the turtle's frame
@@ -168,31 +203,53 @@ Nothing prints unless asked to (the programs print; claude reads results).
   refused without `{ force = true }` (the turtle once paid ~5300 fuel for
   r=16); `T.scanBox(box)` tiles r=8 scans to cover a box.
 - `T.inspectAt(x, y, z)`: goes to a free neighbour, inspects, records the
-  state. `T.inspectAll(list)`: one route past them all, ordered nearest
-  first.
+  state. `T.inspectAll(list)`: one route past them all, each the nearest
+  next (greedy, not the shortest tour: good enough, and cheap to find).
 
 ### `tl.path`: routes
 
-- A* in 3D over the map: known air is cheap, unknown cells cost more,
-  diggable blocks cost a dig, and protected areas, lava, fire, doors and
-  anything the caller lists are walls. It yields every few hundred nodes
-  (CC stops a program that runs too long without yielding) and gives up
-  past a node limit with the reason.
-- `T.travel(x, y, z)`: the "safe altitude" move: the lowest clear height
-  between here and there from the map's height map, scanned for first if
-  the map doesn't know.
+- A* in 3D over the map with a binary heap: known air costs a move, a
+  diggable block a move and a dig, an unknown cell a move and a dig when
+  digging is allowed and a move with a penalty when it isn't (so a route
+  through the unseen is possible, and checked as it's walked); protected
+  areas, lava, fire, doors and anything the caller lists are walls. It
+  yields on a clock (CC aborts code that runs about seven seconds
+  without yielding; every half second is plenty) and gives up past a
+  node limit with the reason. Cubes are read as strings (`string.byte`),
+  not expanded into tables, so a big search stays cheap in memory.
+- `T.travel(x, y, z)`: the "safe altitude" move: from the map, a clear
+  layer over the route's box, between the floor's highest and the
+  ceiling's lowest (the Nether has a roof: a fixed height hit bastion
+  ceilings), scanned for first if the map doesn't know; A* when there's
+  none.
 - On a block it didn't expect, it marks it and plans again.
 
 ### `tl.place`: blocks the right way round
 
-- A table of block families (stairs, slabs, doors, trapdoors, torches and
-  wall torches, logs and pillars, buttons, ladders, fence gates): for each,
-  which state it takes from the approach (from above, from below, from
-  which side) and the heading. The first table comes from the castle
-  turtle's findings (`placeDown` over air gives top-half stairs and slabs,
-  onto a solid block bottom-half; facing follows the heading; a side
-  placement hits at y 0.5, the bottom half) and Minecraft's placement
-  rules.
+- What a turtle's place does, from CC:Tweaked's `TurtlePlaceCommand`
+  (1.120.2, read for this): it tries, in order, an entity in the target
+  cell (so never place where a minecart or item frame is), the block
+  beyond the target (clicked on its near face), for a sideways place the
+  block under the target (clicked on top), and last the turtle's own
+  block (clicked on the face toward the target); a sideways click lands
+  at the face's middle, nudged to y 0.45. With Minecraft's rules for the
+  blocks (a stair or slab clicked on a top face is bottom-half, on an
+  underside top-half, on a side by whether the click is above the
+  middle; facing is the placer's, which is the turtle's heading; a log's
+  axis is the clicked face's; a torch or ladder on a side face hangs on
+  that block), that gives a table of block families (stairs, slabs,
+  doors, trapdoors, torches, logs and pillars, buttons and levers,
+  ladders, fence gates) and what each approach yields:
+  - sideways: always bottom-half, facing the turtle's heading; a log
+    lies along the heading if there's a block beyond, else stands; a
+    torch or ladder needs the block beyond.
+  - placeDown: bottom-half if there's a block below the target, else
+    top-half (the castle turtle's finding, now explained).
+  - placeUp: top-half if there's a block above the target, else
+    bottom-half.
+
+  The table is data, and the sims' build world models `deploy`'s order,
+  so a wrong row shows up there before it does in game.
 - `T.placeAt(x, y, z, item, { facing, half, axis })`: picks an approach
   the table says gives that state and that the map says is reachable,
   places, inspects, and if the state's wrong, digs it and tries the next
@@ -213,12 +270,17 @@ Nothing prints unless asked to (the programs print; claude reads results).
   short, what can be crafted from what's on hand); builds layer by layer
   from above (`placeDown` from y+1, what worked best); blocks that hang on
   others (stairs, doors, torches) after their supports; and keeps a
-  progress file (the blueprint's name and the cells done) so a crash, a
-  reboot or a cleared conversation carries on where it was.
+  progress file so a crash, a reboot or a cleared conversation carries on
+  where it was. The build order is fixed by the blueprint, so the
+  progress is the index of the last cell done and the list of the ones
+  that failed, not a set of cells; the blueprint itself is kept as its
+  layer strings, not a table per cell (a 40 by 30 by 40 build is 48,000
+  cells).
 - `T.verify(bp)` -> the cells that differ, states included (through
   `T.inspectAll` for the ones whose state matters).
 - `T.replace(box, glob, item)`: every block matching in the box swapped,
-  each from its nearest reachable side (the castle's ~410 side swaps).
+  each from its nearest reachable side (the castle's ~410 side swaps);
+  the ones with no free side (inside a wall) are reported, not dug out to.
 - A finished build can protect itself (`opts.protect = "keep"`).
 
 ### `tl.craft`: crafting and smelting
@@ -226,21 +288,33 @@ Nothing prints unless asked to (the programs print; claude reads results).
 - A recipe table for vanilla's building and tool basics: planks, sticks,
   torches, chests, crafting tables, furnaces, stairs, slabs and walls of
   each stone and wood, bricks, polished and chiseled forms, doors,
-  trapdoors, ladders, fences, iron bars, glass panes, buckets. Any
-  ingredient may be a list or a tag-like glob (`*_planks`).
-  `T.addRecipe(...)` for more (claude can look one up and add it).
+  trapdoors, ladders, fences, iron bars, glass panes, buckets. Recipes
+  are shaped, written as the game's data packs write them: up to three
+  rows of letters and a legend, a letter standing for a name, a list of
+  names or a glob (`*_planks`), and how many come out. Families (every
+  stone's stairs from its block) are one entry with the name as a
+  pattern, not a row each. `T.addRecipe(...)` for more (claude can look
+  one up and add it).
 - `T.craft(name, n, opts)`: needs a chest to work from (the one in front,
-  or `opts.chest`, or the junk/work chest): stashes everything else in
-  it, the pickaxe included; pulls the ingredients into the grid; crafts
-  through the workbench peripheral; repeats to n; puts the inventory and
-  the equipment back as they were. The workbench is equipped through
-  `T.withPeripheral`, so it never touches the chunk controller. This is
-  mine's `craftSteps` and `craftSupplies`, generalised.
+  or `opts.chest`, or the junk/work chest) with room for the whole
+  inventory, up to sixteen stacks (checked first, as mine does): stashes
+  everything else in it, the pickaxe included, since a turtle crafts only
+  with every slot outside the grid empty; pulls the ingredients into the
+  grid's slots (1-3, 5-7, 9-11); crafts through the workbench peripheral,
+  the output into the slots from the selected one; repeats to n; puts
+  the inventory and the equipment back as they were. The workbench is
+  equipped through `T.withPeripheral`, so it never touches the chunk
+  controller. This is mine's `craftSteps` and `craftSupplies`,
+  generalised; mine's crafting scenario is the first test of it.
 - `T.canCraft(name, n)` -> what's short, from the inventory and the chest.
 - Fuel and smelting facts as tables: what burns and for how long (nether
   stems and their planks don't), what smelts into what.
-  `T.smelt(item, n, fuel)` runs a furnace beside it: fuel in the side,
-  items in the top, results out of the bottom, waiting as it cooks.
+  `T.smelt(item, n, fuel)` runs a furnace: a furnace takes fuel through
+  its sides, items through its top, and gives results through its
+  underside only, so the turtle drops in from beside and above and sucks
+  from below, which needs the furnace to stand with a free cell above
+  and below it (`T.smelt` places it so, on a pillar if need be, and
+  takes it back after); it waits as it cooks (ten seconds an item).
 
 ### `tl.store`: chests at home
 
@@ -294,9 +368,9 @@ gets anything new. Then, where the new pieces make it better:
   - Its crafting becomes `T.craft` (it can then craft more than chests
     and torches).
   - It protects its homes and the start's chests while it runs.
-- **farm:** its digs go through turtlelib, so protected areas hold. Its
-  learnt obstacles (2D, kept per run today) can be kept in the map
-  between runs.
+- **farm:** nothing to move: the wrapped API makes protected areas hold
+  for its crop digs as they are. Its learnt obstacles (2D, kept per run
+  today) can be kept in the map between runs.
 - **mow:** routes over the map's height map across rough ground, not
   only by stepping. A protected area keeps it out of a garden.
 - **All three:** `T.report` for a job's end and its trouble (an
@@ -308,8 +382,11 @@ gets anything new. Then, where the new pieces make it better:
 - **The log:** rotated at 256 KB (a setting), one old copy kept
   (`claude.log.1`).
 - **Its helpers kept:** `/claude/helpers.lua` is loaded into the code's
-  world at the start of each session if it's there, and the prompt tells
-  it to keep reusable helpers there, not only in the conversation.
+  world at the start of each session if it's there (under pcall: a broken
+  file is reported to the model as the first thing it sees, not a dead
+  session), and the prompt tells it to keep reusable helpers there, not
+  only in the conversation. The modules aren't `require`d by its code
+  (the sandbox's require is a fixed list); they come through `T`.
 - **The system prompt:** turtlelib and each module get a reference
   written in their header comments, like the programs' manuals.
   `sim/mkhelp.py` makes two things from it:
@@ -318,11 +395,17 @@ gets anything new. Then, where the new pieces make it better:
   - `turtle/tl/index.txt`: one line per function (name, arguments, what
     it does and returns).
 
-  claude puts the index in the system prompt at start. It's cached with
-  the rest of the prompt, so it costs a write once, then cache reads. And
-  it's made from the code, so it can't drift: `--check` fails if a public
-  function is missing from it. The prompt's prose shrinks to how to work
-  (frames, safety, cost), with the "what can I call" part from the index.
+  claude puts the index in the system prompt at start (found as the
+  manuals are, with `ccnix.find`). It's cached with the rest of the
+  prompt, so it costs a write once, then cache reads. And it's made from
+  the code, so it can't drift: `--check` fails if a public function has
+  no comment above it or the index is stale. mkhelp today makes manuals
+  from a program's top comment and leaves turtlelib out; it gets a
+  library mode (the top comment as the overview, then each `function
+  T.name(...)` with the comment above it), and both it and `--check`
+  learn to look in `turtle/tl/` (they glob `bin`, `turtle` and `pc`
+  only). The prompt's prose shrinks to how to work (frames, safety,
+  cost), with the "what can I call" part from the index.
 - `status` adds the origin, protected areas near by, and the job journal's
   step.
 
@@ -330,9 +413,11 @@ gets anything new. Then, where the new pieces make it better:
 
 - **D1. Layout:** modules in `turtle/tl/`, loaded on first use through `T`
   (recommended); or all in turtlelib.
-- **D2. The map's disk budget:** files per 16-block cube, capped at 512 KB
-  by default (a setting), the longest-unseen cubes dropped first
-  (recommended; a stock CC disk is 1 MB); or no cap.
+- **D2. The map's disk budget:** a file per 16-block cube (4 KB each, so
+  about 100 cubes, a 160 by 80 by 160 space, in 512 KB), capped at the
+  smaller of 512 KB and a quarter of the disk (a setting), the
+  longest-unseen cubes dropped first (recommended; a stock CC disk is
+  1 MB, and claude's log takes up to 512 KB of it); or no cap.
 - **D3. Scan radius:** over 8 refused unless forced (recommended); or
   allowed with a printed cost.
 - **D4. Recipes:** the built-in vanilla table plus `T.addRecipe`
@@ -340,8 +425,9 @@ gets anything new. Then, where the new pieces make it better:
 - **D5. Junk:** nothing is dropped on the ground or in lava by the
   library; junk goes to a junk chest, or stays (recommended). The
   programs' own dumping (mine's bulk chest) is unchanged.
-- **D6. The undo journal:** opt-in (recommended: it costs an inspect per
-  dig); or on for claude by default.
+- **D6. The undo journal:** opt-in (recommended: the state has to be read
+  before each dig, free on moves, which look first, an inspect on the
+  others; and it grows with every block); or on for claude by default.
 - **D7. mine, farm, mow:** first the refactor with identical sim results,
   then the improvements listed above (recommended); or the refactor only;
   or leave them alone and only claude uses the new pieces.
@@ -352,6 +438,10 @@ gets anything new. Then, where the new pieces make it better:
 - **D10. The origin:** asked for once (claude asks the player; the
   programs take `--origin x,y,z,facing`), `gps.locate` when there's GPS,
   the facing from a scan (recommended).
+- **D11. Wrapping the turtle API:** the moves and turns too, so T.pos
+  stays right whatever the code calls (recommended; nothing calls them
+  directly today, so nothing changes for the programs); or only the
+  digs and placements, keeping the "move through T" rule for claude.
 
 ## Consequences
 
@@ -360,6 +450,10 @@ gets anything new. Then, where the new pieces make it better:
   in code and tables rather than its notes.
 - turtlelib's core grows a little; the bulk is in modules the mining and
   farming turtles load only if they use them.
+- The turtle API on a turtle that has loaded turtlelib is turtlelib's: a
+  dig comes back false with a reason where the game would have dug.
+  Every program on the turtle gets that, and the sims prove the three
+  programs behave the same before anything else lands.
 - Protected areas bind every program on that turtle, including the user
   running mine by hand next to the castle. `T.unprotect` or a setting lifts
   them.
@@ -378,30 +472,39 @@ gets anything new. Then, where the new pieces make it better:
 1. [ ] claude: log rotation; `/claude/helpers.lua` loaded each session;
    the prompt names `T.takeInto`, `T.refuelFrom`, `T.keep` and the scan's
    `r/u/f` until the index replaces it.
-2. [ ] turtlelib: `T.withPeripheral`, `T.pull`, `T.moveTo` with reasons,
-   protected areas in the dig path, the change hooks.
+2. [ ] turtlelib: the turtle API wrapped (digs, placements, moves and
+   turns as D11 says), protected areas, `T.withPeripheral`, `T.pull`,
+   `T.moveTo` with reasons.
 3. [ ] The header-comment reference, `mkhelp` making `help/turtlelib.txt`
    and `turtle/tl/index.txt`, the index in claude's prompt, `--check` for
    drift.
-4. [ ] Sims: protected areas refuse a dig in mineworld; `withPeripheral`
-   keeps a controller on; `moveTo`'s reasons; the log rotates.
+4. [ ] Sims: every existing scenario unchanged with the API wrapped (the
+   first check, before anything else is added); a protected area
+   refusing `turtle.dig()` called straight and `T.digDir` alike;
+   `withPeripheral` keeping a controller on; `moveTo`'s reasons; the log
+   rotating; `--check` and mkhelp over `turtle/tl/`.
 
 ### Phase 2: seeing and moving
 
 5. [ ] `tl.world`: frames and origin, the map files and cap, `T.scan`,
    `T.scanBox`, `T.inspectAt`, `T.inspectAll`, heights and slices.
 6. [ ] `tl.path`: A*, `T.travel`, re-planning, yielding.
-7. [ ] Sims: a scan in each heading lands in the right cells; A* around a
-   protected box and lava; the cap drops the oldest cube.
+7. [ ] Sims: a scan in each heading lands in the right cells; the map
+   survives a `--here` (the transform updated) and says so when it
+   can't; a cube written and read back byte for byte; A* around a
+   protected box and lava, and through unseen cells with a re-plan on a
+   bump; the cap drops the oldest cube.
 
 ### Phase 3: building
 
 8. [ ] `tl.place` with its table and the learnt approaches; `T.ignite`.
 9. [ ] `tl.blueprint`: the format, `T.build` with materials and progress,
    `T.verify`, `T.replace`.
-10. [ ] A mock world with block states (buildworld) and the placement
-    rules as the game has them; sims for stairs and slabs each way, a door,
-    a build resumed after a stop, verify finding a wrong stair.
+10. [ ] A mock world with block states (buildworld) whose `place` follows
+    `TurtlePlaceCommand`'s order and the blocks' rules; sims for stairs
+    and slabs each way (sideways always bottom, placeDown by the block
+    below, placeUp by the block above), a log's axis, a door, a build
+    resumed after a stop, verify finding a wrong stair.
 
 ### Phase 4: materials
 
