@@ -303,3 +303,53 @@ looks = 0
 withSettings({ ["mow.map"] = false }, function() run("4", "4", "notorch") end)
 check("with mow.map off it bumps into the ridge", looks > 0, looks)
 turtle.inspect = rawInspect
+
+--------------------------------------------------------------------------
+-- 9. mow.report: with a player to tell (turtle.player) and a chat box in the
+--    chest below home, the player is told when mow is done (the chat box
+--    taken out for it and put back), and after a pass that gave up on tiles
+--    even when it repeats; a clean pass that repeats says nothing; off, or
+--    with no player, no one is told
+local told = {}
+-- (a chat box only speaks while it is aboard, which stands in for its being equipped)
+package.loaded.mc = { new = function()
+    local aboard = M.carried(Mine, "advancedperipherals:chat_box") > 0
+    return { has = { chat = aboard and "chat box" or nil }, flush = function() return true end,
+             tell = function(who, message)
+                 told[#told + 1] = who .. ": " .. message .. (aboard and " {chat box aboard}" or "")
+                 return true
+             end }
+end }
+local function reportLawn(rough)
+    if rough then roughLawn() else allGrass(4, 3) end
+    set(0, -1, 0, Mine.chest({ { name = "advancedperipherals:chat_box", count = 1 } }))
+    told = {}
+end
+reportLawn(false)
+EQ.left = "minecraft:diamond_hoe"
+withSettings({ ["mow.report"] = true, ["turtle.player"] = "Tester" }, function() run("4", "3", "notorch") end)
+local _, inChest = contents(chestAt(0, -1, 0))
+check("mow.report on: the player is told once, that it is done, with the fuel", #told == 1 and told[1]:find("^Tester: mow: pass complete, 0 torches placed %[") and told[1]:find("fuel ", 1, true),
+    table.concat(told, " | "))
+check("...the chat box was aboard for it and is back in the chest", told[1] and told[1]:find("{chat box aboard}", 1, true) and inChest["advancedperipherals:chat_box"] == 1
+    and M.carried(Mine, "advancedperipherals:chat_box") == 0, tostring(told[1]) .. " / " .. tostring(inChest["advancedperipherals:chat_box"]))
+reportLawn(true)
+EQ.left = "minecraft:diamond_hoe"
+twoPasses()
+withSettings({ ["mow.report"] = true, ["turtle.player"] = "Tester" }, function() run("5", "4", "1", "notorch") end)
+check("a pass that gave up on tiles is told even when it repeats",
+    #told >= 1 and told[1]:find("gave up on 2 tiles", 1, true), table.concat(told, " | "))
+reportLawn(false)
+EQ.left = "minecraft:diamond_hoe"
+twoPasses()
+withSettings({ ["mow.report"] = true, ["turtle.player"] = "Tester" }, function() run("4", "3", "1", "notorch") end)
+check("a clean pass that repeats says nothing", #told == 0, table.concat(told, " | "))
+reportLawn(false)
+EQ.left = "minecraft:diamond_hoe"
+withSettings({ ["turtle.player"] = "Tester" }, function() run("4", "3", "notorch") end)
+check("mow.report off (the default): no one is told", #told == 0, table.concat(told, " | "))
+reportLawn(false)
+EQ.left = "minecraft:diamond_hoe"
+withSettings({ ["mow.report"] = true }, function() run("4", "3", "notorch") end)
+check("on, but no player set: no one is told, and mow says why", #told == 0 and logHas("Couldn't tell the player %(no player to tell"), table.concat(told, " | "))
+package.loaded.mc = nil

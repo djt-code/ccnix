@@ -293,6 +293,14 @@ function T.report.now(said, opts)
     return sent, why
 end
 
+-- T.report.now for a program's end or trouble: the same arguments, but it never raises.  True, or nil and why (Ctrl+T goes on).
+function T.report.try(said, opts)
+    local ok, sent, why = pcall(T.report.now, said, opts)
+    if not ok and sent == "Terminated" then error(sent, 0) end
+    if not ok then return nil, tostring(sent) end
+    return sent, why
+end
+
 setmetatable(T.report, { __call = function(_, said, opts) return T.report.now(said, opts) end })
 
 -- Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil

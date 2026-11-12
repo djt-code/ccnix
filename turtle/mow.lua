@@ -40,6 +40,12 @@
 --  * Protected areas (T.protect, by another program or by hand) are kept
 --    out of: the tiles in one are left alone, the routes go round them, and
 --    mow says how many tiles it kept out of.
+--  * Telling the player: with `sysctl mow.report=true` and a player named
+--    in turtle.player (`sysctl turtle.player=<name>`), mow tells them
+--    through a chat box when it is done, and after a pass that gave up on
+--    tiles or couldn't get home, with where the turtle is and its fuel
+--    (T.report).  A chat box in the chest below home is taken out for the
+--    telling and put back; one on board is put on for the moment.
 --  * Torches go on a diamond lattice so every tile is within TORCH_RADIUS
 --    (taxicab) of one.  Since 1.18 mobs spawn only at block light 0; a
 --    torch is light 14, so radius 13 is the limit and 12 leaves a margin.
@@ -58,6 +64,7 @@ for i = #args, 1, -1 do
     if args[i] == "notorch" then noTorch = true; table.remove(args, i) end
 end
 local TORCHES = not noTorch and T.setting("mow.torches", true, "Light the lawn as mow goes")
+local REPORT = T.setting("mow.report", false, "Tell the player (turtle.player, through a chat box) when mow ends or has trouble")
 if args[1] == "reset" then
     if HERE then T.setHomeHere() else T.goHome() end
     return
@@ -170,6 +177,15 @@ local function ensureRoom()
     end, "No room for drops and nothing to empty (or no chest below home); drops may spill.")
 end
 
+-- Tell the player (T.report: where the turtle is, its fuel), if mow.report
+-- is on.  A chat box in the chest below home is taken out for the telling
+-- and put back.  Never stops mow.
+local function tellPlayer(said)
+    if not REPORT then return end
+    local ok, why = T.report.try(said, { from = "bottom" })
+    if not ok then print("Couldn't tell the player (" .. tostring(why) .. ").") end
+end
+
 --------------------------------------------------------------------------
 -- Torches
 --------------------------------------------------------------------------
@@ -268,13 +284,20 @@ T.withTool("minecraft:diamond_pickaxe", function()
             print()
         end
 
-        if not goToAndSettle(0, 0) then
+        local home = goToAndSettle(0, 0)
+        if not home then
             print("Couldn't get home; at " .. T.posString())
         end
         T.face(0)
         T.dumpDownWait()
         print(string.format("Pass complete. Fuel left: %s, torches placed: %d",
             tostring(turtle.getFuelLevel()), torchesPlaced))
+        -- told when it is over, or when a pass had trouble (however many there are)
+        if not REPEAT or #skipped > 0 or not home then
+            tellPlayer(string.format("mow: pass complete, %d torches placed%s%s", torchesPlaced,
+                #skipped > 0 and string.format("; gave up on %d tiles", #skipped) or "",
+                home and "" or "; couldn't get home"))
+        end
 
         if not REPEAT then break end
         print("Sleeping " .. REPEAT .. " min (Ctrl+T to stop)")

@@ -461,6 +461,23 @@ do
     ok = T.report("aboard", { plain = true, from = "bottom" })
     check("a chat box aboard is used and the chest is left alone", ok == true and carrying(CHAT) == 1 and inChest(CHAT) == 0)
 
+    -- T.report.try never raises
+    fresh()
+    ok, why = T.report.try("nothing aboard")
+    check("T.report.try: a refusal comes back as nil and why", ok == nil and contains(why, "chat_box"), tostring(why))
+    local rawSelect = turtle.getFuelLevel
+    turtle.getFuelLevel = function() error("boom") end
+    W.give(1, CHAT, 1)
+    ok, why = T.report.try("broken", {})
+    turtle.getFuelLevel = rawSelect
+    check("...and so does an error inside, with the chat box put back", ok == nil and contains(why, "boom") and EQ.right == nil and carrying(CHAT) == 1, tostring(why))
+    turtle.getFuelLevel = function() error("Terminated", 0) end
+    ok, why = pcall(T.report.try, "stopped", {})
+    turtle.getFuelLevel = rawSelect
+    check("...but Ctrl+T goes on", ok == false and why == "Terminated", tostring(why))
+    ok = T.report.try("fine", { plain = true })
+    check("...and a good telling is true", ok == true and SENT[#SENT].message == "fine")
+
     -- every n steps
     fresh()
     W.give(1, CHAT, 1)
