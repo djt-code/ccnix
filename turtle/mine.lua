@@ -1927,64 +1927,47 @@ end
 --------------------------------------------------------------------------
 warnedScan = false
 
--- Swap the scanner in for the pickaxe (the other side keeps its chunk
--- controller or whatever it has), scan, and swap back.  If it's
--- equipped already, just scan.
-function scanBlocks()
-    local side, slot
+-- The item name of a Geo Scanner, equipped or in the inventory: nil if there is none.
+function scannerItem()
     for _, sd in ipairs({ "left", "right" }) do
         local name = T.equipped(sd)
-        if name and isScanner(name) then side = sd end
+        if name and isScanner(name) then return name end
     end
-    local equip
-    if not side then
-        for s = 1, 16 do
-            local it = turtle.getItemDetail(s)
-            if it and isScanner(it.name) then slot = s; break end
-        end
-        if not slot then return nil, "no scanner on board" end
-        side = (T.equipped("left") == pickaxe and "left") or (T.equipped("right") == pickaxe and "right")
-        if not side then return nil, "no pickaxe equipped to swap it with" end
-        equip = side == "left" and turtle.equipLeft or turtle.equipRight
-        turtle.select(slot)
-        if not equip() then turtle.select(1); return nil, "couldn't equip it" end
+    for s = 1, 16 do
+        local it = turtle.getItemDetail(s)
+        if it and isScanner(it.name) then return it.name end
     end
-    -- once equipped, the scanner can take a moment to show up as a
-    -- peripheral: ask again until its scan method does (called by name,
-    -- not through a wrapped table)
-    -- The method is scan in Advanced Peripherals' docs, scanBlocks in
-    -- some versions: whichever this one has.
-    local methods, method
-    local function canScan()
-        methods = peripheral.getMethods(side) or {}
-        for _, m in ipairs(methods) do
-            if m == "scanBlocks" or (m == "scan" and not method) then method = m end
-        end
-        return method ~= nil
-    end
-    local found = false
-    for _ = 1, 20 do
-        found = canScan()
-        if found then break end
-        sleep(0.1)
-    end
+end
+
+-- Scan with the Geo Scanner, putting it on for the scan if it is in the
+-- inventory (T.withPeripheral: it goes on a side without a chunk
+-- controller, waits until it shows up as a peripheral, and puts back
+-- what was there, even if the scan fails).  Returns the blocks, or nil
+-- and why.
+function scanBlocks()
+    local name = scannerItem()
+    if not name then return nil, "no scanner on board" end
     local blocks, err
-    if found then
+    local ok, why = T.withPeripheral(name, function(p)
+        -- The method is scan in Advanced Peripherals' docs, scanBlocks in
+        -- some versions: whichever this one has.
+        local method = (p.scanBlocks and "scanBlocks") or (p.scan and "scan")
+        if not method then
+            local methods = tables.sortedKeys(p, function(a, b) return tostring(a) < tostring(b) end)
+            err = string.format("the %s has no scan method (its methods: %s)", name,
+                #methods > 0 and text.join(methods, ", ") or "none")
+            return
+        end
         for _ = 1, 3 do
-            local ok, a, b = pcall(peripheral.call, side, method, SCAN_RADIUS)
-            if ok then blocks, err = a, b else err = a end
+            local good, a, b = pcall(p[method], SCAN_RADIUS)
+            if good then blocks, err = a, b else err = a end
             if blocks then break end
+            if err == "Terminated" then error(err, 0) end
             sleep(1)                       -- the scanner's cooldown
         end
-    else
-        err = string.format("the %s side has a %s but no scan method (its methods: %s)",
-            side, tostring(peripheral.getType(side)), #methods > 0 and table.concat(methods, ", ") or "none")
-    end
-    if equip then
-        turtle.select(slot)
-        equip()                            -- the pickaxe back
-        turtle.select(1)
-    end
+    end)
+    if not ok then return nil, why end
+    turtle.select(1)
     return blocks, err
 end
 
