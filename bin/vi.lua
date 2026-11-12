@@ -9,9 +9,11 @@
 -- the ex commands in /.exrc are run (one per line, " starts a comment), so
 -- `set nu` there turns line numbers on for good.
 --
--- Esc closes the computer's screen in the game, so Ctrl+[ or Ctrl+C do
--- its job (over telnet, Esc works too, and Ctrl+C is the surest: it's one
--- byte, never mistaken for the start of an escape sequence).  Ctrl+C
+-- Esc closes the computer's screen in the game (with the ccnix mod 0.26
+-- or later on the client, Esc reaches the computer, and Shift+Esc closes
+-- the screen), so Ctrl+[ or Ctrl+C do its job everywhere (over telnet,
+-- Esc works too, and Ctrl+C is the surest: it's one byte, never mistaken
+-- for the start of an escape sequence).  Ctrl+C
 -- never quits; in normal mode it says how to: :q, or :wq to save first,
 -- or :q! to throw the changes away.  Holding Ctrl+R or Ctrl+S reboots or
 -- shuts the computer down: tap them.

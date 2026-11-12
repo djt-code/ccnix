@@ -50,13 +50,8 @@ numbers, the text tools and the network tools. Still to try:
 
 - **vi and vim parse with lib/scan, the rest** (0.27.1, no change
   meant). `vim` on a ccsh script: quotes over several lines, comments
-  after `;`. Ex commands: `:.,+2>`, `:/pat/;+1d`, `:'a,'bm$`, `:s/x/y/`
-  then `:&&` and `&`, `:set ts=8 nu? noai invnu`, `:d a 3`, `:ka`, and an
-  /.exrc with blank lines and a CRLF ending. Normal mode: `#` on a word,
-  `*` from just before one, Ctrl+A on `x = -7`, `%` from before a
-  bracket.
+  after `;`. Normal mode: `*` from just before a word.
 
-- **`vim`, the rest** (0.25.0). On a basic computer it's plain vi.
 - **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
   (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
   keys work.
@@ -65,9 +60,8 @@ numbers, the text tools and the network tools. Still to try:
 
 - **Background output while typing, the rest** (0.30.0). A full-screen
   program in the background isn't disturbed; the same over telnet.
-- **Ctrl+C left to programs that use it, the rest** (0.29.1). In `telnet
-  <host>` Ctrl+C reaches the far side's program (a `ping` there stops), not
-  the local telnet; all of it again on a computer without init.
+- **Ctrl+C left to programs that use it, the rest** (0.29.1). `telnet`
+  from a computer without init: Ctrl+C reaches the far side's program.
 - **The line editor, the rest** (0.28.0, lib/readline). `read x` at the
   keyboard has the same keys; Ctrl+C there stops the rest of the line.
 - **Tab and long lines, the rest** (0.28.0): the completion in grey on a
@@ -75,8 +69,7 @@ numbers, the text tools and the network tools. Still to try:
   correctly after Ctrl+L. AltGr (Ctrl+Alt) characters on a non-US layout
   type normally and trigger no bindings.
 - **Ctrl+C, the rest** (0.28.0): a computer without init; under init it doesn't reach
-  ccsh itself when ccsh was started from ccsh. In telnet under init,
-  Ctrl+C goes to the remote side and the local telnet keeps running.
+  ccsh itself when ccsh was started from ccsh.
 - **The editor over telnetd** (0.28.0): the same keys from a real terminal
   client (PuTTY, xterm); Alt+B/F arrive as Esc+letter; Ctrl+C at the remote
   prompt drops the line.
@@ -226,6 +219,16 @@ numbers, the text tools and the network tools. Still to try:
 
 ## The mod
 
+- **Esc goes to the computer** (ccnix-mod 0.26.0, the client's jar only:
+  the server's needn't change). On a computer's, turtle's or pocket
+  computer's screen, Esc no longer closes it: in `vi`, Esc leaves insert
+  mode (the first time, "Esc went to the computer: Shift+Esc closes its
+  screen" shows above the hotbar); in ccsh, Esc then b moves a word back.
+  Shift+Esc closes the screen. A client without the mod (or before 0.26):
+  Esc closes it as before, and Ctrl+C still leaves insert mode in vi.
+  Other screens (the inventory, a chest, the gateway dialog): Esc closes
+  them as always.
+
 - **The Network Configurator** (ccnix-mod 0.23.0; it was the Network
   Tester). An old Network Tester in an inventory is a Network Configurator
   after the update. On a gateway, the dialog's labels fit their column
@@ -282,6 +285,15 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.0, vi's commands: `:.,+2>`, `:/beta/;+1d`,
+  `:ka`/`:kb` then `:'a,'bm$`, `:s/a/A/` then `:&&` then `&` (E486),
+  `:set ts=8 nu? noai invnu`, `:d a 3` and `"ap`, Ctrl+A on `x = -7`,
+  `%` from before a bracket, `#` (wrapping, "search hit TOP"), an /.exrc
+  with a blank line and CRLF endings.  `vim` on a basic computer is plain
+  vi.  Over in-game telnet, vi works (Ctrl+C leaves insert mode, arrows
+  move; Esc closes the screen: asked for, in ccnix-mod 0.26.0), and
+  Ctrl+C stops a ping on the far side, telnet staying.
 
 - 2026-11-12 — ROM 0.43.0: `ccnix update` (the boot message about
   another ROM gone after the reboot); `git pull /ccnix --only lib/`;

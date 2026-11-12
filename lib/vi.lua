@@ -322,7 +322,8 @@ end
 -- Ctrl+letter comes as the Ctrl key's event, then the letter's (and
 -- maybe its char event, which is dropped).  Ctrl with Alt is AltGr,
 -- which types a character.  Ctrl+[ and Ctrl+C stand in for Esc, which
--- closes the computer's screen in the game.
+-- closes the computer's screen in the game (unless the client has the
+-- ccnix mod 0.26 or later: then Esc comes as keys.escape).
 function translate(ev, a, b, c)
     if ev == "char" then
         local s = swallow
