@@ -12,6 +12,7 @@ Provides:
   * routes (tl.path, loaded when first used): T.path, A* over the map round protected areas, lava, fire and doors, and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
+  * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -534,6 +535,61 @@ T.replace(box, pattern, item, opts)
     Swap every block in a box whose name matches a glob for another block: how many, and what could not be. Returns true, info; false, why, info when some were trapped or failed; nil, why when it couldn't begin.
 
     The box is six numbers in a table, or { x1 =, ... }; the glob matches block names (the namespace may be left out); `item` is the block to put in, with a state in brackets if it has one. The cells are those the map holds (opts.scan scans the box first, which the map needs to know it). Each is taken from the nearest free side the map shows, nearest next: the turtle looks at the block (one that has changed since is left), digs it and places the new one. A block with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to. It refuses if there is less of `item` on board than cells to swap, unless opts.partial. Info is { replaced, same, trapped, failed, gone, more }, trapped and failed being lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo), inside (a protected area the job owns, to swap blocks in it), partial.
+
+tl.craft: crafting and smelting: recipes as data, T.craft, T.canCraft, T.smelt, and what burns and smelts
+
+Loaded by turtlelib the first time one of its functions is used (T.craft, T.canCraft, T.recipe, T.addRecipe, T.smelt, T.fuelTicks, T.smeltsTo).
+
+Recipes are written as the game's data packs write them: up to three rows of letters (a dot is an empty cell), what each letter stands for (a name, a list of names or a glob like "*_planks", minecraft: assumed), what comes out and how many.  A family is one entry: "minecraft:{}_stairs" over a list of blocks makes every one's stairs, the {} being the block's name without its ending (oak_planks gives oak, stone_bricks gives stone_brick); a map entry gives the block each result is made from (chiseled forms from their slabs).  T.addRecipe adds more, for modded items.  The table is T.RECIPES (it exists once this module has loaded), the newest first.
+
+A turtle crafts through the crafting table as a peripheral, and only when every slot outside the grid is empty.  So T.craft works from a chest: it checks the chest has room for the whole inventory, puts the crafting table on (through T.withPeripheral: a chunk controller stays on), stashes everything in the chest, the pickaxe too, pulls each round's ingredients into the grid's slots (1-3, 5-7 and 9-11), crafts, stashes again, and at the end puts the inventory back and the product with it.  What it made is never junk (T.markCrafted).  T.canCraft says what is short, from the inventory and the chest.  A craft does the recipe asked for; an ingredient that is itself crafted (planks from logs, sticks from planks) is made first with its own T.craft.
+
+T.smelt runs a furnace: a furnace takes fuel through its sides, the item through its top, and gives the result through its underside only.  It sets the furnace up in front of the turtle, one block up, so the cell under it is free to stand in, drops the fuel from beside, the item from above, sucks the results from below as they cook (ten seconds an item), and takes the furnace back.  What burns and how long (T.fuelTicks; the nether's woods do not) and what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and T.SMELTS.
+
+== Reading and adding recipes, and asking what is short ==
+
+T.addRecipe(spec)
+    Add a recipe (modded items, say): out (the item made), count, shape, key, mixed, and for a family of, from or map. True, or nil and why not.
+
+    spec = { out = "mod:widget", count = 2, shape = { "AA", "B." }, key = { A = "minecraft:iron_ingot", B = "*_planks" } }. A letter in the shape is a name, a list of names or a glob (a name with no namespace is minecraft:'s); a dot is an empty cell; mixed = true lets one letter stand for different items (any planks). A family has out with {} in it and of = "X" for the letter that is the block, with from = a list of blocks, or map = { result = block }. The newest recipe is tried first. Kept in memory only: put the calls in /claude/helpers.lua to have them each session.
+
+T.recipe(name)
+    The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
+
+    shape is the rows of letters, key what each letter is (a name, a glob, a list of names; for a family the block this item is made from), mixed whether one letter may be several items. There may be more than one recipe for it; this is the first (the newest added, else the built-in).
+
+T.canCraft(name, n, opts)
+    Can the item be crafted: true, or false, why and the short list. Counts the inventory and the chest.
+
+    name is the item, n how many to have (default 1; whole crafts, so more may come out). The chest is the container opts.chest names (front, top or bottom) or the first there is; nothing moves. Returns true and { crafts, makes }; or false, a sentence ("short of oak_planks: need 6, have 4") and the list of { item, need, have, short }. It does the one recipe asked for: an ingredient that is itself crafted, planks from logs, counts as short.
+
+== Crafting from a chest ==
+
+T.craft(name, n, opts)
+    Craft n of an item from a chest (stash the inventory, fill the grid, craft, put it all back): true and how many, or false/nil and why.
+
+    It works from a chest: the container in front, above or below, or opts.chest (a side, or { x, y, z, side } to walk to), else the junk chest. The chest needs room for the whole inventory; that is checked first, and so are the ingredients (inventory plus chest) and a crafting table (on board, equipped or in the chest). Then the table goes on (a chunk controller stays on), everything is stashed in the chest, the grid is filled from it and crafted, round after round, and the inventory comes back with the product. n is rounded up to whole crafts. opts: chest, partial (craft what the ingredients allow), move (for T.moveTo).
+
+    Returns true, made; or false, why, made (it made some, or could not carry them); or nil, why (nothing was touched): no recipe, short of an ingredient (the third value is the list from T.canCraft), no chest, no room in the chest, no crafting table. What it made is marked as crafted, so T.isJunk never says it is junk.
+
+== Fuel and smelting ==
+
+T.fuelTicks(name)
+    How many ticks a furnace burns the item for (20 a second; it smelts an item in 200), or nil if it is not a fuel.
+
+    Coal and charcoal 1600, a block of coal 16000, a lava bucket 20000, planks, logs and wooden things 300 or less. The nether's woods (crimson and warped stems, planks and the rest) do not burn. The table is T.FURNACE_FUEL.
+
+T.smeltsTo(name)
+    What the item smelts into in a furnace, or nil if it does not smelt.
+
+    Ores and raw metals to ingots, cobblestone to stone, sand to glass, clay to bricks, logs to charcoal (not the nether's stems), raw food to cooked. The table is T.SMELTS.
+
+T.smelt(item, n, fuel, opts)
+    Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
+
+    The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
+
+    Returns true, got; false, why, got (it did not all come out in time); or nil, why (nothing started): not smeltable, short of the item or the fuel, not a fuel, no furnace on board.
 
 tl.path: routes: a search over the map for a way to a cell, and walking it
 

@@ -38,7 +38,7 @@ print = function() end
 local STONE = "minecraft:stone"
 local BRICKS = "minecraft:stone_bricks"
 local W, T                                  -- the world, the library
-local MODULES = { "turtlelib", "tl.world", "tl.path", "tl.place", "tl.blueprint", "tl.craftstub" }
+local MODULES = { "turtlelib", "tl.world", "tl.path", "tl.place", "tl.blueprint", "tl.craft", "tl.craftstub" }
 
 -- A new world with the turtle at 0,0,0 (heading 0 is north) and the library loaded afresh, told which way it points
 -- (unless origin is false); then the blocks of the scene: { x, y, z, name, state }.
@@ -328,6 +328,7 @@ local SLAB = "name: slab\nanchor: 2 0 3\nB = minecraft:stone_bricks\nlayer 1:\nB
 do
     fresh()
     W.give(1, STONE, 10)
+    T.registry.canCraft = nil                -- (no craft module: tl.craft's row is taken out, to see the plain refusal)
     local ok, why, info = build(SLAB)
     check("short of the material: refused before the turtle moves, nothing placed", ok == nil and why:find("short of", 1, true) and why:find("stone_bricks", 1, true)
         and why:find("need 8", 1, true) and why:find("have 0", 1, true) and W.placed == 0 and W.S.P.x == 0 and W.S.P.z == 0, tostring(why))
@@ -341,6 +342,16 @@ do
     ok, why = build("name: slab\nanchor: 2 0 3\nB = minecraft:stone\nlayer 1:\nBBBB\nBBBB\n")
     check("...and not asked when nothing is short", ok == true and CRAFTSTUB_LOADS == 1)
     T.registry.canCraft = nil
+    -- the real craft module (registered in turtlelib by default): 10 stone on board make the 8 stone bricks
+    fresh()
+    W.give(1, STONE, 10)
+    ok, why, info = build(SLAB)
+    check("with the real tl.craft (the default registry): short 8 bricks, and 10 stone on board means it says they can be crafted",
+        ok == nil and info.short[1].craft == true and why:find("can be crafted", 1, true) ~= nil and package.loaded["tl.craft"] ~= nil, tostring(why))
+    fresh()
+    W.give(1, STONE, 3)
+    ok, why, info = build(SLAB)
+    check("...and with 3 stone on board it is not offered: the craft module says false", ok == nil and info.short[1].craft == false and why:find("can be crafted", 1, true) == nil, tostring(why))
 end
 do
     fresh()

@@ -5,6 +5,56 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.craft: T.craft, T.canCraft, T.smelt and the fuel and smelting tables (ADR-0008 phase 4)
+
+Recipes are data (`T.RECIPES`, `T.recipe(name)`, `T.addRecipe(spec)`); `T.craft(name, n)`
+works from a chest in front of, above or below the turtle (or `opts.chest`,
+or the junk chest). Start with a chest in front holding 12 stone bricks and a
+crafting table on the turtle, a chunk controller on one side:
+
+- **Stairs from blocks, the controller kept on**: `T.craft("minecraft:stone_brick_stairs", 8)`
+  puts the crafting table on (the side that does not hold the chunk
+  controller), stashes the whole inventory in the chest (the pickaxe too),
+  fills the grid slots 1-3, 5-7 and 9-11 from it, crafts, and puts everything
+  back: the pickaxe on its side, the other stacks in their slots, 8 stairs
+  aboard. The chunk controller must not come off (watch the right side).
+  Check the real `workbench.craft(limit)`: that it takes the limit as the number of
+  crafts, what it returns, and that it needs every slot outside the grid empty.
+- **The product lands outside the grid**: the turtle selects slot 16 before
+  each craft (mine did the same); check that stairs do not turn up in the
+  grid slots, and that a craft of more than a stack (`T.craft("minecraft:stick", 300)`,
+  75 crafts in two rounds) does not drop items in the world.
+- **Room in the chest** is checked first (the inventory's stacks, the product and
+  one spare); a chest short of room is refused with nothing moved. The
+  ingredients (inventory plus chest) are checked first as well: `short of
+  minecraft:stone_bricks: need 6, have 5`. `T.canCraft(name, n)` says the same
+  without moving; its first result is `true` when it can be made (tl.blueprint's
+  materials check now uses the real one).
+- **The table in the chest** is pulled, used and put back; **already on** it is used
+  and left on.
+- **Families**: `minecraft:birch_door`, `minecraft:polished_blackstone_brick_stairs`,
+  `minecraft:stone_brick_wall`, `minecraft:oak_slab`, a mixed `minecraft:chest`
+  from any planks. The table is from memory of the vanilla recipes (1.21): check
+  a few against the recipe book, above all the counts (a wall 6 from 6, stairs 4
+  from 6, a door 3 from 6, a trapdoor 2 from 6, iron bars 16 from 6, a fence 3
+  from 4 planks and 2 sticks, a boat, a sign 3).
+- **`T.smelt(item, n, fuel)`**: with a furnace on board, five free cells (the two
+  over the turtle, the one in front, the two over that), it sets the furnace up in
+  front of the turtle, one block up, drops the fuel from beside and the item from
+  above, waits under it and sucks the results out as they cook (10 seconds
+  each), digs the furnace up and comes home facing as before. Check that a
+  turtle can place a furnace in mid-air (the turtle's own block is the last thing
+  it clicks), that fuel dropped from the side goes in the fuel slot, the item
+  dropped down in the input slot, and `suckUp` takes the result from below.
+  `opts.move = { dig = true }` lets it dig the way free.
+- **Tables**: `T.fuelTicks` (coal 1600, planks 300, a lava bucket 20000, wooden
+  slabs 150, doors and signs 200, boats 1200; the nether's woods nothing) and
+  `T.smeltsTo`; the nether woods really do not burn or make charcoal.
+
+Not done here: crafting an ingredient first (planks from logs for a chest): call
+`T.craft` for each step. Recipes added by `T.addRecipe` are kept in memory only;
+put the calls in `/claude/helpers.lua`. mine, farm and mow still do their own crafting.
+
 ## tl.blueprint: T.build, T.verify, T.replace (ADR-0008 phase 3, ccnix 0.48.0)
 
 A plan is layers of text with a legend (`T.blueprint.parse`, or a table, or

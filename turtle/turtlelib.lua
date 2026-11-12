@@ -40,6 +40,10 @@
 --     puts one up layer by layer, materials checked first, progress kept so a
 --     stop or reboot carries on; T.verify says which cells differ, states
 --     included; T.replace swaps the blocks matching a glob in a box
+--   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the
+--     rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral
+--     (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short;
+--     T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2429,6 +2433,9 @@ T.registry = {
     placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place",
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
+    -- tl.craft: recipes, crafting from a chest, and smelting
+    craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
+    smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",
 }
 local loadingModule = {}
 

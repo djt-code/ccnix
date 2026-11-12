@@ -463,6 +463,10 @@ local TAGS = {
     stone = function(n) return STONES[n] == true end,
     building = function(n) return STONES[n] == true or endsWith(n, "_planks") end,
     cobble = function(n) return n == "cobblestone" or n == "blackstone" or n == "cobbled_deepslate" end,
+    iron_ingot = function(n) return n == "iron_ingot" end,
+    iron_nugget = function(n) return n == "iron_nugget" end,
+    glass = function(n) return n == "glass" end,
+    plain_stone = function(n) return n == "stone" end,
 }
 -- The name a block's stairs, slab or wall take: oak_planks -> oak_<x>, stone_bricks -> stone_brick_<x>.
 local function derive(name, kind)
@@ -495,6 +499,12 @@ B.RECIPES = {
     { name = "trapdoors", shape = { "PPP", "PPP" }, key = { P = "planks" }, out = function(i) return derive(i.P, "trapdoor"), 2 end },
     { name = "ladders", shape = { "S.S", "SSS", "S.S" }, key = { S = "stick" }, out = function() return "minecraft:ladder", 3 end },
     { name = "fence gates", shape = { "SPS", "SPS" }, key = { S = "stick", P = "planks" }, out = function(i) return derive(i.P, "fence_gate"), 1 end },
+    { name = "fences", shape = { "PSP", "PSP" }, key = { S = "stick", P = "planks" }, out = function(i) return derive(i.P, "fence"), 3 end },
+    { name = "stone bricks", shape = { "SS", "SS" }, key = { S = "plain_stone" }, out = function() return "minecraft:stone_bricks", 4 end },
+    { name = "iron bars", shape = { "III", "III" }, key = { I = "iron_ingot" }, out = function() return "minecraft:iron_bars", 16 end },
+    { name = "glass panes", shape = { "GGG", "GGG" }, key = { G = "glass" }, out = function() return "minecraft:glass_pane", 16 end },
+    { name = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" }, out = function() return "minecraft:bucket", 1 end },
+    { name = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" }, out = function() return "minecraft:chain", 1 end },
 }
 
 -- The recipe a 3x3 of names (grid[row][col], row 1..3 and col 1..3, nil empty) makes: name, count, recipe
@@ -521,7 +531,7 @@ function B.recipeFor(grid)
                         local have = grid[r1 + r - 1] and grid[r1 + r - 1][c1 + c - 1]
                         if ch == "." then
                             if have then ok = false end
-                        elseif not have or not TAGS[key[ch]](short(have)) then
+                        elseif not have or not (type(key[ch]) == "function" and key[ch] or TAGS[key[ch]])(short(have)) then
                             ok = false
                         elseif ing[ch] and ing[ch] ~= have and not rec.mixed then
                             ok = false
@@ -965,6 +975,16 @@ function B.new(opts)
         getType = function(side) local _, t = wrapSide(side); return t end,
         isPresent = function(side) return wrapSide(side) ~= nil end,
         getName = function(p) return p._name end,
+        getMethods = function(side)
+            local p = wrapSide(side)
+            if not p then return nil end
+            local names = {}
+            for name, f in pairs(p) do
+                if type(f) == "function" then names[#names + 1] = name end
+            end
+            table.sort(names)
+            return names
+        end,
         call = function(side, name, ...)
             local p = wrapSide(side)
             if not (p and p[name]) then error("No such method " .. name, 0) end

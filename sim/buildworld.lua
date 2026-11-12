@@ -370,6 +370,7 @@ do
     w.give(1, "minecraft:crafting_table", 1)
     turtle.select(1); turtle.equipLeft()
     check("equipping the crafting table: the left side is a workbench", peripheral.getType("left") == "workbench" and peripheral.find("workbench") ~= nil)
+    check("...whose methods (what T.withPeripheral waits for) are craft", peripheral.getMethods("left")[1] == "craft" and #peripheral.getMethods("left") == 1)
     local bench = peripheral.wrap("left")
     w.give(1, "minecraft:oak_log", 3)
     local ok = bench.craft(2)
@@ -444,6 +445,31 @@ do
     check("the chest as a peripheral: size and list", c.size() == 27 and c.list()[1].name == "minecraft:coal" and c.list()[1].count == 4)
     check("suck takes it back", turtle.suck(3) == true and w.carrying("minecraft:coal") == 9)
     check("peripheral type of a chest", peripheral.getType("front") == "minecraft:chest")
+    local function recipe(...)
+        local grid, rows = { {}, {}, {} }, { ... }
+        for r, row in ipairs(rows) do
+            for c, name in ipairs(row) do
+                if name ~= "." then grid[r][c] = name end
+            end
+        end
+        local name, count = B.recipeFor(grid)
+        return name, count
+    end
+    local ingot, nugget, plank, stick = "minecraft:iron_ingot", "minecraft:iron_nugget", "minecraft:oak_planks", "minecraft:stick"
+    local n1, c1 = recipe({ plank, stick, plank }, { plank, stick, plank })
+    local n2, c2 = recipe({ "minecraft:stone", "minecraft:stone" }, { "minecraft:stone", "minecraft:stone" })
+    local n3, c3 = recipe({ ingot, ingot, ingot }, { ingot, ingot, ingot })
+    local n4, c4 = recipe({ ingot, ".", ingot }, { ".", ingot })
+    local n5, c5 = recipe({ nugget }, { ingot }, { nugget })
+    local n6, c6 = recipe({ "minecraft:glass", "minecraft:glass", "minecraft:glass" }, { "minecraft:glass", "minecraft:glass", "minecraft:glass" })
+    check("recipes of the mock the craft module is compared with: a fence 3, stone bricks 4, iron bars 16, a bucket, a chain, glass panes 16",
+        n1 == "minecraft:oak_fence" and c1 == 3 and n2 == "minecraft:stone_bricks" and c2 == 4 and n3 == "minecraft:iron_bars" and c3 == 16
+        and n4 == "minecraft:bucket" and c4 == 1 and n5 == "minecraft:chain" and c5 == 1 and n6 == "minecraft:glass_pane" and c6 == 16,
+        tostring(n1) .. " " .. tostring(n2) .. " " .. tostring(n3) .. " " .. tostring(n4) .. " " .. tostring(n5) .. " " .. tostring(n6))
+    local methods = peripheral.getMethods("front")
+    local names = {}
+    for _, m in ipairs(methods or {}) do names[m] = true end
+    check("getMethods of a chest lists its methods (list, size, pushItems); of an empty side, nothing", names.list and names.size and names.pushItems and peripheral.getMethods("top") == nil)
 end
 do
     -- furnace in front: fuel through the side, items from above, the result below

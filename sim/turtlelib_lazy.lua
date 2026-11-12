@@ -25,10 +25,10 @@ local S1 = package.searchpath("tl.fixture", PROJ .. "/turtle/?.lua;" .. PROJ .. 
 check("require(\"tl.x\") turns the dot into a folder on a ?.lua path", S1 and S1:gsub("\\", "/"):find("tl/fixture.lua", 1, true) ~= nil)
 
 local onlyWorld = next(T.registry) ~= nil
-for _, mod in pairs(T.registry) do onlyWorld = onlyWorld and (mod == "tl.world" or mod == "tl.path" or mod == "tl.place" or mod == "tl.blueprint") end
-check("turtlelib has a registry, naming only the real modules' functions (tl.world, tl.path, tl.place, tl.blueprint) to begin with, and loads no module itself",
+for _, mod in pairs(T.registry) do onlyWorld = onlyWorld and (mod == "tl.world" or mod == "tl.path" or mod == "tl.place" or mod == "tl.blueprint" or mod == "tl.craft") end
+check("turtlelib has a registry, naming only the real modules' functions (tl.world, tl.path, tl.place, tl.blueprint, tl.craft) to begin with, and loads no module itself",
     onlyWorld and FIXTURE_LOADS == nil and package.loaded["tl.world"] == nil and package.loaded["tl.path"] == nil
-    and package.loaded["tl.place"] == nil and package.loaded["tl.blueprint"] == nil)
+    and package.loaded["tl.place"] == nil and package.loaded["tl.blueprint"] == nil and package.loaded["tl.craft"] == nil)
 check("a name nobody registered is nil, and loads nothing", T.fixtureHello == nil and T.nothingAtAll == nil and FIXTURE_LOADS == nil)
 
 T.registry.fixtureHello = "tl.fixture"
