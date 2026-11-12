@@ -1,7 +1,7 @@
 # ADR-0008: A building library for turtles: map, paths, placing, blueprints, crafting and storage
 
-**Status:** Proposed (2026-11-12): decisions D1 to D10 below are the user's
-to make
+**Status:** Accepted (2026-11-12): the user took every recommendation,
+D1 to D11
 **Date:** 2026-11-12
 **Deciders:** Dan Theisen
 
@@ -116,7 +116,7 @@ What can't be done from Lua:
    build orders over the network). More memory and speed, but needs the
    network up and a second machine; against "keep it simple".
 
-## Decision (proposed)
+## Decision
 
 **Option 2.** The modules live in `turtle/tl/` (`require("tl.world")`),
 next to turtlelib. ccnix's boot already puts `turtle/` on the path, and
@@ -409,7 +409,7 @@ gets anything new. Then, where the new pieces make it better:
 - `status` adds the origin, protected areas near by, and the job journal's
   step.
 
-## Decisions for the user
+## Decisions (taken 2026-11-12: each as recommended)
 
 - **D1. Layout:** modules in `turtle/tl/`, loaded on first use through `T`
   (recommended); or all in turtlelib.
