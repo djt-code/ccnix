@@ -337,7 +337,8 @@ end
 -- is left to ripen, then harvested and replaced with the planned one.
 -- harvest = false only plants (repair mode's inspection).
 -- Returns: harvested | growing | planted | empty | noseeds | damaged | blocked
--- (damaged: no farmland or dirt to plant on; blocked: something in the way)
+-- | protected (damaged: no farmland or dirt to plant on; blocked: something in
+-- the way; protected: the crop is in a protected area, so it is left alone)
 function workCrop(harvest, crop)
     local seed = CROPS[crop].seed
     local name, d = below()
@@ -345,7 +346,8 @@ function workCrop(harvest, crop)
     if here then
         local age = d.state and tonumber(d.state.age)
         if harvest and age and age >= here.ripe then
-            turtle.digDown()                 -- hoe on a crop: breaks it
+            local dug, why = turtle.digDown()    -- hoe on a crop: breaks it
+            if not dug and heldOff(why) then return "protected" end
             plantDown(seed)
             return "harvested"
         end
@@ -372,11 +374,15 @@ end
 -- regrows.  With no second block, drop down to look at the bottom one and
 -- plant it if it's missing.  A planting that fails with cane on board
 -- means no ground, or no water next to it: damage.
--- Returns: harvested | growing | planted | noseeds | damaged | blocked
+-- Returns: harvested | growing | planted | noseeds | damaged | blocked | protected
 function workCane(harvest)
     local name = below()
     if name == CANE then
-        if harvest then turtle.digDown(); return "harvested" end
+        if harvest then
+            local dug, why = turtle.digDown()
+            if not dug and heldOff(why) then return "protected" end
+            return "harvested"
+        end
         return "growing"
     end
     if name ~= "air" or not T.down() then return "blocked" end
@@ -390,6 +396,12 @@ function workCane(harvest)
     end
     T.up()
     return r
+end
+
+-- Was a dig refused because the cell is in a protected area (the reason a
+-- refused turtle.dig gives)?  Those tiles are left alone, not counted as damage.
+function heldOff(why)
+    return type(why) == "string" and text.startsWith(why, "protected:")
 end
 
 -- Classify the tile below during the learning pass, without changing it.
@@ -1449,7 +1461,7 @@ function farmPass(harvest, lanes, grow)
         plan, mealUsed = only, 0
     end
     local stats = { harvested = 0, planted = 0, growing = 0, empty = 0, lane = 0,
-                    damaged = 0, dry = 0, blocked = 0, noseeds = 0 }
+                    damaged = 0, dry = 0, blocked = 0, noseeds = 0, protected = 0 }
     local damaged, skipped, triedRestock, bare = {}, 0, {}, {}
     for i, t in ipairs(plan) do
         local k = T.ckey(t.x, t.z)
@@ -1498,6 +1510,9 @@ function farmPass(harvest, lanes, grow)
     if #damaged > 0 then
         print(string.format("Damage: %d crop/cane tiles won't plant, %d lane tiles not a source, %d blocked",
             stats.damaged, stats.dry, stats.blocked))
+    end
+    if stats.protected > 0 then
+        print(string.format("%d tiles left alone: they are in a protected area.", stats.protected))
     end
     for _, seed in ipairs(tables.sortedKeys(bare)) do
         print(string.format("Out of %s: %d tiles left bare. Put some in the chest.",

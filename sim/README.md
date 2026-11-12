@@ -140,6 +140,7 @@ reading: compare the numbers before and after a change (`git stash`, run,
 | `farm_mixed_crops` | farm | wheat, carrots, potatoes and beetroot learned per tile; a wrong crop planted on a tile |
 | `farm_reset` | farm | `farm reset` after a stop out on a 5x22 farm with cane: past the default routing area, over cane, down in a lane, at travel height, with no map yet, left of home; facing other than saved, at home and mid-farm, and a farming run started at home facing the wrong way |
 | `farm_sugar_cane` | farm | a cane strip: harvest above the bottom block, replant a cane lost when its lane dried up |
+| `farm_protect` | farm | a protected area holds for farm's own crop digs: ripe crops and a cane strip in it are left alone, said so and not counted as harvested or damaged; farmed again once it is let go of |
 | `farm_bone_meal` | farm | grow passes with bone meal from the chest |
 | `farm_compost_while_waiting` | farm | surplus seeds go into the compost hopper during the wait between runs; a short wait runs out of time |
 | `farm_chest_tidy` | farm | the farm chest tidied on every visit: part stacks merged, then sorted with like items together at the end of the chest (slot 1 left free); no moves when already in order; a full chest |
