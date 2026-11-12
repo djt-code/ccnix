@@ -249,19 +249,8 @@ local function deliver(box, who, message, tries, wait)
     return nil, "the chat box stayed busy"
 end
 
--- Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
---
--- The player is the setting turtle.player (opts.player overrides it); with none, nothing is said.  A chat box on a side is used
--- as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side.  The
--- chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1).  opts.plain sends the
--- text alone.  T.report(said, opts) does the same.
-function T.report.now(said, opts)
-    opts = opts or {}
-    if type(said) ~= "string" or said == "" then return nil, "nothing to say: give the text" end
-    local who = opts.player or playerName()
-    if type(who) ~= "string" or who == "" then
-        return nil, "no player to tell: set turtle.player (sysctl turtle.player=<name>)"
-    end
+-- The telling itself, for T.report.now: `said` with its additions, through the chat box, however it is reached.  True, or nil and why.
+local function sendReport(said, opts, who)
     local message = said
     if not opts.plain then
         local fuel = turtle.getFuelLevel()
@@ -276,6 +265,32 @@ function T.report.now(said, opts)
     local ok, a, b = T.withPeripheral(CHAT_BOX, function(box) return deliver(box, who, message, tries, wait) end)
     if not ok then return nil, a end
     return a, b
+end
+
+-- Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+--
+-- The player is the setting turtle.player (opts.player overrides it); with none, nothing is said.  A chat box on a side is used
+-- as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side.  The
+-- chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1).  opts.plain sends the
+-- text alone.  T.report(said, opts) does the same.
+--
+-- opts.from names a side ("top", "bottom" or "front") whose container may hold the chat box: with none aboard or attached, one is
+-- taken out of it for the telling and put back after (a program that keeps its chat box in the chest at home).
+function T.report.now(said, opts)
+    opts = opts or {}
+    if type(said) ~= "string" or said == "" then return nil, "nothing to say: give the text" end
+    local who = opts.player or playerName()
+    if type(who) ~= "string" or who == "" then
+        return nil, "no player to tell: set turtle.player (sysctl turtle.player=<name>)"
+    end
+    local borrowed = false
+    if opts.from and T.countItem(CHAT_BOX) == 0 and require("mc").new().has.chat ~= "chat box" and T.containerOn(opts.from) then
+        borrowed = T.pull(opts.from, CHAT_BOX, 1) == 1
+    end
+    local ok, sent, why = pcall(sendReport, said, opts, who)
+    if borrowed and T.selectItem(CHAT_BOX) then T.dropSide(opts.from, 1); turtle.select(1) end
+    if not ok then error(sent, 0) end
+    return sent, why
 end
 
 setmetatable(T.report, { __call = function(_, said, opts) return T.report.now(said, opts) end })

@@ -92,6 +92,12 @@ local function know(x1, y1, z1, x2, y2, z2)
     end end end
 end
 local function carrying(name) return W.carrying(name) end
+-- How many of an item the chest below the start holds.
+local function inChest(name)
+    local n = 0
+    for _, it in pairs(W.get(0, -1, 0).inv) do if it.name == name then n = n + it.count end end
+    return n
+end
 local function has(x, y, z, name) local b = W.get(x, y, z); return b ~= nil and (name == nil or b.name == name) end
 local function contains(s, part) return type(s) == "string" and s:find(part, 1, true) ~= nil end
 local function readFile(name)
@@ -431,6 +437,29 @@ do
     local swaps2 = SWAPS
     ok, why = T.report("attached", { plain = true })
     check("a chat box on a side is used as it is, nothing swapped", ok == true and SENT[1] and SENT[1].message == "attached" and SWAPS == swaps2 and EQ.right == CHAT, tostring(why))
+
+    -- a chat box in the chest below (opts.from): taken out for the telling and put back
+    fresh()
+    W.set(0, -1, 0, "minecraft:chest")
+    W.get(0, -1, 0).inv[3] = { name = CHAT, count = 1 }
+    W.get(0, -1, 0).inv[4] = { name = "minecraft:wheat_seeds", count = 5 }
+    ok, why = T.report("no box aboard", { plain = true })
+    check("without opts.from a chat box in a chest is not looked for", ok == nil and contains(why, "chat_box") and #SENT == 0, tostring(why))
+    ok, why = T.report("from the chest", { plain = true, from = "bottom" })
+    check("opts.from: the chat box comes out of the chest below, is used, and goes back", ok == true and #SENT == 1
+        and SENT[1].message == "from the chest" and carrying(CHAT) == 0 and inChest(CHAT) == 1
+        and inChest("minecraft:wheat_seeds") == 5 and EQ.left == PICK and EQ.right == nil, tostring(why))
+    BUSY = 100
+    ok, why = T.report("busy", { plain = true, from = "bottom", tries = 2, wait = 0.1 })
+    check("...and goes back when the telling fails", ok == nil and contains(why, "stayed busy") and carrying(CHAT) == 0
+        and inChest(CHAT) == 1, tostring(why))
+    BUSY = 0
+    for slot, it in pairs(W.get(0, -1, 0).inv) do if it.name == CHAT then W.get(0, -1, 0).inv[slot] = nil end end
+    ok, why = T.report("empty chest", { plain = true, from = "bottom" })
+    check("a chest with no chat box: nil and why, nothing sent", ok == nil and contains(why, "chat_box") and #SENT == 1, tostring(why))
+    W.give(1, CHAT, 1)
+    ok = T.report("aboard", { plain = true, from = "bottom" })
+    check("a chat box aboard is used and the chest is left alone", ok == true and carrying(CHAT) == 1 and inChest(CHAT) == 0)
 
     -- every n steps
     fresh()

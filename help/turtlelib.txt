@@ -677,6 +677,8 @@ T.report.now(said, opts)
 
     The player is the setting turtle.player (opts.player overrides it); with none, nothing is said. A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
 
+    opts.from names a side ("top", "bottom" or "front") whose container may hold the chat box: with none aboard or attached, one is taken out of it for the telling and put back after (a program that keeps its chat box in the chest at home).
+
 T.report.every(n)
     Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.
 
