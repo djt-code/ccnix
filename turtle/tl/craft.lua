@@ -35,6 +35,11 @@ local FURNACE = "minecraft:furnace"
 local SIDES = { "front", "top", "bottom" }           -- where a chest may be, as for turtle.suck
 local STACK = 64
 local SMELT_TICKS = 200                              -- ticks a furnace takes to cook an item (ten seconds)
+-- Items that stack to less than 64, by the end of their name and by name (without the namespace): a boat or a bed is
+-- one to a slot, a sign or a bucket sixteen.  Tools are one too (T.isTool).
+local STACK_BY_ENDING = { _boat = 1, _raft = 1, _bed = 1, _sign = 16, _banner = 16 }
+local STACK_BY_NAME = { bucket = 16, snowball = 16, egg = 16, ender_pearl = 16, armor_stand = 16, honey_bottle = 16,
+                        water_bucket = 1, lava_bucket = 1, milk_bucket = 1, minecart = 1, saddle = 1, cake = 1 }
 
 -- A name with its namespace (minecraft: if it has none).
 local function full(name)
@@ -141,14 +146,14 @@ local CHISELED = {
 -- WOOD_FUEL; the nether's woods are not in it, and burn nowhere.
 local FURNACE_FUEL = {
     ["minecraft:coal"] = 1600, ["minecraft:charcoal"] = 1600, ["minecraft:coal_block"] = 16000,
-    ["minecraft:lava_bucket"] = 20000, ["minecraft:blaze_rod"] = 2400, ["minecraft:dried_kelp_block"] = 4000,
+    ["minecraft:lava_bucket"] = 20000, ["minecraft:blaze_rod"] = 2400, ["minecraft:dried_kelp_block"] = 4001,
     ["minecraft:stick"] = 100, ["minecraft:bamboo"] = 50, ["minecraft:scaffolding"] = 50,
     ["minecraft:bamboo_mosaic"] = 300, ["minecraft:ladder"] = 300, ["minecraft:chest"] = 300,
     ["minecraft:trapped_chest"] = 300, ["minecraft:barrel"] = 300, ["minecraft:crafting_table"] = 300,
     ["minecraft:bookshelf"] = 300, ["minecraft:lectern"] = 300, ["minecraft:jukebox"] = 300,
     ["minecraft:note_block"] = 300, ["minecraft:loom"] = 300, ["minecraft:composter"] = 300,
     ["minecraft:cartography_table"] = 300, ["minecraft:fletching_table"] = 300, ["minecraft:smithing_table"] = 300,
-    ["minecraft:bowl"] = 300, ["minecraft:bow"] = 300, ["minecraft:crossbow"] = 300, ["minecraft:fishing_rod"] = 300,
+    ["minecraft:bowl"] = 100, ["minecraft:bow"] = 300, ["minecraft:crossbow"] = 300, ["minecraft:fishing_rod"] = 300,
     ["minecraft:daylight_detector"] = 300, ["minecraft:wooden_sword"] = 200, ["minecraft:wooden_pickaxe"] = 200,
     ["minecraft:wooden_axe"] = 200, ["minecraft:wooden_shovel"] = 200, ["minecraft:wooden_hoe"] = 200,
 }
@@ -380,10 +385,10 @@ local function candidatesFor(outName)
             local item = row.map[outName]
             if item then found[#found + 1] = { row = row, fixed = { [row.of] = item } } end
         elseif row.from then
+            -- (every item that makes it: oak planks come from an oak log, oak wood, or either stripped)
             for _, item in ipairs(row.from) do
                 if text.replace(row.out, "{}", stem(item)) == outName then
                     found[#found + 1] = { row = row, fixed = { [row.of] = item } }
-                    break
                 end
             end
         elseif row.out == outName then
@@ -454,12 +459,24 @@ local function lay(cand, cells, p, left, sorted)
     return layout
 end
 
+-- How many of the item make a stack (64 for most).  A family's output may still read "{}_boat".
+local function stackOf(name)
+    local short = shortName(name)
+    if STACK_BY_NAME[short] then return STACK_BY_NAME[short] end
+    for ending, n in pairs(STACK_BY_ENDING) do
+        if text.endsWith(short, ending) then return n end
+    end
+    if T.isTool(full(short)) then return 1 end
+    return STACK
+end
+
 -- The rounds of crafting that make `crafts` crafts from the stock: a list of { p, layout } (p crafts at once, at most 64
 -- and as many as the free slots can hold the product of), and how many crafts they come to.
 local function plan(cand, cells, crafts, stock)
     local left = copyOf(stock)
     local sorted = tables.sortedKeys(left)
-    local cap = math.max(1, math.floor(STACK * (15 - #cells) / cand.row.count))
+    -- (no more than the free slots outside the grid hold: CC drops what a craft can't store)
+    local cap = math.max(1, math.floor(stackOf(cand.row.out) * (15 - #cells) / cand.row.count))
     local rounds, done = {}, 0
     while done < crafts do
         local p, layout
@@ -719,7 +736,7 @@ local function craftAt(side, name, n, cands, opts)
     end
     local free = chest.size()
     for _ in pairs(chest.list()) do free = free - 1 end
-    local products = math.ceil(done * count / STACK)
+    local products = math.ceil(done * count / stackOf(name))
     if free < used + products + 1 then
         return nil, "no room in the chest to work in: it needs " .. (used + products + 1) .. " free slots (the inventory " ..
             "is " .. used .. " stacks, the product " .. products .. ", and one spare), it has " .. free
@@ -942,10 +959,18 @@ function T.smelt(item, n, fuel, opts)
         if not home then note = note .. " (and can't get home: " .. tostring(homeWhy) .. ")" end
         return note
     end
+    -- (from every slot that holds it, as far as it takes: a stack split over slots goes in whole)
     local function dropAll(name, count, how)
         local before = T.countItem(name)
-        T.selectItem(name)
-        how(count)
+        for slot = 1, 16 do
+            local gone = before - T.countItem(name)
+            if gone >= count then break end
+            local it = turtle.getItemDetail(slot)
+            if it and it.name == name then
+                turtle.select(slot)
+                if not how(math.min(count - gone, it.count)) then break end
+            end
+        end
         return before - T.countItem(name)
     end
     -- the steps, each returning nil and why when it cannot go on

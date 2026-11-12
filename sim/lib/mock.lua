@@ -40,11 +40,11 @@ end
 --------------------------------------------------------------------------
 -- Items
 --------------------------------------------------------------------------
--- How many of an item make a stack: tools and water buckets one, empty
--- buckets 16, everything else 64.
+-- How many of an item make a stack: tools, boats and water buckets one,
+-- empty buckets 16, everything else 64.
 function M.stackSize(name)
     if name:find("_pickaxe$") or name:find("_hoe$") or name:find("_axe$") or name:find("_shovel$")
-        or name:find("_sword$") or name == "minecraft:water_bucket" or name == "minecraft:lava_bucket" then
+        or name:find("_sword$") or name:find("_boat$") or name == "minecraft:water_bucket" or name == "minecraft:lava_bucket" then
         return 1
     end
     if name == "minecraft:bucket" then return 16 end

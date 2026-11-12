@@ -511,6 +511,7 @@ B.RECIPES = {
     { name = "glass panes", shape = { "GGG", "GGG" }, key = { G = "glass" }, out = function() return "minecraft:glass_pane", 16 end },
     { name = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" }, out = function() return "minecraft:bucket", 1 end },
     { name = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" }, out = function() return "minecraft:chain", 1 end },
+    { name = "boat", shape = { "P.P", "PPP" }, key = { P = "planks" }, out = function(i) return derive(i.P, "boat"), 1 end },
 }
 
 -- The recipe a 3x3 of names (grid[row][col], row 1..3 and col 1..3, nil empty) makes: name, count, recipe

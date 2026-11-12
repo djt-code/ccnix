@@ -572,3 +572,52 @@ do
     check("facing east: the furnace is set up that way, glass out, the turtle faces east again", ok == true and carrying("minecraft:glass") == 3 and T.dir == 1 and W.S.P.d == 1
         and W.S.P.x == 0 and W.S.P.z == 0 and W.get(1, 1, 0) == nil, tostring(why) .. " / " .. inventory())
 end
+
+--------------------------------------------------------------------------
+-- Planks from any of a wood's logs; a product that stacks to one; a smelt from stacks split over slots
+--------------------------------------------------------------------------
+do
+    for _, log in ipairs({ "minecraft:stripped_oak_log", "minecraft:oak_wood" }) do
+        fresh()
+        fill(0, 0, 1, { [1] = { log, 2 } })
+        W.give(1, TABLE, 1)
+        local ok, made = T.craft("minecraft:oak_planks", 8)
+        check("oak planks from " .. log .. ", as the game takes them", ok == true and made == 8 and carrying("minecraft:oak_planks") == 8, tostring(made))
+    end
+    fresh()
+    W.give(2, "minecraft:crimson_hyphae", 1)
+    check("...and crimson planks from crimson hyphae", T.canCraft("minecraft:crimson_planks", 1) == true,
+        tostring(select(2, T.canCraft("minecraft:crimson_planks", 1))))
+
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_planks", 64 }, [2] = { "minecraft:oak_planks", 36 } })
+    W.give(1, TABLE, 1)
+    SPILLED = 0
+    local limits = {}
+    local rawWrap = peripheral.wrap
+    peripheral.wrap = function(side)
+        local p = rawWrap(side)
+        if p and p.craft then
+            local rawCraft = p.craft
+            p.craft = function(n) limits[#limits + 1] = n; return rawCraft(n) end
+        end
+        return p
+    end
+    local ok, why, made = T.craft("minecraft:oak_boat", 20)
+    if ok == true then made = why end
+    peripheral.wrap = rawWrap
+    local most = 0
+    for _, n in ipairs(limits) do most = math.max(most, n) end
+    check("boats stack to one: the crafts go in rounds the free slots hold, nothing spills (the rest wait in the chest)", made == 20 and SPILLED == 0 and most <= 10,
+        tostring(ok) .. " " .. tostring(made) .. ", rounds " .. table.concat(limits, ",") .. ", spilled " .. tostring(SPILLED))
+    check("a bowl burns 100 ticks and a dried kelp block 4001, as vanilla's fuel list says",
+        T.fuelTicks("minecraft:bowl") == 100 and T.fuelTicks("minecraft:dried_kelp_block") == 4001)
+
+    fresh(false)
+    W.give(1, FURNACE, 1)
+    W.give(2, "minecraft:cobblestone", 5); W.give(4, "minecraft:cobblestone", 15)
+    W.give(3, "minecraft:coal", 1); W.give(5, "minecraft:coal", 9)
+    ok, made = T.smelt("minecraft:cobblestone", 20, "minecraft:coal")
+    check("a smelt takes the item and the fuel from every slot they are in", ok == true and made == 20 and carrying("minecraft:stone") == 20,
+        tostring(ok) .. " " .. tostring(made) .. " / " .. inventory())
+end
