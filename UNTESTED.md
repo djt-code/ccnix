@@ -279,7 +279,9 @@ numbers, the text tools and the network tools. Still to try:
   telnetd logged nothing for it; `netstat -s` on the router agreeing with
   its screen (forwarded 7791, dropped 0).  `ip neigh` after `ping -w 2`
   of a missing host showed no INCOMPLETE: by then the three asks (a
-  second apart) were over; asked again in the background.
+  second apart) were over; asked again in the background.  Shift+PgUp
+  on a router without init: nothing (the scrollback is init's); with
+  init.boot on, it works there too.
 
 - 2026-11-12 — ROM 0.43.2 with ccnix-mod 0.26.0 on the client: Esc
   leaves vi's insert mode, Esc then b moves ccsh's cursor a word back,
