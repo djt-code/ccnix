@@ -890,3 +890,6 @@ end
 check("every T.name the paragraph mentions is in the index", #missing26 == 0, table.concat(missing26, " "))
 check("the old interim sentence about scanBlocks now points at T.scan", sys26:find("T.scan(r) does the Geo Scanner's work in this frame for you", 1, true)
     and sys26:find("r, u and f", 1, true))
+check("the prompt says what moves with a --here, how to drop a wrong lesson, and whose autoDump and undo they are",
+    sys26:find("move with the frame", 1, true) and para26:find("T.forgetPlacements()", 1, true)
+    and para26:find("not while a program you run has the turtle", 1, true) and para26:find("not a program's you run", 1, true))
