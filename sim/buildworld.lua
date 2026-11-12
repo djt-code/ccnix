@@ -568,6 +568,26 @@ do
 end
 
 --------------------------------------------------------------------------
+-- An empty bucket takes up a liquid source in the target cell
+--------------------------------------------------------------------------
+do
+    local EMPTY = "minecraft:bucket"
+    local w = world(nil, { { 0, 0, 1, "minecraft:lava", { level = 0 } } })
+    w.give(1, EMPTY, 1)
+    check("an empty bucket on a lava source takes it up: the cell is empty and the bucket comes back full",
+        turtle.place() == true and w.get(0, 0, 1) == nil and w.carrying("minecraft:lava_bucket") == 1 and w.carrying(EMPTY) == 0)
+    w = world(nil, { { 0, 0, 1, "minecraft:water", { level = 0 } } })
+    w.give(1, EMPTY, 2)
+    check("...water gives a water bucket, and the other empty bucket stays", turtle.place() == true and w.carrying("minecraft:water_bucket") == 1 and w.carrying(EMPTY) == 1)
+    w = world(nil, { { 0, 0, 1, "minecraft:lava", { level = 3 } } })
+    w.give(1, EMPTY, 1)
+    check("flowing lava is not taken up", turtle.place() == false and w.get(0, 0, 1) ~= nil and w.carrying(EMPTY) == 1)
+    w = world(nil, { { 0, 0, 1, STONE } })
+    w.give(1, EMPTY, 1)
+    check("nor is a block", turtle.place() == false and w.get(0, 0, 1).name == STONE)
+end
+
+--------------------------------------------------------------------------
 -- The pieces: names, directions
 --------------------------------------------------------------------------
 do

@@ -25,12 +25,12 @@ local S1 = package.searchpath("tl.fixture", PROJ .. "/turtle/?.lua;" .. PROJ .. 
 check("require(\"tl.x\") turns the dot into a folder on a ?.lua path", S1 and S1:gsub("\\", "/"):find("tl/fixture.lua", 1, true) ~= nil)
 
 local REAL = { ["tl.world"] = true, ["tl.path"] = true, ["tl.place"] = true, ["tl.blueprint"] = true, ["tl.craft"] = true,
-              ["tl.store"] = true }
+              ["tl.store"] = true, ["tl.harvest"] = true }
 local onlyReal = next(T.registry) ~= nil
 for _, mod in pairs(T.registry) do onlyReal = onlyReal and REAL[mod] == true end
 local noneLoaded = FIXTURE_LOADS == nil
 for mod in pairs(REAL) do noneLoaded = noneLoaded and package.loaded[mod] == nil end
-check("turtlelib has a registry, naming only the real modules' functions (tl.world, tl.path, tl.place, tl.blueprint, tl.craft, tl.store) to begin with, and loads no module itself",
+check("turtlelib has a registry, naming only the real modules' functions (tl.world, tl.path, tl.place, tl.blueprint, tl.craft, tl.store, tl.harvest) to begin with, and loads no module itself",
     onlyReal and noneLoaded)
 check("a name nobody registered is nil, and loads nothing", T.fixtureHello == nil and T.nothingAtAll == nil and FIXTURE_LOADS == nil)
 

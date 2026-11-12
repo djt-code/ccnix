@@ -54,8 +54,9 @@
 -- support on the side clicked).  UNVERIFIED in game.
 --
 -- Simplifications (what it leaves out): waterlogging (always false), double chests, fence and wall
--- connections, redstone, blocks falling, fluids flowing, entities moving, an empty bucket picking a
--- liquid up.  A bucket places a source block in the target cell.  Flint and steel puts a fire in the cell
+-- connections, redstone, blocks falling, fluids flowing, entities moving.  A bucket of water or lava
+-- places a source block in the target cell; an empty one placed on a source in the target cell takes it
+-- up (the bucket comes back full, in the selected slot as CC puts it) and does nothing on flowing liquid.  Flint and steel puts a fire in the cell
 -- the click lands in (an empty one with something solid under it); the item is not used up.
 
 local M = require("mock")
@@ -92,6 +93,8 @@ local NOT_BLOCK_EXACT = { stick = true, coal = true, charcoal = true, diamond = 
                           clay_ball = true, brick = true, lapis_lazuli = true, quartz = true, redstone = true }
 local NOT_BLOCK_SUFFIX = { "_pickaxe", "_axe", "_shovel", "_hoe", "_sword", "_ingot", "_nugget", "_dye", "_helmet" }
 local ITEM_LIQUID = { ["minecraft:water_bucket"] = "minecraft:water", ["minecraft:lava_bucket"] = "minecraft:lava" }
+-- The full bucket an empty one makes of each liquid
+local LIQUID_BUCKET = { ["minecraft:water"] = "minecraft:water_bucket", ["minecraft:lava"] = "minecraft:lava_bucket" }
 -- Torches: the standing block and the one that hangs on a wall.
 local WALL_OF = { torch = "wall_torch", soul_torch = "soul_wall_torch", redstone_torch = "redstone_wall_torch" }
 local IS_WALL_TORCH = {}
@@ -732,6 +735,16 @@ function B.new(opts)
         local dx, dy, dz = w.vec(dir)
         local tx, ty, tz = x + dx, y + dy, z + dz                  -- the target cell
         local item = it.name
+        -- an empty bucket takes up a liquid source in the target cell
+        if item == "minecraft:bucket" then
+            local b = w.at(tx, ty, tz)
+            if not (b and LIQUID[b.name] and tonumber(b.state.level or 0) == 0) then return false, "Cannot place item here" end
+            W[M.key(tx, ty, tz)] = nil
+            it.count = it.count - 1
+            if it.count <= 0 then S.inv[S.sel] = nil end
+            M.addItem(S, LIQUID_BUCKET[b.name], 1)
+            return true
+        end
         local block = isBlockItem(item)
         local function usable(cx, cy, cz, adjacent, face)
             local b = w.at(cx, cy, cz)

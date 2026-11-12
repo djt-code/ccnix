@@ -14,6 +14,7 @@ Provides:
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and T.cfg.autoDump = true does that on its own when the inventory nearly fills
+  * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -594,6 +595,37 @@ T.smelt(item, n, fuel, opts)
     The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
 
     Returns true, got; false, why, got (it did not all come out in time); or nil, why (nothing started): not smeltable, short of the item or the fuel, not a fuel, no furnace on board.
+
+tl.harvest: taking blocks by name, fuel from lava, and what a job will cost in fuel
+
+Loaded by turtlelib the first time one of its functions is used (T.harvest, T.refuelFromLava, T.fuelFor).
+
+T.harvest digs every block in a place whose name matches a glob, nearest first, but a block only after the matching blocks above it in its column (top down), and never one with a falling block (sand, gravel, concrete powder, an anvil) over it that is not itself to be dug: digging out from under it would bring it down.  A block that lava touches is left (opts.lava lifts that), so is one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  It counts as it goes and stops at the target.  The place is a box in the turtle's frame (the map is scanned for it as needed), a scan's result (T.scan's { ["x,y,z"] = name }) or a list of cells such as T.map.find gives.  Each block is dug from the nearest cell next to it that the map shows free, tunnelling to one when opts.move allows digging.  The turtle stays where the last block was.
+
+T.refuelFromLava finds the nearest lava source the map knows, goes next to it, takes it up with an empty bucket (a turtle that places an empty bucket on a source takes it up, as mine's scoop does), burns the bucket of lava for 1000 fuel and goes back where it began.
+
+T.fuelFor adds up what a route, a build and some scans will cost in fuel and says whether the tank and the fuel on board will do.  The cost of a scan is an estimate (set T.cfg.scanFuel = { [8] = cost } from what T.scan reports in info.fuel).
+
+== Harvesting ==
+
+T.harvest(pattern, where, target, opts)
+    Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be. Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+
+    `pattern` is a glob of block names (the namespace may be left out). `where` is a box in the turtle's frame (six numbers in a table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of T.scan, or a list of cells ({ x, y, z }, as T.map.find gives). `target`, if given, is how many blocks to dig before stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead). Each block is looked at before it is dug and left if the map was wrong. Left alone, and listed in info.skipped with why: a block with a falling block over it that is not to be dug too, one that lava touches (opts.lava digs those), one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers). A block with no free cell beside it is skipped unless opts.move lets it dig a way in. It stops when the inventory is full (T.cfg.autoDump keeps room), or the fuel is out. Info is { got, target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, lava, item.
+
+== Fuel from lava ==
+
+T.refuelFromLava(target, opts)
+    Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
+
+    `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit the tank (1000 each), or when no lava source is left to reach. It needs an empty bucket aboard (a lava bucket aboard is burned first). The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over. opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
+
+== What a job costs in fuel ==
+
+T.fuelFor(plan, opts)
+    What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
+
+    `plan` is a table with any of: route (a list of points { x, y, z } to go through from here), go (one point), build (a blueprint, or its text), box and radius (a box to scan with T.scanBox), scans (a number of scans of `radius`, default 8), back (true: and return to where the turtle is now), extra (fuel to add). A plan that is a blueprint, or a bare list of points, is a build or a route. Moves cost a fuel each; those of a route and the way to a build are made 25% longer for detours (opts.detour), and T.cfg.fuelMargin (30) is added on top. Info is { route, build, scans, back, extra, margin, need, tank, board, have, enough, short }, the costs in fuel and `board` the fuel value of the T.fuel items aboard.
 
 tl.path: routes: a search over the map for a way to a cell, and walking it
 

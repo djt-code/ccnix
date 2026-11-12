@@ -48,6 +48,9 @@
 --     goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes
 --     some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and
 --     T.cfg.autoDump = true does that on its own when the inventory nearly fills
+--   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a
+--     place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava
+--     takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2449,6 +2452,8 @@ T.registry = {
     -- tl.store: the chests at home, what is in them, putting away and fetching
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
     fetch = "tl.store", stow = "tl.store", autoDump = "tl.store",
+    -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
+    harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
 }
 local loadingModule = {}
 

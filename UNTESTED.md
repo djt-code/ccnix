@@ -5,6 +5,21 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.harvest: T.harvest, T.refuelFromLava, T.fuelFor (ADR-0008 phase 4)
+
+- **T.harvest(glob, box, target)** digs the blocks matching in a box (scanned as
+  needed), nearest first and top down. Check it on a tree and an ore vein: that it
+  leaves a block with sand or gravel over it, one that lava touches, one in a
+  protected area and chests, and says why (`info`); that it stops at the target;
+  and that a scan whose centre is solid needs `opts.move.dig`.
+- **T.refuelFromLava(target)** takes up the nearest lava source the map knows with
+  an empty bucket (a placed empty bucket scoops a source: confirm in game, as mine's
+  `scoop` does), burns it for 1000 fuel and walks back. Check the net gain it
+  reports against the tank.
+- **T.fuelFor(plan)** adds up route, build and scans against the tank and fuel on
+  board. The scan cost is an estimate from the r=16 figure; set
+  `T.cfg.scanFuel = { [8] = cost }` from what `T.scan` reports in `info.fuel`.
+
 ## tl.store: the chests at home, fetching, stowing and T.cfg.autoDump (ADR-0008 phase 4)
 
 `T.addChest(x, y, z, side, bulk)` tells the turtle where a chest is (the cell it

@@ -156,6 +156,12 @@ Fuel and smelting:
 T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it smelts an item in 200), or nil if it is not a fuel.
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
 T.smelt(item, n, fuel, opts) - Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
+Harvesting:
+T.harvest(pattern, where, target, opts) - Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be. Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+Fuel from lava:
+T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
+What a job costs in fuel:
+T.fuelFor(plan, opts) - What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
