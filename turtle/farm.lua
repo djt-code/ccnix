@@ -91,6 +91,14 @@
 --    avoided, so the turtle doesn't bump into the same post over and over.
 --    If that leaves no way to a tile it forgets them for the trip and finds
 --    out for itself.  `sysctl farm.map=false` turns it off.
+--  * Telling the player: with `sysctl farm.report=true` and a player named
+--    in turtle.player (`sysctl turtle.player=<name>`), farm tells them
+--    through a chat box when it is done (a single pass, or `farm repair`),
+--    after a pass with trouble (damaged or unreachable tiles, out of seeds)
+--    however many passes it repeats, and when it stops on an error, with
+--    where the turtle is and its fuel (T.report).  A chat box in the chest
+--    below home is taken out for the telling and put back; one on board is
+--    put on for the moment.
 --  * Protected areas (T.protect, by another program or by hand) are kept
 --    to: crops in one are left alone, not harvested, and the pass says how
 --    many.
@@ -138,6 +146,7 @@ SET = {
     length = T.setting("farm.length", nil, "Farm length to learn: tiles + ahead / - behind the turtle"),
     ["repeat"] = T.setting("farm.repeat", 20, "Minutes between farm passes; 0 = a single pass"),
 }
+REPORT = T.setting("farm.report", false, "Tell the player (turtle.player, through a chat box) when farm ends or has trouble")
 if WIDTH and LENGTH then
     savedSize = { ["farm.width"] = WIDTH, ["farm.length"] = LENGTH }   -- saved once it's checked
     if REPEAT then savedSize["farm.repeat"] = REPEAT end
@@ -1587,11 +1596,33 @@ function farmPass(harvest, lanes, grow)
     if stats.protected > 0 then
         print(string.format("%d tiles left alone: they are in a protected area.", stats.protected))
     end
+    local out = {}
     for _, seed in ipairs(tables.sortedKeys(bare)) do
-        print(string.format("Out of %s: %d tiles left bare. Put some in the chest.",
-            (text.replace(text.stripPrefix(seed, "minecraft:") or seed, "_", " ")), bare[seed]))
+        local what = text.replace(text.stripPrefix(seed, "minecraft:") or seed, "_", " ")
+        print(string.format("Out of %s: %d tiles left bare. Put some in the chest.", what, bare[seed]))
+        out[#out + 1] = what
     end
+    passTrouble = { damaged = #damaged, unreachable = skipped, outOf = out }
     return damaged
+end
+
+-- What went wrong in the last farmPass, as a sentence ("3 tiles damaged,
+-- 2 unreachable, out of wheat seeds"), or nil if nothing did.
+function troubleOf(t)
+    local parts = {}
+    if t.damaged > 0 then parts[#parts + 1] = t.damaged .. " tiles damaged" end
+    if t.unreachable > 0 then parts[#parts + 1] = t.unreachable .. " unreachable" end
+    if #t.outOf > 0 then parts[#parts + 1] = "out of " .. table.concat(t.outOf, ", ") end
+    return #parts > 0 and table.concat(parts, ", ") or nil
+end
+
+-- Tell the player (T.report: where the turtle is, its fuel), if farm.report
+-- is on.  A chat box in the chest below home is taken out for the telling
+-- and put back.  Never stops farm.
+function tellPlayer(said)
+    if not REPORT then return end
+    local ok, why = T.report.try(said, { from = CHEST_SIDE })
+    if not ok then print("Couldn't tell the player (" .. tostring(why) .. ").") end
 end
 
 -- Repair mode: rebuild the damaged tiles to match the layout.  Starts and
@@ -1839,7 +1870,7 @@ if haveMap and not doClone then
     for k, kind in pairs(tiles) do if kind == "water" then wet[k] = true end end
 end
 
-T.withTool(HOE, function()
+local ran, failure = pcall(T.withTool, HOE, function()
     forgetObstacles()
     T.inventoryLine("On board")
     if findCompostHopper() then
@@ -1874,6 +1905,7 @@ T.withTool(HOE, function()
     end
     if doRepair then
         T.inventoryLine("Kept on board")
+        tellPlayer("farm repair: done")
         return
     end
     while true do
@@ -1883,6 +1915,7 @@ T.withTool(HOE, function()
         restartAfter = nil
         if not ok and damaged ~= RESTART_PASS then error(damaged, 0) end
         if ok then                           -- (else: start over, right away)
+            local trouble = passTrouble and troubleOf(passTrouble)
             dumpAtHome()
             if #damaged > 0 then
                 -- missing ground: check the whole farm, lanes included
@@ -1892,9 +1925,17 @@ T.withTool(HOE, function()
             growPasses()
             print("Pass complete. Fuel: " .. tostring(turtle.getFuelLevel()))
             T.inventoryLine("Kept on board")
+            -- told when it is over, or when a pass had trouble (however many there are)
+            if REPEAT <= 0 or trouble then
+                tellPlayer("farm: pass complete" .. (trouble and ("; " .. trouble) or ""))
+            end
             if REPEAT <= 0 then break end
             print("Sleeping " .. REPEAT .. " min (Ctrl+T to stop)")
             waitAndCompost(REPEAT * 60)
         end
     end
 end)
+if not ran then
+    if failure ~= "Terminated" then tellPlayer("farm stopped: " .. tostring(failure)) end
+    error(failure, 0)
+end
