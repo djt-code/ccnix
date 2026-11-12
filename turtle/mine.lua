@@ -184,7 +184,11 @@
 --    board.  Lighting is optional: with no torches it just keeps mining,
 --    and --no-lights turns it off (torches are then just valuables).
 --  * Never digs chests, barrels, shulker boxes, spawners or ComputerCraft
---    blocks (other turtles, computers).
+--    blocks (other turtles, computers).  While it runs, the chests of the
+--    start and of every home are also protected areas (T.protect, named
+--    "mine home K chest" and "mine home K bulk"), so no other program on the
+--    turtle digs them either; they are let go of when it ends, however it
+--    ends (`sysctl mine.protect=false` protects nothing).
 --  * Position is saved after every move, so `mine reset` can bring it to
 --    its last home (`--home N`: home N; `--to-start`: the start) after a Ctrl+T or a server
 --    restart, checking the home's chests are there when it arrives.  It runs under T.run, so a
@@ -232,6 +236,7 @@ end
 forceHere, resume, fresh, toStart = opts.here == true, opts.resume == true, opts.new == true, opts["to-start"] == true
 lights = not opts["no-lights"]
     and T.setting("mine.lights", true, "Light mined tunnels with torches in wall niches")
+guardHomes = T.setting("mine.protect", true, "Protect mine's home chests (T.protect) while it runs, so no other program digs them")
 keepMap = T.setting("mine.map", true, "Keep mine's Geo Scanner scans in the map (T.map), so later runs know what they saw")
 spacingArg, homeArg = opts.spacing and tonumber(opts.spacing), opts.home and tonumber(opts.home)
 doReset = args[1] == "reset"
@@ -1626,6 +1631,41 @@ function suppliesLow()
     return have.chests < 4 or have.torches < 2 * torchesPerSegment()
 end
 
+-- The cell of the chest on a home's `side` ("top", "bottom" or "front").
+function chestCell(h, side)
+    if side == "top" then return h.x, h.y + 1, h.z end
+    if side == "bottom" then return h.x, h.y - 1, h.z end
+    local v = DELTA[h.face]
+    return h.x + v[1], h.y + v[2], h.z + v[3]
+end
+
+-- While mine runs, the start's chests and each home's two are protected
+-- areas (T.protect), so no other program on the turtle digs them (the
+-- wrapped dig refuses).  mine itself never digs a chest.  They are named
+-- "mine home K chest" and "mine home K bulk" (the start is home 0), and
+-- let go of when it ends, or are replaced when a run that was cut off
+-- starts again.
+HOME_AREA = "mine home "
+function protectHome(h)
+    if not guardHomes then return end
+    for _, kind in ipairs({ "chest", "bulk" }) do
+        local x, y, z = chestCell(h, kind == "chest" and h.val or h.bulk)
+        local ok, why = T.protect(HOME_AREA .. h.k .. " " .. kind, x, y, z, x, y, z)
+        if not ok and not warnedGuard then
+            warnedGuard = true
+            print("Not protecting the home chests (" .. tostring(why) .. ").")
+        end
+    end
+end
+
+-- Let go of every area of this program's (the ones of an earlier run
+-- that was cut off too).
+function releaseHomes()
+    for _, a in ipairs(T.protections()) do
+        if text.startsWith(a.name, HOME_AREA) then T.unprotect(a.name) end
+    end
+end
+
 -- The segment is done: build the next home at its end and move the
 -- supplies there from this one.  The turtle starts and ends at a home.
 function advance()
@@ -1671,6 +1711,7 @@ function advance()
         T.face(home.face)
     end
     home = next
+    protectHome(home)
     if exists then
         print(string.format("On to home %d at z=%d.", home.k, home.z))
     else
@@ -3099,6 +3140,8 @@ if not home then return end
 lanes = #planLanes()
 fuelGoal = lanes * SPACING + 4 * SPACING + 300
 saveJob("active")
+releaseHomes()
+for k = 0, lastHome do protectHome(homeAt(k)) end
 
 stopped = nil
 T.withTool(pickaxe, function()
@@ -3214,11 +3257,12 @@ T.withTool(pickaxe, function()
     T.fuelTrip = nil
     inTrip = false
     if not ok then
-        if err == "Terminated" then error(err, 0) end
+        if err == "Terminated" then releaseHomes(); error(err, 0) end
         stopped = type(err) == "table" and err.stop or tostring(err)
         print("Stopping: " .. stopped)
     end
     returnToStart()
+    releaseHomes()
 end)
 -- "stopped": it stopped itself and came back, so the autostart leaves it;
 -- "active" left behind means it went down mid-job, and the autostart resumes

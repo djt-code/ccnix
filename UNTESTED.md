@@ -12,6 +12,12 @@ section.
   pickaxe's), the scan is made, and the pickaxe is back on afterwards. Before, the scanner always took the
   pickaxe's place; with an empty side the pickaxe now stays on. Check the controller never comes off, and a
   scan that comes back "cooling down" is asked again.
+- **Home chests protected**: run `mine` with homes; in claude's code (or a Lua prompt) `T.protections()` lists
+  "mine home 0 chest", "mine home 0 bulk" and one pair for each home built, and `turtle.dig()` facing a home's
+  chest comes back `false, "protected: mine home 1 chest"` (or "won't dig" for the chest itself). When mine ends,
+  or stops with Ctrl+T, the list is empty again (`mine --resume` puts them back). If a run is killed some other way
+  they stay until the next `mine` run starts and ends; `T.unprotect(name)` lifts one by hand.
+  `sysctl mine.protect=false` switches it off. Check mine behaves as before otherwise (no dig of its own is refused).
 - **Scans in the map**: after a `mine` run with a scanner, `T.map.get(x, y, z)` (in claude's code, or a Lua
   prompt with `require("turtlelib")`) names the wall blocks the scans looked at and says air in the tunnel;
   `T.map.stats()` shows the cubes. A scan costs the merge's time (4913 cells at radius 8; the loop yields every

@@ -149,6 +149,80 @@ check("nothing spilled", (SPILLED or 0) == 0, tostring(SPILLED or 0))
 check("dug nothing on trips home and back", (TRAVEL_DIGS or 0) == 0, tostring(TRAVEL_DIGS or 0) .. " blocks")
 check("job done", jobState() == "done", tostring(jobState()))
 
+-- 2p. the chests of the start and of each home are protected areas while it
+--     runs (a dig into one is refused, whoever calls it), each home's as it
+--     is built, and let go of when it ends, however it ends (done, stopped
+--     as if by Ctrl+T; a resume protects them again); `mine.protect` off
+--     protects nothing
+local function areasNow()
+    local lib = package.loaded.turtlelib
+    return lib and lib.protections() or {}
+end
+local function areaNames(list)
+    local names = {}
+    for _, a in ipairs(list) do names[#names + 1] = a.name end
+    table.sort(names)
+    return table.concat(names, ", ")
+end
+local function guardWorld()
+    setup(stock(8, 128, 64)); remember()
+    startAt(); Mine.inv, Mine.files = {}, {}
+    FUEL, LOWEST, DRY, SPILLED = 1000, 1000, 0, 0
+end
+guardWorld()
+local seen, early, refused = {}, nil, nil
+ONMOVE = function(x, y, z, nx, ny, nz)
+    local lib = package.loaded.turtlelib
+    if nz == 3 and not early then early = areaNames(areasNow()) end           -- before home 1 exists
+    if nz == 40 and not seen[40] then
+        seen[40] = areaNames(areasNow())
+        refused = { lib.guarded(0, 1, 0), lib.guarded(-1, 0, 16), lib.guarded(0, -1, 32), lib.guarded(1, 1, 20) }
+    end
+end
+run("3", "3", "50", "--spacing", "16")
+ONMOVE = nil
+check("while it runs, the start's two chests are areas from the first move",
+    early == "mine home 0 bulk, mine home 0 chest", tostring(early))
+check("...and each home's two as it is built (homes 1 and 2 by z=40)",
+    seen[40] == "mine home 0 bulk, mine home 0 chest, mine home 1 bulk, mine home 1 chest, mine home 2 bulk, mine home 2 chest",
+    tostring(seen[40]))
+check("a dig at the start's top chest, home 1's wall chest and home 2's bulk chest is refused; the tunnel is not",
+    refused and refused[1] == "mine home 0 chest" and refused[2] == "mine home 1 chest" and refused[3] == "mine home 2 bulk"
+        and refused[4] == nil, refused and (tostring(refused[1]) .. ", " .. tostring(refused[2]) .. ", " .. tostring(refused[3]) .. ", " .. tostring(refused[4])) or "nil")
+check("when it ends, none is left, and the file is gone", #areasNow() == 0 and Mine.files[".protected"] == nil
+    and areaNames(areasNow()) == "", areaNames(areasNow()))
+check("the tunnel was dug as ever", leftIn(0, 2, 0, 2, 1, 50) == 0 and jobState() == "done", leftIn(0, 2, 0, 2, 1, 50) .. " blocks left")
+
+guardWorld()
+STOP_AT_DIG = 400
+local midway
+ONMOVE = function(x, y, z, nx, ny, nz) if nz == 40 and not midway then midway = areaNames(areasNow()) end end
+run("3", "3", "50", "--spacing", "16")
+ONMOVE = nil
+STOP_AT_DIG = nil
+check("stopped as if by Ctrl+T: the areas are let go of", midway and midway ~= "" and #areasNow() == 0,
+    tostring(midway) .. " / " .. areaNames(areasNow()))
+local resumed
+run("reset")
+ONMOVE = function(x, y, z, nx, ny, nz) if not resumed then resumed = areaNames(areasNow()) end end
+run("--resume")
+ONMOVE = nil
+check("...and a resume protects the homes it has again at its first move", resumed and resumed:find("mine home 1 chest", 1, true)
+    and resumed:find("mine home 0 bulk", 1, true), tostring(resumed))
+check("...and lets them go at its end", #areasNow() == 0)
+
+guardWorld()
+local offNames = {}
+local defaults, chosen = {}, { ["mine.protect"] = false }
+settings = { define = function(name, o) defaults[name] = o.default end,
+             get = function(name) if chosen[name] ~= nil then return chosen[name] end return defaults[name] end,
+             set = function() end, save = function() end }
+ONMOVE = function(x, y, z, nx, ny, nz) if nz == 20 then offNames[#offNames + 1] = areaNames(areasNow()) end end
+run("3", "3", "30", "--spacing", "16")
+ONMOVE = nil
+settings = nil
+check("mine.protect off: nothing is protected", #offNames > 0 and offNames[1] == "" and offNames[#offNames] == "", table.concat(offNames, "|"))
+
 -- 3. no length, homes every 8, 5 chests: two homes, then out of chests
 setup(stock(5, 64))
 startAt(); Mine.inv, Mine.files = {}, {}
