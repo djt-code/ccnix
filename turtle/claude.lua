@@ -58,7 +58,8 @@
 --   status       where it is, fuel, what's around, what it carries, the
 --                tools equipped, what's attached, a mine job, the network
 --   run_program  runs one of ccnix's turtle programs (mine, farm, mow,
---                home) with arguments, or reads its manual (help/)
+--                home), or ip and ping for the network, with arguments,
+--                or reads its manual (help/)
 --   ask_user     asks you, at the prompt
 --   memory       its notes, kept between sessions in /claude/memories/
 --                (the API's memory tool: view, create, str_replace,
@@ -118,8 +119,11 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 -- Old tool results cleared once the conversation is this long (tokens in),
 -- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST
 local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 60000, 6, 10000
--- The turtle programs run_program may run
-local PROGRAMS = { mine = true, farm = true, mow = true, home = true }
+-- The programs run_program may run: ccnix's turtle programs, and ip (the
+-- network's settings: it saves them itself) and ping to set up and check
+-- the network
+local PROGRAMS = { mine = "turtle/mine", farm = "turtle/farm", mow = "turtle/mow", home = "turtle/home",
+                   ip = "bin/ip", ping = "bin/ping" }
 
 --------------------------------------------------------------------------
 -- Arguments
@@ -178,9 +182,9 @@ Libraries: `local text = require("text")` and so on give ccnix's own; use them r
 - mc: require("mc").new() -> the world through what's attached (Advanced Peripherals' chat box, player detector, environment detector): time(), weather(), players(), say(text, from) into the game's chat, tell(player, text, from); a function whose peripheral isn't there returns nil and why.
 - httpc, net, netdb: ccnix's own network stack over modems (IPv4, UDP, TCP, DNS), when it's up (`status` says): httpc.get(url) / httpc.post(url, body, headers) / httpc.request({ url, method, body, headers, follow, timeout }) -> { status, headers, body } or nil and why (http:// only, no TLS); net.connect(host, port) -> a TCP connection (conn:send(s), conn:read(timeout), conn:close()); net.udp(); netdb.getaddrinfo(name).
 
-Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.readAll(), h.getResponseCode(), h.close(); or nil, why and the error response; http.post(url, body, headers); http.request for more): it is real HTTP and HTTPS from the server to the internet, as far as the server's allow-list lets it. Use ccnix's stack (httpc, net) for what only it reaches: addresses on the CC network (10.x.x.x and names there), raw TCP or UDP, or when http is disabled or refuses the host. Web pages for research are better fetched with web_fetch (below), which reads them for you.
+Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.readAll(), h.getResponseCode(), h.close(); or nil, why and the error response; http.post(url, body, headers); http.request for more): it is real HTTP and HTTPS from the server to the internet, as far as the server's allow-list lets it. Use ccnix's stack (httpc, net) for what only it reaches: addresses on the CC network (10.x.x.x and names there), raw TCP or UDP, or when http is disabled or refuses the host. To set the network up or change it (an interface's address, routes, DNS, bringing it up, starting it at boot), run_program ip, after reading its manual; ping checks the result. The code itself can't change settings. Web pages for research are better fetched with web_fetch (below), which reads them for you.
 
-Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start). Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
+Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
 Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it tidy. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
@@ -203,7 +207,7 @@ local TOOLS = {
     },
     {
         name = "run_program",
-        description = "Run one of ccnix's turtle programs: mine, farm, mow or home, with its arguments as you'd type them (\"3 3 32 --spacing 4\"), and wait until it ends; what it prints comes back, with where the turtle is afterwards. With help = true, its manual comes back instead and nothing runs.",
+        description = "Run one of ccnix's turtle programs (mine, farm, mow or home) or network tools (ip, ping: `ip` with no arguments shows the network, `ip help` its commands), with its arguments as you'd type them (\"3 3 32 --spacing 4\"), and wait until it ends; what it prints comes back, with where the turtle is afterwards. With help = true, its manual comes back instead and nothing runs.",
         input_schema = {
             type = "object",
             properties = {
@@ -279,6 +283,7 @@ local function colourOf(digit) return math.floor(2 ^ convert.toInteger(digit, 16
 -- Show the code: highlighted on a colour screen as lib/syntax colours
 -- Lua (vi's colours), kept for the pager.
 local function showCode(code)
+    code = convert.fromUTF8(code)
     if not COLOUR then return print(code) end
     local fg, state = {}, nil
     for i, line in ipairs(text.split(code, "\n", true)) do
@@ -617,7 +622,7 @@ local function status()
 end
 
 local function askUser(question)
-    say("yellow", "Claude asks: " .. tostring(question))
+    say("yellow", "Claude asks: " .. convert.fromUTF8(tostring(question)))
     return ask("> "), false
 end
 
@@ -787,7 +792,7 @@ local function runProgram(input)
         if not manual then return "No manual for " .. name .. " on this computer.", true end
         return clip(manual)
     end
-    local file = sysenv.findProgram("turtle/" .. name)
+    local file = sysenv.findProgram(PROGRAMS[name])
     if not (file and shell and shell.run) then return name .. " isn't on this computer.", true end
     local words = text.words(tostring(input.args or ""))
     local line = #words > 0 and (name .. " " .. text.join(words, " ")) or name
@@ -816,11 +821,30 @@ local function runProgram(input)
         keepPrint(said)
         if COLOUR then term.setTextColour(colours.lightGrey) end
     end
+    -- and what it writes to io.write (ip and ping do): a handle as io's own
+    -- are (ccsh pipes the same way), kept and shown a line at a time
+    local savedOut, pending = io and io.output and io.output(), ""
+    local ioMeta = io and io.stdout and getmetatable(io.stdout)
+    if ioMeta then
+        io.output(setmetatable({ _handle = {
+            write = function(s)
+                pending = pending .. tostring(s)
+                local lines = text.split(pending, "\n", true)
+                pending = table.remove(lines)
+                for _, l in ipairs(lines) do out[#out + 1] = l; keepPrint(l) end
+            end,
+            flush = function() end, close = function() end,
+        } }, ioMeta))
+    end
     T.savePos()                         -- where it starts from, for it to read
     if COLOUR then term.setTextColour(colours.lightGrey) end
     local ok, ran = pcall(shell.run, file, table.unpack(words))
     if COLOUR then term.setTextColour(colours.white) end
     _G.print, _G.printError = savedPrint, savedPrintError
+    if ioMeta then
+        io.output(savedOut)
+        if pending ~= "" then out[#out + 1] = pending; keepPrint(pending) end
+    end
     if stopped then error("Terminated", 0) end
     if not ok then error(ran, 0) end
     takeSavedPos()                      -- where it left the turtle
@@ -876,8 +900,25 @@ end
 local messages = {}
 local usage = { input = 0, output = 0, cached = 0 }
 
+-- Every string in v (in place) as UTF-8, which the API reads: the model's
+-- own text is already, and stays byte for byte as it was (a thinking
+-- block's signature covers all that came before it); CC's text (what was
+-- typed, what a tool printed) is Latin-1, made UTF-8.
+local function asUTF8(v)
+    for k, x in pairs(v) do
+        if type(x) == "string" then
+            if not utf8.len(x) then v[k] = convert.toUTF8(x) end
+        elseif type(x) == "table" then
+            asUTF8(x)
+        end
+    end
+    return v
+end
+
 local function body()
-    return textutils.serialiseJSON({
+    -- (unicode_strings: without it each byte past ASCII is sent as a
+    -- character of its own, and the API reads its "×" back as "Ã—")
+    return textutils.serialiseJSON(asUTF8({
         model = MODEL,
         max_tokens = MAX_TOKENS,
         system = { { type = "text", text = SYSTEM, cache_control = { type = "ephemeral" } } },
@@ -903,7 +944,7 @@ local function body()
             clear_at_least = { type = "input_tokens", value = CLEAR_AT_LEAST },
             exclude_tools = { "memory" },
         } } },
-    }, { allow_repetitions = true })
+    }), { allow_repetitions = true, unicode_strings = true })
 end
 
 local HEADERS = {
@@ -926,6 +967,11 @@ local function eventData(stream)
         pos = last + 1 + #line
     end
 end
+
+-- The API's own tools as shown: what they're called, and the input field
+-- that says what they did (any other, such as the code a web search's
+-- results are filtered with, shown by its name)
+local SERVER_TOOL = { web_search = { "web search", "query" }, web_fetch = { "web fetch", "url" } }
 
 -- Which field of a content block each kind of delta adds to
 local DELTA_FIELD = { text_delta = "text", thinking_delta = "thinking", signature_delta = "signature",
@@ -1086,12 +1132,13 @@ local function converse(goal)
         count(reply)
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
-            if b.type == "text" and b.text ~= "" then print(b.text); log("claude: " .. b.text) end
+            if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
             if b.type == "thinking" and (b.thinking or "") ~= "" then log("thinking: " .. b.thinking) end
             if b.type == "server_tool_use" then         -- a web search or fetch, done by the API
-                local what = (b.name == "web_fetch" and "web fetch: " or "web search: ")
-                    .. tostring((b.input or {}).url or (b.input or {}).query or "")
-                say("lightBlue", "--- " .. what)
+                local shows = SERVER_TOOL[b.name]
+                local what = shows and shows[1] .. ": " .. tostring((b.input or {})[shows[2]] or "")
+                    or tostring(b.name):gsub("_", " ")
+                say("lightBlue", "--- " .. convert.fromUTF8(what))
                 log(what)
             end
         end

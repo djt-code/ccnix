@@ -457,7 +457,29 @@ check("/memories itself can't be deleted; what's in it can",
 
 -- 17. run_program: a program's manual, a run with its arguments (what it
 --     prints comes back, and T takes the position it saved), and only
---     the four programs
+--     the programs it knows.  (io's output as CC's is: a handle is a table
+--     with io's own metatable, which io.output takes; the rest of io real.)
+local realIO = io
+local ccFile = { __name = "FILE*" }
+ccFile.__index = {
+    write = function(self, ...)
+        for _, v in ipairs(table.pack(...)) do self._handle.write(tostring(v)) end
+        return self
+    end,
+}
+local screenOut = setmetatable({ _handle = { write = function(v) write(v) end } }, ccFile)
+local currentOut = screenOut
+io = setmetatable({
+    stdout = screenOut,
+    output = function(h)
+        if h ~= nil then
+            if getmetatable(h) ~= ccFile then error("bad argument #1 (FILE expected)", 2) end
+            currentOut = h
+        end
+        return currentOut
+    end,
+    write = function(...) return currentOut:write(...) end,
+}, { __index = realIO })
 fresh({ "" })
 Mine.files["turtle/mine.lua"] = "-- mine"
 Mine.files["help/mine.txt"] = "mine: tunnels and branch mines"
@@ -485,9 +507,27 @@ check("the program ran with its arguments, its output and where it left the turt
         and progOut(2) == "Mining 3x3.\n[mine finished; the turtle is at (4,0,9) facing 2, fuel 1000]", progOut(2))
 check("T took the position the program saved", progOut(3) == "-> (4,0,9)\n-> 2", progOut(3))
 local _, e4p = progOut(4)
-check("a program that isn't one of the four is refused", e4p and progOut(4):find("No such program: autocompost", 1, true), progOut(4))
+check("a program it doesn't know is refused", e4p and progOut(4):find("No such program: autocompost", 1, true), progOut(4))
 check("the run was shown and logged", Mine.logHas("^%-%-%- run mine 3 3 32 %-%-here$")
     and (Mine.files["claude.log"] or ""):find("run: mine 3 3 32 --here", 1, true))
+
+-- ip, for the network: what it writes (io.write) comes back, and io's
+-- output is the screen again afterwards
+fresh({ "" })
+Mine.files["bin/ip.lua"] = "-- ip"
+shell.run = function(file, ...)
+    ranWith = { file, ... }
+    io.write("up: 1 interface\n", "partial")
+    return true
+end
+HTTP.queue = {
+    reply({ toolUse("run_program", { program = "ip", args = "up" }) }, "tool_use"),
+    reply({ text("Up.") }, "end_turn"),
+}
+run("bring the network up")
+check("run_program ip: bin/ip ran, what it wrote with io.write came back",
+    ranWith and ranWith[1]:find("bin/ip$") and ranWith[2] == "up"
+        and progOut(1):find("^up: 1 interface\npartial\n%[ip finished") ~= nil and io.output() == screenOut, progOut(1))
 
 -- Ctrl+T in the program stops claude too
 fresh({ "" })
@@ -497,6 +537,7 @@ HTTP.queue = { reply({ toolUse("run_program", { program = "mine" }) }, "tool_use
 local okT, errT = run("mine")
 check("Ctrl+T in a program stops claude, nothing more is asked", not okT and tostring(errT):find("Terminated") and #HTTP.requests == 1, tostring(errT))
 shell.run = nil
+io = realIO
 
 -- 18. status: the tools equipped, what's attached, the computer, a mine
 --     job, and the network; the code's net sees the running stack
@@ -547,3 +588,23 @@ local quoted = w3 and w3[3] and w3[3].content[1]
 check("the quoting text block goes back with its citations",
     quoted and quoted.text == "A turtle takes a computer and a chest." and quoted.citations
         and quoted.citations[1].url == "https://wiki.example/turtle", w3 and textutils.serialiseJSON(w3))
+
+-- 20. Text past ASCII: the model's UTF-8 goes back byte for byte (a
+--     thinking block after it is bound to it), CC's Latin-1 from a tool goes
+--     as UTF-8, and the screen shows what CC can ("×" as itself, "—" and "’"
+--     as ASCII); a step of the API's own the code a search filters with
+--     is shown by its name
+fresh({ "" })
+local UTF = "3\195\1513 \226\128\148 it\226\128\153s done"
+HTTP.queue = {
+    reply({ text(UTF), { type = "server_tool_use", id = "srvtoolu_2", name = "code_execution", input = { code = "x" } },
+            thinking(), toolUse("lua", { code = "print('a' .. string.char(167) .. 'b')" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig")
+local u2 = HTTP.requests[2] and HTTP.requests[2].body.messages
+check("the model's UTF-8 goes back as it came", u2 and u2[2].content[1].text == UTF, u2 and u2[2].content[1].text)
+local lr = tostring((resultsIn(2).toolu_1 or {}).content)
+check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, lr)
+check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
+check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))

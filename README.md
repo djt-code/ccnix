@@ -1129,7 +1129,7 @@ code prints or returns goes back to it. The others:
 | Tool | What it does |
 | --- | --- |
 | `status` | where it is, fuel, what's in front, above and below, the inventory, the tools equipped, what's attached, the label, a `mine` job under way, whether `http` and ccnix's network are up (and its addresses) |
-| `run_program` | runs `mine`, `farm`, `mow` or `home` with arguments and waits for it (their output comes back, and the position they saved is taken up), or reads the program's manual from `help/` |
+| `run_program` | runs `mine`, `farm`, `mow` or `home` with arguments and waits for it (their output comes back, and the position they saved is taken up), or `ip` and `ping` to set up and check the network (the code can't change settings itself); or reads the program's manual from `help/` |
 | `ask_user` | it asks you at the keyboard |
 | `memory` | the API's memory tool: notes kept between sessions in `/claude/memories/` (view, create, str_replace, insert, delete, rename, nothing outside that folder) |
 | `web_search`, `web_fetch` | look things up on the internet; they run on Anthropic's side, not the turtle's, cost a little each, and at most 5 of each are used per reply |
@@ -1179,8 +1179,8 @@ CraftOS's `cc.*` modules (`cc.strings`, `cc.pretty`, `cc.base64`,
 the network's `net`, `netdb` and `httpc`, which find the running stack).
 It has CC's `http` and is told to prefer it, real HTTP and HTTPS from the
 server as far as `http.rules` allows, over ccnix's stack, which it uses for
-the CC network's own addresses. It can't reach `shell` (only the four
-programs, through `run_program`), so a slip can't rewrite the programs, and
+the CC network's own addresses. It can't reach `shell` (only the
+programs `run_program` names) or `settings` (`ip` changes the network's), so a slip can't rewrite the programs, and
 it never sees the key. Everything it reads can go to the API, or anywhere
 `http` reaches, so keep secrets other than the key (a `.gitlite` with a
 token) off the turtle. It can do anything the turtle can, though, so keep valuables out of reach

@@ -5,40 +5,33 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## claude: http, the network, programs, memory, the web (0.39.0)
+## claude: UTF-8, and ip and ping (0.41.0)
 
-- **http in the code**, preferred over ccnix's stack: `claude fetch
-  https://example.com and tell me its title` (CC's http.get; the host must
-  be in `http.rules`). With `ip up` on a networked turtle, `claude get
-  http://<a 10.x host>/ with httpc` and `claude what's my address`
-  (`status` shows the network's addresses).
-- **run_program:** `claude read mine's manual, then mine a 3 by 3 tunnel
-  10 long here` (it should pass `--here`, the output should come back, and
-  `claude where are you` afterwards should agree with `.turtlepos`).
-  Ctrl+T while `mine` runs should stop claude too, the position saved.
-- **memory:** `claude remember that the fuel chest is behind the start`,
-  quit, run `claude where's the fuel?` (it should look in its memory
-  first). The notes are in `/claude/memories/`.
-- **web search and fetch:** `claude look up the crafting recipe for a
-  mining turtle` (shown as `--- web search: ...`; the answer may quote its
-  source). Needs web search turned on for the API key's organization.
-- **status:** the equipped tools, attached peripherals, the label, and a
-  `mine` job under way after Ctrl+T in `mine`.
+- **Text past ASCII**: ask for something the model answers with "×",
+  "—" or curly quotes (`claude how big a tunnel is 3 by 3 by 5? use the
+  times sign`), then go on in the same session with a web search and
+  another question: no "Invalid signature in thinking block" error (the
+  model's text went back as "Ã—" before, which broke its thinking
+  blocks), "×" shown as itself, dashes and quotes as - and '.  The web
+  search's own code steps show as `--- code execution` (they showed as
+  an empty `--- web search:`).
+- **ip and ping through run_program**: on a turtle with a modem, `claude
+  set the network up on the left modem as 10.1.4.30/24, gateway 10.1.4.1,
+  DNS 4.2.2.1, and start it at boot`: it reads ip's manual, runs `ip`
+  (its output comes back), and pings to check.
+
+## claude: http, the network, programs, memory, the web, the rest (0.39.0)
+
+- **status after Ctrl+T in `mine`**: the `mine` job under way shows.
+  Ctrl+T while `mine` runs stops claude too, the position saved.
 - **A long session** (60k+ tokens): `claude.log` should show "context: N
   old tool results cleared" and the session should carry on sensibly.
 
-## claude: ccnix's libraries in its code (0.38.0)
+## claude: ccnix's libraries in its code, the rest (0.38.0)
 
-- **The code's `require` loads ccnix's libraries:** text, scan, convert,
-  path, glob, regex, tables, fileio, getopt and mc, beside the cc.*
-  modules, and the system prompt lists what's in them (and more of
-  turtlelib: goHome, dumpDown, the chest helpers, the mine job). Try
-  `claude list the ores around you by name, sorted` (it should reach for
-  glob.match and tables.sortedKeys), `claude keep notes in
-  /claude/notes.txt` (fileio.write there works; anywhere else, and a read
-  of claude.key, give nil and why), and, with a chat box attached, `claude
-  say hello in the chat` (mc.say). `require("turtlelib")` and
-  `require("fs")` are still refused, naming what it may have.
+- With a chat box attached, `claude say hello in the chat` (mc.say).
+  `require("turtlelib")` and `require("fs")` are still refused, naming
+  what it may have.
 
 ## Everything: the text libraries (0.37.0)
 
@@ -375,8 +368,33 @@ section.
 
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
+- `ip up` on a turtle (2026-11-11, ROM 0.40.3) seemed not to bring the
+  network up: pings worked only after `ip boot` and a reboot. Not
+  reproduced or understood yet: what was set, and in what order, matters.
+- httpd on Lab-B (2026-11-11, ROM 0.40.3), started at boot and logging
+  "listening on port 80", later had no listener (`netstat -al` empty,
+  "connection refused") while `service status` said running; `service
+  restart httpd` brought it back. Before it: the 8.5 network tests
+  (`ip neigh add`, a reboot, `ping -c 0` stopped with Ctrl+C, a `ping &`
+  stopped with Ctrl+T after `fg`, `nc -w 3` to a host that was down).
+  Not found by reading lib/net, lib/proc, lib/httpd yet.
 
 ## Tested
+
+- 2026-11-11 — claude on ROM 0.40.3 (a turtle with a wireless modem and a
+  chunk controller): `claude fetch https://example.com and tell me its
+  title` (CC's http, "Example Domain"); httpc to Lab-B's httpd at
+  10.1.2.10 over the CC network; its status (equipped, attached, the
+  network's address); `mine 3 3 5 --here` through run_program after the
+  person gave it chests (it swapped the modem for the pickaxe and back),
+  `where are you` agreeing; memory (notes in /claude/memories/notes.md,
+  looked at first); a web search for the mining turtle's recipe; ores
+  around it by name, sorted (Geo Scanner); notes written under /claude/,
+  claude.key unreadable every way it tried.  Seen then: it couldn't set
+  the network up (no settings; ip through run_program since 0.41.0); "×"
+  shown as "Ã" and a block, and once an "Invalid signature in thinking
+  block" error after a web search (UTF-8 sent back wrong, fixed in
+  0.41.0).
 
 - 2026-11-11 — The network on ROM 0.40.3 (Lab-B): `ip host gone <addr>`,
   `ping gone`, `ip host del gone` (gone from the list, "Name or service

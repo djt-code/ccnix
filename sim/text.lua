@@ -163,6 +163,7 @@ same("utf8: two bytes", convert.utf8(0xE9), "\195\169")
 same("utf8: three bytes", convert.utf8(0x2588), "\226\150\136")
 same("fromUTF8: Latin-1 as itself, others ?", convert.fromUTF8("caf\195\169 \226\150\136"), "caf\233 ?")
 same("fromUTF8: not UTF-8 taken as Latin-1", convert.fromUTF8("caf\233"), "caf\233")
+same("fromUTF8: quotes, dashes, arrows and ... as ASCII", convert.fromUTF8("\226\128\156a\226\128\157 \226\128\148 \226\134\146 b\226\128\166"), "\"a\" - -> b...")
 same("toUTF8", convert.toUTF8("caf\233"), "caf\195\169")
 
 -- 9. escapes and quoting

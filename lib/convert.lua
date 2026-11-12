@@ -58,8 +58,10 @@
 --                       isn't base64; blanks in it are skipped)
 --   convert.utf8(code)  the UTF-8 bytes for one code point
 --   convert.fromUTF8(s) UTF-8 as CC shows text: Latin-1 (160-255) as
---                       itself, any other character past ASCII as "?";
---                       bytes that aren't UTF-8 are taken as Latin-1
+--                       itself, common punctuation, arrows and maths as
+--                       ASCII ("’" as "'", "—" as "-", "→" as "->"), any
+--                       other character past ASCII as "?"; bytes that
+--                       aren't UTF-8 are taken as Latin-1
 --   convert.toUTF8(s)   CC's text (Latin-1) as UTF-8
 --
 -- Escapes and quoting:
@@ -313,6 +315,20 @@ end
 
 local function isContinuation(b) return b and b >= 0x80 and b <= 0xBF end
 
+-- What fromUTF8 shows for the characters past Latin-1 that text uses most
+-- (typography, arrows, maths), by code point: the nearest ASCII
+local LOOKALIKE = {
+    [0x2010] = "-", [0x2011] = "-", [0x2012] = "-", [0x2013] = "-", [0x2014] = "-", [0x2015] = "-",
+    [0x2018] = "'", [0x2019] = "'", [0x201A] = ",", [0x201B] = "'", [0x2032] = "'",
+    [0x201C] = '"', [0x201D] = '"', [0x201E] = '"', [0x201F] = '"', [0x2033] = '"',
+    [0x2022] = "*", [0x2023] = ">", [0x2026] = "...", [0x2039] = "<", [0x203A] = ">",
+    [0x2002] = " ", [0x2003] = " ", [0x2009] = " ", [0x200A] = " ", [0x202F] = " ", [0x200B] = "",
+    [0x2190] = "<-", [0x2192] = "->", [0x2191] = "^", [0x2193] = "v", [0x2194] = "<->",
+    [0x21D2] = "=>", [0x2212] = "-", [0x2260] = "!=", [0x2264] = "<=", [0x2265] = ">=",
+    [0x2248] = "~", [0x221E] = "inf", [0x2713] = "v", [0x2714] = "v", [0x2717] = "x", [0x2718] = "x",
+    [0x2122] = "TM",
+}
+
 -- Is any byte of s past ASCII?
 local function hasHighBytes(s)
     for i = 1, #s do
@@ -337,7 +353,7 @@ function convert.fromUTF8(s)
             local code = b % (2 ^ (6 - tail))
             for k = 1, tail do code = code * 64 + s:byte(i + k) % 64 end
             -- Latin-1 shows as itself; CC's 128-159 are its own graphics, not these
-            out[#out + 1] = (code >= 160 and code <= 255) and string.char(code) or "?"
+            out[#out + 1] = (code >= 160 and code <= 255) and string.char(code) or LOOKALIKE[code] or "?"
             i = i + tail + 1
         else
             out[#out + 1] = s:sub(i, i)         -- (not UTF-8: taken as Latin-1)

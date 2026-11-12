@@ -451,7 +451,9 @@ end
 --------------------------------------------------------------------------
 -- JSON, as textutils.serialiseJSON/unserialiseJSON do it: a table with
 -- keys 1..n is an array, any other table an object (keys in order, so the
--- output repeats), null reads as nil.
+-- output repeats), null reads as nil.  Bytes past ASCII as CC writes them:
+-- each one its own \u00XX, or with { unicode_strings = true } as UTF-8 (an
+-- error if the string isn't UTF-8, as CC's utf8.codes gives).
 --------------------------------------------------------------------------
 local json = {}
 M.json = json
@@ -463,7 +465,7 @@ local function isArray(t)
 end
 
 local ESC = { ['"'] = '\\"', ["\\"] = "\\\\", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
-function json.encode(v)
+function json.encode(v, opts)
     local t = type(v)
     if t == "nil" then return "null" end
     if t == "boolean" then return tostring(v) end
@@ -471,22 +473,32 @@ function json.encode(v)
         if math.type and math.type(v) == "integer" or v == math.floor(v) then return string.format("%d", v) end
         return string.format("%.14g", v)
     end
-    if t == "string" then return '"' .. v:gsub('[%c"\\]', function(c) return ESC[c] or string.format("\\u%04x", c:byte()) end) .. '"' end
+    if t == "string" then
+        local s = v:gsub('[%c"\\]', function(c) return ESC[c] or string.format("\\u%04x", c:byte()) end)
+        if opts and opts.unicode_strings then
+            if not utf8.len(v) then error("bad argument #1 (invalid UTF-8 code)", 0) end
+        else
+            s = s:gsub("[\128-\255]", function(c) return string.format("\\u%04X", c:byte()) end)
+        end
+        return '"' .. s .. '"'
+    end
     if t ~= "table" then error("can't serialise a " .. t) end
     if v == M.EMPTY_ARRAY then return "[]" end
     if isArray(v) then
         local parts = {}
-        for i = 1, #v do parts[i] = json.encode(v[i]) end
+        for i = 1, #v do parts[i] = json.encode(v[i], opts) end
         return "[" .. table.concat(parts, ",") .. "]"
     end
     local keys = {}
     for k in pairs(v) do keys[#keys + 1] = tostring(k) end
     table.sort(keys)
     local parts = {}
-    for _, k in ipairs(keys) do parts[#parts + 1] = json.encode(k) .. ":" .. json.encode(v[k]) end
+    for _, k in ipairs(keys) do parts[#parts + 1] = json.encode(k, opts) .. ":" .. json.encode(v[k], opts) end
     return "{" .. table.concat(parts, ",") .. "}"
 end
 M.EMPTY_ARRAY = setmetatable({}, { __name = "empty_json_array" })
+-- (the API sends UTF-8 as it is)
+local UTF8 = { unicode_strings = true }
 
 function json.decode(s)
     local pos = 1
@@ -583,8 +595,8 @@ function M.textutilsApi()
         return "{" .. table.concat(parts, ",") .. "}"
     end
     return {
-        serialiseJSON = function(v) return json.encode(v) end,
-        serializeJSON = function(v) return json.encode(v) end,
+        serialiseJSON = function(v, opts) return json.encode(v, opts) end,
+        serializeJSON = function(v, opts) return json.encode(v, opts) end,
         unserialiseJSON = function(s) local ok, v = pcall(json.decode, s); if ok then return v end; return nil, v end,
         unserializeJSON = function(s) local ok, v = pcall(json.decode, s); if ok then return v end; return nil, v end,
         serialise = serialise, serialize = serialise,
@@ -609,7 +621,7 @@ end
 -- text, thinking and tool input in small deltas, a ping between blocks.
 function M.sse(msg)
     local out = {}
-    local function ev(t) out[#out + 1] = "event: " .. t.type .. "\ndata: " .. json.encode(t) .. "\n\n" end
+    local function ev(t) out[#out + 1] = "event: " .. t.type .. "\ndata: " .. json.encode(t, UTF8) .. "\n\n" end
     local function pieces(s, n)
         local t = {}
         for i = 1, #s, n do t[#t + 1] = s:sub(i, i + n - 1) end
@@ -635,7 +647,7 @@ function M.sse(msg)
             ev({ type = "content_block_delta", index = idx, delta = { type = "signature_delta", signature = b.signature } })
         elseif b.type == "tool_use" or b.type == "server_tool_use" then
             ev({ type = "content_block_start", index = idx, content_block = { type = b.type, id = b.id, name = b.name, input = {} } })
-            local input = json.encode(b.input or {})
+            local input = json.encode(b.input or {}, UTF8)
             if input ~= "[]" and input ~= "{}" then
                 for _, p in ipairs(pieces(input, 7)) do ev({ type = "content_block_delta", index = idx, delta = { type = "input_json_delta", partial_json = p } }) end
             end
@@ -672,7 +684,7 @@ function M.httpApi()
             local r = table.remove(H.queue, 1)
             if not r then error("http.post with nothing scripted for it (request " .. #H.requests .. ")") end
             if r.fail then return nil, r.fail, nil end
-            local text = type(r.body) == "string" and r.body or json.encode(r.body)
+            local text = type(r.body) == "string" and r.body or json.encode(r.body, UTF8)
             local asked = H.requests[#H.requests].body
             if r.code == 200 and type(asked) == "table" and asked.stream and type(r.body) == "table" then
                 text = M.sse(r.body)        -- a streamed request gets the reply as events

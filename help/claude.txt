@@ -32,7 +32,7 @@ The other tools:
   status
       where it is, fuel, what's around, what it carries, the tools equipped, what's attached, a mine job, the network
   run_program
-      runs one of ccnix's turtle programs (mine, farm, mow, home) with arguments, or reads its manual (help/)
+      runs one of ccnix's turtle programs (mine, farm, mow, home), or ip and ping for the network, with arguments, or reads its manual (help/)
   ask_user
       asks you, at the prompt
   memory
