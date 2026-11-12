@@ -183,6 +183,28 @@ local function drawRegionPrompt(e)
     e.x = e.left + #prompt
 end
 
+-- Write s, a control character in it as its letter reversed (Ctrl+B's
+-- \2 as a reversed B, as irssi shows IRC's formatting codes), one cell
+-- each as any character is.
+local function writeShown(t, s, colour)
+    colour = colour or colours.white
+    local from = 1
+    for i = 1, #s do
+        local b = s:byte(i)
+        if b < 32 then
+            if i > from then t.write(s:sub(from, i - 1)) end
+            local bg = t.getBackgroundColour and t.getBackgroundColour() or colours.black
+            t.setBackgroundColour(colour)
+            t.setTextColour(bg)
+            t.write(string.char(b + 64))
+            t.setBackgroundColour(bg)
+            t.setTextColour(colour)
+            from = i + 1
+        end
+    end
+    if from <= #s then t.write(s:sub(from)) end
+end
+
 -- Draw the line from e.x, scrolled so the cursor shows, the completion
 -- after it in grey, and put the cursor there.
 local function draw(e)
@@ -205,7 +227,7 @@ local function draw(e)
     if before ~= "" then term.write(before:sub(1, x - e.x)) end
     term.setCursorPos(x, e.y)
     local shown = e.line:sub(e.scroll + 1, e.scroll + room)
-    term.write(shown)
+    writeShown(term, shown, e.colour)
     local left = room - #shown
     local comp = e.comps and e.comps[e.ci]
     if comp and left > 0 then

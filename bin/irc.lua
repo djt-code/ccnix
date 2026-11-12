@@ -20,7 +20,9 @@
 -- completes nicks, channels and commands.  The line edits as ccsh's does
 -- (lib/readline: Ctrl+A/E, Ctrl+K/U/W/Y, Alt+B/F, Up and Down, Ctrl+R).
 -- Ctrl+C then b, c (and colour digits), u, r, i or o puts mIRC's bold,
--- colour, underline, reverse, italic or plain into the line.  Ctrl+T
+-- colour, underline, reverse, italic or plain into the line (shown there
+-- as a reversed letter: B, C ...).  CC's font has no bold, underline or
+-- italic: the chat's text is light grey and bold shows white.  Ctrl+T
 -- quits.  Your nick (or hilight_words) in a channel, or a private
 -- message, chimes on a speaker if one is attached.
 --

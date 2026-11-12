@@ -47,7 +47,9 @@ U.BUFLIST_AUTO, U.NICKLIST_AUTO = 80, 60
 
 -- Blit colours
 local BAR_BG, BAR_FG, BAR_DIM = "b", "0", "9"
-local TEXT_FG, BG = "0", "f"
+-- the chat's text light grey, so bold (which CC's font hasn't) can show
+-- as white, as a terminal's bright bold does
+local TEXT_FG, BOLD_FG, BG = "8", "0", "f"
 local ACT_COLOUR = { [0] = "8", "0", "4", "2" }     -- none, joins, messages, hilights
 local FORMAT_KEYS = { b = irc.BOLD, c = irc.COLOUR, u = irc.UNDERLINE, r = irc.REVERSE, i = irc.ITALIC,
     o = irc.PLAIN, ["_"] = irc.UNDERLINE }
@@ -133,7 +135,7 @@ end
 local function cellsOf(message, defaultFg, out)
     out = out or { ch = {}, fg = {}, bg = {} }
     for _, r in ipairs(irc.runs(message)) do
-        local fg = r.fg and irc.MIRC_BLIT[r.fg] or defaultFg
+        local fg = r.fg and irc.MIRC_BLIT[r.fg] or (r.bold and defaultFg == TEXT_FG and BOLD_FG) or defaultFg
         local bg = r.bg and irc.MIRC_BLIT[r.bg] or BG
         if r.reverse then fg, bg = bg, fg end
         if fg == bg then fg = (bg == "f") and "0" or "f" end
@@ -448,7 +450,10 @@ function UI:candidates(word, first)
     if b.kind == "channel" then
         local list = b:nickList()
         table.sort(list, function(x, y) return x.nick:lower() < y.nick:lower() end)
-        for _, n in ipairs(list) do add(n.nick) end
+        local mine = s and s.nick and s.nick:lower()
+        for _, n in ipairs(list) do
+            if n.nick:lower() ~= mine then add(n.nick) end      -- (your own last, below)
+        end
     elseif b.kind == "query" then
         add(b.name)
     end

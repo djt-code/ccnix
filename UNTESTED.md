@@ -258,20 +258,16 @@ section.
 
 ## IRC
 
-- **ircd as a service** (0.35.0). On A: `setup ircd`, reboot: `service`
-  shows ircd running, `service status ircd` its "listening on port 6667;
-  the game: ..." line (what it found: chat box, players, weather).
-  `service stop ircd` with a client connected: the client sees "Server
-  shutting down". `service disable ircd`, reboot: not running.
-  `sysctl ircd.oper=pw`, `service restart ircd`, then `/quote OPER x pw`
-  from a client gives +o.
-- **irc against ircd, two computers** (0.35.0). B: `irc 10.1.1.6` (A's
-  address). The banner, then the server buffer (2) with the welcome and
-  MOTD. `/join #ccnix`: you're @, the buffer switches. C does the same:
-  B sees C join; messages both ways, B's nick in C's line hilights it
-  (yellow behind the nick, Act in the status bar, a speaker's chime if
-  one is attached). Alt+1/2/3, Ctrl+N/P, Alt+A, PgUp/PgDn, the wheel,
-  Tab on a nick, Ctrl+C b for bold. `/quit`: the shell comes back clean.
+- **IRC's look, 0.41.2**: Ctrl+C then b in the line shows a reversed B
+  (not the font's smiley); the chat's text light grey, a bold word white;
+  Tab on a prefix your own nick shares offers the others first, yours
+  last.
+- **ircd as a service, the rest** (0.35.0). `service stop ircd` with a
+  client connected: the client sees "Server shutting down". `service
+  disable ircd`, reboot: not running. `sysctl ircd.oper=pw`, `service
+  restart ircd`, then `/quote OPER x pw` from a client gives +o.
+- **irc, the rest** (0.35.0). A third client: hilights chime on a
+  speaker if one is attached; Alt+A to the buffer with something new.
 - **irc on a monitor or a wide screen** (0.35.0). On a computer with an
   80-column monitor redirected (`monitor right irc ...`, or a big
   advanced monitor): the buffer list on the left, the nick list on the
@@ -365,6 +361,17 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-11 — IRC on ROM 0.41.1: `/rom/ccnix/deploy/setup ircd` on Lab-A
+  (setup isn't on the path: `ccnix setup` or its full path), reboot:
+  ircd running, "listening on port 6667; the game: the clock only".
+  `irc 10.1.1.10` from Lab-B: the banner, the welcome and MOTD, `/join
+  #ccnix` as @; `irc localhost` on Lab-A's console joined too (seen by
+  Lab-B); messages both ways; Lab-B's nick in Lab-A's line hilighted
+  (yellow behind the nick); the wheel, PgUp/PgDn, Alt+number, Tab on a
+  nick; `/quit` seen by the other as a quit with its message.  Seen then:
+  Tab offered your own nick first; Ctrl+C b showed as the font's smiley
+  and bold didn't show in the chat (0.41.2).
 
 - 2026-11-11 — CraftOS's startup after ccnix on a plain (basic) Computer
   under init (ROM 0.41.1, `init.boot`, `ccsh.login`, `motd.enable` on):
