@@ -239,29 +239,13 @@ section.
 
 ## screen
 
-- **screen over telnet** (0.36.0). On A with init: `telnet A` from B,
-  `screen -S work`, then `ping 10.1.0.1` (it runs on). Ctrl+A c, `irc
-  ...`; Ctrl+A 0 and 1 go back and forth; the status bar shows
-  `0-ping  1*irc` style titles. Ctrl+A d: "[detached from work]". `screen
-  -ls`: work, 2 windows, detached. `screen -r`: both windows as they were.
-- **A dropped connection** (0.36.0). Inside screen on a telnet session,
-  close B's telnet (Ctrl+] q, or break the cable). Telnet in again:
-  `screen -ls` shows work detached (or attached until the hangup lands:
-  `screen -d -r work` takes it), and `screen -r` brings it back with the
-  programs still running.
-- **The rest of screen** (0.36.0). Ctrl+A A names a window; Ctrl+A k then
-  y kills one; Ctrl+A [ and Shift+PgUp scroll back through a window's
-  past; Ctrl+A a gives ccsh its Ctrl+A; Ctrl+C stops a ping in a window
-  (not screen); `screen -x` from the console while B has it: both
-  show it, both type into it; a different-sized screen resizes the
-  windows. `sysctl screen.prefix=b`, then Ctrl+B is the key.
+- **The rest of screen** (0.36.0). Ctrl+A a gives ccsh its Ctrl+A;
+  `screen -x` from the console while B has it: both show it, both type
+  into it; a different-sized screen resizes the windows. `sysctl
+  screen.prefix=b`, then Ctrl+B is the key.
 
 ## IRC
 
-- **IRC's look, 0.41.2**: Ctrl+C then b in the line shows a reversed B
-  (not the font's smiley); the chat's text light grey, a bold word white;
-  Tab on a prefix your own nick shares offers the others first, yours
-  last.
 - **ircd as a service, the rest** (0.35.0). `service stop ircd` with a
   client connected: the client sees "Server shutting down". `service
   disable ircd`, reboot: not running. `sysctl ircd.oper=pw`, `service
@@ -361,6 +345,15 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-11 — ROM 0.41.2: irc's Tab offers the others before your own
+  nick; Ctrl+C b shows a reversed B in the line, bold white in the chat.
+  `screen` over telnet (Lab-B into Lab-A): `screen -S work`, a ping in
+  window 0, Ctrl+A c and `irc localhost` in 1, Ctrl+A 0/1, the status bar
+  (`0-ping 1*irc`), Ctrl+A A to rename, Ctrl+A [ scrollback (q leaves),
+  Ctrl+C stopping the ping and not screen, Ctrl+A d ("[detached from
+  work]"), `screen -ls` (2 windows, detached), `screen -r`; telnet closed
+  with Ctrl+] q, in again, `screen -r`: as it was; Ctrl+A k then y.
 
 - 2026-11-11 — IRC on ROM 0.41.1: `/rom/ccnix/deploy/setup ircd` on Lab-A
   (setup isn't on the path: `ccnix setup` or its full path), reboot:
