@@ -4,7 +4,17 @@
 --     local T = require("turtlelib")
 --
 -- Provides:
---   * dead-reckoned position/heading (T.pos, T.dir, T.face)
+--   * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right
+--     by the turtle API itself: loading this wraps turtle.forward/back/
+--     up/down/turnLeft/turnRight, dig*/place* (once, however many
+--     programs load it), so a move made straight through turtle.* is
+--     counted too; T.raw holds the originals
+--   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that
+--     no dig through the turtle API goes into, and a refusal to dig
+--     chests, barrels, shulker boxes, spawners and ComputerCraft blocks
+--     (T.cfg.digContainers lifts it)
+--   * change hooks: T.onChange(fn) hears every successful dig, placement
+--     and move
 --   * fuel management that refuels from inventory mid-task (T.ensureFuel)
 --   * low-level moves that only dig blocks listed in T.diggable
 --   * six directions (0..3 and "up"/"down"): look, dig, place or move in
@@ -184,8 +194,325 @@ function T.startAtHome(force)
     return nil
 end
 
-function T.turnRight() turtle.turnRight(); T.dir = (T.dir + 1) % 4; T.savePos() end
-function T.turnLeft()  turtle.turnLeft();  T.dir = (T.dir + 3) % 4; T.savePos() end
+--------------------------------------------------------------------------
+-- The turtle API, wrapped once
+--
+-- Loading turtlelib replaces turtle.dig/digUp/digDown, place/placeUp/
+-- placeDown, forward/back/up/down and turnLeft/turnRight with versions
+-- that know which cell they act on (from T.pos and T.dir):
+--   * a move or turn that succeeds updates T.pos / T.dir and saves them,
+--     so the position is right whatever code made it (a program, or
+--     claude's code calling turtle.forward() straight);
+--   * a dig into a protected area, or at a chest, barrel, shulker box,
+--     spawner or ComputerCraft block, returns false and why;
+--   * every successful dig, placement and move is told to the listeners
+--     (T.onChange).
+-- The originals are kept in T.raw: T.forward and the rest use those, with
+-- their own bookkeeping, so nothing is counted twice.
+--
+-- It happens once per turtle table, however many programs load turtlelib
+-- (each program the shell runs, and claude's code, gets a copy of this
+-- module of its own, but there is one `turtle`): the first load installs
+-- the wrappers and a marker (turtle._ccnixWrap) holding the originals, the
+-- listeners and the protected areas; later loads install nothing and take
+-- over the marker's owner, the module whose T.pos the wrapped calls
+-- update.  The newest load is the owner; T.claim() makes a module the
+-- owner again (claude does after running a program).
+--------------------------------------------------------------------------
+local WRAP_KEY = "_ccnixWrap"
+local WRAPPED = { "dig", "digUp", "digDown", "place", "placeUp", "placeDown",
+                  "forward", "back", "up", "down", "turnLeft", "turnRight" }
+
+-- Which side of the turtle each digging and placing function acts on, and
+-- the inspect that looks at the same side
+local DIG_SIDE = { dig = "front", digUp = "up", digDown = "down" }
+local PLACE_SIDE = { place = "front", placeUp = "up", placeDown = "down" }
+local INSPECT_SIDE = { front = "inspect", up = "inspectUp", down = "inspectDown" }
+
+-- How each move changes the position: dx, dy, dz from the heading
+local MOVE_STEP = {
+    forward = function() return DX[T.dir], 0, DZ[T.dir] end,
+    back    = function() return -DX[T.dir], 0, -DZ[T.dir] end,
+    up      = function() return 0, 1, 0 end,
+    down    = function() return 0, -1, 0 end,
+}
+-- ...and how each turn changes the heading
+local TURN_BY = { turnRight = 1, turnLeft = 3 }
+
+-- What the dig functions refuse (the checks mine always made for itself):
+-- a name that has one of these words in it, or starts with one of these
+local NEVER_DIG_WORDS = { "chest", "barrel", "shulker", "spawner" }
+local NEVER_DIG_PREFIXES = { "computercraft:" }
+
+local W                                -- the marker: raw, listeners, areas, owner, impl
+local raw = {}                         -- the turtle's own functions, as before wrapping
+local impl = {}                        -- this module's versions (T.raw's counterpart)
+
+if turtle then
+    W = turtle[WRAP_KEY]
+    if not W then
+        W = { raw = {}, listeners = {} }
+        for _, name in ipairs(WRAPPED) do
+            if type(turtle[name]) == "function" then
+                W.raw[name] = turtle[name]
+                -- the installed function hands over to whichever module owns the marker now
+                turtle[name] = function(...) return W.impl[name](...) end
+            end
+        end
+        turtle[WRAP_KEY] = W
+    end
+    raw = W.raw
+    W.owner, W.impl = T, impl
+    W.areas = nil                      -- (read again from the file: another program may have changed it)
+end
+-- The turtle's functions as they were before the wrapping: the same ones
+-- T.forward, T.digDir and the rest call underneath.  Nothing here tracks
+-- the position, checks an area or tells a listener.
+T.raw = raw
+
+-- Make this module the one the wrapped turtle functions keep up to date.
+-- Loading turtlelib does it already; call it when another program's
+-- module may have loaded since (claude, after run_program).
+function T.claim()
+    if W then W.owner, W.impl = T, impl end
+end
+
+-- Call fn(event) for every successful dig, placement and move from now on,
+-- by any program on this turtle that has the wrapped API.  event is a
+-- table: kind "dig" (x, y, z the cell; was the block's name and state the
+-- block's state table, as the inspect before it gave them), "place" (x, y,
+-- z the cell; item the name of what was placed, if it's in the slot's
+-- details) or "move" (x, y, z the cell it arrived at; from = { x, y, z }).
+-- A listener's error is dropped (except Ctrl+T), so one can't stop the
+-- turtle.  Returns a function that removes the listener.  (They last until
+-- the computer restarts: remove yours when the program ends.)
+function T.onChange(fn)
+    if not W then return function() end end
+    local list = W.listeners
+    list[#list + 1] = fn
+    return function()
+        for i, f in ipairs(list) do
+            if f == fn then table.remove(list, i); return end
+        end
+    end
+end
+
+-- Tell the listeners (if there are any) of an event, built from the
+-- fields given.
+local function tell(event)
+    if not W or not W.listeners[1] then return end
+    for _, fn in ipairs({ table.unpack(W.listeners) }) do
+        local ok, err = pcall(fn, event)
+        if not ok and err == "Terminated" then error(err, 0) end
+    end
+end
+
+-- The cell the turtle acts on to its front, up or down.
+local function targetOf(side)
+    local v = T.DELTA[side == "front" and T.dir or side]
+    return T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3]
+end
+
+-- A successful move: T.pos follows, the listeners hear, it's saved.
+local function moved(name)
+    local dx, dy, dz = MOVE_STEP[name]()
+    local from = W and W.listeners[1] and T.here()
+    T.pos.x, T.pos.y, T.pos.z = T.pos.x + dx, T.pos.y + dy, T.pos.z + dz
+    if from then tell({ kind = "move", x = T.pos.x, y = T.pos.y, z = T.pos.z, from = from }) end
+    T.savePos()
+end
+
+-- A successful turn.
+local function turned(by)
+    T.dir = (T.dir + by) % 4
+    T.savePos()
+end
+
+-- onOk() if the call's first result is true; the results as they were.
+local function afterwards(onOk, ok, ...)
+    if ok then onOk() end
+    return ok, ...
+end
+
+-- Protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (the
+-- corners in order, low to high).  The list is the marker's, read from
+-- the data file the first time it's needed, so every program has the
+-- same one; a line of the file is "x1 y1 z1 x2 y2 z2 name" (the name may
+-- have spaces).
+local PROTECT_FILE = ".protected"
+
+local function areas()
+    if W and W.areas then return W.areas end
+    local list = {}
+    if W then W.areas = list end
+    local data = fileio.read(T.dataPath(PROTECT_FILE))
+    for _, line in ipairs(data and text.lines(data) or {}) do
+        local w = text.words(line)
+        local n, name = {}, text.afterWords(line, 6)
+        for i = 1, 6 do n[i] = convert.toInteger(w[i]) end
+        if name and n[1] and n[2] and n[3] and n[4] and n[5] and n[6] then
+            list[#list + 1] = { name = name, n[1], n[2], n[3], n[4], n[5], n[6] }
+        end
+    end
+    return list
+end
+
+-- Write the list back to the file (or delete it when empty); true, or nil
+-- and why.
+local function saveAreas(list)
+    local path = T.dataPath(PROTECT_FILE)
+    if #list == 0 then
+        if fs.exists(path) then fs.delete(path) end
+        return true
+    end
+    local lines = {}
+    for _, a in ipairs(list) do
+        lines[#lines + 1] = string.format("%d %d %d %d %d %d %s", a[1], a[2], a[3], a[4], a[5], a[6], a.name)
+    end
+    return fileio.write(path, table.concat(lines, "\n") .. "\n")
+end
+
+local function isWhole(n) return type(n) == "number" and n == math.floor(n) end
+
+-- Protect the box between two corners (x, y, z, in the turtle's frame,
+-- either way round) under `name`: a dig that goes into it through the
+-- turtle API returns false, "protected: <name>".  Protecting a name that's
+-- already there replaces its box.  Returns true, or nil and why.
+function T.protect(name, x1, y1, z1, x2, y2, z2)
+    if type(name) ~= "string" or name == "" or text.contains(name, "\n") then
+        return nil, "an area needs a name (one line of text)"
+    end
+    local corners = { x1, y1, z1, x2, y2, z2 }
+    for i = 1, 6 do
+        if not isWhole(corners[i]) then return nil, "an area's corners are x1, y1, z1, x2, y2, z2: whole numbers" end
+    end
+    local list = areas()
+    local area = { name = name, math.min(x1, x2), math.min(y1, y2), math.min(z1, z2),
+                   math.max(x1, x2), math.max(y1, y2), math.max(z1, z2) }
+    local at = #list + 1
+    for i, a in ipairs(list) do
+        if a.name == name then at = i end
+    end
+    list[at] = area
+    local ok, err = saveAreas(list)
+    if not ok then return nil, "couldn't save the protected areas: " .. tostring(err) end
+    return true
+end
+
+-- Remove the area called `name`.  True, or false and why (none by that name).
+function T.unprotect(name)
+    local list = areas()
+    for i, a in ipairs(list) do
+        if a.name == name then
+            table.remove(list, i)
+            local ok, err = saveAreas(list)
+            if not ok then return false, "couldn't save the protected areas: " .. tostring(err) end
+            return true
+        end
+    end
+    return false, "no protected area called " .. tostring(name)
+end
+
+-- The name of the first protected area that holds the cell, or nil.
+-- `skip`, a name, leaves that area out (see T.guarded).
+function T.protected(x, y, z, skip)
+    for _, a in ipairs(areas()) do
+        if a.name ~= skip and x >= a[1] and x <= a[4] and y >= a[2] and y <= a[5] and z >= a[3] and z <= a[6] then
+            return a.name
+        end
+    end
+end
+
+-- The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 }
+-- (copies: changing one changes nothing).
+function T.protections()
+    local out = {}
+    for i, a in ipairs(areas()) do
+        out[i] = { name = a.name, x1 = a[1], y1 = a[2], z1 = a[3], x2 = a[4], y2 = a[5], z2 = a[6] }
+    end
+    return out
+end
+
+-- The name of the protected area that stops the current job from digging
+-- the cell: T.protected, but not counting the area the job is working
+-- inside (T.cfg.inside, set by T.inside).  nil if none.
+function T.guarded(x, y, z)
+    return T.protected(x, y, z, T.cfg.inside)
+end
+
+-- Run fn(...) as a job that owns the protected area `name`: digging in it
+-- is allowed meanwhile (other areas still hold).  Puts back what was set
+-- before, even if fn errors (the error is re-thrown); returns what fn
+-- returned.
+function T.inside(name, fn, ...)
+    local before = T.cfg.inside
+    T.cfg.inside = name
+    local res = table.pack(pcall(fn, ...))
+    T.cfg.inside = before
+    if not res[1] then error(res[2], 0) end
+    return table.unpack(res, 2, res.n)
+end
+
+-- Is this block one the dig functions refuse (a container, spawner or
+-- ComputerCraft block)?  mine's own list of blocks never to dig.
+function T.neverDig(name)
+    for _, word in ipairs(NEVER_DIG_WORDS) do
+        if text.contains(name, word) then return true end
+    end
+    for _, prefix in ipairs(NEVER_DIG_PREFIXES) do
+        if text.startsWith(name, prefix) then return true end
+    end
+    return false
+end
+
+-- The wrapped digs: refuse what's protected, look at what's there (the
+-- listeners are told it), then dig (with the tool side the caller named,
+-- if any).
+for name, side in pairs(DIG_SIDE) do
+    impl[name] = function(...)
+        local x, y, z = targetOf(side)
+        local area = T.guarded(x, y, z)
+        if area then return false, "protected: " .. area end
+        local inspect = turtle[INSPECT_SIDE[side]]
+        local ok, data = false, nil
+        if inspect then ok, data = inspect() end
+        if ok and type(data) == "table" and data.name and not T.cfg.digContainers and T.neverDig(data.name) then
+            return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
+        end
+        return afterwards(function()
+            if W and W.listeners[1] then
+                tell({ kind = "dig", x = x, y = y, z = z,
+                       was = ok and data and data.name or nil, state = ok and data and data.state or nil })
+            end
+        end, raw[name](...))
+    end
+end
+
+-- The wrapped placements: place, then tell the listeners what went where.
+for name, side in pairs(PLACE_SIDE) do
+    impl[name] = function(...)
+        local x, y, z = targetOf(side)
+        local item
+        if W and W.listeners[1] and turtle.getItemDetail then
+            local it = turtle.getItemDetail(turtle.getSelectedSlot())
+            item = it and it.name
+        end
+        return afterwards(function()
+            tell({ kind = "place", x = x, y = y, z = z, item = item })
+        end, raw[name](...))
+    end
+end
+
+-- The wrapped moves and turns: keep the position.
+for name in pairs(MOVE_STEP) do
+    impl[name] = function() return afterwards(function() moved(name) end, raw[name]()) end
+end
+for name, by in pairs(TURN_BY) do
+    impl[name] = function() return afterwards(function() turned(by) end, raw[name]()) end
+end
+
+function T.turnRight() raw.turnRight(); turned(1) end
+function T.turnLeft()  raw.turnLeft();  turned(3) end
 
 function T.face(d)
     if T.dir == d then return end
@@ -222,7 +549,7 @@ function T.lookAround()
     for a = 0, 3 do
         local ok, data = turtle.inspect()
         seen[a] = ok and data or false
-        turtle.turnRight()
+        raw.turnRight()
     end
     return seen
 end
@@ -485,8 +812,8 @@ function T.up()
     if T.pos.y >= T.cfg.maxHeight then return false end
     T.ensureFuel()
     for _ = 1, 5 do
-        if not clearWay(turtle.inspectUp, turtle.digUp) then return false end
-        if turtle.up() then T.pos.y = T.pos.y + 1; T.savePos(); return true end
+        if not clearWay(turtle.inspectUp, impl.digUp) then return false end
+        if raw.up() then moved("up"); return true end
         turtle.attackUp(); sleep(0.3)
     end
     return false
@@ -496,8 +823,8 @@ function T.down()
     if T.pos.y <= -T.cfg.maxDrop then return false end
     T.ensureFuel()
     for _ = 1, 5 do
-        if not clearWay(turtle.inspectDown, turtle.digDown) then return false end
-        if turtle.down() then T.pos.y = T.pos.y - 1; T.savePos(); return true end
+        if not clearWay(turtle.inspectDown, impl.digDown) then return false end
+        if raw.down() then moved("down"); return true end
         turtle.attackDown(); sleep(0.3)
     end
     return false
@@ -506,12 +833,8 @@ end
 function T.forward()
     T.ensureFuel()
     for _ = 1, 5 do
-        if not clearWay(turtle.inspect, turtle.dig) then return false end
-        if turtle.forward() then
-            T.pos.x = T.pos.x + DX[T.dir]; T.pos.z = T.pos.z + DZ[T.dir]
-            T.savePos()
-            return true
-        end
+        if not clearWay(turtle.inspect, impl.dig) then return false end
+        if raw.forward() then moved("forward"); return true end
         turtle.attack(); sleep(0.3)
     end
     return false
@@ -522,9 +845,8 @@ end
 -- there.
 function T.back()
     T.ensureFuel()
-    if not turtle.back() then return false end
-    T.pos.x = T.pos.x - DX[T.dir]; T.pos.z = T.pos.z - DZ[T.dir]
-    T.savePos()
+    if not raw.back() then return false end
+    moved("back")
     return true
 end
 
@@ -606,17 +928,17 @@ function T.look(d)
 end
 
 function T.digDir(d)
-    if d == "up" then return turtle.digUp() end
-    if d == "down" then return turtle.digDown() end
+    if d == "up" then return impl.digUp() end
+    if d == "down" then return impl.digDown() end
     T.face(d)
-    return turtle.dig()
+    return impl.dig()
 end
 
 function T.placeDir(d)
-    if d == "up" then return turtle.placeUp() end
-    if d == "down" then return turtle.placeDown() end
+    if d == "up" then return impl.placeUp() end
+    if d == "down" then return impl.placeDown() end
     T.face(d)
-    return turtle.place()
+    return impl.place()
 end
 
 function T.attackDir(d)
