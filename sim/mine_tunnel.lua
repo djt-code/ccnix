@@ -386,6 +386,37 @@ check("on, but no player set: no one is told, and mine says why", #told == 0 and
     table.concat(told, " | "))
 package.loaded.mc = nil
 
+-- 5o. --origin x,y,z,facing: the world cell of the start and the way it
+--     faces, for the map (T.origin, T.toWorld, T.toLocal); badly written, it
+--     is refused with the reason and nothing is dug; with no facing and no
+--     scanner to work it out from, it says so and mines on
+setup(stock(4, 64)); startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 1000, 1000, 0
+run("3", "3", "6", "--origin", "10,64,-20,east")
+local lib = package.loaded.turtlelib
+local origin = lib.origin()
+local ahead, right = lib.toWorld(0, 0, 5), lib.toWorld(2, 1, 0)
+check("--origin: said so, and the map has the start's world cell and facing",
+    logHas("World origin: the start is at 10,64,%-20, facing east") and origin and origin.x == 10 and origin.y == 64
+        and origin.z == -20 and origin.facing == "east", origin and (origin.x .. "," .. origin.y .. "," .. origin.z .. " " .. origin.facing) or "nil")
+check("...so the tunnel's cells have world cells (5 along it is 5 east, 2 right of it is 2 south)",
+    ahead and ahead.x == 15 and ahead.y == 64 and ahead.z == -20 and right and right.x == 10 and right.y == 65 and right.z == -18,
+    ahead and (ahead.x .. "," .. ahead.y .. "," .. ahead.z) or "nil")
+check("...and the tunnel was dug as ever", leftIn(0, 2, 0, 2, 1, 6) == 0 and jobState() == "done")
+setup(stock(4, 64)); startAt(); Mine.inv, Mine.files = {}, {}
+run("3", "3", "6", "--origin", "10,64")
+check("--origin with two numbers is refused, with the usage, and nothing is dug",
+    logHas("mine: %-%-origin wants x,y,z or x,y,z,facing") and logHas("Usage: mine") and leftIn(0, 2, 0, 2, 1, 6) > 0)
+run("3", "3", "6", "--origin", "10,64,-20,up")
+check("...and so is a facing that isn't a compass way", logHas("facing is north, east, south or west") and leftIn(0, 2, 0, 2, 1, 6) > 0)
+run("3", "3", "6", "--origin", "10,64,x")
+check("...and a coordinate that isn't a number", leftIn(0, 2, 0, 2, 1, 6) > 0)
+setup(stock(4, 64)); startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 1000, 1000, 0
+run("3", "3", "6", "--origin", "10,64,-20")
+check("no facing and no scanner: it says why it isn't setting the origin, and mines on",
+    logHas("Not setting the origin %(") and leftIn(0, 2, 0, 2, 1, 6) == 0 and package.loaded.turtlelib.origin() == nil)
+
 -- 6. only a little fuel: stops while it can still get back
 setup(stock(10, 6))
 startAt(); Mine.inv, Mine.files = {}, {}

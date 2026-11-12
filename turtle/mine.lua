@@ -6,6 +6,7 @@
 -- keeps running unattended.
 --
 -- Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
+--              [--origin x,y,z[,facing]]
 --         mine --resume          keep digging the tunnel it stopped in (from
 --                                the start, or from the last home)
 --         mine ... --new         start a fresh tunnel, forgetting the old one
@@ -19,6 +20,12 @@
 --                                or between which two; the tunnel's homes
 --                                (it reads the saved job and position, so it
 --                                works while mine runs, as a service say)
+--
+-- --origin gives the world cell of the start (what F3 shows for the block
+-- the turtle stands in) and the compass way it faces, north, east, south or
+-- west (left out, it is worked out from a Geo Scanner scan), for a run from
+-- the start.  The map then knows where it is in the world (T.toWorld,
+-- T.toLocal), for claude and the other programs.
 --
 -- width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 -- height = blocks UP from the turtle (negative = DOWN)
@@ -215,6 +222,7 @@ scan = require("scan")
 text = require("text")
 fileio = require("fileio")
 tables = require("tables")
+convert = require("convert")
 
 PROGRESS_FILE = T.dataPath("mine.seg")
 VEIN_REACH = 4       -- how far a vein is followed out from the tunnel
@@ -231,13 +239,38 @@ MAX_SPACING = 64     -- most blocks between homes
 --------------------------------------------------------------------------
 -- Arguments
 --------------------------------------------------------------------------
+-- The compass ways --origin may name the start's facing (T.setOrigin takes these).
+FACINGS = { north = true, east = true, south = true, west = true, n = true, e = true, s = true, w = true }
+
+-- --origin x,y,z[,facing]: the world cell of the start and the way it faces.
+-- { x, y, z, facing } (facing nil if left out), or nil and why.
+function parseOrigin(arg)
+    local parts = text.split(arg, ",")
+    local x, y, z = convert.toInteger(parts[1] or ""), convert.toInteger(parts[2] or ""), convert.toInteger(parts[3] or "")
+    if not (x and y and z and (#parts == 3 or #parts == 4)) then
+        return nil, "--origin wants x,y,z or x,y,z,facing (the world cell of the start; whole numbers)"
+    end
+    local facing = parts[4] and parts[4]:lower()
+    if facing and not FACINGS[facing] then
+        return nil, "--origin's facing is north, east, south or west"
+    end
+    return { x = x, y = y, z = z, facing = facing }
+end
+
 -- (T.options: a negative size, -3, is a size, not an option)
 opts, args = T.options({ ... }, { here = true, resume = true, new = true, ["no-lights"] = true,
-    spacing = "=", home = "=", ["to-start"] = true })
+    spacing = "=", home = "=", ["to-start"] = true, origin = "=" })
 if not opts then
     print("mine: " .. args)
     args, badOption = {}, true                  -- (the usage, below)
     opts = {}
+end
+if opts.origin then
+    originArg, originWhy = parseOrigin(opts.origin)
+    if not originArg then
+        print("mine: " .. originWhy)
+        badOption = true
+    end
 end
 forceHere, resume, fresh, toStart = opts.here == true, opts.resume == true, opts.new == true, opts["to-start"] == true
 lights = not opts["no-lights"]
@@ -268,7 +301,7 @@ elseif not (doReset or doHaul or doWhere or resume) and WIDTH and HEIGHT then
 end
 
 function usage()
-    print("Usage: mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]")
+    print("Usage: mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here] [--origin x,y,z[,facing]]")
     print("       mine --resume | mine haul | mine where | mine reset [--home N | --to-start | --here]")
     print("width: + right / - left; height: + up / - down;")
     print("no length: dig until out of chests, fuel or room")
@@ -3165,6 +3198,19 @@ if not home then return end
 lanes = #planLanes()
 fuelGoal = lanes * SPACING + 4 * SPACING + 300
 saveJob("active")
+if originArg then
+    if T.pos.x == 0 and T.pos.y == 0 and T.pos.z == 0 then
+        local ok, why = T.setOrigin(originArg.x, originArg.y, originArg.z, originArg.facing)
+        if ok then
+            print(string.format("World origin: the start is at %d,%d,%d%s.", originArg.x, originArg.y, originArg.z,
+                originArg.facing and (", facing " .. originArg.facing) or ""))
+        else
+            print("Not setting the origin (" .. tostring(why) .. ").")
+        end
+    else
+        print("Not setting the origin: --origin is for a run from the start.")
+    end
+end
 releaseHomes()
 for k = 0, lastHome do protectHome(homeAt(k)) end
 

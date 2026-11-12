@@ -3,6 +3,7 @@ mine: tunnel-mining turtle for CC:Tweaked
 Needs a pickaxe (any *_pickaxe upgrade), equipped or in the inventory. Any other tool is parked in the inventory while it runs and put back afterwards.  Optional: Advanced Peripherals Chunky Turtle upgrade so it keeps running unattended.
 
 Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
+             [--origin x,y,z[,facing]]
         mine --resume
             keep digging the tunnel it stopped in (from the start, or from the last home)
         mine ... --new
@@ -17,6 +18,8 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
             turtle was put back at the start by hand
         mine where
             where it is along the tunnel: at which home, or between which two; the tunnel's homes (it reads the saved job and position, so it works while mine runs, as a service say)
+
+--origin gives the world cell of the start (what F3 shows for the block the turtle stands in) and the compass way it faces, north, east, south or west (left out, it is worked out from a Geo Scanner scan), for a run from the start.  The map then knows where it is in the world (T.toWorld, T.toLocal), for claude and the other programs.
 
 width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 height = blocks UP from the turtle (negative = DOWN)

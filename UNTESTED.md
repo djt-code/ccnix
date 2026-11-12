@@ -12,6 +12,10 @@ section.
   pickaxe's), the scan is made, and the pickaxe is back on afterwards. Before, the scanner always took the
   pickaxe's place; with an empty side the pickaxe now stays on. Check the controller never comes off, and a
   scan that comes back "cooling down" is asked again.
+- **`mine --origin x,y,z,facing`**: stand the turtle on a block, read its cell off F3 (the block it stands in), and
+  `mine 3 3 10 --origin <x>,<y>,<z>,<north|east|south|west>` (the way the tunnel runs). Then `T.origin()` and
+  `T.toWorld(0, 0, 5)` (in claude's code) should give the F3 cell five blocks along the tunnel. Without the facing
+  and with a scanner on board the facing is worked out from a scan: check it names the way you know it faces.
 - **mine tells the player**: `sysctl mine.report=true`, `sysctl turtle.player=<your name>`, a chat box in the
   start's top chest (or on board, or on a side), then a short `mine` run: at the end you get one chat message
   "mine Done: ..." with the turtle's place and fuel; stopped by bedrock or no fuel it says why. mine takes the
