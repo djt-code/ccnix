@@ -7,13 +7,10 @@ section.
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
-- **A long session** (60k+ tokens): `claude.log` should show "context: N
-  old tool results cleared" and the session should carry on sensibly.
 
 ## claude: ccnix's libraries in its code, the rest (0.38.0)
 
-- With a chat box attached, `claude say hello in the chat` (mc.say).
-  `require("turtlelib")` and `require("fs")` (0.43.5) say the code has
+- `require("turtlelib")` and `require("fs")` (0.43.5) say the code has
   them already, as the globals T and fs.
 
 ## Everything: the text libraries, what's left (0.36.1-0.37.0)
@@ -224,6 +221,14 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.3, claude's long session: it equipped a chat box
+  from its inventory in the modem's place and said "hello from the
+  turtle" in the game's chat (shown as [AP], mc.say given no name), then
+  read 47 help pages before its 60 tool calls ran out, said so, and
+  carried on when asked; claude.log showed "context: 51 old tool results
+  cleared (31278 tokens)" on each request past the threshold (the API
+  clears afresh each time). 1.4M tokens in for the goal, half cached.
 
 - 2026-11-12 — ROM 0.43.4, claude: told to dig with mine, Ctrl+T stopped
   both; asked, it found the job unfinished, said where the turtle was,
