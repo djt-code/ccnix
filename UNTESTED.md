@@ -31,20 +31,17 @@ numbers, the text tools and the network tools. Still to try:
   on an install made before 0.37.0 adds the text libraries to a checkout
   cloned with `--only` paths; `ccnix setup --autostart=router`; setup's
   migration from an old /cc-turtles, if one is left anywhere.
-- **git:** `git pull /ccnix --only lib/` (options after operands); curl
-  and git refuse an unknown or misused `--option`.
 - **The turtles:** `mine -3 3 32`, `mine --spacing=4`, `farm`, `mow
   notorch`, `claude go -5 blocks` (options through lib/getopt); a farm or
   mine run's saved job read back after a reboot; claude's Lua shown in
   lib/syntax's colours.
 - **Text on screen:** the pager wrapping a long coloured line (`vim` on a
-  long line, `help` in a narrow window); a long IRC message split in two
-  at the last space that fits.
-- **The rest:** `host` a name; `curl` a Lua page with a query, one
-  using `text` and `fileio`; a panic report (one row layout);
-  `$HOSTNAME` on an unlabelled computer (its ID); jbod on the
-  fileserver; a long `sort` and `wc` on a big file (no "Too long without
-  yielding"); a syslog line's trailing blanks dropped.
+  long line).
+- **The rest:** a panic report (one row layout); jbod on the
+  fileserver; a log message received over the network (syslogd with
+  `syslog.listen`, another computer forwarding to it): its line end and
+  the blanks before it dropped (a message logged on the computer itself
+  keeps them, as util-linux logger does).
 
 ## Editors
 
@@ -285,6 +282,15 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.0: `ccnix update` (the boot message about
+  another ROM gone after the reboot); `git pull /ccnix --only lib/`;
+  `curl --bogus` and `git pull --bogus` refused; a Lua page using
+  `text.trim` and `fileio.read` with a query (`<p>[bob] 111</p>`); `wc`
+  and `sort` on a 10225-line file; `$HOSTNAME` with the label cleared
+  (the ID); a 600-character paste in irc sent as two messages split at a
+  space; `help ccsh` on a pocket computer; `host example.com` through the
+  gateway.
 
 - 2026-11-12 — ROM 0.43.0: `grep -r` (apis/<file> names in order, `-rl`
   from inside without `./`, `-rc` on a folder; a folder without -r: "Is
