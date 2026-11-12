@@ -162,6 +162,21 @@ Fuel from lava:
 T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 What a job costs in fuel:
 T.fuelFor(plan, opts) - What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
+The job journal:
+T.job.start(goal, steps) - Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
+T.job.done(step) - Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step).
+T.job.resume() - The job as it stands: { goal, steps = { { text, done } }, step (the text of the step to do now), next (its number), done, total, finished, notes, work = { key = text }, every }; nil and why if there is none.
+T.job.note(said) - Add a note to the job (the newest 40 are kept). True, or nil and why.
+T.job.progress(key, said) - Set the progress line for a key such as "build" or "harvest" (text nil takes it away). T.build and T.harvest call this when a job is on. True, or nil and why.
+T.job.status() - How the job stands in one line ("step 2 of 3: lay the floor; build keep: 40 of 300 cells"), or nil if there is none.
+T.job.clear() - Forget the job. True.
+Reports to the player:
+T.report.now(said, opts) - Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+T.report.every(n) - Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.
+The undo journal:
+T.undoMark() - The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.
+T.undoClear() - Empty the undo journal. True.
+T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:

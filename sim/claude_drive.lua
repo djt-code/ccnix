@@ -842,3 +842,23 @@ check("with no index on the computer the prompt says so and points at the source
     sysNone:find("index of turtlelib's functions, turtle/tl/index.txt, isn't on this computer", 1, true)
         and sysNone:find("turtlelib.lua", 1, true) and sysNone:find("say plainly if something failed.", 1, true)
         and not sysNone:find("@INDEX@", 1, true))
+
+-- 25. status shows the world origin and the job journal's step (ADR-0008, phase 4)
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[
+T.map.clear()
+T.setOrigin(100, 64, -20, "north")
+T.job.start("build the keep", { "clear", "floor", "walls" })
+T.job.done()
+return 1]] }) }, "tool_use"),
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("what is the job")
+local st25a = resultsIn(2).toolu_1 and tostring(resultsIn(2).toolu_1.content) or ""
+local st25b = resultsIn(4).toolu_3 and tostring(resultsIn(4).toolu_3.content) or ""
+check("status says nothing of an origin or a job while there is none", st25a ~= "" and not st25a:find("world origin", 1, true) and not st25a:find("job: ", 1, true), st25a)
+check("...and shows the origin and the job's step once there is", st25b:find("world origin: the turtle's 0,0,0 is 100,64,-20 and its +z points north", 1, true)
+    and st25b:find("job: build the keep - step 2 of 3: floor", 1, true), st25b)

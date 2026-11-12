@@ -272,7 +272,7 @@ Programs: run_program runs ccnix's own turtle programs, tested and careful about
 
 Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it tidy. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
-Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, and whether the network is up. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
+Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
 
 local TOOLS = {
@@ -742,6 +742,16 @@ local function status()
     if #areas > 0 then
         lines[#lines + 1] = "protected areas near: " .. (#near > 0 and table.concat(near, ", ")
             or string.format("none within %d blocks (%d elsewhere: T.protections())", NEAR_AREAS, #areas))
+    end
+    -- the world origin when it is set, and the job journal's step when a job is on
+    local origin = T.origin()
+    if origin then
+        lines[#lines + 1] = string.format("world origin: the turtle's 0,0,0 is %d,%d,%d and its +z points %s%s", origin.x, origin.y, origin.z,
+            origin.facing, origin.aligned == false and " (the map is unaligned)" or "")
+    end
+    if fs.exists(T.dataPath(".job")) then
+        local goal = T.job.resume()
+        if goal then lines[#lines + 1] = "job: " .. goal.goal .. " - " .. T.job.status() end
     end
     local job = T.loadMineJob()
     if job then

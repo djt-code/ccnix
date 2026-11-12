@@ -565,8 +565,20 @@ local function loadSaved()
     return saved
 end
 
--- Write how far the build has got.
+-- Tell the job journal how far the build has got, if a job is on (without one nothing is loaded or written).
+local function tellJob(job)
+    if not fs.exists(dataFile(".job")) then return end
+    local failed = #tables.sortedKeys(job.failed)
+    local line = (job.plan.name or "build") .. ": " .. job.done .. " of " .. job.total .. " cells tried"
+    if failed > 0 then line = line .. ", " .. failed .. " failed" end
+    if job.done >= job.total and failed == 0 then line = line .. " (finished)" end
+    local ok, err = pcall(T.job.progress, "build", line)
+    if not ok and err == "Terminated" then error(err, 0) end
+end
+
+-- Write how far the build has got (and tell the job journal).
 local function saveProgress(job)
+    tellJob(job)
     local out = { "name " .. (job.plan.name or ""), "done " .. job.done }
     for _, n in ipairs(tables.sortedKeys(job.failed)) do
         out[#out + 1] = "failed " .. n .. " " .. text.replace(tostring(job.failed[n]), "\n", " ")

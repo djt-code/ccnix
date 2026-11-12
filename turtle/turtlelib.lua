@@ -51,6 +51,9 @@
 --   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a
 --     place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava
 --     takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
+--   * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file
+--     so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them
+--     back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2454,6 +2457,8 @@ T.registry = {
     fetch = "tl.store", stow = "tl.store", autoDump = "tl.store",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
+    -- tl.journal: the job journal, the undo journal and reports to the player
+    job = "tl.journal", report = "tl.journal", undo = "tl.journal", undoMark = "tl.journal", undoClear = "tl.journal",
 }
 local loadingModule = {}
 
@@ -2494,10 +2499,12 @@ setmetatable(T, { __index = function(_, name)
 end })
 
 -- T.cfg.autoDump = true (or a number of free slots) turns on the store module's dumping when the
--- inventory nearly fills; a program only sets it, so setting it the first time loads the module.
+-- inventory nearly fills, and T.cfg.undo = true the journal's record of every dig and placement; a
+-- program only sets them, so setting one the first time loads the module.
 setmetatable(T.cfg, { __newindex = function(cfg, key, value)
     rawset(cfg, key, value)
     if key == "autoDump" and value then pcall(T.need, "autoDump") end
+    if key == "undo" and value then pcall(T.need, "undo") end
 end })
 
 -- A map on disk is kept right by every program that digs, places or moves, so its module

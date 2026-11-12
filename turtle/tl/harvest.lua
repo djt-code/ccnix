@@ -224,6 +224,14 @@ local function cellsOf(pattern, test, where, opts, info)
     return out, cut
 end
 
+-- Tell the job journal how far the harvest has got, if a job is on (without one nothing is loaded or written).
+local function tellJob(info, pattern)
+    if not fs.exists(T.dataPath(".job")) then return end
+    local line = pattern .. ": " .. info.got .. (info.target and (" of " .. info.target) or "") .. " dug"
+    local ok, err = pcall(T.job.progress, "harvest", line)
+    if not ok and err == "Terminated" then error(err, 0) end
+end
+
 -- Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be.
 -- Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
 --
@@ -320,6 +328,7 @@ function T.harvest(pattern, where, target, opts)
                 local dug, digWhy = T.digDir(d)
                 if dug then
                     info.got = info.got + 1
+                    if info.got % 8 == 0 then tellJob(info, pattern) end
                 else
                     info.failed[#info.failed + 1] = { x = c.x, y = c.y, z = c.z, name = c.name, why = "couldn't dig it: " .. tostring(digWhy) }
                 end
@@ -360,6 +369,7 @@ function T.harvest(pattern, where, target, opts)
         end
     end
     loop()
+    tellJob(info, pattern)
 
     local after = inventory()
     for name, n in pairs(after) do

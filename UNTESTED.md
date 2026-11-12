@@ -5,6 +5,24 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.journal: T.job, T.undo and T.report (ADR-0008 phase 4, ccnix 0.49.0)
+
+- **T.job.start(goal, steps)** then **T.job.done()** as each step finishes; reboot the computer (or Ctrl+T and
+  start again) and **T.job.resume()** gives the step to do now (`job.next`, `job.step`). The job is the data file
+  `.job`. Check that a `T.build` and a `T.harvest` run with a job on show their progress in `T.job.status()`
+  (`build: keep: 40 of 300 cells tried`) and that without a job no `.job` file appears. claude's `status`
+  shows the world origin and the job line.
+- **T.cfg.undo = true**, then dig and place a few blocks (by hand-written code or claude), then `T.undo(3)`:
+  the placed blocks are dug out and the dug one is placed again with the item aboard (stairs through `T.placeAt`,
+  facing and half as they were). Check on a real block with a state (a stair, a log), that `T.undoMark()` and
+  `T.undo(nil, { since = mark })` undo a stretch of work, and the file `.undo` (cut at 2000 entries, the setting
+  `undo.max`). The dig has always looked at the block first, so the state costs nothing extra.
+- **T.report("text")** with `sysctl turtle.player=<your name>` and a chat box in the inventory (not on a side):
+  the turtle equips it on the side without the chunk controller, speaks, and puts the pickaxe back. Check the
+  message: where it is (the world cell when the origin is set), fuel, the job's line. Check what the chat
+  box does when it is busy (the retry waits a second, five times), and with the chat box already attached.
+  **T.report.every(2)** with a job: a message on every second `T.job.done()`.
+
 ## tl.harvest: T.harvest, T.refuelFromLava, T.fuelFor (ADR-0008 phase 4)
 
 - **T.harvest(glob, box, target)** digs the blocks matching in a box (scanned as

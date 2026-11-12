@@ -15,6 +15,7 @@ Provides:
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
+  * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -626,6 +627,71 @@ T.fuelFor(plan, opts)
     What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
 
     `plan` is a table with any of: route (a list of points { x, y, z } to go through from here), go (one point), build (a blueprint, or its text), box and radius (a box to scan with T.scanBox), scans (a number of scans of `radius`, default 8), back (true: and return to where the turtle is now), extra (fuel to add). A plan that is a blueprint, or a bare list of points, is a build or a route. Moves cost a fuel each; those of a route and the way to a build are made 25% longer for detours (opts.detour), and T.cfg.fuelMargin (30) is added on top. Info is { route, build, scans, back, extra, margin, need, tank, board, have, enough, short }, the costs in fuel and `board` the fuel value of the T.fuel items aboard.
+
+tl.journal: the job journal, the undo journal and reports to the player
+
+Loaded by turtlelib the first time T.job, T.report, T.undo, T.undoMark or T.undoClear is used, or when T.cfg.undo is set.
+
+The job journal (T.job) keeps a job in one data file, .job: the goal, the steps of the plan and which are done, notes, and the progress a build or a harvest reports as it goes.  A reset, a crash or a cleared conversation then carries on at the step:
+    T.job.start("build the keep",
+        { "clear the ground", "lay the floor", "raise the walls" })
+    T.job.done()                  -- the next step is done
+    local job = T.job.resume()    -- job.step is the text of the step to do now, job.done of job.total are done
+T.build and T.harvest write their progress there (T.job.progress) when a job is on, and write nothing when there is none.
+
+The undo journal (T.cfg.undo = true) writes down each block the turtle digs or places, in the data file .undo: the block's name and its state for a dig (the dig looks first, so the state comes free), the item for a placement.  T.undo(n) puts the last n back: a dug block is placed again (through T.placeAt when it has a state, with the item on hand) and a placed one is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
+
+T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added.  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
+
+== The job journal ==
+
+T.job.start(goal, steps)
+    Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
+
+T.job.done(step)
+    Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step).
+
+    A step done twice is done. With T.report.every set, the player is told once in every n steps.
+
+T.job.resume()
+    The job as it stands: { goal, steps = { { text, done } }, step (the text of the step to do now), next (its number), done, total, finished, notes, work = { key = text }, every }; nil and why if there is none.
+
+    This is what to call after a restart: the job is carried on at job.next.
+
+T.job.note(said)
+    Add a note to the job (the newest 40 are kept). True, or nil and why.
+
+T.job.progress(key, said)
+    Set the progress line for a key such as "build" or "harvest" (text nil takes it away). T.build and T.harvest call this when a job is on. True, or nil and why.
+
+T.job.status()
+    How the job stands in one line ("step 2 of 3: lay the floor; build keep: 40 of 300 cells"), or nil if there is none.
+
+T.job.clear()
+    Forget the job. True.
+
+== Reports to the player ==
+
+T.report.now(said, opts)
+    Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+
+    The player is the setting turtle.player (opts.player overrides it); with none, nothing is said. A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
+
+T.report.every(n)
+    Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.
+
+== The undo journal ==
+
+T.undoMark()
+    The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.
+
+T.undoClear()
+    Empty the undo journal. True.
+
+T.undo(n, opts)
+    Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
+
+    A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
 
 tl.path: routes: a search over the map for a way to a cell, and walking it
 
