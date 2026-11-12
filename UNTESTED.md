@@ -222,8 +222,7 @@ numbers, the text tools and the network tools. Still to try:
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
   route reaches every CC computer. On the dev server, after redeploying:
   `ip -br addr show ccnix0` on the host shows 10.1.0.1/24 alone (the old
-  10.0.0.1 gone); routers' back addresses moved to 10.1.0.x with `default
-  via 10.1.0.1`; `/ccnix route add 10.1.0.0/16 via 10.1.0.2` is accepted
+  10.0.0.1 gone); `/ccnix route add 10.1.0.0/16 via 10.1.0.2` is accepted
   (a route around the exchange) and `10.1.0.0/25 via 10.1.0.2` refused;
   a computer straight on the exchange (no router) reaches the internet.
 
@@ -234,9 +233,6 @@ numbers, the text tools and the network tools. Still to try:
   existing eula.txt alone; on a fresh host the server doesn't start until
   eula.txt says true; `-e minecraft_eula_accepted=true` writes it.
 
-- **Everything since ROM 0.19.1 on a modded server**: the dev server still
-  runs ccnix-mod 0.15.22. Deploying a newer jar brings the ROM up to date;
-  then `ccnix version` there, and the items above that need the mod.
 
 ## Help pages
 
@@ -264,6 +260,10 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — the exchange at 10.1.0.0/24, in game: a router's back.1 is
+  10.1.0.2/24 with `default via 10.1.0.1`, and the internet answers
+  through it (`host example.com`).
 
 - 2026-11-12 — ROM 0.43.2: `ping -c 1 10.1.2.99 &` then `ip neigh`:
   INCOMPLETE, 1 queued, asked 2 times; gone a moment later (three asks a
