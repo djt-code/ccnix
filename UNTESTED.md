@@ -5,6 +5,33 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## turtlelib: withPeripheral, pull, moveTo, junk, the module loader (ADR-0008)
+
+- **withPeripheral**: with a chunk controller on one side and a pickaxe on
+  the other, `T.withPeripheral("advancedperipherals:geo_scanner", function(p)
+  return p.scanBlocks(8) end)` in claude's code: the scanner goes on the
+  pickaxe's side (the controller stays on, so the chunks stay loaded), the
+  scan comes back, and the pickaxe is back on after, also when the function
+  errors. Try the chat box the same way, and with the controller on the other
+  side. Check the wait for the peripheral is long enough (2 s) on a real
+  server, and that an upgrade swap leaves no stray item.
+- **pull**: `T.pull("bottom", "minecraft:cobblestone", 150)` from a chest of
+  mixed stacks gives 150 across slots and leaves everything else; from a full
+  chest (the wanted stack at the back) it puts the stack it moved aside back.
+- **moveTo**: `T.moveTo(x, y, z, { dig = true })` over a few blocks of stone
+  and gravel; `false, "blocked by ..."` with dig off; lava, fire and a door
+  stopped at ("avoiding ..."); a protected area refusing the dig
+  ("protected: ..."); `inside` digging in it. Its fuel top-up at under 50
+  fuel, and "something is in the way" for a mob.
+- **junk**: `T.setJunkChest(x, y, z, "up")` (the chest above the cell),
+  `T.dumpJunk()` with junk aboard: it walks there, drops only into the chest,
+  and walks back facing as before; with the chest broken it drops nothing.
+  Needs the job's building materials in `T.keep` first.
+- **Modules loaded on first use**: nothing in `turtle/tl/` yet (the first
+  module comes with the next piece); the loader and the path (`require
+  "tl.x"` finding `turtle/tl/x.lua` through ccnix's `turtle/?.lua`) are tested
+  only on a fixture in the sims. In game, the first module is the test.
+
 ## turtlelib: the turtle API wrapped, protected areas, change hooks (ADR-0008)
 
 - **The wrap**: after turtlelib loads, `turtle.forward()`, `back`, `up`,

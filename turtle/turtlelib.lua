@@ -15,6 +15,15 @@
 --     (T.cfg.digContainers lifts it)
 --   * change hooks: T.onChange(fn) hears every successful dig, placement
 --     and move
+--   * T.moveTo: a move to a cell in three dimensions that says why it
+--     stopped (blocked, protected, lava), T.withPeripheral and
+--     T.equipPeripheral: use an item as a peripheral without taking off a
+--     chunk controller, T.pull: a count of one item out of a chest, and
+--     a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is
+--     ever dropped on the ground for
+--   * modules loaded when first used: a function T lacks that is in
+--     T.registry is looked up there, its module (turtle/tl/<name>.lua,
+--     required as "tl.<name>") fills T in, and the call goes on
 --   * fuel management that refuels from inventory mid-task (T.ensureFuel)
 --   * low-level moves that only dig blocks listed in T.diggable
 --   * six directions (0..3 and "up"/"down"): look, dig, place or move in
@@ -45,6 +54,7 @@ local convert = require("convert")
 local fileio = require("fileio")
 local tables = require("tables")
 local getopt = require("getopt")
+local glob = require("glob")
 
 --------------------------------------------------------------------------
 -- Configuration (override from the program)
@@ -798,6 +808,121 @@ function T.equipTool(name, side)
 end
 
 --------------------------------------------------------------------------
+-- Peripheral upgrades (a Geo Scanner, a chat box, a crafting table): CC
+-- attaches one only while it is equipped, so using one takes a swap in and
+-- a swap back.  The upgrade that comes off goes into the slot the new one
+-- came from, so no free slot is needed unless the new one is a stack.
+-- A chunk controller keeps the chunks round the turtle loaded, so it is
+-- never taken off; nor is the upgrade on a side named in T.cfg.keepSide
+-- (a side, "left" or "right", or a list of them).
+--------------------------------------------------------------------------
+local KEEP_UPGRADES = { ["advancedperipherals:chunk_controller"] = true }
+local EQUIP_SIDES = { "left", "right" }
+
+-- Is the upgrade `held` on `side` one to leave on?
+local function upgradeKept(side, held)
+    local keep = T.cfg.keepSide
+    if keep == side then return true end
+    if type(keep) == "table" then
+        for _, s in ipairs(keep) do
+            if s == side then return true end
+        end
+    end
+    return held ~= nil and KEEP_UPGRADES[held] == true
+end
+
+-- Wait up to two seconds for a peripheral to show up on `side` (an
+-- upgrade can take a moment after it is equipped: ask until it has
+-- methods).  Returns the wrapped peripheral, or nil.
+local function waitForPeripheral(side)
+    for _ = 1, 20 do
+        if peripheral.getType(side) then
+            local methods = peripheral.getMethods(side)
+            if methods and #methods > 0 then return peripheral.wrap(side) end
+        end
+        sleep(0.1)
+    end
+    return nil
+end
+
+-- Equip the item `name` (from the inventory, or it is on already) on the
+-- side that holds no chunk controller or kept side, preferring an empty
+-- side, then one with a tool, then another upgrade; wait until it shows up
+-- as a peripheral.  Returns the wrapped peripheral and a function that
+-- puts back what was on that side (call it when done; calling it again
+-- does nothing), or nil and why: not on board, a tool rather than a
+-- peripheral, both sides kept, no free slot for what comes off, or it
+-- never showed up.
+function T.equipPeripheral(name)
+    if T.isTool(name) then return nil, name .. " is a tool, not a peripheral (T.withTool)" end
+    local before = { left = T.equipped("left"), right = T.equipped("right") }
+    for _, side in ipairs(EQUIP_SIDES) do
+        if before[side] == name then
+            local p = waitForPeripheral(side)
+            if p then return p, function() return true end end
+            return nil, "the " .. name .. " on the " .. side .. " isn't showing up as a peripheral"
+        end
+    end
+    local slot = T.findSlot(name)
+    if not slot then return nil, "no " .. name .. " on board" end
+    local side, rank
+    for _, s in ipairs(EQUIP_SIDES) do
+        local held = before[s]
+        if not upgradeKept(s, held) then
+            local r = held == nil and 0 or (T.isTool(held) and 1 or 2)
+            if not rank or r < rank then side, rank = s, r end
+        end
+    end
+    if not side then
+        return nil, "both sides hold an upgrade to keep (a chunk controller or T.cfg.keepSide): nowhere to put the " .. name
+    end
+    local was = before[side]
+    if was and turtle.getItemCount(slot) > 1 and not T.emptySlot() then
+        return nil, "no free slot for the " .. was .. " that comes off the " .. side
+    end
+    local sel = turtle.getSelectedSlot()
+    turtle.select(slot)
+    local ok, err = equipSide(side)
+    turtle.select(sel)
+    if not ok then return nil, "couldn't equip the " .. name .. (err and (": " .. tostring(err)) or "") end
+    local done = false
+    -- puts back what was on the side (an empty slot selected takes the
+    -- peripheral off when there was nothing); true, or false and why
+    local function restore()
+        if done then return true end
+        done = true
+        local cur = turtle.getSelectedSlot()
+        local from = was and T.findSlot(was) or T.emptySlot()
+        if not from then
+            return false, "couldn't put the " .. (was or "empty side") .. " back on the " .. side .. ": it isn't on board"
+        end
+        turtle.select(from)
+        equipSide(side)
+        turtle.select(cur)
+        return true
+    end
+    local p = waitForPeripheral(side)
+    if not p then
+        restore()
+        return nil, "the " .. name .. " didn't show up as a peripheral on the " .. side
+    end
+    return p, restore
+end
+
+-- Run fn(peripheral) with the item `name` equipped as a peripheral, and
+-- put back what was on that side afterwards, even if fn errors (the error
+-- is re-thrown).  Returns true and what fn returned, or nil and why it
+-- couldn't equip (see T.equipPeripheral).
+function T.withPeripheral(name, fn)
+    local p, restore = T.equipPeripheral(name)
+    if not p then return nil, restore end
+    local res = table.pack(pcall(fn, p))
+    restore()
+    if not res[1] then error(res[2], 0) end
+    return true, table.unpack(res, 2, res.n)
+end
+
+--------------------------------------------------------------------------
 -- Low-level moves.  Each keeps T.pos in sync, cuts through T.diggable
 -- blocks, attacks mobs, and returns false if blocked by anything else.
 --------------------------------------------------------------------------
@@ -962,6 +1087,124 @@ function T.moveDir(d)
     if d == "down" then return T.down() end
     T.face(d)
     return T.forward()
+end
+
+--------------------------------------------------------------------------
+-- Moving to a cell in three dimensions, and saying why it stopped
+--------------------------------------------------------------------------
+-- For each axis letter of an order: the position field, and the direction
+-- toward more and toward less
+local AXIS = { x = { "x", 1, 3 }, y = { "y", "up", "down" }, z = { "z", 0, 2 } }
+
+-- What moveTo goes round by default: lava, fire and doors (a turtle
+-- can't open one)
+local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door" }
+
+-- Blocks a turtle moves into without digging them
+local FLUID = {
+    ["minecraft:water"] = true, ["minecraft:flowing_water"] = true,
+    ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true,
+}
+
+-- A test on a block name, from a spec: true (every name), a glob, or a
+-- list of globs; anything else (nil, false) matches none.
+local function nameTest(spec)
+    if spec == true then return function() return true end end
+    local globs = type(spec) == "string" and { spec } or type(spec) == "table" and spec or {}
+    local tests = {}
+    for i, g in ipairs(globs) do tests[i] = glob.compile(g) end
+    return function(name)
+        for _, test in ipairs(tests) do
+            if test(name) then return true end
+        end
+        return false
+    end
+end
+
+-- One step in direction d for moveTo: look at what's there; refuse what's
+-- to be avoided, dig what may be dug (not what is protected), move,
+-- attacking what's in the way.  true, or false, why, the block's name (if
+-- a block stopped it) and its cell.
+local function stepInto(d, mayDig, avoid)
+    local v = T.DELTA[d]
+    local cell = { x = T.pos.x + v[1], y = T.pos.y + v[2], z = T.pos.z + v[3] }
+    local at = T.posKey(cell)
+    local move = (d == "up" or d == "down") and d or "forward"
+    local name
+    for _ = 1, 6 do
+        local ok, data = T.look(d)
+        name = ok and type(data) == "table" and data.name or nil
+        if name and avoid(name) then return false, "avoiding " .. name .. " at " .. at, name, cell end
+        if name and not FLUID[name] then
+            if not mayDig(name) then return false, "blocked by " .. name .. " at " .. at, name, cell end
+            local area = T.guarded(cell.x, cell.y, cell.z)
+            if area then return false, "protected: " .. area .. " (" .. name .. " at " .. at .. ")", name, cell end
+            local dug, why = T.digDir(d)
+            if not dug then
+                return false, "couldn't dig " .. name .. " at " .. at .. (why and (": " .. tostring(why)) or ""), name, cell
+            end
+        end
+        local level = turtle.getFuelLevel()
+        if level ~= "unlimited" and level < T.cfg.lowFuel then
+            T.refuelTo(T.cfg.topupFuel)
+            if turtle.getFuelLevel() < 1 then return false, "out of fuel at " .. T.posString(), nil, T.here() end
+        end
+        if raw[move]() then moved(move); return true end
+        T.attackDir(d)
+        sleep(0.3)
+    end
+    return false, "can't move into " .. at .. (name and (" (" .. name .. ")") or ": something is in the way"), name, cell
+end
+
+-- Move to the cell x, y, z (the turtle's frame, whole numbers), along the
+-- axes in the order opts.order names (default "yxz": up or down first,
+-- then x, then z).  opts (all optional):
+--   dig     false (default), true, a glob or a list of globs: the blocks it
+--           may dig on the way (a protected area, a chest or a computer is
+--           never dug)
+--   avoid   a glob or a list: blocks it stops at rather than enter
+--           (default: lava, fire and doors); {} avoids nothing
+--   inside  the name of a protected area the move may dig in (see T.inside)
+--   path    true, or a function(x, y, z, opts): when a straight run is
+--           blocked, ask a route finder (T.travel, from the path module, if
+--           there is one; or this function) to take it the rest of the way
+-- Returns true, or false, why (a sentence: "blocked by minecraft:obsidian
+-- at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ..."),
+-- the block's name and its cell { x, y, z } where a block stopped it.
+-- The turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a
+-- program's grid, don't apply.)
+function T.moveTo(x, y, z, opts)
+    opts = opts or {}
+    for _, n in ipairs({ x, y, z }) do
+        if not isWhole(n) then return false, "moveTo wants a cell of whole numbers: x, y, z" end
+    end
+    local order = opts.order or "yxz"
+    for i = 1, #order do
+        if not AXIS[order:sub(i, i)] then return false, "the order of axes is letters x, y and z, like \"yxz\"" end
+    end
+    local want = { x = x, y = y, z = z }
+    local mayDig = nameTest(opts.dig)
+    local avoid = nameTest(opts.avoid == nil and DEFAULT_AVOID or opts.avoid)
+    local function run()
+        for i = 1, #order do
+            local field, more, less = table.unpack(AXIS[order:sub(i, i)])
+            while T.pos[field] ~= want[field] do
+                local ok, why, name, cell = stepInto(T.pos[field] < want[field] and more or less, mayDig, avoid)
+                if not ok then
+                    local finder = type(opts.path) == "function" and opts.path or opts.path and (T.need("travel") or T.need("path"))
+                    if finder and name then
+                        local routed, noRoute = finder(x, y, z, opts)
+                        if routed and T.pos.x == x and T.pos.y == y and T.pos.z == z then return true end
+                        if noRoute then why = why .. " (no route: " .. tostring(noRoute) .. ")" end
+                    end
+                    return false, why, name, cell
+                end
+            end
+        end
+        return true
+    end
+    if opts.inside then return T.inside(opts.inside, run) end
+    return run()
 end
 
 -- Turns it takes to face direction d (none for up or down).
@@ -1840,6 +2083,176 @@ function T.takeInto(side, name, n, slot)
     return turtle.getItemCount(slot)
 end
 
+-- Take n (default 1) of the item `name` out of the container on `side`
+-- ("front", "top" or "bottom"), into whatever slots will have it: a part
+-- stack of it first, else an empty slot.  Sucking from a side takes the
+-- container's first stack whatever it is, so each time the wanted stack
+-- is moved to the front first (as T.takeInto does), and as many stacks
+-- are taken as it needs.  Needs a container it can read (a chest or a
+-- barrel).  Returns how many it got, and, when that's short of n, why:
+-- no container, none left in it, or no room in the turtle.
+function T.pull(side, name, n)
+    n = n or 1
+    if side ~= "front" and side ~= "top" and side ~= "bottom" then
+        return 0, "the side is \"front\", \"top\" or \"bottom\", not " .. tostring(side)
+    end
+    local suck, drop = sideFuncs(side)
+    local chest = peripheral and peripheral.wrap(side)
+    if not (chest and chest.list and chest.pushItems and chest.size) then
+        return 0, "no container I can read on the " .. side
+    end
+    local start, sel = T.countItem(name), turtle.getSelectedSlot()
+    local why
+    local ok, err = pcall(function()
+        for _ = 1, 256 do
+            local have = T.countItem(name) - start
+            if have >= n then return end
+            local found, held = frontStack(chest, name, suck)
+            if not found then
+                why = "the container on the " .. side .. " has no more " .. name
+                return
+            end
+            local into
+            for s = 1, 16 do
+                local it = turtle.getItemDetail(s)
+                if s ~= held and it and it.name == name and turtle.getItemSpace(s) > 0 then into = s; break end
+            end
+            if not into then
+                for s = 1, 16 do
+                    if s ~= held and turtle.getItemCount(s) == 0 then into = s; break end
+                end
+            end
+            if not into then
+                if held then turtle.select(held); drop() end
+                why = "no room in the turtle for " .. name
+                return
+            end
+            turtle.select(into)
+            local got = suck(math.min(64, n - have))
+            if held then turtle.select(held); drop() end
+            if not got then
+                why = "couldn't take " .. name .. " from the " .. side
+                return
+            end
+        end
+    end)
+    turtle.select(sel)
+    if not ok then
+        if err == "Terminated" then error(err, 0) end
+        why = tostring(err)
+    end
+    local got = T.countItem(name) - start
+    if got >= n then return got end
+    return got, (why or "short of " .. name) .. " (got " .. got .. " of " .. n .. ")"
+end
+
+--------------------------------------------------------------------------
+-- Junk.  The library never drops anything on the ground or into lava:
+-- what isn't wanted goes into a junk chest (T.setJunkChest), or stays in
+-- the turtle.  What counts as junk is everything but what's kept: the
+-- items in T.keep (put the job's building materials there), tools, fuel,
+-- peripherals and what T.craft made this job.  (A program's own dumping,
+-- like mine's bulk chest, is its own: T.dumpDown.)
+--------------------------------------------------------------------------
+local JUNK_FILE = ".junkchest"
+-- The words for the side of a junk chest, as the file keeps them: a
+-- heading (T.dir's 0 to 3) or up or down
+local JUNK_SIDES = { up = "up", top = "up", down = "down", bottom = "down", [0] = 0, [1] = 1, [2] = 2, [3] = 3 }
+-- Not junk by name: a bucket, a crafting table, anything of these mods
+local NEVER_JUNK = { ["minecraft:bucket"] = true, ["minecraft:water_bucket"] = true, ["minecraft:crafting_table"] = true }
+local NEVER_JUNK_PREFIXES = { "advancedperipherals:", "computercraft:" }
+local crafted = {}                         -- what T.craft made this job
+
+-- Remember the junk chest: it stands on `side` of the cell x, y, z (the
+-- turtle's frame): "up" or "top", "down" or "bottom", or a heading 0 to 3
+-- (T.dir's: 0 is +z, 1 is +x).  Kept in a data file, so every program on
+-- the turtle uses the same one.  true, or nil and why.
+function T.setJunkChest(x, y, z, side)
+    for _, n in ipairs({ x, y, z }) do
+        if not isWhole(n) then return nil, "the junk chest's cell is x, y, z: whole numbers" end
+    end
+    local d = JUNK_SIDES[side]
+    if d == nil then return nil, "the junk chest's side is \"up\", \"down\" or a heading 0 to 3, not " .. tostring(side) end
+    if not fileio.write(T.dataPath(JUNK_FILE), string.format("%d %d %d %s", x, y, z, tostring(d))) then
+        return nil, "couldn't save the junk chest's place"
+    end
+    return true
+end
+
+-- Where the junk chest is, as { x, y, z, side } (side a heading 0 to 3,
+-- "up" or "down"), or nil if none is set.
+function T.junkChest()
+    local line = fileio.read(T.dataPath(JUNK_FILE))
+    local w = line and text.words(line) or {}
+    local x, y, z = convert.toInteger(w[1]), convert.toInteger(w[2]), convert.toInteger(w[3])
+    local d = w[4] == "up" and "up" or w[4] == "down" and "down" or convert.toInteger(w[4])
+    if x and y and z and JUNK_SIDES[d] ~= nil then return { x = x, y = y, z = z, side = d } end
+    return nil
+end
+
+-- The craft module calls this for each item it makes, so it is never
+-- junk for the rest of the job (until the computer restarts, or
+-- T.clearCrafted()).
+function T.markCrafted(name) crafted[name] = true end
+function T.clearCrafted() crafted = {} end
+
+-- Is the item `name` junk?  False for what's in T.keep, tools, fuel,
+-- buckets, a crafting table, peripherals and what was crafted this job.
+function T.isJunk(name)
+    if T.keep[name] or T.fuel[name] or T.isTool(name) or crafted[name] or NEVER_JUNK[name] then return false end
+    for _, prefix in ipairs(NEVER_JUNK_PREFIXES) do
+        if text.startsWith(name, prefix) then return false end
+    end
+    return true
+end
+
+-- Go to the junk chest, put every junk stack in it, and come back to
+-- where the turtle was, facing as it did.  Nothing is dropped unless a
+-- chest is there to take it (it looks first), and what doesn't fit stays.
+-- Returns true, how many items went in and how many didn't fit; or
+-- false and why (no junk chest set, no way there, no chest there).  With
+-- no junk on board it goes nowhere.
+function T.dumpJunk()
+    local spot = T.junkChest()
+    if not spot then return false, "no junk chest set (T.setJunkChest)" end
+    local plan = {}
+    for slot = 1, 16 do
+        local it = turtle.getItemDetail(slot)
+        if it and T.isJunk(it.name) then plan[#plan + 1] = { slot = slot, n = it.count } end
+    end
+    if #plan == 0 then return true, 0, 0 end
+    local from, dir, sel = T.here(), T.dir, turtle.getSelectedSlot()
+    -- (a second try along the axes the other way round)
+    local function go(p)
+        if T.moveTo(p.x, p.y, p.z) then return true end
+        return T.moveTo(p.x, p.y, p.z, { order = "xzy" })
+    end
+    local ok, why = go(spot)
+    if not ok then
+        go(from); T.face(dir)
+        return false, "can't get to the junk chest: " .. tostring(why)
+    end
+    local side = spot.side == "up" and "top" or spot.side == "down" and "bottom" or "front"
+    if side == "front" then T.face(spot.side) end
+    if not T.containerOn(side) then
+        go(from); T.face(dir)
+        return false, "no chest at the junk chest's place: on the " .. side .. " of " .. T.posKey(spot)
+    end
+    local dropped, left = 0, 0
+    for _, j in ipairs(plan) do
+        local before = turtle.getItemCount(j.slot)
+        turtle.select(j.slot)
+        T.dropSide(side, j.n)
+        local gone = before - turtle.getItemCount(j.slot)
+        dropped, left = dropped + gone, left + j.n - gone
+    end
+    turtle.select(sel)
+    local back, why2 = go(from)
+    T.face(dir)
+    if not back then return false, "put " .. dropped .. " junk in the chest but can't get back: " .. tostring(why2) end
+    return true, dropped, left
+end
+
 -- Burn fuel from the container on `side` until the tank holds `target`
 -- (capped at the tank's limit), fuel already on board first.  Takes one
 -- item of a kind to learn what it's worth, then only as many as needed.
@@ -1883,5 +2296,60 @@ function T.refuelFrom(side, target)
     turtle.select(sel)
     return turtle.getFuelLevel() >= target
 end
+
+--------------------------------------------------------------------------
+-- Modules loaded when first used.  The big parts of the library (the map,
+-- routes, building, crafting, ...) live beside this file, in turtle/tl/,
+-- as modules named "tl.<name>" (Lua's require turns the dot into a
+-- folder, and ccnix's boot has turtle/ on the path).  T.registry says
+-- which module defines each function T doesn't have: { craft =
+-- "tl.craft" }.  Using T.craft the first time requires that module, which
+-- does `local T = require("turtlelib")` (it is handed this very T, loaded
+-- already) and adds its functions to it; later uses are plain lookups.  A
+-- program that never crafts never loads the recipes.
+--
+-- A module loads in this module's own world, as turtlelib does: the real
+-- fs, io and require (in claude too: the guarded fs and io are only the
+-- model's code's).  Each copy of turtlelib loads its own copy of a module,
+-- as each program has its own require.
+--------------------------------------------------------------------------
+T.registry = {}
+local loadingModule = {}
+
+-- The function T.<name>: as it is, or from the module the registry names,
+-- loading that first.  Returns it, or nil and why (not a function of T,
+-- or its module wouldn't load or lacks it).
+function T.need(name)
+    local f = rawget(T, name)
+    if f ~= nil then return f end
+    local mod = T.registry[name]
+    if not mod then return nil, "turtlelib has no " .. tostring(name) end
+    if loadingModule[mod] then return nil, mod .. " is loading: T." .. name .. " isn't defined yet" end
+    loadingModule[mod] = true
+    local owner, was = package.loaded.turtlelib, package.loaded[mod]
+    package.loaded.turtlelib, package.loaded[mod] = T, nil
+    local ok, err = pcall(require, mod)
+    package.loaded.turtlelib = owner
+    if not ok then package.loaded[mod] = was end
+    loadingModule[mod] = nil
+    if not ok then
+        if err == "Terminated" then error(err, 0) end
+        -- (require lists every place it looked: the first line says enough)
+        return nil, "T." .. name .. " is in " .. mod .. ", which didn't load: " .. text.split(tostring(err), "\n", true)[1]
+    end
+    f = rawget(T, name)
+    if f == nil then return nil, mod .. " loaded but doesn't define T." .. name end
+    return f
+end
+
+-- A name T lacks that the registry knows is that module's function; one
+-- whose module won't load becomes a function that raises the reason when
+-- called, rather than "attempt to call a nil value".
+setmetatable(T, { __index = function(_, name)
+    if T.registry[name] == nil then return nil end
+    local f, why = T.need(name)
+    if f then return f end
+    return function() error(why, 2) end
+end })
 
 return T

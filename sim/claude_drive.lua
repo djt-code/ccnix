@@ -757,3 +757,22 @@ check("after a program loaded its own turtlelib, claude's T is still the one the
 check("the prompt no longer says never to call turtle.forward, and tells of protected areas",
     not sys:find("Never call turtle.forward", 1, true) and sys:find("T.protect(name", 1, true)
         and sys:find("T.onChange(fn)", 1, true) and sys:find("T.cfg.digContainers", 1, true))
+
+-- 23. a module loaded through T (ADR-0008's lazy loader): the model's code
+--     asks T for a function T lacks, T loads its module from turtlelib's
+--     own world (the real require and the real fs, as turtlelib itself),
+--     and only the code's own fs is guarded
+fresh({ "" })
+FIXTURE_LOADS = nil
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[T.registry.fixtureReadsKey = "tl.fixture"; T.registry.fixtureHello = "tl.fixture"
+return T.fixtureReadsKey(), (select(2, fs.open("claude.key", "r")))]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return T.fixtureHello("again")]] }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("a module through T")
+local viaT = resultsIn(2).toolu_1 and tostring(resultsIn(2).toolu_1.content) or ""
+check("a module loaded through T reads what the code's own fs may not (turtlelib's world, not the code's)",
+    viaT:find("^%-> true\n") and viaT:find("API key isn't readable", 1, true) and FIXTURE_LOADS == 1, viaT)
+check("...a second function of it needs no second load",
+    resultsIn(3).toolu_2 and tostring(resultsIn(3).toolu_2.content):find("^%-> hello again") and FIXTURE_LOADS == 1)
