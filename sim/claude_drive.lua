@@ -718,3 +718,42 @@ check("a broken helpers.lua is reported to the model with its first goal",
 check("the session carries on, and the failure is logged",
     resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 2"
         and (Mine.files["claude.log"] or ""):find("helpers.lua failed to load", 1, true))
+
+-- 22. the turtle API is wrapped (ADR-0008): moves made straight through
+--     turtle.* keep T.pos right, the prompt says so, and a program that
+--     loaded a turtlelib of its own meanwhile doesn't take that from claude
+fresh({ "" })
+Mine.files["turtle/mine.lua"] = "-- mine"
+currentOut = screenOut
+io = setmetatable({
+    stdout = screenOut,
+    output = function(h)
+        if h ~= nil then currentOut = h end
+        return currentOut
+    end,
+    write = function(...) return currentOut:write(...) end,
+}, { __index = realIO })
+shell.run = function()
+    local mine = package.loaded.turtlelib
+    package.loaded.turtlelib = nil          -- what a program run by the shell gets: a copy of its own
+    require("turtlelib")
+    package.loaded.turtlelib = mine
+    return true
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.dig(); turtle.forward(); turtle.turnRight(); return T.posString(), T.dir" }) }, "tool_use"),
+    reply({ toolUse("run_program", { program = "mine" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.digUp(); turtle.up(); return T.posString(), T.dir" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("move straight through turtle")
+shell.run = nil
+io = realIO
+local sys = HTTP.requests[1] and textutils.serialiseJSON(HTTP.requests[1].body.system) or ""
+check("turtle.forward() and turnRight() called straight keep T.pos and T.dir right",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> (0,0,1)\n-> 1", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content)
+check("after a program loaded its own turtlelib, claude's T is still the one the turtle API updates",
+    resultsIn(4).toolu_3 and resultsIn(4).toolu_3.content == "-> (0,1,1)\n-> 1", resultsIn(4).toolu_3 and resultsIn(4).toolu_3.content)
+check("the prompt no longer says never to call turtle.forward, and tells of protected areas",
+    not sys:find("Never call turtle.forward", 1, true) and sys:find("T.protect(name", 1, true)
+        and sys:find("T.onChange(fn)", 1, true) and sys:find("T.cfg.digContainers", 1, true))

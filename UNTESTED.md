@@ -5,6 +5,28 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## turtlelib: the turtle API wrapped, protected areas, change hooks (ADR-0008)
+
+- **The wrap**: after turtlelib loads, `turtle.forward()`, `back`, `up`,
+  `down`, `turnLeft`, `turnRight` called straight keep `T.pos` and `T.dir`
+  right (and save them), and mine, farm and mow behave as before. Try
+  `lua` in claude: `turtle.dig() turtle.forward()` then `status`. Running
+  `mine` from claude (run_program) and then moving straight through
+  `turtle.*` should still update claude's `T.pos` (claude takes the wrap
+  back after a program).
+- **Protected areas**: `T.protect("castle", x1, y1, z1, x2, y2, z2)` in
+  claude's code, then `turtle.dig()` into the box returns `false,
+  "protected: castle"`; so do `T.digDir` and `T.forward` with the block in
+  `T.diggable`; the file `.protected` beside the programs keeps it over a
+  reboot and a second program (mine, farm) on the turtle respects it.
+  `T.inside("castle", fn)` digs inside it; `T.unprotect("castle")` lifts it.
+- **Chests and computers**: `turtle.dig()` at a chest, barrel, shulker box,
+  spawner or ComputerCraft block returns `false, "won't dig ..."` unless
+  `T.cfg.digContainers = true` (real block names, e.g. a modded chest, are
+  caught by "chest" in the name).
+- **Hooks**: `T.onChange(fn)` hears digs (with the block's name and state),
+  placements (with the item) and moves.
+
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **The log** (0.45.0): a session, then claude.log. Each entry starts
