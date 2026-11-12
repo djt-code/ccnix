@@ -1374,6 +1374,10 @@ end
 local NEIGH = { { 0, 1 }, { 1, 0 }, { 0, -1 }, { -1, 0 } }
 
 -- Shortest column path from the current position to (tx,tz), or nil.
+--
+-- Columns marked blocked are walls, and so are the ones outside the routing area.  A program can also set T.edgeOK to a
+-- function(x, z, nx, nz) that says whether the step from column x, z into its neighbour nx, nz may be planned (mow, which
+-- knows the height of the ground, refuses a step up or down more than it can make).
 function T.bfs(tx, tz)
     local parent = { [T.ckey(T.pos.x, T.pos.z)] = false }
     local queue, head = { { T.pos.x, T.pos.z } }, 1
@@ -1391,7 +1395,7 @@ function T.bfs(tx, tz)
         for _, d in ipairs(NEIGH) do
             local nx, nz = x + d[1], z + d[2]
             local nk = T.ckey(nx, nz)
-            if T.inBounds(nx, nz) and parent[nk] == nil and not T.blocked[nk] then
+            if T.inBounds(nx, nz) and parent[nk] == nil and not T.blocked[nk] and (not T.edgeOK or T.edgeOK(x, z, nx, nz)) then
                 parent[nk] = n
                 queue[#queue + 1] = { nx, nz }
             end

@@ -289,6 +289,8 @@ T.inBounds(x, z)
 T.bfs(tx, tz)
     Shortest column path from the current position to (tx,tz), or nil.
 
+    Columns marked blocked are walls, and so are the ones outside the routing area. A program can also set T.edgeOK to a function(x, z, nx, nz) that says whether the step from column x, z into its neighbour nx, nz may be planned (mow, which knows the height of the ground, refuses a step up or down more than it can make).
+
 == Column-stepping strategies ==
 
 T.stepFlat()
