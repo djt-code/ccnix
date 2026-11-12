@@ -1,7 +1,8 @@
 -- grep.lua -- print the lines that match a pattern (POSIX grep)
 --
---   grep [-E|-F] [-c|-l|-q] [-insvx] -e patterns ... [-f file] ... [file...]
---   grep [-E|-F] [-c|-l|-q] [-insvx] patterns [file...]
+--   grep [-E|-F] [-c|-l|-q] [-inrsvx] -e patterns ... [-f file] ... [file...]
+--   grep [-E|-F] [-c|-l|-q] [-inrsvx] patterns [file...]
+--   grep -r pattern [dir...]          (the files under each dir, all the way down)
 --
 -- Patterns are basic regular expressions (-E: extended, -F: fixed
 -- strings); a pattern list holds one pattern per line, and a line is
@@ -12,15 +13,20 @@
 -- count per file instead, -l the names of the files with a selected line,
 -- -q nothing.  -s hides the messages about unreadable files.  No files (or
 -- "-") reads standard input (the keyboard: hold Ctrl+T to end it).
+-- -r (or -R: CC has no links to tell apart), as GNU's and BSD's grep
+-- have it: a directory operand stands for every file under it, in name
+-- order, each line prefixed with its file; no operands searches the
+-- current directory (the names without "./").
 -- Exit status: 0 a line was selected, 1 none, 2 an error (0 with -q if a
 -- line was selected anyway).
 
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;") .. package.path  -- ccnix's lib/, or the one beside bin/
 local cu = require("cu").init("grep",
-    "grep [-E|-F] [-c|-l|-q] [-insvx] [-e patterns] [-f file] [patterns] [file...]")
+    "grep [-E|-F] [-c|-l|-q] [-inrsvx] [-e patterns] [-f file] [patterns] [file...]")
 local regex = require("regex")
 local text = require("text")
-local opts, files, order = cu.getopt({ ... }, "EFce:f:ilnqsvx")
+local path = require("path")
+local opts, files, order = cu.getopt({ ... }, "EFRce:f:ilnqrsvx")
 
 -- the pattern lists from -e and -f, in order; else the first operand
 local ere, fixed, pats, given = false, false, {}, false
@@ -68,8 +74,35 @@ local function selected(l)
     return opts.v == true
 end
 
+-- -r: each directory operand as the files under it ("" for none given:
+-- the current directory, its names shown bare)
+local tree = false
+if opts.r or opts.R then
+    local function walk(shown, real, out)
+        local names = fs.list(real)
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local s, r = path.join(shown, name), fs.combine(real, name)
+            if fs.isDir(r) then walk(s, r, out) else out[#out + 1] = s end
+            cu.breathe()
+        end
+    end
+    local list = {}
+    for _, f in ipairs(#files > 0 and files or { "" }) do
+        local real = f ~= "-" and shell.resolve(f == "" and "." or f)
+        if real and fs.isDir(real) then
+            tree = true
+            walk(f, real, list)
+        else
+            list[#list + 1] = f
+        end
+    end
+    files = list
+    if #files == 0 then return cu.exit(1) end       -- (empty directories: no lines, and not the keyboard)
+end
+
 local mode = opts.q and "q" or opts.l and "l" or opts.c and "c"
-local multi, found = #files > 1, false
+local multi, found = #files > 1 or tree, false
 if opts.s then cu.err = function() end end   -- unreadable files: quietly
 cu.each(files, function(h, name)
     local label = name == "-" and "(standard input)" or name

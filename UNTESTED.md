@@ -5,6 +5,14 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## grep -r (0.43.0)
+
+- `cd /rom; grep -r "os.pullEvent" apis | head`: lines as
+  `apis/<file>:<line>`, the files in name order. `grep -r pullEvent`
+  in a directory with subdirectories: names without `./`; `grep -rl`,
+  `grep -rc`; `grep -r x somefile`: no name in front. `grep x /rom`
+  without -r: "Is a directory".
+
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **status after Ctrl+T in `mine`**: the `mine` job under way shows.
@@ -18,67 +26,38 @@ section.
   `require("turtlelib")` and `require("fs")` are still refused, naming
   what it may have.
 
-## Everything: the text libraries (0.37.0)
+## Everything: the text libraries, what's left (0.36.1-0.37.0)
 
-- **A regression pass, the second.** Every program now uses lib/scan,
-  lib/text, lib/convert, lib/getopt, lib/glob and lib/path rather than a
-  copy of its own (the turtle programs, git and setup too). Sims pass and
-  each swap was run against the old code on edge cases (about two million
-  of them), but none of it has run in game. The same quick pass as below,
-  plus:
-  - **setup run alone, on a stock CC: Tweaked computer** (no mod): `wget
-    run .../deploy/setup.lua`. It now fetches lib/scan, text, convert,
-    path and getopt into memory before git. Then `ccnix update`, then
-    `ccnix setup` once on an install made before this: that adds the text
-    libraries to a checkout that was cloned with `--only` paths.
-  - **git:** `git pull /ccnix --only lib/` (options after operands), `git
-    log` (the dates, now read by convert.fromDateTime).
-  - **globs:** `ls *.lua`, `ls [[:upper:]]*`, `case b in [a"-"c])` (a
-    quoted `-` in a bracket is now itself: no match), `find . -name
-    "[[:digit:]]*"`, an IRC `/ignore *!*@host`.
-  - **numbers:** `test 99999999999999999999 -gt 99999999999999999998`,
-    `expr +5 + 1` (now 6), `sleep +1`, `printf "%d %x\n" 0x1f 255`, `seq -s
-    "\t" 3`, `tr -d "[:punct:]"`.
-  - **text:** `diff -b` on lines with leading blanks, the pager wrapping a
-    long coloured line (`vim` on a long line, `help` in a narrow window),
-    a long IRC message split in two (now at the last space that fits, with
-    the rest's spacing kept), the irc nick list and buffer list columns.
-  - **the second pass (one implementation per job):** `mine -3 3 32` and
-    `mine --spacing=4`, `farm`, `mow notorch`, `claude go -5 blocks` (the
-    turtles' options now go through lib/getopt); claude's Lua in lib/syntax's
-    colours; `ccnix setup --autostart=router`; `ps -l` and a panic report
-    (one row layout); `export -p`, `$HOSTNAME` on an unlabelled computer
-    (the ID); telnetd's banner; `ip route`, `netstat -r`, `tcpdump net
-    10.0.0.0/8` (lib/net's prefix math); an IRC `MODE #c +ov a b` both
-    ways; vi `:r` of an empty file (adds nothing, as vim); a Lua page
-    using `text` and `fileio`; jbod on the fileserver (reads through the
-    disk under the pool).
-  - **coreutils, second pass:** a long `sort`, `grep -c` over many
-    files, `find /` and `wc` on a big file don't get "Too long without yielding" (cu.breathe
-    now yields once a second); `od -j 0x10 -N 8`; `printf "%x
-    %o %#08X\n" -1 8 255`; `df` (its columns);
-    `mkdir`/`rmdir`/`tee` errors without the path in front.
-  - **behaviour that changed on purpose:** WHOIS idle reads "5m 3s";
-    `head -n x`, `uniq -f x`, `strings -n x`, `xargs -s 0` say "bad -n x"
-    (and so on);
-    curl and git refuse an unknown or misused `--option`; httpd listing
-    links percent-encode `!$&'()*+,;=:@`; a syslog line's trailing blanks
-    are dropped.
+Every program's parsing moved from Lua patterns to lib/scan (0.36.1),
+then onto the shared lib/text, convert, getopt, glob and path (0.37.0).
+The two smoke rounds of 2026-11-12 (Tested) covered the shell, globs,
+numbers, the text tools and the network tools. Still to try:
 
-## Everything: parsing without patterns (0.36.1)
-
-- **A regression pass.** Every program's parsing moved from Lua patterns
-  to lib/scan (or, for git, setup, boot and the turtle programs, small
-  helpers of their own). The sims pass and each part was compared with
-  the old code on edge cases, but nothing has run in game. Worth a
-  quick pass: a ccsh line with a pipe, quotes, globs (`ls *.lua`,
-  `[a-c]*`), `$(...)` and a `for` loop; `ip addr`, `ip route`, `ping`
-  a name, `host`; `curl` a page from httpd (a Lua page, a query); `git
-  pull` / `ccnix update`; a syslog line in /var/log; `sort -n`, `cut
-  -d: -f1`, `printf "%5.2f\n" 3.14159`, `seq 1 3`, `find . -name
-  "*.lua"`; `telnet` in (keys, mouse, paste); a farm or mine run
-  (tool names, its saved job read back after a reboot); setup's
+- **setup run alone, on a stock CC: Tweaked computer** (no mod): `wget
+  run .../deploy/setup.lua`. It fetches lib/scan, text, convert, path and
+  getopt into memory before git. Then `ccnix update`; `ccnix setup` once
+  on an install made before 0.37.0 adds the text libraries to a checkout
+  cloned with `--only` paths; `ccnix setup --autostart=router`; setup's
   migration from an old /cc-turtles, if one is left anywhere.
+- **git:** `git pull /ccnix --only lib/` (options after operands); curl
+  and git refuse an unknown or misused `--option`.
+- **The turtles:** `mine -3 3 32`, `mine --spacing=4`, `farm`, `mow
+  notorch`, `claude go -5 blocks` (options through lib/getopt); a farm or
+  mine run's saved job read back after a reboot; claude's Lua shown in
+  lib/syntax's colours.
+- **Text on screen:** the pager wrapping a long coloured line (`vim` on a
+  long line, `help` in a narrow window); a long IRC message split in two
+  at the last space that fits.
+- **IRC:** `/ignore *!*@host`; `MODE #c +ov a b` both ways; WHOIS idle
+  over a minute reads "5m 3s".
+- **The rest:** `ip addr`, `ping` and `host` a name; `curl` a Lua page
+  with a query, one using `text` and `fileio`; vi `:r` of an empty file
+  (adds nothing); a panic report (one row layout); `$HOSTNAME` on an
+  unlabelled computer (its ID); jbod on the fileserver; a long `sort`
+  and `wc` on a big file (no "Too long without yielding"); `od -j 0x10
+  -N 8`; `mkdir`/`rmdir`/`tee` errors without the path in front;
+  `strings -n x` and `xargs -s 0` ("bad -n x"); a syslog line's trailing
+  blanks dropped.
 
 ## Editors
 
@@ -319,6 +298,15 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.3, the smoke test's second round on Lab-B: `ip
+  route`, `netstat -r`, `tcpdump -c 4 net 10.0.0.0/8 &` with a ping (4
+  packets, then Done), `curl` of httpd's listing (a file named `!` linked
+  as `%21`), `ps -l`, `export -p`, `$HOSTNAME`, `telnet` to Lab-A (its
+  password prompt), `git log /ccnix -n 3` (dates), `df`, `cat
+  /rom/apis/*.lua | grep -c local`, `find / | wc -l` (no "Too long
+  without yielding"), `printf "%5.2f|\n" 3.14159`.  Asked for: `grep -r`
+  (0.43.0).
 
 - 2026-11-12 — ROM 0.42.3, the text libraries' smoke test on Lab-B:
   `ls *.lua`, `ls [[:upper:]]*`, `find . -name "[[:digit:]]*"`, `case b
