@@ -35,6 +35,11 @@
 --     axis), choosing how to place it from a table of what each approach
 --     gives, checking and trying another way if the game differed, and
 --     remembering what it learnt; T.ignite lights a fire from above
+--   * building (tl.blueprint, loaded when first used): a plan is layers of
+--     text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build
+--     puts one up layer by layer, materials checked first, progress kept so a
+--     stop or reboot carries on; T.verify says which cells differ, states
+--     included; T.replace swaps the blocks matching a glob in a box
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2421,7 +2426,9 @@ T.registry = {
     -- tl.path: routes
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
-    placeAt = "tl.place", ignite = "tl.place",
+    placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place",
+    -- tl.blueprint: building from a plan, checking it, swapping blocks
+    blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
 }
 local loadingModule = {}
 

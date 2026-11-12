@@ -5,6 +5,45 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.blueprint: T.build, T.verify, T.replace (ADR-0008 phase 3, ccnix 0.48.0)
+
+A plan is layers of text with a legend (`T.blueprint.parse`, or a table, or
+`T.blueprint.fill/box/walls/fromMap`); `T.build(plan)` puts it up. Needs the
+world origin only for a stair or the like that names a `facing`. Start with a
+small plan (a 5 by 5 floor, walls, a stair bench, a torch, a door) beside the
+turtle, with the items on board:
+
+- **The text and the cells**: the first line of a layer is the highest z, a
+  column goes toward +x, the next layer is up; the anchor is the turtle-frame
+  cell of the first character. Build a 3 by 3 plan and compare with F3 that
+  the corners are where `T.blueprint.at(plan, x, y, z)` says.
+- **Build order and stand**: layer by layer from the bottom; each plain block
+  placed downward from the cell over it; in a layer, plain blocks, then stairs
+  and slabs, then torches, ladders, buttons, trapdoors and gates, then doors.
+  Watch that the door goes in last and sits right in its gap, and that the
+  upper half is not placed separately (a door's upper cell in the plan is
+  written `half=upper`, or just the same door again over the lower cell).
+- **Materials**: with less of an item than the plan needs, `T.build` should
+  refuse with `short of ...` before moving (`opts.partial` builds what it can).
+- **Stop and carry on**: `T.build(plan, { limit = 20 })` stops after 20 cells;
+  `T.build()` carries on, also after Ctrl+T or a reboot (the files are
+  `.build`, the plan as text, and `.build.progress`, in the data folder). A
+  cell the map says is already there is taken as done without a look;
+  `opts.look = true` looks at each.
+- **`T.verify()`**: after the build, clean (no plan = the saved build). Turn a
+  stair round by hand and see it listed with `facing=` both ways; break a plain
+  block and see that only `{ inspect = "all" }` finds it (the map is trusted for
+  plain blocks). Cells it cannot reach to look at are listed as `unverified`.
+- **`T.replace(box, "stone", "minecraft:stone_bricks")`** on a thick wall: each
+  block dug from a free side and replaced; one with every neighbour solid in
+  the map is listed in `trapped` and left alone. The map has to know the box
+  (scan it first, or pass `scan = true`). In a protected area it needs
+  `inside = "<area>"`.
+- **`opts.protect = "keep"`** on a finished build protects its box under the
+  plan's name; check a `turtle.dig()` into it comes back `protected: <name>`.
+- Fuel is not checked before a build (moves ask for fuel as they go); a big plan
+  on a thirsty turtle stops at "out of fuel" with the cell failed.
+
 ## tl.place: T.placeAt and T.ignite (ADR-0008 phase 3)
 
 `T.placeAt(x, y, z, item, { facing, half, axis })` places a block with the state

@@ -476,3 +476,18 @@ do
     n = T.ignite(0, 0, 3)
     check("ignite on a map that has never seen the cell: found out on arrival", n == "minecraft:fire")
 end
+
+--------------------------------------------------------------------------
+-- T.placeInfo: what a plan reads off an item
+--------------------------------------------------------------------------
+do
+    fresh(nil, {})
+    local stairs, slab, door, torch, plainInfo = T.placeInfo("minecraft:oak_stairs"), T.placeInfo("minecraft:oak_slab"), T.placeInfo("minecraft:oak_door"),
+        T.placeInfo("minecraft:torch"), T.placeInfo("minecraft:stone")
+    check("placeInfo: a stair is placed by facing and half; a slab by type (half is the same); a door by facing, and is two blocks",
+        stairs.family == "stairs" and stairs.keys.facing and stairs.keys.half and slab.keys.type and slab.keys.half and door.keys.facing and not door.keys.half
+        and door.door == true and stairs.door == false)
+    check("...a torch hangs; a plain block has no keys", torch.hang == true and torch.keys.facing and plainInfo.family == "block" and next(plainInfo.keys) == nil
+        and plainInfo.hang == false)
+    check("...an empty name is nothing", T.placeInfo("") == nil and T.placeInfo(nil) == nil)
+end

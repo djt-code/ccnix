@@ -551,6 +551,25 @@ end
 -- Placing a block with the state wanted
 --------------------------------------------------------------------------
 
+-- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
+--
+-- family is stairs, slab, log, torch, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
+-- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
+-- type, which are the same); hang is true for a family that hangs or stands on a solid block; door is true for a
+-- family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
+function T.placeInfo(item)
+    if type(item) ~= "string" or item == "" then return nil end
+    local famName = familyOf(item)
+    local fam = FAMILIES[famName]
+    local keys = {}
+    for key in pairs(keysOf(fam)) do keys[key] = true end
+    for name, key in pairs(fam.alias or {}) do
+        if keys[key] then keys[name] = true end
+    end
+    return { family = famName, keys = keys, hang = fam.hang == true, door = fam.needs ~= nil }
+end
+
+
 -- Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and
 -- how; nil and why if it can't.
 --

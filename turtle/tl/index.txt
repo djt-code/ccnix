@@ -128,11 +128,29 @@ T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back fa
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+Plans:
+T.blueprint.fill(x1, y1, z1, x2, y2, z2, item) - Make a plan that is the whole box x1, y1, z1 to x2, y2, z2 (corners either way) filled with the block `item` (a name, with a state in brackets if it has one). Returns the plan, or nil and why.
+T.blueprint.box(x1, y1, z1, x2, y2, z2, item) - Make a plan that is the six faces of the box (floor, roof and walls) in the block `item`; the inside is left alone. Returns the plan, or nil and why.
+T.blueprint.walls(x1, y1, z1, x2, y2, z2, item) - Make a plan that is the four walls of the box, from its bottom to its top, in the block `item` (no floor or roof). Returns the plan, or nil and why.
+T.blueprint.fromMap(box) - Make a plan from what the map holds in the box (six numbers in a table, or {x1 =, ...}); returns it, or nil and why.
+T.blueprint.new(source) - Make a plan from a table or from the text of a plan file (the format in the overview), checked: every symbol in the legend, the anchor whole numbers. Returns the plan, or nil and why (with the line for text).
+T.blueprint.parse(source) - Read a plan from the text of a plan file. Returns the plan, or nil and why, with the line.
+T.blueprint.format(plan) - A plan as text in the file format (what T.blueprint.parse reads).
+T.blueprint.at(plan, x, y, z) - The block a plan has at x, y, z (turtle frame): its name and state table; "minecraft:air" for ".", nil for a cell it leaves alone or does not reach.
+T.blueprint.extent(plan) - The box a plan covers: x1, y1, z1, x2, y2, z2 of the turtle's frame (the cells its text reaches).
+T.blueprint.put(plan, x, y, z, item) - Set one cell of a plan to a block (`item`, with a state in brackets if it has one; "air" for air; nil or " " to leave it alone). Returns true, or nil and why.
+Building:
+T.build(plan, opts) - Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+Checking:
+T.verify(plan, opts) - Check a plan against the world: the cells that differ, as a list of { x, y, z, want, wantState, found, foundState, why, unverified }, and { checked, inspected, differing, unverified }; nil and why if it can't start.
+Swapping blocks:
+T.replace(box, pattern, item, opts) - Swap every block in a box whose name matches a glob for another block: how many, and what could not be. Returns true, info; false, why, info when some were trapped or failed; nil, why when it couldn't begin.
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
 T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
 Placing a block with the state wanted:
+T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
 Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.

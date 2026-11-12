@@ -11,6 +11,7 @@ Provides:
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
   * routes (tl.path, loaded when first used): T.path, A* over the map round protected areas, lava, fire and doors, and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
+  * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -455,6 +456,85 @@ T.refuelFrom(side, target)
 T.need(name)
     The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
 
+tl.blueprint: plans of what to build: the format, building it, checking it, and swapping blocks in a place
+
+Loaded by turtlelib the first time T.blueprint, T.build, T.verify or T.replace is used.  Cells are the turtle's own (the frame it counts in).
+
+A plan is layers of text with a legend, bottom layer first.  As a file it reads:
+
+  name: tower
+  anchor: 10 64 -3
+  B = minecraft:stone_bricks
+  s = minecraft:stone_brick_stairs[facing=north,half=bottom]
+  layer 1:
+  BBBB
+  B..B
+  layer 2:
+  ssss
+
+Each character is a cell: "." is air, a space is "leave alone" (not built, not checked), anything else is looked up in the legend.  The text is a map seen from above with +z at the top, as T.map.slice shows one: the first line of a layer is the highest z, a column goes toward +x, the next layer is one up.  The anchor is the turtle-frame cell of the first character of the first line of the first layer.  A state is in brackets after the name, key=value separated by commas; a name without a namespace is minecraft:'s.  The same plan as a Lua table: { name, anchor = {x, y, z}, legend = { B = "minecraft:stone_bricks", s = "...[facing=north]" }, layers = { "BBBB\nB..B", { "ssss" } } } (a layer is a string of lines or a list of lines).  The helpers fill, box, walls and fromMap make one from code; put changes a cell.
+
+T.build puts a plan up.  It checks the materials first (what is short, and what could be crafted if the craft module is there), then goes layer by layer from the bottom, standing over each cell and placing down; in a layer the plain blocks come first, then stairs and slabs, then what hangs on others (torches, ladders, buttons, trapdoors, gates), then doors, so a thing goes in after its support.  A stair, slab, log, torch or door goes through T.placeAt for the state it names.  The plan is kept as text in the data file .build, and how far the build has got (the number of the last cell tried and the cells that failed, with why) in .build.progress, so a stop, a crash or a reboot carries on where it was with a plain T.build().  A build never digs a block out of a cell it fills (T.replace swaps blocks).  A finished build can protect itself (opts.protect).
+
+T.verify walks the plan and says which cells differ, states included: a cell with a state to match, or that the map has never seen, is looked at with T.inspectAll; the rest is read from the map.  T.replace swaps every block matching a glob in a box for another, each from its nearest free side; one with no free side is reported, never dug to.
+
+== Plans ==
+
+T.blueprint.fill(x1, y1, z1, x2, y2, z2, item)
+    Make a plan that is the whole box x1, y1, z1 to x2, y2, z2 (corners either way) filled with the block `item` (a name, with a state in brackets if it has one). Returns the plan, or nil and why.
+
+T.blueprint.box(x1, y1, z1, x2, y2, z2, item)
+    Make a plan that is the six faces of the box (floor, roof and walls) in the block `item`; the inside is left alone. Returns the plan, or nil and why.
+
+T.blueprint.walls(x1, y1, z1, x2, y2, z2, item)
+    Make a plan that is the four walls of the box, from its bottom to its top, in the block `item` (no floor or roof). Returns the plan, or nil and why.
+
+T.blueprint.fromMap(box)
+    Make a plan from what the map holds in the box (six numbers in a table, or {x1 =, ...}); returns it, or nil and why.
+
+    The blocks are as the map has them, with their states if they were inspected, air as ".", cells the map has never seen left alone.
+
+T.blueprint.new(source)
+    Make a plan from a table or from the text of a plan file (the format in the overview), checked: every symbol in the legend, the anchor whole numbers. Returns the plan, or nil and why (with the line for text).
+
+T.blueprint.parse(source)
+    Read a plan from the text of a plan file. Returns the plan, or nil and why, with the line.
+
+T.blueprint.format(plan)
+    A plan as text in the file format (what T.blueprint.parse reads).
+
+T.blueprint.at(plan, x, y, z)
+    The block a plan has at x, y, z (turtle frame): its name and state table; "minecraft:air" for ".", nil for a cell it leaves alone or does not reach.
+
+T.blueprint.extent(plan)
+    The box a plan covers: x1, y1, z1, x2, y2, z2 of the turtle's frame (the cells its text reaches).
+
+T.blueprint.put(plan, x, y, z, item)
+    Set one cell of a plan to a block (`item`, with a state in brackets if it has one; "air" for air; nil or " " to leave it alone). Returns true, or nil and why.
+
+    The cell must be in one of the plan's layers, and no lower in x or higher in z than the anchor; the lines of the layer grow to hold it.
+
+== Building ==
+
+T.build(plan, opts)
+    Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+
+    `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a reboot. The same plan again carries on too; a different plan while one is unfinished is refused unless opts.restart. It first counts what the cells still to do need against what is on board, and refuses if anything is short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a function) unless opts.partial; cells with no item left fail one by one. A cell that fails is noted and the build goes on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them). Nothing is dug out of a cell it fills: a block in the way is a failure. A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead. opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan = false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart, partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or that name; only when no cell failed). Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short }.
+
+== Checking ==
+
+T.verify(plan, opts)
+    Check a plan against the world: the cells that differ, as a list of { x, y, z, want, wantState, found, foundState, why, unverified }, and { checked, inspected, differing, unverified }; nil and why if it can't start.
+
+    `plan` is a plan; nil checks the saved build. Every cell the plan does not leave alone is compared: the block's name, and each key of the state the plan names. A cell with a state to match, or that the map has never seen, is looked at with T.inspectAll (opts.inspect = "all" looks at every cell); the rest is read from the map, which the build keeps right. A cell that could not be looked at is listed too, with unverified = true. An empty list means the build is as planned. opts: at ({ x, y, z }), scan (true: scan the box with T.scanBox first), inspect, move (for the walking), inside.
+
+== Swapping blocks ==
+
+T.replace(box, pattern, item, opts)
+    Swap every block in a box whose name matches a glob for another block: how many, and what could not be. Returns true, info; false, why, info when some were trapped or failed; nil, why when it couldn't begin.
+
+    The box is six numbers in a table, or { x1 =, ... }; the glob matches block names (the namespace may be left out); `item` is the block to put in, with a state in brackets if it has one. The cells are those the map holds (opts.scan scans the box first, which the map needs to know it). Each is taken from the nearest free side the map shows, nearest next: the turtle looks at the block (one that has changed since is left), digs it and places the new one. A block with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to. It refuses if there is less of `item` on board than cells to swap, unless opts.partial. Info is { replaced, same, trapped, failed, gone, more }, trapped and failed being lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo), inside (a protected area the job owns, to swap blocks in it), partial.
+
 tl.path: routes: a search over the map for a way to a cell, and walking it
 
 Loaded by turtlelib the first time T.path or T.travel is used (T.moveTo asks for T.travel when a straight run is blocked and opts.path is set).  Cells are the turtle's own (the frame it counts in).
@@ -508,6 +588,11 @@ A turtle does not choose how a block lands.  What it gets depends on how the tur
 T.placeAt(x, y, z, item, { facing, half, axis }) works out which approaches the table says give that state and the map (tl.world) says are possible, goes to the nearest, places, inspects, and if the state came out wrong digs the block and tries the next.  Facing is a compass name, so it needs the world origin (T.setOrigin: the compass way the turtle's frame points); half and axis do not.  Where the map does not know what is beside the target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it and the cell above free; T.ignite lights a fire from above with flint and steel.
 
 == Placing a block with the state wanted ==
+
+T.placeInfo(item)
+    What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
+
+    family is stairs, slab, log, torch, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and type, which are the same); hang is true for a family that hangs or stands on a solid block; door is true for a family of two blocks. Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
 
 T.placeAt(x, y, z, item, opts)
     Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
