@@ -265,6 +265,7 @@ local REQ_CODES = {
     [[local glob, convert = require("glob"), require("convert"); return glob.match("minecraft:*_ore", "minecraft:iron_ore"), convert.toInteger("ff", 16), convert.duration(3725)]],
     [[local fileio = require("fileio"); return fileio.read("claude.key"), fileio.write("startup.lua", "x"), fileio.read("notes.txt")]],
     [[fs.makeDir("claude"); local fileio = require("fileio"); return fileio.write("claude/f.txt", "kept"), require("text") == require("text")]],
+    "return require('json')",
 }
 HTTP.queue = {}
 for i, c in ipairs(REQ_CODES) do HTTP.queue[i] = reply({ toolUse("lua", { code = c }) }, "tool_use") end
@@ -272,9 +273,12 @@ HTTP.queue[#REQ_CODES + 1] = reply({ text("Checked.") }, "end_turn")
 run("poke at require")
 local function reqOut(i) local r = resultsIn(i + 1)["toolu_" .. i]; return r and tostring(r.content) or "", r and r.is_error end
 local q1, e1 = reqOut(1)
-local _, e2 = reqOut(2)
+local q2, e2 = reqOut(2)
+check("require of what the code has as a global (turtlelib, fs): an error result saying which global",
+    e1 and q1:find("the global T", 1, true) and e2 and q2:find("the global fs", 1, true), q1 .. " / " .. q2)
+local q7, e7 = reqOut(7)
 check("require of anything else is an error result naming what it can have",
-    e1 and q1:find("only these here") and q1:find("cc.strings", 1, true) and q1:find("text", 1, true) and e2, q1)
+    e7 and q7:find("only these here") and q7:find("cc.strings", 1, true) and q7:find("text", 1, true), q7)
 check("ccnix's libraries load in the code: text, glob, convert",
     reqOut(3) == "-> a|b|c" and reqOut(4) == "-> true\n-> 255\n-> 1h 2m 5s", reqOut(3) .. " / " .. reqOut(4))
 local f5 = reqOut(5)

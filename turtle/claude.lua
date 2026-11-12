@@ -532,7 +532,16 @@ local function loadLib(name)
     return nil, name .. " isn't on this computer"
 end
 
+-- What isn't a module here because the code has it already, as a global
+-- (turtlelib is T, the very one moving the turtle: a second copy would
+-- keep a position of its own; fs and io are the guarded ones)
+local AS_GLOBAL = { turtlelib = "T", fs = "fs", io = "io", turtle = "turtle", http = "http", os = "os",
+                    peripheral = "peripheral", textutils = "textutils" }
+
 local function ccRequire(name)
+    if AS_GLOBAL[name] then
+        error("require: " .. name .. " isn't a module here: the code has it already, as the global " .. AS_GLOBAL[name], 2)
+    end
     if type(name) ~= "string" or not (CC_MODULES[name] or CCNIX_MODULES[name]) then
         error("require: only these here: " .. table.concat(tables.sortedKeys(CC_MODULES), ", ")
             .. ", and ccnix's " .. table.concat(tables.sortedKeys(CCNIX_MODULES), ", "), 2)

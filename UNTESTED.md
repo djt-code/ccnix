@@ -7,16 +7,14 @@ section.
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
-- **status after Ctrl+T in `mine`**: the `mine` job under way shows.
-  Ctrl+T while `mine` runs stops claude too, the position saved.
 - **A long session** (60k+ tokens): `claude.log` should show "context: N
   old tool results cleared" and the session should carry on sensibly.
 
 ## claude: ccnix's libraries in its code, the rest (0.38.0)
 
 - With a chat box attached, `claude say hello in the chat` (mc.say).
-  `require("turtlelib")` and `require("fs")` are still refused, naming
-  what it may have.
+  `require("turtlelib")` and `require("fs")` (0.43.5) say the code has
+  them already, as the globals T and fs.
 
 ## Everything: the text libraries, what's left (0.36.1-0.37.0)
 
@@ -226,6 +224,12 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.4, claude: told to dig with mine, Ctrl+T stopped
+  both; asked, it found the job unfinished, said where the turtle was,
+  and `mine reset --to-start` brought it back.  `require("turtlelib")` and
+  `require("fs")` refused, listing what it may have (it worked out T and
+  fs itself; the error names them since 0.43.5).
 
 - 2026-11-12 — ROM 0.43.3, the turtle: `mine -3 3 8 --no-lights --new`
   (-3 the width), Ctrl+T, `mine where` the same after a reboot, `mine
