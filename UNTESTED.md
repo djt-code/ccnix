@@ -5,6 +5,41 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## farm and mow on the shared pieces (ADR-0008 phase 5, ccnix 0.50.0)
+
+- **Protected areas hold for farm's crop digs**: `T.protect("garden", x1, y, z1, x2, y, z2)` over a few ripe crop
+  tiles (in a Lua prompt or claude's code, in the turtle's frame; the crops are one below the cruise height), then
+  `farm`: the crops in the box are left standing, the pass says "N tiles left alone: they are in a protected
+  area" and counts them neither harvested nor damaged, and no repair pass starts. `T.unprotect("garden")` and the
+  next pass takes them. The same for a protected sugar cane strip (the cut of the second block is refused). Check
+  a real hoe on a crop in a protected cell comes back `false, "protected: garden"` through the wrapped digDown.
+- **farm keeps the obstacles in the map** (`sysctl farm.map=false` turns it off): put a block (a post) at the cruise
+  height somewhere on the route, in a column that is not a crop tile, e.g. right in front of home, and run `farm`:
+  it bumps into it once, and `T.map.get(x, 0, z)` (in a Lua prompt, in the turtle's frame) names it. Run `farm`
+  again (a new run, or the next pass): it goes round without the bump. Take the post away and run again: if it
+  leaves no other way, farm forgets the remembered obstacles for that trip and goes through, and the map
+  says air there afterwards. A clean farm should leave no `.map` folder behind. Check the map's frame stays right
+  across `farm reset --here`, and that the extra look at the block in front (an inspect after a failed step) costs
+  nothing visible.
+- **mow's heights and gardens** (`sysctl mow.map=false` turns the heights off): on rough ground, `mow` writes the
+  ground under each tile into the map; a second pass (`mow 16 16 1`) or the next run does not run into the
+  same pillar again, and a step the turtle cannot make (ground more than 3 up or down from the next column) is
+  not planned. Check `T.map.heights()` shows the lawn afterwards, and that the extra inspect and map write
+  per tile does not slow a big lawn much (a 16 x 16 lawn writes 256 cells, some cubes). A protected area over a
+  garden (flowers, a crop plot) is kept out of: "Keeping out of N tiles in a protected area (name)", the grass in
+  it stands, the route goes round. Unknown ground is taken level with where the turtle stands; a column that
+  something solid blocked stays out for the rest of the run (restart `mow` to try it again).
+- **farm.report and mow.report** (off by default): `sysctl farm.report=true`, `sysctl mow.report=true`,
+  `sysctl turtle.player=<your name>`, a chat box in the chest below home (or on board, or on a side). A single
+  `farm 5 6 0` / `mow 5 4` pass ends with one chat message with the turtle's place and fuel; `farm repair` says
+  "done"; a repeating run says nothing for a clean pass and tells the player after one with damaged or unreachable
+  tiles, out of seeds or (mow) tiles given up; an error that stops farm is told, and the error goes on. The chat
+  box comes out of the chest for the telling and goes back; check the hoe or pickaxe is back on its side
+  afterwards, the chunk controller never came off, and with no chat box the run ends as ever after a line
+  "Couldn't tell the player".
+- **T.report(text, { from = "bottom" })** and **T.report.try(text)**: the chat box taken from the container
+  on that side for the telling, and a version that never raises; both used by the two reports above.
+
 ## mine on the shared pieces (ADR-0008 phase 5)
 
 - **The Geo Scanner through T.withPeripheral**: `mine` with a scanner in the start's top chest and a chunk

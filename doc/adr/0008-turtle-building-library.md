@@ -469,16 +469,16 @@ gets anything new. Then, where the new pieces make it better:
 
 ### Phase 1: what costs claude most today
 
-1. [ ] claude: log rotation; `/claude/helpers.lua` loaded each session;
+1. [x] claude: log rotation; `/claude/helpers.lua` loaded each session;
    the prompt names `T.takeInto`, `T.refuelFrom`, `T.keep` and the scan's
    `r/u/f` until the index replaces it.
-2. [ ] turtlelib: the turtle API wrapped (digs, placements, moves and
+2. [x] turtlelib: the turtle API wrapped (digs, placements, moves and
    turns as D11 says), protected areas, `T.withPeripheral`, `T.pull`,
    `T.moveTo` with reasons.
-3. [ ] The header-comment reference, `mkhelp` making `help/turtlelib.txt`
+3. [x] The header-comment reference, `mkhelp` making `help/turtlelib.txt`
    and `turtle/tl/index.txt`, the index in claude's prompt, `--check` for
    drift.
-4. [ ] Sims: every existing scenario unchanged with the API wrapped (the
+4. [x] Sims: every existing scenario unchanged with the API wrapped (the
    first check, before anything else is added); a protected area
    refusing `turtle.dig()` called straight and `T.digDir` alike;
    `withPeripheral` keeping a controller on; `moveTo`'s reasons; the log
@@ -486,10 +486,10 @@ gets anything new. Then, where the new pieces make it better:
 
 ### Phase 2: seeing and moving
 
-5. [ ] `tl.world`: frames and origin, the map files and cap, `T.scan`,
+5. [x] `tl.world`: frames and origin, the map files and cap, `T.scan`,
    `T.scanBox`, `T.inspectAt`, `T.inspectAll`, heights and slices.
-6. [ ] `tl.path`: A*, `T.travel`, re-planning, yielding.
-7. [ ] Sims: a scan in each heading lands in the right cells; the map
+6. [x] `tl.path`: A*, `T.travel`, re-planning, yielding.
+7. [x] Sims: a scan in each heading lands in the right cells; the map
    survives a `--here` (the transform updated) and says so when it
    can't; a cube written and read back byte for byte; A* around a
    protected box and lava, and through unseen cells with a re-plan on a
@@ -497,10 +497,10 @@ gets anything new. Then, where the new pieces make it better:
 
 ### Phase 3: building
 
-8. [ ] `tl.place` with its table and the learnt approaches; `T.ignite`.
-9. [ ] `tl.blueprint`: the format, `T.build` with materials and progress,
+8. [x] `tl.place` with its table and the learnt approaches; `T.ignite`.
+9. [x] `tl.blueprint`: the format, `T.build` with materials and progress,
    `T.verify`, `T.replace`.
-10. [ ] A mock world with block states (buildworld) whose `place` follows
+10. [x] A mock world with block states (buildworld) whose `place` follows
     `TurtlePlaceCommand`'s order and the blocks' rules; sims for stairs
     and slabs each way (sideways always bottom, placeDown by the block
     below, placeUp by the block above), a log's axis, a door, a build
@@ -508,20 +508,24 @@ gets anything new. Then, where the new pieces make it better:
 
 ### Phase 4: materials
 
-11. [ ] `tl.craft`: recipes, `T.craft`, `T.canCraft`, fuel and smelting
+11. [x] `tl.craft`: recipes, `T.craft`, `T.canCraft`, fuel and smelting
     tables, `T.smelt`.
-12. [ ] `tl.store`: catalogue, fetch, stow, auto-dump; `T.junk`.
-13. [ ] `tl.harvest`, `T.refuelFromLava`, `T.fuelFor`.
-14. [ ] `tl.journal`: job, undo, `T.report`.
-15. [ ] Sims for each (a mock furnace and grid; mine's crafting scenario
-    moved onto `T.craft` with the same result).
+12. [x] `tl.store`: catalogue, fetch, stow, auto-dump; `T.junk`.
+13. [x] `tl.harvest`, `T.refuelFromLava`, `T.fuelFor`.
+14. [x] `tl.journal`: job, undo, `T.report`.
+15. [x] Sims for each (a mock furnace and grid). Mine's crafting scenario
+    was not moved onto `T.craft`: mine's chain (one chest, the table and
+    pickaxe left in it, bulk sent to the bulk chest) cannot give the same
+    result there, so mine keeps its own crafting.
 
 ### Phase 5: the programs
 
-16. [ ] mine, farm, mow onto the shared pieces, sims identical.
-17. [ ] Their improvements, as D7 decides, each with a sim.
+16. [x] mine, farm, mow onto the shared pieces, sims identical (mine's
+    scanner swap is `T.withPeripheral`; its crafting stays its own, see 15).
+17. [x] Their improvements, as D7 decides, each with a sim.
 18. [ ] UNTESTED.md entries, help regenerated, versions bumped (ccnix's
-    minor per phase), ccnix-mod's ROM bumped with each.
+    minor per phase), ccnix-mod's ROM bumped with each. (ccnix's side is
+    done, 0.50.0; the ROM bump in ccnix-mod is left.)
 
 ### In game, in order
 
