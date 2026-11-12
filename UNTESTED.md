@@ -7,6 +7,14 @@ section.
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
+- **The conversation cached** (0.44.0): the same long session as before
+  (equip the chat box, read the help pages, ...). The line when the goal
+  ends now reads `[N tokens in: R from the cache, W written to it, U new;
+  ...]`: R should be most of N (before, only the ~11k system prompt was
+  read back on each call), and claude.log's "context: ... cleared" lines
+  fewer (past 100k, at least 30k at a time; before, past 60k, 10k).
+  `--cache 1h`: a goal, wait 10 minutes, another: its R still large.
+  `--cache 15m`: refused.
 
 ## claude: ccnix's libraries in its code, the rest (0.38.0)
 

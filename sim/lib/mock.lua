@@ -630,7 +630,9 @@ function M.sse(msg)
     local start = {}
     for k, v in pairs(msg) do if k ~= "content" and k ~= "stop_reason" and k ~= "stop_details" then start[k] = v end end
     start.content, start.stop_reason = {}, nil
-    start.usage = { input_tokens = msg.usage and msg.usage.input_tokens, cache_read_input_tokens = msg.usage and msg.usage.cache_read_input_tokens, output_tokens = 1 }
+    local u = msg.usage or {}
+    start.usage = { input_tokens = u.input_tokens, cache_read_input_tokens = u.cache_read_input_tokens,
+                    cache_creation_input_tokens = u.cache_creation_input_tokens, output_tokens = 1 }
     ev({ type = "message_start", message = start })
     for i, b in ipairs(msg.content or {}) do
         local idx = i - 1

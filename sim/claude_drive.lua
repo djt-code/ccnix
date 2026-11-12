@@ -32,7 +32,8 @@ local function text(s) return { type = "text", text = s } end
 local function reply(blocks, stop, extra)
     local r = { id = "msg_1", type = "message", role = "assistant", model = "claude-opus-5-5",
                 content = blocks, stop_reason = stop or "end_turn",
-                usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = 50 } }
+                usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = 50,
+                          cache_creation_input_tokens = 25 } }
     for k, v in pairs(extra or {}) do r[k] = v end
     return { code = 200, body = r }
 end
@@ -93,6 +94,8 @@ check("the request names the model, effort, cached system prompt and the tools: 
 check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
     r1 and r1.body.context_management.edits[1].type == "clear_tool_uses_20250919"
         and r1.body.context_management.edits[1].exclude_tools[1] == "memory"
+        and r1.body.context_management.edits[1].trigger.value == 100000
+        and r1.body.context_management.edits[1].clear_at_least.value == 30000
         and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
         and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
@@ -113,7 +116,11 @@ check("the code's print and return values came back",
 check("the turtle moved as the code said", P.x == 1 and P.y == 0 and P.z == 2 and P.d == 1, string.format("(%d,%d,%d) facing %d", P.x, P.y, P.z, P.d))
 check("three API calls, then it stopped at end_turn and waited for the next goal", #HTTP.requests == 3)
 check("the final note was printed", Mine.logHas("^Done: the turtle is at"))
-check("the token totals were printed", Mine.logHas("tokens in"))
+check("the conversation is cached too (the top-level mark), for the API's default 5 minutes",
+    r1 and r1.body.cache_control and r1.body.cache_control.type == "ephemeral" and r1.body.cache_control.ttl == nil
+        and r1.body.system[1].cache_control.ttl == nil)
+check("the token totals were printed, cache reads and writes counted in",
+    Mine.logHas("^%[525 tokens in: 150 from the cache, 75 written to it, 300 new; 60 out; 585 in all%]"))
 check("the code was logged to claude.log", (Mine.files["claude.log"] or ""):find("T.turnRight") ~= nil)
 
 -- 2. the sandbox: fs is out of reach, a syntax error and a runtime error
@@ -202,6 +209,16 @@ fresh({ "" })
 run("dig", "--steps")
 check("an option with no word after it: getopt's message, nothing sent",
     #HTTP.requests == 0 and Mine.logHas("claude: option '%-%-steps' requires an argument"))
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig", "--cache", "1h")
+local c1 = HTTP.requests[1]
+check("--cache 1h: the conversation and the system prompt both cached for an hour",
+    c1 and c1.body.cache_control and c1.body.cache_control.ttl == "1h" and c1.body.system[1].cache_control.ttl == "1h")
+fresh({ "" })
+run("dig", "--cache", "15m")
+check("--cache 15m: refused (the API has 5m and 1h), nothing sent",
+    #HTTP.requests == 0 and Mine.logHas("claude: %-%-cache is 5m or 1h, not 15m"))
 
 -- 6. ask_user hands the question to the keyboard
 fresh({ "left", "" })

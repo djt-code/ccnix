@@ -8,13 +8,17 @@
 --
 -- Usage:
 --   claude [goal words...] [--model id] [--effort low|medium|high]
---          [--steps N] [--confirm]
+--          [--steps N] [--cache 5m|1h] [--confirm]
 --
 --   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
 --   claude                      asks for the goal
 --
 --   --steps N    at most N tool calls per goal (default 60), then it's
 --                told to stop and sum up
+--   --cache 1h   keep the conversation cached for an hour with no call
+--                reading it, not 5 minutes (for long pauses between
+--                goals: writing it costs more, 2x the input price, not
+--                1.25x; reading it is cheap either way)
 --   --confirm    show each piece of code and ask before running it
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
@@ -43,8 +47,11 @@
 --     (the same `http.rules` allow-list that lets `git` reach your host).
 --
 -- What it costs: every round trip (one tool call) sends the whole
--- conversation, so a long job is many calls; the system prompt and tools
--- are marked for prompt caching.  The totals are printed when a goal ends.
+-- conversation, so a long job is many calls; the conversation is cached
+-- (the API's prompt caching), so each call reads what came before from
+-- the cache, at a fraction of the price, and pays in full only for
+-- what's new.  When a goal ends its tokens are printed: those read from
+-- the cache, written to it and new, and what came out.
 --
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
@@ -117,8 +124,15 @@ local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is k
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
 -- Old tool results cleared once the conversation is this long (tokens in),
--- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST
-local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 60000, 6, 10000
+-- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST.  A
+-- clear changes the conversation from the first result cleared on, so the
+-- cache is written again from there: rarer and bigger clears cost less
+-- than many small ones.
+local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
+-- How long the cache keeps the conversation with no request reading it:
+-- the API has 5 minutes and an hour (writing for an hour costs 2x the
+-- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5)
+local CACHE_TTLS = { ["5m"] = true, ["1h"] = true }
 -- The programs run_program may run: ccnix's turtle programs, and ip (the
 -- network's settings: it saves them itself) and ping to set up and check
 -- the network
@@ -134,16 +148,24 @@ local BOUNDED = { ping = { letters = { "c", "w" }, add = { "-c", "4" } } }
 --------------------------------------------------------------------------
 -- (T.options: the goal's words are free, a "-5" or a "-x" in it too;
 -- only these are options)
-local opts, args = T.options({ ... }, { confirm = true, model = "=", effort = "=", steps = "=" })
+local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--cache 5m|1h] [--confirm]"
+local opts, args = T.options({ ... }, { confirm = true, model = "=", effort = "=", steps = "=", cache = "=" })
 if not opts then
     print("claude: " .. args)
-    print("Usage: claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--confirm]")
+    print(USAGE)
+    return
+end
+if opts.cache and not CACHE_TTLS[opts.cache] then
+    print("claude: --cache is 5m or 1h, not " .. opts.cache)
+    print(USAGE)
     return
 end
 local CONFIRM = opts.confirm == true
 local MODEL = opts.model or "claude-opus-5-5"
 local EFFORT = opts.effort or "medium"
 local MAX_STEPS = opts.steps and tonumber(opts.steps) or 60
+-- (5 minutes is the API's own default, so it isn't named)
+local CACHE = { type = "ephemeral", ttl = opts.cache ~= "5m" and opts.cache or nil }
 local goal = table.concat(args, " ")
 
 --------------------------------------------------------------------------
@@ -924,7 +946,9 @@ end
 -- The API
 --------------------------------------------------------------------------
 local messages = {}
-local usage = { input = 0, output = 0, cached = 0 }
+-- (input: tokens in at the full price; written: into the cache; cached:
+-- read from it.  The three add up to all that was sent.)
+local usage = { input = 0, written = 0, cached = 0, output = 0 }
 
 -- Every string in v (in place) as UTF-8, which the API reads: the model's
 -- own text is already, and stays byte for byte as it was (a thinking
@@ -947,7 +971,13 @@ local function body()
     return textutils.serialiseJSON(asUTF8({
         model = MODEL,
         max_tokens = MAX_TOKENS,
-        system = { { type = "text", text = SYSTEM, cache_control = { type = "ephemeral" } } },
+        -- cached: the system prompt and tools (they never change), and
+        -- the conversation up to its last block, read back by the next
+        -- call (the top-level cache_control: the API moves that mark on
+        -- as the conversation grows).  One TTL for both: a longer one
+        -- may not come after a shorter.
+        system = { { type = "text", text = SYSTEM, cache_control = CACHE } },
+        cache_control = CACHE,
         tools = TOOLS,
         messages = messages,
         output_config = { effort = EFFORT },
@@ -1102,7 +1132,17 @@ local function count(reply)
     local u = reply.usage or {}
     usage.input = usage.input + (u.input_tokens or 0)
     usage.output = usage.output + (u.output_tokens or 0)
+    usage.written = usage.written + (u.cache_creation_input_tokens or 0)
     usage.cached = usage.cached + (u.cache_read_input_tokens or 0)
+end
+
+-- The tokens a goal took (since `before`), and the session's in all
+local function tokenLine(before)
+    local d = {}
+    for k, v in pairs(usage) do d[k] = v - before[k] end
+    return string.format("[%d tokens in: %d from the cache, %d written to it, %d new; %d out; %d in all]",
+        d.input + d.written + d.cached, d.cached, d.written, d.input, d.output,
+        usage.input + usage.written + usage.cached + usage.output)
 end
 
 -- Error results for the tool calls in the last assistant turn, if it has
@@ -1222,11 +1262,9 @@ local function main()
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        local before = { input = usage.input, output = usage.output, cached = usage.cached }
+        local before = tables.copy(usage)
         converse(goal)
-        say("grey", string.format("[%d tokens in (%d from cache), %d out; %d in all]",
-            usage.input - before.input, usage.cached - before.cached, usage.output - before.output,
-            usage.input + usage.output))
+        say("grey", tokenLine(before))
         goal = ask("> ")
     end
 end

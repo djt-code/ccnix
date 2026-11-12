@@ -4,13 +4,15 @@ Talks to the Claude API (Anthropic) from the turtle over HTTP and gives the mode
 
 Usage:
   claude [goal words...] [--model id] [--effort low|medium|high]
-         [--steps N] [--confirm]
+         [--steps N] [--cache 5m|1h] [--confirm]
 
   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
   claude                      asks for the goal
 
   --steps N
       at most N tool calls per goal (default 60), then it's told to stop and sum up
+  --cache 1h
+      keep the conversation cached for an hour with no call reading it, not 5 minutes (for long pauses between goals: writing it costs more, 2x the input price, not 1.25x; reading it is cheap either way)
   --confirm
       show each piece of code and ask before running it
 
@@ -24,7 +26,7 @@ Setup:
   * put an API key in `claude.key` next to this program (`edit claude.key`, paste the key, save).  Make it a key of its own with a spending limit: anything on a computer's disk can be read by whoever can open the turtle or the server's save folder.  The file is in .gitignore, and `git pull` never touches untracked files.
   * the server's CC:Tweaked config must allow HTTP to api.anthropic.com (the same `http.rules` allow-list that lets `git` reach your host).
 
-What it costs: every round trip (one tool call) sends the whole conversation, so a long job is many calls; the system prompt and tools are marked for prompt caching.  The totals are printed when a goal ends.
+What it costs: every round trip (one tool call) sends the whole conversation, so a long job is many calls; the conversation is cached (the API's prompt caching), so each call reads what came before from the cache, at a fraction of the price, and pays in full only for what's new.  When a goal ends its tokens are printed: those read from the cache, written to it and new, and what came out.
 
 The code has the turtle, turtlelib, peripherals, the plain Lua bits, CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and ccnix's libraries for text, the network and the world (text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc, mc), and the files: fs, io, loadfile and dofile read anything but the API key, and write only under /claude/ (so it can't rewrite the programs or the startup).  No shell.
 
