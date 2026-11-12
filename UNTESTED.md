@@ -89,9 +89,6 @@ numbers, the text tools and the network tools. Still to try:
   screen; `/var/log/panic.count` holds the count. Remove the fault, boot:
   no panic; a panic more than ten minutes later counts from 1 again.
 
-- **A crashing service, the rest** (0.26.0). A syntax error or a missing
-  command ends `failed: exit status 1`; Ctrl+T or `kill -TERM` from outside
-  `service stop` shows `failed: Terminated` with no traceback.
 - **Commands run through lib/procrun** (0.26.0). Services, telnet sessions
   and the console chain (autostart, ccsh) still start and get their quoted
   arguments as before; `shell.getRunningProgram()` and `arg` inside them are
@@ -112,9 +109,6 @@ numbers, the text tools and the network tools. Still to try:
 
 - **ping, the rest** (0.29.0). `ping -s 65507` through the gateway, in
   NAT mode (the gateway's own address) and in TUN mode (a real host).
-- **`ip neigh`'s INCOMPLETE entry** (0.29.0): `ping -c 1 10.1.2.99 &`
-  then `ip neigh` at once: 10.1.2.99 INCOMPLETE, asked N times; gone
-  about 3 s after the ping started (three asks a second apart).
 - **`netstat -s` on a router, a forged source** (0.29.0): the drop counted
   by reason (martian or rpfilter), and the router screen's spoofed count
   agreeing.
@@ -270,6 +264,13 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.2: `ping -c 1 10.1.2.99 &` then `ip neigh`:
+  INCOMPLETE, 1 queued, asked 2 times; gone a moment later (three asks a
+  second apart).  Services: a syntax error and a missing command each
+  `failed: exit status 1` with the error in the last lines; `kill -TERM`
+  of a service's process, `failed: Terminated`, no traceback (each then
+  restarting, as services do).
 
 - 2026-11-12 — ROM 0.43.2, the network: `ping -s 65507` to a host across
   the router and to the router (bytes=65507, no note); `ip route get
