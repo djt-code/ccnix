@@ -49,7 +49,7 @@ local chatApi = {
 
 -- A new world: a floor of stone, the pickaxe on the left, 200 fuel, the library loaded afresh and told where it is in the world
 -- (100,64,-20, north).  The chat box can be equipped, and is not attached.
-local function fresh()
+local function fresh(noOrigin)
     W = B.new({ facing = "north" })
     W.install()
     EQ.left, EQ.right = PICK, nil
@@ -71,7 +71,7 @@ local function fresh()
     for x = -8, 8 do for z = -8, 8 do W.set(x, -1, z, STONE) end end
     for _, name in ipairs(MODS) do package.loaded[name] = nil end
     T = require("turtlelib")
-    T.setOrigin(100, 64, -20, "north")
+    if not noOrigin then T.setOrigin(100, 64, -20, "north") end
     return W, T
 end
 -- A restart of the computer: the disk and the world as they are, the library loaded afresh, the turtle where it is.
@@ -285,6 +285,35 @@ do
     check("T.undo puts the stair back, facing east, bottom half", ok2 == true and has(2, 0, 2, STAIRS) and st and st.facing == "east" and st.half == "bottom",
         tostring(info and info.failed[1] and info.failed[1].why) .. " " .. tostring(st and st.facing))
     check("...and the stair is not aboard any more", carrying(STAIRS) == 0)
+
+    -- with no world origin a facing can't be asked for: the undo says so
+    fresh(true)
+    T.cfg.undo = true
+    W.set(2, 0, 2, STAIRS, { facing = "east", half = "bottom" })
+    know(-1, -1, -1, 4, 2, 4)
+    T.moveTo(2, 0, 1, {})
+    T.digDir(0)
+    local why2
+    ok2, why2 = T.undo()
+    check("a faced block with no origin: the undo says what placeAt said", ok2 == false and contains(why2, "T.setOrigin"), tostring(why2))
+
+    -- seeds and bone meal make no block of their own: nothing to undo
+    fresh()
+    T.cfg.undo = true
+    T.undoClear()
+    W.set(0, -1, 1, "minecraft:farmland")
+    W.give(1, "minecraft:wheat_seeds", 4)
+    turtle.select(1)
+    -- (the mock has no crops: seeds placed down make wheat, as in the game)
+    T.raw.placeDown = function()
+        if W.get(0, 0, 1) then return false, "Cannot place block here" end
+        W.set(0, 0, 1, "minecraft:wheat", { age = 0 })
+        return true
+    end
+    T.up()
+    T.forward()
+    local planted = turtle.placeDown()
+    check("seeds planted with the journal on write nothing to undo", planted and lines(".undo") == 0, tostring(readFile(".undo")))
 
     -- a top-half stair too
     fresh()
