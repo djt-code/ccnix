@@ -5,14 +5,6 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## grep -r (0.43.0)
-
-- `cd /rom; grep -r "os.pullEvent" apis | head`: lines as
-  `apis/<file>:<line>`, the files in name order. `grep -r pullEvent`
-  in a directory with subdirectories: names without `./`; `grep -rl`,
-  `grep -rc`; `grep -r x somefile`: no name in front. `grep x /rom`
-  without -r: "Is a directory".
-
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **status after Ctrl+T in `mine`**: the `mine` job under way shows.
@@ -48,16 +40,11 @@ numbers, the text tools and the network tools. Still to try:
 - **Text on screen:** the pager wrapping a long coloured line (`vim` on a
   long line, `help` in a narrow window); a long IRC message split in two
   at the last space that fits.
-- **IRC:** `/ignore *!*@host`; `MODE #c +ov a b` both ways; WHOIS idle
-  over a minute reads "5m 3s".
-- **The rest:** `ip addr`, `ping` and `host` a name; `curl` a Lua page
-  with a query, one using `text` and `fileio`; vi `:r` of an empty file
-  (adds nothing); a panic report (one row layout); `$HOSTNAME` on an
-  unlabelled computer (its ID); jbod on the fileserver; a long `sort`
-  and `wc` on a big file (no "Too long without yielding"); `od -j 0x10
-  -N 8`; `mkdir`/`rmdir`/`tee` errors without the path in front;
-  `strings -n x` and `xargs -s 0` ("bad -n x"); a syslog line's trailing
-  blanks dropped.
+- **The rest:** `host` a name; `curl` a Lua page with a query, one
+  using `text` and `fileio`; a panic report (one row layout);
+  `$HOSTNAME` on an unlabelled computer (its ID); jbod on the
+  fileserver; a long `sort` and `wc` on a big file (no "Too long without
+  yielding"); a syslog line's trailing blanks dropped.
 
 ## Editors
 
@@ -298,6 +285,15 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.0: `grep -r` (apis/<file> names in order, `-rl`
+  from inside without `./`, `-rc` on a folder; a folder without -r: "Is
+  a directory").  `strings -n x` and `xargs -s 0` ("bad ..."), `mkdir`,
+  `rmdir`, `tee` errors without a path in front; `od -j 0x10 -N 8`; vi
+  `:r` of an empty file adds nothing.  irc: `/mode #ccnix +ov Lab-A
+  Lab-A` (shown on both), `/ignore *!*@<address>` hides that host's lines
+  (a client on the ircd's own computer comes from 127.0.0.1), `/whois`
+  idle "1m 12s".  `ip host laba 10.1.1.10`, `ping -c1 laba`, `ip addr`.
 
 - 2026-11-12 — ROM 0.42.3, the smoke test's second round on Lab-B: `ip
   route`, `netstat -r`, `tcpdump -c 4 net 10.0.0.0/8 &` with a ping (4
