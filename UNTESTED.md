@@ -31,10 +31,8 @@ numbers, the text tools and the network tools. Still to try:
   on an install made before 0.37.0 adds the text libraries to a checkout
   cloned with `--only` paths; `ccnix setup --autostart=router`; setup's
   migration from an old /cc-turtles, if one is left anywhere.
-- **The turtles:** `mine -3 3 32`, `mine --spacing=4`, `farm`, `mow
-  notorch`, `claude go -5 blocks` (options through lib/getopt); a farm or
-  mine run's saved job read back after a reboot; claude's Lua shown in
-  lib/syntax's colours.
+- **The turtles:** `farm` on a real farm (options through lib/getopt),
+  its saved layout read back after a reboot.
 - **Text on screen:** the pager wrapping a long coloured line (`vim` on a
   long line).
 - **The rest:** a panic report (one row layout); jbod on the
@@ -121,6 +119,11 @@ numbers, the text tools and the network tools. Still to try:
   NAT-mode gateway.
 
 ## mine
+
+- **`mine where` between homes** (0.43.4): after a Ctrl+T part way, it
+  says "`mine reset`, then `mine --resume`, carries on" (it said `mine
+  --resume`, which wants the turtle at a home); at a home, `mine
+  --resume` alone.
 
 - **Resuming from an earlier home walks out in one go** (0.22.0). `mine
   reset --home N` (N a few homes back), then `mine --resume`: one pass to the
@@ -223,6 +226,14 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.3, the turtle: `mine -3 3 8 --no-lights --new`
+  (-3 the width), Ctrl+T, `mine where` the same after a reboot, `mine
+  reset` back to the start; `mine 3 3 6 --spacing=4 --new` (homes every
+  4); `mow 3 3 notorch` (no torches); `farm --bogus` with no farm (the
+  usage); `claude go -5 blocks` (5 back; its Lua in colour).  Not right:
+  `mine where` said `mine --resume` carries on, but --resume wants the
+  turtle at a home (`mine reset` first; fixed in 0.43.4).
 
 - 2026-11-12 — ROM 0.43.3: `sysctl ccsh.login=yes` refused ("ccsh.login
   is a boolean: not yes", status 1); `sysctl ccsh.login=true` taken.

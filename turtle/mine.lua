@@ -2920,14 +2920,17 @@ function where()
     if not job then print("No saved job: there's no tunnel to be in."); return end
     useJob(job)
     local built = job.homes
+    local away = false          -- (between homes: --resume wants it at one, `mine reset` first)
     if not p then
         print("No saved position: it hasn't moved since its last job.")
     elseif p.z <= 0 then
-        print(p.z == 0 and p.x == 0 and p.y == 0 and "At the start (home 0)." or
+        away = not (p.z == 0 and p.x == 0 and p.y == 0)
+        print(not away and "At the start (home 0)." or
             string.format("At the start end, x=%d y=%d z=%d.", p.x, p.y, p.z))
     else
         local k = math.min(math.floor(p.z / SPACING), built)
         local at = p.z == k * SPACING and p.x == 0 and p.y == 0
+        away = not at
         if at then
             print(string.format("At home %d (z=%d).", k, p.z))
         else
@@ -2942,8 +2945,9 @@ function where()
             print(string.format("`mine reset --home %d` takes it back to home %d.", k, k))
         end
     end
-    local state = job.state == "done" and "finished" or job.state == "stopped" and "stopped itself (`mine --resume` carries on)"
-        or "under way, or stopped part way (`mine --resume` carries on)"
+    local carryOn = away and "`mine reset`, then `mine --resume`, carries on" or "`mine --resume` carries on"
+    local state = job.state == "done" and "finished" or job.state == "stopped" and ("stopped itself (" .. carryOn .. ")")
+        or ("under way, or stopped part way (" .. carryOn .. ")")
     print(string.format("The tunnel: %dx%d, %s, homes every %d blocks, %d built (the furthest at z=%d; `mine reset` goes there); %s.",
         math.abs(WIDTH), math.abs(HEIGHT), job.length and (job.length .. " long") or "no end", SPACING, built,
         built * SPACING, state))

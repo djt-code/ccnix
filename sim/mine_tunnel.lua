@@ -721,9 +721,12 @@ run("where")
 check("mine where: the last home it passed, 46, and the next, 47", logHas("Last home: 46 %(z=2944%), 6 blocks back")
     and logHas("Next home: 47 %(z=3008%)") and logHas("59 built %(the furthest at z=3776")
     and logHas("mine reset %-%-home 46") and Mine.moves == 0)
+check("... between homes: `mine reset`, then `mine --resume` (--resume wants it at a home)",
+    logHas("`mine reset`, then `mine %-%-resume`, carries on"))
 Mine.files[".turtlepos"] = "0 0 2944 3 flat"
 run("where")
-check("... at home 46", logHas("At home 46 %(z=2944%)"))
+check("... at home 46, where `mine --resume` alone carries on", logHas("At home 46 %(z=2944%)")
+    and logHas("%(`mine %-%-resume` carries on%)") and not logHas("then `mine %-%-resume`"))
 Mine.files[".turtlepos"] = "1 2 3800 0 flat"
 run("where")
 check("... past the furthest home", logHas("Last home: 59 %(z=3776%), 24 blocks back, the furthest built"))
