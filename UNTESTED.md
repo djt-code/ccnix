@@ -191,32 +191,17 @@ numbers, the text tools and the network tools. Still to try:
 
 ## IRC
 
-- **ircd as a service, the rest** (0.35.0). `service disable ircd`,
-  reboot: not running.
-- **irc, the rest** (0.35.0). A third client: hilights chime on a
-  speaker if one is attached; Alt+A to the buffer with something new.
+- **irc, the rest** (0.35.0). Hilights chime on a speaker if one is
+  attached.
 - **A real client and server through the gateway** (0.35.0). From the
   VM: `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. From B,
   with the network reaching out: `irc irc.libera.chat` (plain 6667),
   /join a channel; `/set network.<name>.sasl_user` and `sasl_pass` for
   SASL.
-- **Scripts, the rest** (0.35.0). `/script load hilightwin` (a hilight
-  buffer gathers hilights); `/script load autorejoin`, get kicked: back
-  in 3 s; `/script autorun slap`, restart irc: loaded at the start.
 - **readline's editor** (0.35.0): ccsh's prompt is unchanged (Ctrl+A/E,
   Ctrl+R, Tab completion, history), since read() is now built on it.
 
 ## The mod
-
-- **The Network Configurator** (ccnix-mod 0.23.0; it was the Network
-  Tester). An old Network Tester in an inventory is a Network Configurator
-  after the update. On a gateway, the dialog's labels fit their column
-  ("From other blocks" no longer runs into its value), long values wrap
-  instead of being cut, and the rows say one thing each: Gateway (the
-  address), Mode (TUN or NAT), Untagged, Exchange (untagged, or tagged as
-  back.1), Standing by. Click into the VLANs box and type slowly: the
-  refresh each second no longer moves the cursor. Escape, Done, or the
-  block broken closes it.
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -226,8 +211,6 @@ numbers, the text tools and the network tools. Still to try:
   (a route around the exchange) and `10.1.0.0/25 via 10.1.0.2` refused;
   a computer straight on the exchange (no router) reaches the internet.
 
-- **Credits in the mod list** (ccnix-mod 0.15.39): the ccnix entry in the
-  mod list shows the new Credits text (from `credits=` in mods.toml).
 - **The ansible EULA gate** (ccnix-mod 0.15.39): a run with
   `minecraft_eula_accepted` unset skips the eula.txt task and leaves an
   existing eula.txt alone; on a fresh host the server doesn't start until
@@ -260,6 +243,14 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.2: irc's hilightwin (a "hilight" buffer with the
+  hilight and the kick), autorejoin (kicked, back at once), `/script
+  autorun slap` (loaded at the next start), Alt+A to the buffer with
+  something new.  `service disable ircd` and a reboot: not running;
+  enabled and started again.  The gateway's dialog through the Network
+  Configurator (labels in their column, the VLANs box, Done), and
+  ccnix's Credits and Authors in the mod list (0.26.0).
 
 - 2026-11-12 — the exchange at 10.1.0.0/24, in game: a router's back.1 is
   10.1.0.2/24 with `default via 10.1.0.1`, and the internet answers
