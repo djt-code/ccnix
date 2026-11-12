@@ -12,6 +12,12 @@ section.
   pickaxe's), the scan is made, and the pickaxe is back on afterwards. Before, the scanner always took the
   pickaxe's place; with an empty side the pickaxe now stays on. Check the controller never comes off, and a
   scan that comes back "cooling down" is asked again.
+- **mine tells the player**: `sysctl mine.report=true`, `sysctl turtle.player=<your name>`, a chat box in the
+  start's top chest (or on board, or on a side), then a short `mine` run: at the end you get one chat message
+  "mine Done: ..." with the turtle's place and fuel; stopped by bedrock or no fuel it says why. mine takes the
+  chat box out of the top chest for the telling and puts it back. Check the pickaxe is back on afterwards, the
+  chunk controller never came off, and with no chat box you get "Couldn't tell the player" and the run ends as
+  ever.
 - **Home chests protected**: run `mine` with homes; in claude's code (or a Lua prompt) `T.protections()` lists
   "mine home 0 chest", "mine home 0 bulk" and one pair for each home built, and `turtle.dig()` facing a home's
   chest comes back `false, "protected: mine home 1 chest"` (or "won't dig" for the chest itself). When mine ends,

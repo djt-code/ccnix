@@ -330,6 +330,62 @@ run("2", "2", "--spacing", "8", "--new")
 check("stopped at the bedrock", logHas("Can't get through at %(%d,%d,12%) %(minecraft:bedrock%)"))
 check("back at the start", atStart())
 
+-- 5r. with mine.report on and a player to tell (turtle.player), it tells the
+--     player how the run ended, with where it is and its fuel: done, and
+--     stopped (here by the bedrock); off, or with no player, it tells no one
+local told = {}
+package.loaded.mc = { new = function()
+    return { has = { chat = "chat box" }, flush = function() return true end,
+             tell = function(who, message)
+                 local held = false
+                 for slot = 1, 16 do
+                     local it = turtle.getItemDetail(slot)
+                     if it and it.name == "advancedperipherals:chat_box" then held = true end
+                 end
+                 told[#told + 1] = who .. ": " .. message .. (held and " {chat box aboard}" or "")
+                 return true
+             end }
+end }
+local function withSettings(chosen, fn)
+    local defaults = {}
+    settings = { define = function(name, o) defaults[name] = o.default end,
+                 get = function(name) if chosen[name] ~= nil then return chosen[name] end return defaults[name] end,
+                 set = function() end, save = function() end }
+    fn()
+    settings = nil
+end
+local function bedrockWorld()
+    setup(stock(10, 64))
+    for x = 0, 1 do for y = 0, 1 do set(x, y, 13, { name = "minecraft:bedrock" }) end end
+    startAt(); Mine.inv, Mine.files = {}, {}
+    FUEL, DRY = 100, 0
+end
+bedrockWorld()
+withSettings({ ["mine.report"] = true, ["turtle.player"] = "Tester" }, function() run("2", "2", "--spacing", "8", "--new") end)
+check("mine.report on: the player is told once, how it stopped, with its fuel",
+    #told == 1 and told[1]:find("^Tester: mine Stopped:") and told[1]:find("Stopped because: Can't get through at", 1, true)
+        and told[1]:find("fuel ", 1, true), table.concat(told, " | "))
+told = {}
+local boxStock = stock(4, 64)
+boxStock[#boxStock + 1] = { name = "advancedperipherals:chat_box", count = 1 }
+setup(boxStock); startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 1000, 1000, 0
+withSettings({ ["mine.report"] = true, ["turtle.player"] = "Tester" }, function() run("2", "2", "6", "--new") end)
+check("...and when it is done", #told == 1 and told[1]:find("^Tester: mine Done: ") and not told[1]:find("Stopped because", 1, true), table.concat(told, " | "))
+local _, topNow = contents(chestAt(0, 1, 0))
+check("...a chat box in the start's top chest is taken out for the telling, and put back",
+    told[1] and told[1]:find("{chat box aboard}", 1, true) and topNow["advancedperipherals:chat_box"] == 1
+        , tostring(topNow["advancedperipherals:chat_box"]))
+told = {}
+bedrockWorld()
+withSettings({ ["turtle.player"] = "Tester" }, function() run("2", "2", "--spacing", "8", "--new") end)
+check("mine.report off (the default): no one is told", #told == 0, table.concat(told, " | "))
+bedrockWorld()
+withSettings({ ["mine.report"] = true }, function() run("2", "2", "--spacing", "8", "--new") end)
+check("on, but no player set: no one is told, and mine says why", #told == 0 and logHas("Couldn't tell the player %(no player to tell"),
+    table.concat(told, " | "))
+package.loaded.mc = nil
+
 -- 6. only a little fuel: stops while it can still get back
 setup(stock(10, 6))
 startAt(); Mine.inv, Mine.files = {}, {}

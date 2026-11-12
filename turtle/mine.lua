@@ -189,6 +189,12 @@
 --    "mine home K chest" and "mine home K bulk"), so no other program on the
 --    turtle digs them either; they are let go of when it ends, however it
 --    ends (`sysctl mine.protect=false` protects nothing).
+--  * Telling the player: with `sysctl mine.report=true` and a player named
+--    in turtle.player (`sysctl turtle.player=<name>`), mine tells them
+--    through a chat box when it ends or stops and why, with where the
+--    turtle is and its fuel (T.report).  A chat box in the start's top chest
+--    is taken out for the telling and put back; one on board is put on for
+--    the moment, beside a chunk controller.
 --  * Position is saved after every move, so `mine reset` can bring it to
 --    its last home (`--home N`: home N; `--to-start`: the start) after a Ctrl+T or a server
 --    restart, checking the home's chests are there when it arrives.  It runs under T.run, so a
@@ -236,6 +242,7 @@ end
 forceHere, resume, fresh, toStart = opts.here == true, opts.resume == true, opts.new == true, opts["to-start"] == true
 lights = not opts["no-lights"]
     and T.setting("mine.lights", true, "Light mined tunnels with torches in wall niches")
+reportEnd = T.setting("mine.report", false, "Tell the player (turtle.player, through a chat box) when mine ends or stops")
 guardHomes = T.setting("mine.protect", true, "Protect mine's home chests (T.protect) while it runs, so no other program digs them")
 keepMap = T.setting("mine.map", true, "Keep mine's Geo Scanner scans in the map (T.map), so later runs know what they saw")
 spacingArg, homeArg = opts.spacing and tonumber(opts.spacing), opts.home and tonumber(opts.home)
@@ -1656,6 +1663,24 @@ function protectHome(h)
             print("Not protecting the home chests (" .. tostring(why) .. ").")
         end
     end
+end
+
+-- Tell the player how the run ended (T.report: where the turtle is, its
+-- fuel), if mine.report is on.  A chat box in the start's top chest is
+-- taken out for the telling and put back (T.report puts one on for the
+-- moment, beside a chunk controller).  Never stops the end of the run.
+CHAT_BOX = "advancedperipherals:chat_box"
+function tellPlayer(said)
+    if not reportEnd then return end
+    local borrowed = false
+    if T.countItem(CHAT_BOX) == 0 and T.pos.x == 0 and T.pos.y == 0 and T.pos.z == 0 and containerOn("top")
+            and (chestCounts("top")[CHAT_BOX] or 0) > 0 then
+        borrowed = T.pull("top", CHAT_BOX, 1) == 1
+    end
+    local ok, done, why = pcall(T.report, said)
+    if borrowed and T.selectItem(CHAT_BOX) then T.dropSide("top", 1); turtle.select(1) end
+    if not ok and done == "Terminated" then error(done, 0) end
+    if not (ok and done) then print("Couldn't tell the player (" .. tostring(ok and why or done) .. ").") end
 end
 
 -- Let go of every area of this program's (the ones of an earlier run
@@ -3268,17 +3293,19 @@ end)
 -- "active" left behind means it went down mid-job, and the autostart resumes
 saveJob(stopped and "stopped" or "done")
 if not stopped then clearProgress() end
-print(string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid blocks sealed, %d floor holes filled%s%s.",
+final = string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid blocks sealed, %d floor holes filled%s%s.",
     stopped and "Stopped" or "Done", stats.homes, stats.veins, stats.ore, stats.sealed, stats.filled,
     lights and (", " .. stats.torches .. " torches placed"
         .. (stats.relit > 0 and (" (" .. stats.relit .. " put back after digging knocked them off)") or "")) or "",
     hasScanner and (", " .. stats.fetched .. " deposits fetched from further out") or "")
     .. (stats.wood > 0 and string.format(" Dug %d blocks of wood for chests and torches.", stats.wood) or "")
-    .. (stats.lava > 0 and string.format(" Burned %d lava sources for fuel.", stats.lava) or ""))
+    .. (stats.lava > 0 and string.format(" Burned %d lava sources for fuel.", stats.lava) or "")
+print(final)
 for _, k in ipairs(tables.sortedKeys(leftBehind)) do
     print(string.format("No room to bring back %d items from home %d (z=%d).", leftBehind[k], k, homeAt(k).z))
 end
 if stopped then print("Stopped because: " .. stopped .. " `mine --resume` carries on.") end
+tellPlayer("mine " .. final .. (stopped and (" Stopped because: " .. stopped) or ""))
 end
 
 -- Under T.run, Ctrl+T never leaves the saved position or heading wrong.
