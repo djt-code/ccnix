@@ -476,3 +476,28 @@ boot(W)
 r = ccnixSays(W, "version")
 check("a ROM from before versions (updates made for another ROM aren't used): unversioned",
     r.out == "ccnix unversioned\n", show(r.out))
+
+-- setup's turtle files carry every library turtlelib and its modules require (a `setup mine` install has no lib/
+-- of its own beyond them)
+do
+    local whole = repoFile("deploy/setup.lua")
+    -- (what a turtle install always gets: the TURTLE list, and TEXT, which every install gets)
+    local function listAt(start)
+        local from = whole:find(start, 1, true)
+        return from and whole:sub(from, whole:find("}", from, true)) or ""
+    end
+    local setupText = listAt("local TURTLE = {") .. listAt("local TEXT = {")
+    local missing = {}
+    local files = { "turtle/turtlelib.lua" }
+    for _, m in ipairs({ "blueprint", "craft", "harvest", "journal", "path", "place", "store", "world" }) do
+        files[#files + 1] = "turtle/tl/" .. m .. ".lua"
+    end
+    for _, file in ipairs(files) do
+        for name in repoFile(file):gmatch('require%("([%w_]+)"%)') do
+            if name ~= "turtlelib" and not setupText:find('"lib/' .. name .. '.lua"', 1, true) then
+                missing[#missing + 1] = file .. " needs lib/" .. name .. ".lua"
+            end
+        end
+    end
+    check("setup ships every library turtlelib and turtle/tl/ require", #missing == 0, table.concat(missing, "; "))
+end
