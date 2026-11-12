@@ -111,20 +111,15 @@ numbers, the text tools and the network tools. Still to try:
 ## Network
 
 - **ping, the rest** (0.29.0). `ping -s 65507` through the gateway, in
-  NAT mode (the gateway's own address) and in TUN mode (a real host):
-  replies show bytes=N with no "(sent ...)" or "changed" note.
-- **`ip route get` and `ip neigh`, the rest** (0.29.0). `ip route get` for
-  a name; the INCOMPLETE entry gone about 3 s after the last try.
-- **`netstat -s` on a router** (0.29.0) after some forwarding and a forged
-  source: drops by reason, and the router screen's forwarded/dropped/spoofed
-  agreeing with it.
-- **`nc`, the rest** (0.29.0). The far side's telnetd shows no error for
-  the empty connection `nc -z` makes.
-
-- **`ip neigh add` / `ip neigh del`, the rest** (ccnix 0.24.0). Added
-  with the network down; a wrong MAC breaks pings to that host; `ip neigh
-  del <addr>` brings ARP back; `dev <iface>` for an address off every
-  interface's network.
+  NAT mode (the gateway's own address) and in TUN mode (a real host).
+- **`ip neigh`'s INCOMPLETE entry** (0.29.0): `ping -c 1 10.1.2.99 &`
+  then `ip neigh` at once: 10.1.2.99 INCOMPLETE, asked N times; gone
+  about 3 s after the ping started (three asks a second apart).
+- **`netstat -s` on a router, a forged source** (0.29.0): the drop counted
+  by reason (martian or rpfilter), and the router screen's spoofed count
+  agreeing.
+- **`ip neigh add ... dev <iface>`** (ccnix 0.24.0) for an address off
+  every interface's network.
 - **Source checking on the host's TUN chain** (`ccnix0-src`): needs
   `gateway.sourceCheck` off, then a forged source from inside is dropped by
   the host instead.
@@ -275,6 +270,16 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.2, the network: `ping -s 65507` to a host across
+  the router and to the router (bytes=65507, no note); `ip route get
+  example.com` (the address, via, dev, src, the route and the neighbour);
+  `ip neigh add` of a wrong MAC with the network down (permanent, pings
+  fail), `ip neigh del` (pings back); `nc -zv 10.1.1.10 23` open, and
+  telnetd logged nothing for it; `netstat -s` on the router agreeing with
+  its screen (forwarded 7791, dropped 0).  `ip neigh` after `ping -w 2`
+  of a missing host showed no INCOMPLETE: by then the three asks (a
+  second apart) were over; asked again in the background.
 
 - 2026-11-12 — ROM 0.43.2 with ccnix-mod 0.26.0 on the client: Esc
   leaves vi's insert mode, Esc then b moves ccsh's cursor a word back,
