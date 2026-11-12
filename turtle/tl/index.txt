@@ -128,6 +128,10 @@ T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back fa
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+The search:
+T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
+Walking a route:
+T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
 Frames and the world:
 T.frameChanged(old, new) - Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.
 T.alignMap(dx, dy, dz, turns) - Say how the turtle's frame sits in the map's, and mark the map aligned. Returns true, or nil and why.

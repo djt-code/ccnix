@@ -26,6 +26,10 @@
 --     (T.map.get/find/heights/slice, ...) that digs, placements and moves update,
 --     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
 --     for block states; a re-zeroed frame (--here) keeps the map right
+--   * routes (tl.path, loaded when first used): T.path, A* over the map round
+--     protected areas, lava, fire and doors, and T.travel, which walks one
+--     along a clear layer (or the search), planning again at a block it did
+--     not expect; T.moveTo's opts.path asks for it
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -1166,6 +1170,7 @@ local AXIS = { x = { "x", 1, 3 }, y = { "y", "up", "down" }, z = { "z", 0, 2 } }
 -- What moveTo goes round by default: lava, fire and doors (a turtle
 -- can't open one)
 local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door" }
+T.DEFAULT_AVOID = DEFAULT_AVOID           -- (tl.path routes round the same by default)
 
 -- Blocks a turtle moves into without digging them
 local FLUID = {
@@ -1187,6 +1192,7 @@ local function nameTest(spec)
         return false
     end
 end
+T.nameTest = nameTest                     -- (tl.path reads opts.dig and opts.avoid the same way)
 
 -- One step in direction d for moveTo: look at what's there; refuse what's
 -- to be avoided, dig what may be dug (not what is protected), move,
@@ -2407,6 +2413,8 @@ T.registry = {
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
     alignMap = "tl.world", frameChanged = "tl.world",
+    -- tl.path: routes
+    path = "tl.path", travel = "tl.path",
 }
 local loadingModule = {}
 

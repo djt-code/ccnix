@@ -9,6 +9,7 @@ Provides:
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
+  * routes (tl.path, loaded when first used): T.path, A* over the map round protected areas, lava, fire and doors, and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -452,6 +453,43 @@ T.refuelFrom(side, target)
 
 T.need(name)
     The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+
+tl.path: routes: a search over the map for a way to a cell, and walking it
+
+Loaded by turtlelib the first time T.path or T.travel is used (T.moveTo asks for T.travel when a straight run is blocked and opts.path is set).  Cells are the turtle's own (the frame it counts in).
+
+T.path finds a route: A* in three dimensions over the map (tl.world), with a binary heap.  What a step into a cell costs depends on what the map holds there:
+  known air or water
+      one move
+  a block it may dig
+      a move and a dig (opts.dig says what may be dug, as for T.moveTo)
+  a cell never seen
+      a move and a dig when digging everything is allowed; otherwise a move and a penalty, so a route through the unseen is possible but the known is preferred (it is checked as it is walked)
+  a wall
+      never: a protected area (except the one opts.inside names, and except the empty cells of an area the route starts or ends in), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
+The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so.
+
+T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits bastion ceilings): up, across, down.  If the map doesn't know enough it scans the route's box first; if there is no layer it uses the search.  Then it walks the route.  A block it didn't expect stops a step: it notes the block in the map and plans again from where it is, a few times.
+
+== The search ==
+
+T.path(x, y, z, opts)
+    A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
+
+    It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
+      dig        false (default), true, a glob or a list of globs: what a route may dig (as for T.moveTo)
+      avoid      a glob or a list: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+      inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
+      avoidCells a list of { x, y, z } cells a route may not use
+      limit      cells to search before giving up (default 20000)
+      margin     how far outside the box of the two cells it may look (default 24)
+
+== Walking a route ==
+
+T.travel(x, y, z, opts)
+    Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+
+    Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6). opts are T.path's (dig, avoid, inside, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
 
 tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
 

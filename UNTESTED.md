@@ -5,6 +5,37 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.path: routes over the map (ADR-0008 phase 2, 0.47.0)
+
+- **A route and its cost**: with a scanned area, `T.path(x, y, z)` in claude's
+  code returns a list of cells and `{ nodes, cost, digs, unknown }`; the turtle
+  does not move. Ask for a cell behind a lava pool or a protected box and see
+  the route go round. How long a search takes on a real turtle (Cobalt is
+  slow) is only known here: `T.path` over 30 or 40 blocks of scanned air, and
+  the same over empty map (everything unseen). The default limit is 20000
+  cells searched; "no route: gave up after searching ..." says it hit it.
+- **Yielding**: a long search must not be killed by CC ("too long without
+  yielding"); it gives the computer a turn about every half second. Try a
+  search over a big unscanned stretch and press Ctrl+T during it: it should
+  stop at once with "Terminated".
+- **Travel over a wall**: in a place with a roof (the Nether), put the turtle
+  by a high wall with the other side scanned in the map: `T.travel(x, y, z)`
+  climbs to a layer between the wall's top and the roof, crosses and comes down,
+  without digging. Without the map it scans the route's box first (up to 27
+  scans, each fuel; `opts.scan = false` skips it, and a box over 27 scans is
+  refused, then the search takes over).
+- **Re-planning**: send it through ground the map has never seen, with stone in
+  the way and `dig` off: it stops at the stone ("blocked by ..."), notes it in
+  the map (`T.map.get` agrees), and goes round. A mob standing still in a
+  corridor is kept out of the next plan. After 6 re-plans it gives up and says
+  so.
+- **moveTo and routes**: `T.moveTo(x, y, z, { path = true })` blocked by a wall
+  asks `T.travel` to take it the rest of the way.
+- **Protected areas**: a route never enters a protected area's solid cells; its
+  empty cells are open only to a route that starts or ends in that area (a
+  turtle inside the castle's walls can walk its courtyard). `opts.inside =
+  name` lets a job dig in the area it owns.
+
 ## tl.world: the map, the frames, scans and inspects (ADR-0008 phase 2)
 
 - **A scan in the turtle's frame**: `T.scan(8)` in claude's code with the Geo
@@ -45,8 +76,8 @@ section.
   from that and was only checked against the mock.
 - **Inspecting**: `T.inspectAt` on a stair or a slab: its `facing`, `half` and
   `shape` come back and are kept (`T.map.get` after a restart). A cell
-  boxed in by solid blocks is "couldn't get next to"; there is no way round
-  yet (that is the path module).
+  boxed in by solid blocks is "couldn't get next to"; `T.inspectAt` does not
+  use the path module yet.
 - **scanBox**: `T.scanBox({0, 0, 0, 30, 10, 10}, { move = { dig = true } })`
   makes two or three scans, walking to each centre.
 - **Views**: `print(T.map.heights(box))` and `print(T.map.slice(y, box))` on a

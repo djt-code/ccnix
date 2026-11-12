@@ -244,6 +244,7 @@ check("a clear way with opts.path = true loads nothing", ok and ROUTE_LOADS == n
 package.loaded.turtlelib = nil
 T = require("turtlelib")
 home(); clearWorld()
+T.registry.travel, T.registry.path = nil, nil            -- (a turtlelib whose registry has no path module)
 set(1, 0, 0, block("minecraft:stone"))
 ok, why = T.moveTo(3, 0, 0, { order = "x", path = true })
 check("opts.path = true with no path module: just the block's reason", ok == false and why == "blocked by minecraft:stone at 1,0,0", tostring(why))
