@@ -183,6 +183,8 @@ The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
 T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+Looking at what came out, and taking it back:
+T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 Placing a block with the state wanted:
 T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.

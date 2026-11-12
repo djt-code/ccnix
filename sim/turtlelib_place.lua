@@ -491,3 +491,39 @@ do
         and plainInfo.hang == false)
     check("...an empty name is nothing", T.placeInfo("") == nil and T.placeInfo(nil) == nil)
 end
+
+--------------------------------------------------------------------------
+-- A slab over a half slab of its own kind: the game skips that slab (it counts as replaceable) and clicks on, so the
+-- approach is a guess, and nothing wrong is learnt from it; T.forgetPlacements puts the table's rows back
+--------------------------------------------------------------------------
+do
+    local SL = "minecraft:oak_slab"
+    local walls = { stone(0, 0, 2), stone(0, 0, 4), stone(1, 0, 3), stone(-1, 0, 3) }
+    local blocks = { { 0, -1, 3, SL, { type = "bottom" } }, stone(0, -2, 3) }
+    for _, b in ipairs(walls) do blocks[#blocks + 1] = b end
+    fresh("north", blocks)
+    knowAll()
+    W.give(1, SL, 8)
+    T.placeAt(0, 0, 3, SL, { half = "bottom" })
+    local kept = learnedText()
+    check("a slab placed over a half slab of its kind learns nothing", kept == nil, tostring(kept))
+    blocks = { stone(0, -1, 3) }
+    for _, b in ipairs(walls) do blocks[#blocks + 1] = b end
+    fresh("north", blocks)
+    if kept then                            -- (the same turtle's disk, later)
+        local f = fs.open(T.dataPath(".placements"), "w"); f.write(kept); f.close()
+    end
+    knowAll()
+    W.give(1, SL, 8)
+    local name, why = T.placeAt(0, 0, 3, SL, { half = "bottom" })
+    check("...so a bottom slab over plain stone still goes in from above", name ~= nil and has(0, 0, 3, "oak_slab", { type = "bottom" }),
+        tostring(why))
+    -- a row learnt wrong, by hand: forgotten
+    local h = fs.open(T.dataPath(".placements"), "w")
+    h.write("slab down beyond type=top\nstairs down beyond facing=back\n")
+    h.close()
+    check("T.forgetPlacements(family) forgets that family's rows only", T.forgetPlacements("slab") == true
+        and learnedText() == "stairs down beyond facing=back\n", tostring(learnedText()))
+    check("...an unknown family is refused", select(1, T.forgetPlacements("nonsense")) == false)
+    check("...and with no family, all of them", T.forgetPlacements() == true and learnedText() == nil)
+end

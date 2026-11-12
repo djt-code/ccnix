@@ -2543,7 +2543,7 @@ T.registry = {
     -- tl.path: routes
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
-    placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place",
+    placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place", forgetPlacements = "tl.place",
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
     -- tl.craft: recipes, crafting from a chest, and smelting

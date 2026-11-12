@@ -57,6 +57,12 @@ local SYMBOLS = "BCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$
 local PLACE_KEYS = { facing = true, half = true, axis = true, face = true, type = true }
 -- The families with no state to place by: put in from above, no questions
 local PLAIN_FAMILIES = { block = true, fence = true, pane = true, wall = true }
+-- A block whose item has another name: a plan names the item (what is carried and placed), and the block found is
+-- taken as that item's (a torch hung on a wall is a wall_torch, facing away from the wall)
+local ITEM_OF_BLOCK = { ["minecraft:wall_torch"] = "minecraft:torch", ["minecraft:soul_wall_torch"] = "minecraft:soul_torch",
+                        ["minecraft:redstone_wall_torch"] = "minecraft:redstone_torch" }
+local WALL_FORM = {}
+for block, item in pairs(ITEM_OF_BLOCK) do WALL_FORM[item] = block end
 -- The order of building inside a layer, by family: what others hang on first, doors last
 local RANK = { block = 0, fence = 0, pane = 0, wall = 0, log = 0, stairs = 1, slab = 1, chest = 1,
                torch = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, door = 3 }
@@ -118,7 +124,7 @@ local function entryOf(value)
     if type(value) == "string" then
         local name, state = parseItem(value)
         if not name then return nil, state end
-        return { name = name, state = state }
+        return { name = ITEM_OF_BLOCK[name] or name, state = state }
     end
     if type(value) == "table" then
         local name, state = value.name or value.item or value[1], value.state
@@ -127,7 +133,7 @@ local function entryOf(value)
         if not parsed then return nil, parsedState end
         local copy = {}
         for key, v in pairs(state or parsedState or {}) do copy[key] = tostring(v) end
-        return { name = parsed, state = next(copy) and copy or nil }
+        return { name = ITEM_OF_BLOCK[parsed] or parsed, state = next(copy) and copy or nil }
     end
     return nil, "a legend entry is a block as text, like minecraft:stone[...]"
 end
@@ -138,6 +144,17 @@ local function infoOf(entry)
         entry.info = T.placeInfo(entry.name) or { family = "block", keys = {}, hang = false, door = false }
     end
     return entry.info
+end
+
+-- Is the block found the one a plan's entry asks for: the same name, or the wall form of its item when it has a facing?
+local function isBlockOf(found, entry)
+    if found == entry.name then return true end
+    return found ~= nil and found == WALL_FORM[entry.name] and entry.state ~= nil and entry.state.facing ~= nil
+end
+
+-- Is the entry a double slab (two slab items in one cell)?
+local function isDouble(entry)
+    return entry.state ~= nil and entry.state.type == "double"
 end
 
 -- Does a block's state hold every key the plan names?
@@ -402,7 +419,7 @@ function T.blueprint.fromMap(box)
             if state ~= "not in the map" then failure = failure or state end
             return nil
         end
-        return name, state
+        return ITEM_OF_BLOCK[name] or name, state
     end)
     if not plan then return nil, why end
     if failure then return nil, failure end
@@ -589,7 +606,7 @@ end
 -- Does the map say the cell already holds its block, with the state asked for (so it needs none of that block)?
 local function mapHolds(cell, want)
     local name, state = T.map.get(cell.x, cell.y, cell.z)
-    return name == cell.name and stateHolds(want, state)
+    return isBlockOf(name, cell.entry) and stateHolds(want, state)
 end
 
 -- How many of each block the cells still to do need: { name = count }, how many cells, and whether any wants a compass
@@ -601,7 +618,7 @@ local function tally(plan, job)
             cells = cells + 1
             local want = wantsOf(cell.entry)
             if want.facing or (want.axis and want.axis ~= "y") then compass = true end
-            if not mapHolds(cell, want) then need[cell.name] = (need[cell.name] or 0) + 1 end
+            if not mapHolds(cell, want) then need[cell.name] = (need[cell.name] or 0) + (isDouble(cell.entry) and 2 or 1) end
         end
     end)
     return need, cells, compass
@@ -614,6 +631,22 @@ end
 -- Put one cell in place: true, or false and why; the second answer is true when it was there already.
 local function putCell(cell, move, look)
     local want, asked = wantsOf(cell.entry)
+    if isDouble(cell.entry) then
+        -- a double slab: a bottom half, then a second slab placed down onto it from above
+        want.type = nil
+        if not look and mapHolds(cell, { type = "double" }) then return true, true end
+        if T.countItem(cell.name) < 2 then return false, "a double " .. cell.name .. " takes two, and there are fewer on board" end
+        local opts = { move = move, half = "bottom" }
+        local name, why = T.placeAt(cell.x, cell.y, cell.z, cell.name, opts)
+        if not name then return false, why end
+        local ok, moveWhy = T.moveTo(cell.x, cell.y + 1, cell.z, move)
+        if not ok then return false, "couldn't get over the half slab: " .. tostring(moveWhy) end
+        T.selectItem(cell.name)
+        T.placeDir("down")
+        local found, data = T.look("down")
+        if found and type(data) == "table" and data.state and data.state.type == "double" then return true end
+        return false, "the second half didn't go onto the slab at " .. cell.x .. "," .. cell.y .. "," .. cell.z
+    end
     local plain = asked == 0 and PLAIN_FAMILIES[infoOf(cell.entry).family]
     -- (the map says it is there: a cell done before a crash, or a plan built over itself; opts.look goes to see)
     if not look and mapHolds(cell, want) then return true, true end
@@ -710,6 +743,8 @@ function T.build(plan, opts)
             if not (whole(ax) and whole(ay) and whole(az)) then return nil, "opts.at is { x, y, z }, whole numbers" end
             p.anchor = { x = ax, y = ay, z = az }
         end
+        -- (the name is part of the plan as it is kept, so it goes in before the plan is compared with the saved one)
+        if opts.name then p.name = opts.name end
         local planText = formatPlan(p)
         local unfinished = saved and (saved.done < saved.total or next(saved.failed) ~= nil)
         if saved and saved.text == planText and unfinished and not opts.restart then
@@ -894,7 +929,7 @@ function T.verify(plan, opts)
         elseif cell.name == nil then
             row = { why = "not in the map", unverified = true }
         else
-            local sameName = cell.name == want.name or (AIRS[cell.name] and AIRS[want.name])
+            local sameName = isBlockOf(cell.name, want) or (AIRS[cell.name] and AIRS[want.name])
             if not sameName or not stateHolds(want.state, cell.state) then
                 row = { why = "wanted " .. itemText(want.name, want.state) .. ", found " .. itemText(cell.name, cell.state) }
             end

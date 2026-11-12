@@ -759,6 +759,13 @@ A turtle does not choose how a block lands.  What it gets depends on how the tur
 
 T.placeAt(x, y, z, item, { facing, half, axis }) works out which approaches the table says give that state and the map (tl.world) says are possible, goes to the nearest, places, inspects, and if the state came out wrong digs the block and tries the next.  Facing is a compass name, so it needs the world origin (T.setOrigin: the compass way the turtle's frame points); half and axis do not.  Where the map does not know what is beside the target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it and the cell above free; T.ignite lights a fire from above with flint and steel.
 
+== Looking at what came out, and taking it back ==
+
+T.forgetPlacements(family)
+    Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
+
+    A wrong row learnt (say from a block the map had wrong) is laid over the table from then on; this puts the table's rows back.
+
 == Placing a block with the state wanted ==
 
 T.placeInfo(item)

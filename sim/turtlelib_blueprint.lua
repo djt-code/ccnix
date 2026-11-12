@@ -613,3 +613,51 @@ do
     check("a bad glob or block is refused", select(2, replace({ 0, 0, 4, 2, 0, 4 }, "", BRICKS)) ~= nil and select(2, replace({ 0, 0, 4, 2, 0, 4 }, "stone", "stone[x")) ~= nil)
     check("a bad box is refused", select(2, replace({ 0, 0, 4 }, "stone", BRICKS)) ~= nil)
 end
+
+--------------------------------------------------------------------------
+-- Blocks whose item has another name, double slabs, and a named plan carried on
+--------------------------------------------------------------------------
+do
+    local STONE_ = "minecraft:stone"
+    local text = require("text")
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE_)
+    W.fill(-2, 0, 5, 2, 1, 5, STONE_)          -- a wall to the north
+    know(-4, -3, -4, 4, 4, 6)
+    W.give(1, "minecraft:torch", 8)
+    local plan = assert(T.blueprint.new({ anchor = { 0, 0, 4 }, legend = { t = "minecraft:torch[facing=south]" }, layers = { "t" } }))
+    local ok, why = build(plan)
+    check("a torch with a facing builds as a wall torch", ok == true and has(0, 0, 4, "wall_torch", { facing = "south" }), tostring(why))
+    local diffs = T.verify(plan, { inspect = "all" })
+    check("...and verifies clean: a wall_torch is the torch the plan asked for", diffs and #diffs == 0,
+        diffs and diffs[1] and diffs[1].why or "nil")
+    local copy = assert(T.blueprint.fromMap({ 0, 0, 4, 0, 0, 4 }))
+    check("T.blueprint.fromMap writes the item, a torch facing south, not the block", text.contains(T.blueprint.format(copy), "minecraft:torch[facing=south]"),
+        T.blueprint.format(copy))
+    W.set(0, 0, 4, nil)
+    T.map.set(0, 0, 4, "minecraft:air")
+    ok, why = build(copy, { restart = true })
+    check("...and that plan builds again", ok == true and has(0, 0, 4, "wall_torch", { facing = "south" }), tostring(why))
+
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE_)
+    know(-4, -3, -4, 4, 4, 6)
+    W.give(1, "minecraft:oak_slab", 1)
+    local double = assert(T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { d = "minecraft:oak_slab[type=double]" }, layers = { "d" } }))
+    ok, why = build(double)
+    check("a double slab counts two slabs", ok == nil and text.contains(tostring(why), "need 2, have 1"), tostring(why))
+    W.give(1, "minecraft:oak_slab", 4)
+    ok, why = build(double)
+    check("...and builds as a bottom half with a second slab on it", ok == true and has(0, 0, 3, "oak_slab", { type = "double" }), tostring(why))
+    diffs = T.verify(double, { inspect = "all" })
+    check("...which verifies clean", diffs and #diffs == 0, diffs and diffs[1] and diffs[1].why or "nil")
+
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE_)
+    know(-4, -3, -4, 4, 4, 6)
+    W.give(1, "minecraft:cobblestone", 64)
+    local hut = assert(T.blueprint.fill(-1, 0, 2, 1, 0, 4, "cobblestone"))
+    build(hut, { name = "hut", limit = 3 })
+    ok, why = build(hut, { name = "hut" })
+    check("the same plan with the same name carries on (opts.name)", ok == true and has(1, 0, 4, "cobblestone"), tostring(why))
+end

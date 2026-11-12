@@ -385,16 +385,22 @@ end
 
 -- Every approach that can give `want` at the target, nearest first, the sure ones before the guesses.  Each is
 -- { kind, h, sx, sy, sz, row, certain, key }.  tried: the keys of the approaches already used.
-local function plan(famName, fam, learned, want, tx, ty, tz, base, tried, dig)
+local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, dig)
     local apps = {}
+    -- A half slab of the item's own kind may be one the game takes as replaceable and skips (then it clicks the
+    -- next block): not a fact to plan on for sure, nor to learn from.
+    local function fact(name)
+        if famName == "slab" and name == item then return nil end
+        return factAbout(fam, name)
+    end
     local headingMatters = want.facing ~= nil or want.axis ~= nil
     for _, kind in ipairs({ "front", "down", "up" }) do
         for h = 0, 3 do
             if (kind == "front" or headingMatters or h == T.dir) and #fam[kind] > 0 then
                 local sx, sy, sz = standFor(kind, h, tx, ty, tz)
                 local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
-                local facts = { beyond = factAbout(fam, nameAt(bx, by, bz)) }
-                if kind == "front" then facts.floor = factAbout(fam, nameAt(tx, ty - 1, tz)) end
+                local facts = { beyond = fact(nameAt(bx, by, bz)) }
+                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz)) end
                 local stand = nameAt(sx, sy, sz)
                 if not (stand and clickable(stand) and not dig) then
                     for _, c in ipairs(rowsFor(fam, kind, facts)) do
@@ -516,6 +522,25 @@ local function learnFrom(learned, famName, kind, row, h, base, item, name, state
     return changed
 end
 
+-- Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as
+-- T.placeInfo names them) or for all.  True, or false and why.
+--
+-- A wrong row learnt (say from a block the map had wrong) is laid over the table from then on; this puts the table's
+-- rows back.
+function T.forgetPlacements(family)
+    local learned = loadLearned()
+    if family == nil then
+        learned = {}
+    else
+        if not FAMILIES[family] then return false, "no family called " .. tostring(family) end
+        for id in pairs(learned) do
+            if text.startsWith(id, family .. " ") then learned[id] = nil end
+        end
+    end
+    if not saveLearned(learned) then return false, "couldn't write the learnt placements" end
+    return true
+end
+
 -- Dig the block in the target cell that this call has just placed.  It is the library's own work, so a protected
 -- area round it, or a chest that the digs refuse, doesn't stop it.  True, or false and why.
 local function takeBack(kind, h, x, y, z)
@@ -611,7 +636,7 @@ function T.placeAt(x, y, z, item, opts)
         local learned, tried, lastWhy = loadLearned(), {}, nil
         local tries = opts.tries or TRIES
         for attempt = 1, tries do
-            local apps = plan(famName, fam, learned, want, x, y, z, base, tried, move.dig)
+            local apps = plan(famName, fam, item, learned, want, x, y, z, base, tried, move.dig)
             local app = apps[1]
             if not app then break end
             tried[app.key] = true
