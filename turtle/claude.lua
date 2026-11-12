@@ -58,6 +58,14 @@
 -- did, the thinking, each call's tokens and how long it took, retries,
 -- clears, and each goal's tokens in all.  A call that writes many tokens
 -- to the cache after a long gap is the cache having run out (--cache 1h).
+-- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
+-- replacing the older copy, and a new claude.log starts: one old copy kept.
+--
+-- Its helpers: functions it wants again are kept in /claude/helpers.lua (it
+-- can write there).  At the start of each session that file, if it's there,
+-- is run in the code's own world, so what it defines is in scope for every
+-- chunk the model runs.  A broken file is told to the model with its first
+-- goal, and the session goes on without it.
 --
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
@@ -120,6 +128,9 @@ local API_URL = "https://api.anthropic.com/v1/messages"
 local API_VERSION = "2026-10-21"
 local KEY_FILE = T.dataPath("claude.key")
 local LOG_FILE = T.dataPath("claude.log")
+local LOG_SIZE = tonumber(T.setting("claude.logSize", 262144,
+    "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144
+local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session
 local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
                                 -- thinking before it counts too
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
@@ -202,6 +213,8 @@ Coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`: it
 Also useful: T.look(d) / T.digDir(d) / T.placeDir(d) (inspect, dig, place in a direction, facing it first); turtle.inspect(), turtle.inspectUp(), turtle.inspectDown() -> ok, {name=..., state=...}; turtle.detect/detectUp/detectDown(); turtle.select(slot), turtle.getItemDetail(slot), turtle.getItemCount(slot); T.selectItem(name), T.countItem(name), T.freeSlots(), T.tidyInventory(); turtle.place/placeUp/placeDown(), turtle.drop/dropUp/dropDown(n), turtle.suck/suckUp/suckDown(n); turtle.getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds); T.posString(). Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps or programs you keep between goals.
 
 More of turtlelib: T.goHome() goes back to (0,0,0); T.inventoryFull(); T.dumpDown() empties the inventory into the container below (tools and the items in T.keep, torches to start, stay); T.containerCounts(side) -> { [name] = count } of a chest beside, above or below ("front", "top", "bottom"); T.restockFrom(side, name, target) takes items from it until the turtle has target of them; T.dropSide(side, n), T.suckSide(side, n), T.inspectSide(side); T.hasMineJob() and T.loadMineJob() -> { width, height, length, spacing, homes, state } tell whether the `mine` program has a job under way (leave it alone unless asked).
+
+Keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write: it is loaded into the code's world at the start of every session, so what it defines is there in every lua call, not only in this conversation. Notes on turtlelib: T.takeInto(side, name, n, slot) takes name from the chest on a side into a slot until it holds n; T.refuelFrom(side, target) burns fuel from a chest until the tank holds target; T.keep is the table of item names T.dumpDown leaves in the turtle. The Geo Scanner's scanBlocks entries carry r, u and f (right, up and forward of the turtle, relative to its heading) as well as the world x, y and z.
 
 Libraries: `local text = require("text")` and so on give ccnix's own; use them rather than writing string code by hand or using Lua patterns.
 - text: trim(s), trimStart, trimEnd, squeeze (runs of blanks as one space), words(s) -> list, split(s, sep [, keep]) -> trimmed pieces (keep: as they are, empty ones too), join(list, sep), cut(s, sep) / cutLast(s, sep) -> before, after, lines(s), startsWith, endsWith, stripPrefix, stripSuffix, find(s, part [, from]) / findLast (plain text), contains(s, part), containsAny(s, chars), count(s, part), replace(s, old, new) (plain text, never a pattern), padRight(s, w) / padLeft / center / truncate(s, w), columns(rows [, right]) -> aligned lines, wrap(s, w) -> lines, equalFold(a, b), capitalize, swapCase.
@@ -427,7 +440,12 @@ local function now()
 end
 
 -- Each entry in the log starts with when it was written (UTC).
+-- Past LOG_SIZE the log becomes LOG_FILE.1 (an older one goes) first.
 local function log(line)
+    if fs.exists(LOG_FILE) and fs.getSize(LOG_FILE) >= LOG_SIZE then
+        if fs.exists(LOG_FILE .. ".1") then fs.delete(LOG_FILE .. ".1") end
+        fs.move(LOG_FILE, LOG_FILE .. ".1")
+    end
     local f = fs.open(LOG_FILE, "a")
     if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
 end
@@ -592,6 +610,23 @@ local function ccRequire(name)
 end
 modWorld.require = ccRequire
 API.require = ccRequire
+
+-- Run /claude/helpers.lua, if there is one, in the code's world, so what
+-- it defines is there for the model's code.  Returns nil, or what went
+-- wrong, as a sentence for the model.
+local function loadHelpers()
+    if not fs.exists(HELPERS_FILE) then return nil end
+    local chunk, err = codeLoadfile(HELPERS_FILE, "t", env)
+    local ok = chunk ~= nil
+    if chunk then
+        ok, err = pcall(chunk)
+        if err == "Terminated" then error(err, 0) end
+    end
+    if ok then return nil end
+    local note = "/claude/helpers.lua failed to load, so none of your kept helpers are defined (fix the file): " .. tostring(err)
+    log(note)
+    return note
+end
 
 local function runLua(code)
     local out = {}
@@ -1204,8 +1239,10 @@ end
 
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
+local startNote         -- what loading the helpers said, for the model's first goal
 local function converse(goal)
-    addUser(goal, "Not run: the goal ended before this call was answered.")
+    local said = startNote and goal .. "\n\n[" .. startNote .. "]" or goal
+    addUser(said, "Not run: the goal ended before this call was answered.")
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
     while true do
@@ -1216,10 +1253,11 @@ local function converse(goal)
             -- a goal it never answered goes; tool results stay, for the
             -- next goal to go on from
             local last = messages[#messages]
-            if last.role == "user" and last.content == goal then messages[#messages] = nil end
+            if last.role == "user" and last.content == said then messages[#messages] = nil end
             return false
         end
         count(reply, now() - started)
+        startNote = nil
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
@@ -1291,6 +1329,8 @@ local function main()
     log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)",
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
+    startNote = loadHelpers()
+    if startNote then say("red", startNote) end
     if goal == "" then
         goal = ask("Goal: ")
     end

@@ -13,6 +13,13 @@ section.
   each call a `tokens: N in (R from the cache, W written to it, U new), O
   out; Ss` line; when a goal ends `goal done: [...]`, as printed; a retry
   and a failed request are logged too.
+- **Log rotation**: past 256 KB (setting `claude.logSize`, bytes) claude.log
+  becomes claude.log.1, replacing any older one, and a new claude.log starts.
+- **Kept helpers**: `/claude/helpers.lua`, if there, is run in the code's
+  world at the start of a session, so its functions are there in every lua
+  call; a broken file is told to the model with its first goal, and the
+  session carries on. The prompt tells the model to keep helpers there.
+
 - `--cache 15m`: refused (0.44.0).
 
 ## claude: ccnix's libraries in its code, the rest (0.38.0)

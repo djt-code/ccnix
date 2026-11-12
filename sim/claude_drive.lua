@@ -662,3 +662,59 @@ local lr = tostring((resultsIn(2).toolu_1 or {}).content)
 check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, lr)
 check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
 check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))
+
+-- 21. The log rotates at claude.logSize, keeping one old copy; the helpers
+--     the model keeps in /claude/helpers.lua are in its code's world; a
+--     broken helpers file is told to the model and the session goes on
+-- (loadfile reads the real disk in the sim: files in the mock's fs are read from it first)
+local realLoadfile = loadfile
+loadfile = function(p, ...)
+    local body = Mine.files[(tostring(p):gsub("^/", ""))]
+    if body then
+        local mode, e = ...
+        return load(body, "=" .. p, mode, e)
+    end
+    return realLoadfile(p, ...)
+end
+local SET = { ["claude.logSize"] = 600 }
+settings = { define = function() end, get = function(n) return SET[n] end }
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return string.rep('x', 400)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return string.rep('y', 400)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return string.rep('z', 400)" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("fill the log")
+local cur, old = Mine.files["claude.log"], Mine.files["claude.log.1"]
+check("claude.log passes claude.logSize: the old log is kept as claude.log.1, a new one started",
+    cur and old and #old >= 600 and cur:find("^%d+%-%d+%-%d+ %d+:%d+:%d+ ") ~= nil, tostring(cur and #cur) .. " / " .. tostring(old and #old))
+check("only one old copy: the first entries are gone from both", not (Mine.files["claude.log.2"])
+    and not (old or ""):find("start: claude", 1, true) and not (cur or ""):find("start: claude", 1, true))
+settings = nil
+
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "function double(n) return n * 2 end\nHELPER_NAME = 'kept'"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return double(21), HELPER_NAME" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("use the helper")
+check("what /claude/helpers.lua defines is there for the model's code",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 42\n-> kept", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content)
+check("the system prompt tells it to keep helpers in /claude/helpers.lua and of T.takeInto, T.refuelFrom and r/u/f",
+    HTTP.requests[1] and textutils.serialiseJSON(HTTP.requests[1].body.system):find("/claude/helpers.lua", 1, true)
+        and textutils.serialiseJSON(HTTP.requests[1].body.system):find("T.takeInto", 1, true)
+        and textutils.serialiseJSON(HTTP.requests[1].body.system):find("T.refuelFrom", 1, true))
+
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "function broken( end"
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1 + 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("go on")
+local m1 = HTTP.requests[1] and HTTP.requests[1].body.messages[1]
+local m1text = m1 and textutils.serialiseJSON(m1.content) or ""
+check("a broken helpers.lua is reported to the model with its first goal",
+    m1text:find("helpers.lua failed to load", 1, true) and m1text:find("go on", 1, true), m1text)
+check("the session carries on, and the failure is logged",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 2"
+        and (Mine.files["claude.log"] or ""):find("helpers.lua failed to load", 1, true))
