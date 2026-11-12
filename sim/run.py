@@ -4,7 +4,9 @@
     python sim/run.py                    every simulator, then a summary
     python sim/run.py farm_clone ...     just these (".lua" optional)
     python sim/run.py --check            syntax-check the programs only (and
-                                         that help/ is made from them)
+                                         that help/ and turtle/tl/index.txt are
+                                         made from them, every public function of
+                                         turtlelib has a comment)
 
 On a ComputerCraft computer, use sim/runsim.lua instead (sim/watchsim.lua
 plays one out on a monitor).
@@ -47,7 +49,8 @@ def check():
     import shadow
     load = lua().eval("function(s, n) local f, e = load(s, '@' .. n); return e end")
     bad = 0
-    dirs = ["bin", "lib", os.path.join("lib", "ircscripts"), "turtle", "pc", "deploy", "sim", os.path.join("sim", "lib")]
+    dirs = ["bin", "lib", os.path.join("lib", "ircscripts"), "turtle", os.path.join("turtle", "tl"), "pc", "deploy", "sim",
+            os.path.join("sim", "lib")]
     for path in sorted(sum((glob.glob(os.path.join(ROOT, d, "*.lua")) for d in dirs), [])):
         src = open(path, encoding="utf-8").read()
         name = os.path.relpath(path, ROOT)
@@ -69,6 +72,11 @@ def check():
     import mkhelp
     stale = mkhelp.main(["--check"])
     print(("FAIL help/ out of date (python sim/mkhelp.py): " + " ".join(stale)) if stale else "ok   help/")
+    # turtlelib's reference and the index claude reads are made from the comments above its functions
+    comments = mkhelp.undocumented()
+    for problem in comments:
+        print("FAIL " + problem)
+    print("ok   turtlelib comments" if not comments else "FAIL turtlelib comments: %d to fix" % len(comments))
     # the mod's ROM is a data pack: a path there is a ResourceLocation's, a-z 0-9 / . _ - (no capitals)
     import re
     unnamed = []
@@ -83,7 +91,7 @@ def check():
     import vendor
     copies = vendor.main(["--check"])
     print(("FAIL vendored copies out of date (python sim/vendor.py): " + " ".join(copies)) if copies else "ok   vendor/")
-    return 1 if bad or stale or copies else 0
+    return 1 if bad or stale or comments or copies else 0
 
 
 def main(args):

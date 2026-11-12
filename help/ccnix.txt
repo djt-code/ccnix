@@ -82,6 +82,7 @@ Anywhere (bin/):
   xargs: run a command with arguments read from input (POSIX xargs)
 
 Turtles (turtle/):
+  turtlelib: the turtle library: what a program or the model can call
   autocompost: a turtle that sits on a composter and composts everything compostable you give it
   autostart: at boot, carry on with the turtle's job
   claude: let Claude drive the turtle

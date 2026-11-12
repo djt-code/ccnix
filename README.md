@@ -29,7 +29,7 @@ computer's ROM instead: see [ccnix](#ccnix-in-every-computers-rom).
 | `turtle/mow.lua` | Mows every grass/fern/dead-bush tile in a rectangle, following rough terrain and routing around walls, chests and holes. |
 | `turtle/farm.lua` | Learns the layout of a crop farm inside a bounding box, including which crop (wheat, carrots, potatoes, beetroot, sugar cane) grows on each tile, then loops: harvest ripe crops, replant, repair damage, dump into a chest, sleep. |
 | `turtle/mine.lua` | Digs a tunnel of any width and height, as long as asked or as long as its supplies last, following every ore vein it touches. It builds a new home from chests every so often, carries its supplies forward, and brings the valuables back to the start at the end. |
-| `turtle/turtlelib.lua` | Shared library: dead-reckoned position, mid-task refuelling, obstacle map + BFS routing, terrain/flat stepping, six-direction look/dig/place/move, inventory helpers, tool hot-swap, chest dumping/restocking/tidying. |
+| `turtle/turtlelib.lua` | Shared library (`help turtlelib`; the modules it loads on first use are in `turtle/tl/`): dead-reckoned position kept right by a wrapped turtle API, protected areas, change hooks, `moveTo`, equipping peripherals, junk chest, mid-task refuelling, obstacle map + BFS routing, terrain/flat stepping, six-direction look/dig/place/move, inventory helpers, tool hot-swap, chest dumping/restocking/tidying. |
 | `turtle/home.lua` | Sends the turtle back to its start after a Ctrl+T or reboot (same as `mow reset` / `farm reset`; for `mine`, use `mine reset`). |
 | `bin/ccnix.lua` | ccnix, these programs in every computer's ROM (the ccnix mod): `ccnix` says what's in use, `ccnix update` pulls updates over the ROM's into `/ccnix` (only the files that differ), `ccnix reset` goes back to the ROM. See [ccnix](#ccnix-in-every-computers-rom). |
 | `bin/git.lua` | Minimal git client: `clone`, `pull`, `status` and `log` for one branch over HTTP, via the Forgejo/Gitea or GitHub REST API. |
@@ -1888,6 +1888,14 @@ T.goTo(0, 0)
 ```
 
 Everything is relative to the start: `(0,0,0)` facing `+z`, `+x` to the right.
+
+Every public function has a comment above it, and the references are made
+from those comments (`python sim/mkhelp.py`): `help turtlelib` on a turtle is
+the whole reference, and `turtle/tl/index.txt` is one line a function (what it
+does and returns), which `claude` puts in its system prompt. `sim/run.py
+--check` fails if either is stale or a function has no comment. The library's
+modules, loaded when first used, go in `turtle/tl/` (required as `tl.<name>`)
+and are listed the same way; `ccnix setup` installs the folder with the library.
 
 A turtle puts what it picks up into the first slot, counting on from the
 selected one, that is empty *or* holds the same item. So an empty slot ahead

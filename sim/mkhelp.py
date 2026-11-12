@@ -1,6 +1,6 @@
 """Make help/<name>.txt for each program from the comment at its top.
 
-    python sim/mkhelp.py            write help/
+    python sim/mkhelp.py            write help/ (and turtle/tl/index.txt)
     python sim/mkhelp.py --check    say which help files are out of date
 
 CraftOS's `help` wraps each line to the screen, so prose is joined into
@@ -12,6 +12,15 @@ stops at a "How it works" section, which is about the code, not its use.
 help/ccnix.txt ends with the index: every command, and the topics:
 hand-written help in doc/<topic>.txt (a guide, not a program's), copied
 as it is.
+
+A library is made differently (turtle/turtlelib.lua and the modules in
+turtle/tl/): its top comment is the overview, and each "function T.name(...)"
+in column 0 with the comment right above it is an entry.  help/turtlelib.txt
+has the whole reference; turtle/tl/index.txt has one line a function (the
+signature and the comment's first paragraph: what it does and returns),
+under the headings of the banners ("-----", a title, "-----") it stands
+beneath: claude puts that in its system prompt.  A public function with no
+comment, or an index line too long, is a mistake (--check says so).
 """
 import glob
 import os
@@ -22,7 +31,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DIRS = ["bin", "turtle", "pc"]
 TOPICS = "doc"                          # hand-written help topics
-LEAVE_OUT = {"[", "turtlelib"}          # "[" is test's other name; turtlelib a library
+LEAVE_OUT = {"[", "turtlelib"}          # "[" is test's other name; turtlelib a library (below)
+LIBRARY = os.path.join("turtle", "turtlelib.lua")
+MODULES = os.path.join("turtle", "tl")  # the library's modules: tl/<name>.lua is required as "tl.<name>"
+INDEX = "turtle/tl/index.txt"           # one line a function, for claude's system prompt
+INDEX_LINE = 260                        # the longest an index line may be (it costs tokens in every request)
 
 
 def header(path):
@@ -154,8 +167,139 @@ def programs():
     yield "deploy", "setup", os.path.join(ROOT, "deploy", "setup.lua")   # (ccnix setup runs it)
 
 
+# ---------------------------------------------------------------------
+# Libraries: turtlelib and the modules in turtle/tl/
+# ---------------------------------------------------------------------
+FUNCTION = re.compile(r"function (T(?:[.:]\w+)+)\(([^)]*)\)")
+BANNER = re.compile(r"-{20,}")
+
+
+def library_files():
+    """(name, path) of the library and then its modules."""
+    yield "turtlelib", os.path.join(ROOT, LIBRARY)
+    for path in sorted(glob.glob(os.path.join(ROOT, MODULES, "*.lua"))):
+        yield "tl." + os.path.basename(path)[:-4], path
+
+
+def section_title(first):
+    """A banner's title: its first line up to the first full stop."""
+    first = first.strip()
+    for stop in (". ", ":"):
+        if stop in first:
+            first = first.split(stop, 1)[0]
+    return first.rstrip(".:").strip()
+
+
+def parse_library(path):
+    """The functions of a library file, in order: (line, section, signature,
+    comment lines).  The section is the title of the last banner above."""
+    lines = open(path, encoding="utf-8").read().replace("\r\n", "\n").split("\n")
+    out, section = [], None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if BANNER.fullmatch(line):                              # a banner: dashes, comment, dashes
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("--") and not BANNER.fullmatch(lines[j]):
+                j += 1
+            if j < len(lines) and BANNER.fullmatch(lines[j]) and j > i + 1:
+                title = lines[i + 1][2:]
+                section = section_title(title[1:] if title.startswith(" ") else title)
+                i = j + 1
+                continue
+        m = FUNCTION.match(line)
+        if m:
+            above, j = [], i - 1
+            while j >= 0 and lines[j].startswith("--") and not lines[j].startswith("---"):
+                text = lines[j][2:]
+                above.insert(0, text[1:] if text.startswith(" ") else text)
+                j -= 1
+            out.append((i + 1, section, m.group(1) + "(" + m.group(2).strip() + ")", above))
+        i += 1
+    return out
+
+
+def first_paragraph(comment):
+    """The comment's first paragraph as one line: what the function does
+    and returns.  It ends at a blank comment line or an indented one."""
+    words = []
+    for line in comment:
+        if not line.strip() or line.startswith(" "):
+            break
+        words.append(line.strip())
+    return " ".join(" ".join(words).split())
+
+
+def comment_lines(comment, indent="    "):
+    """A comment for help: each paragraph on one line (the screen wraps
+    it), indented lines kept as they are."""
+    out, para = [], []
+    for line in comment + [""]:
+        if line.strip() and not line.startswith(" "):
+            para.append(line.strip())
+            continue
+        if para:
+            out.append(indent + " ".join(" ".join(para).split()))
+            para = []
+        if line.strip():
+            out.append(indent + line.rstrip())
+        elif out and out[-1].strip():
+            out.append("")
+    while out and not out[-1].strip():
+        out.pop()
+    return out
+
+
+def library():
+    """(the library's help text, its index, the mistakes found)."""
+    help_out, index_out, problems = [], [], []
+    for name, path in library_files():
+        if not os.path.exists(path):
+            continue
+        head = header(path)
+        title = re.sub(r"^\S+\.lua\s+--\s+", "", head[0]) if head else ""
+        rest = head[1:]
+        while rest and rest[0].strip() and not rest[0].startswith(" "):
+            title += " " + rest[0].strip()
+            rest = rest[1:]
+        rel = os.path.relpath(path, ROOT).replace("\\", "/")
+        help_out.append(name + ": " + title)
+        help_out.extend(reflow(rest))
+        help_out.append("")
+        shown = None
+        for line, section, sig, comment in parse_library(path):
+            heading = section or (name + ": " + title)
+            if heading != shown:
+                shown = heading
+                help_out.extend(["== " + heading + " ==", ""])
+                index_out.append(heading + ":")
+            help_out.append(sig)
+            if not comment:
+                problems.append("%s:%d: %s has no comment above it" % (rel, line, sig))
+                help_out.append("")
+                continue
+            help_out.extend(comment_lines(comment))
+            help_out.append("")
+            entry = sig + " - " + first_paragraph(comment)
+            if len(entry) > INDEX_LINE:
+                problems.append("%s:%d: the index line for %s is %d characters (the most is %d): "
+                                "shorten the first paragraph of its comment" % (rel, line, sig, len(entry), INDEX_LINE))
+            index_out.append(entry)
+    return "\n".join(help_out).rstrip() + "\n", "\n".join(index_out) + "\n", problems
+
+
+def undocumented():
+    """Mistakes in the libraries' comments: a public function without one,
+    an index line too long."""
+    return library()[2]
+
+
 def build():
     files, index = {}, {}
+    manual, listing, _ = library()
+    files["turtlelib.txt"] = manual
+    extras = {INDEX: listing}                   # (made outside help/)
+    index.setdefault("turtle", []).append(("turtlelib", "the turtle library: what a program or the model can call"))
     for d, name, path in programs():
         lines = header(path)
         if not lines:
@@ -192,11 +336,11 @@ def build():
     out.append("Settings: `set` lists them, with what each means (mine.*, farm.*, mow.*, net.*, telnetd.*, httpd.*, syslog.*,"
                " service.*, ccnix.autostart, ccsh.login, init.boot).")
     files["ccnix.txt"] = files["ccnix.txt"] + "\n" + "\n".join(out) + "\n"     # the index, after the program's own
-    return files
+    return files, extras
 
 
 def main(args):
-    files = build()
+    files, extras = build()
     helpdir = os.path.join(ROOT, "help")
     if args[:1] == ["--check"]:
         stale = []
@@ -206,20 +350,33 @@ def main(args):
             if have != text:
                 stale.append(name)
         extra = sorted(set(os.listdir(helpdir)) - set(files)) if os.path.isdir(helpdir) else []
+        for rel, text in sorted(extras.items()):
+            p = os.path.join(ROOT, rel)
+            have = open(p, encoding="utf-8").read() if os.path.exists(p) else None
+            if have != text:
+                stale.append(rel)
         return stale + extra
     os.makedirs(helpdir, exist_ok=True)
+    for rel, text in extras.items():
+        p = os.path.join(ROOT, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
     for name in os.listdir(helpdir):
         if name not in files:
             os.remove(os.path.join(helpdir, name))
     for name, text in files.items():
         with open(os.path.join(helpdir, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-    print("%d help files in help/" % len(files))
+    print("%d help files in help/, and %s" % (len(files), " ".join(extras)))
     return []
 
 
 if __name__ == "__main__":
     bad = main(sys.argv[1:])
+    for problem in undocumented():
+        print(problem)
+        bad = bad or ["(the comments above)"]
     if bad:
         print("out of date (python sim/mkhelp.py): " + " ".join(bad))
         sys.exit(1)

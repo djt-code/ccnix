@@ -5,10 +5,10 @@
 --
 -- Provides:
 --   * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right
---     by the turtle API itself: loading this wraps turtle.forward/back/
---     up/down/turnLeft/turnRight, dig*/place* (once, however many
---     programs load it), so a move made straight through turtle.* is
---     counted too; T.raw holds the originals
+--     by the turtle API itself: loading this wraps the moves and turns
+--     (forward, back, up, down, turnLeft, turnRight) and the digs and
+--     places, once however many programs load it, so a move made
+--     straight through turtle.* is counted too; T.raw holds the originals
 --   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that
 --     no dig through the turtle API goes into, and a refusal to dig
 --     chests, barrels, shulker boxes, spawners and ComputerCraft blocks
@@ -105,13 +105,14 @@ T.DX, T.DZ = DX, DZ
 --------------------------------------------------------------------------
 T.mode = "flat"            -- "flat" or "terrain": which stepper to use going home
 
--- Path for a data file kept next to the running program.  The programs
--- moved from the repo's top folder into turtle/ on 2026-10-28; a file
--- left up there (a job half done) is moved down the first time it's asked
--- for, so `--resume` and `reset` still find it.  A program in ccnix's ROM
--- (/rom/ccnix/turtle) keeps its files in /ccnix/turtle, where its updates
--- go too (the ROM is read-only); one from an install before ccnix
--- (/cc-turtles/turtle) is moved there the same way.
+-- The path of a data file kept next to the running program (/ccnix/turtle for one in the ROM),
+-- moving an old copy down the first time it's asked for.
+--
+-- The programs moved from the repo's top folder into turtle/ on 2026-10-28; a file left up there (a job
+-- half done) is moved down the first time it's asked for, so `--resume` and `reset` still find it.  A
+-- program in ccnix's ROM (/rom/ccnix/turtle) keeps its files in /ccnix/turtle, where its updates go too
+-- (the ROM is read-only); one from an install before ccnix (/cc-turtles/turtle) is moved there the same
+-- way.
 function T.dataPath(name)
     local prog = shell and shell.getRunningProgram and shell.getRunningProgram() or ""
     local dir = fs.getDir(prog)
@@ -133,6 +134,8 @@ local POS_FILE = ".turtlepos"
 -- command, and raised here, once the move or turn is saved.
 T.stopping = false
 
+-- Write T.pos, T.dir and T.mode to the position file, so a stop or a reboot can still find the way
+-- home.  Raises "Terminated" if a Ctrl+T was held back (see T.run).
 function T.savePos()
     if not fileio.write(T.dataPath(POS_FILE), string.format("%d %d %d %d %s", T.pos.x, T.pos.y, T.pos.z, T.dir, T.mode)) then
         return
@@ -143,15 +146,18 @@ function T.savePos()
     end
 end
 
--- Run fn(...) so that Ctrl+T can't leave the saved position wrong.  Plain
--- Ctrl+T stops a program wherever it's waiting, in the middle of a turtle
--- command too: the turtle still moves or turns, but the program never
--- records it, so its saved position or heading is off by one and going
--- home from there goes astray.  Under T.run a Ctrl+T that comes during a
--- command (or a peripheral call) is held back until it's done: the
--- program stops at the next saved move or turn (T.savePos), or the next
--- ordinary wait (sleep, a key), whichever comes first.
 local COMMAND_EVENTS = { turtle_response = true, task_complete = true }
+
+-- Run fn(...) so that Ctrl+T can't leave the saved position wrong: one that
+-- comes during a turtle command is held back until the move or turn is saved.
+--
+-- Plain Ctrl+T stops a program wherever it's waiting, in the middle of a
+-- turtle command too: the turtle still moves or turns, but the program never
+-- records it, so its saved position or heading is off by one and going home
+-- from there goes astray.  Under T.run a Ctrl+T that comes during a command
+-- (or a peripheral call) is held back until it's done: the program stops at
+-- the next saved move or turn (T.savePos), or the next ordinary wait (sleep, a
+-- key), whichever comes first.
 function T.run(fn, ...)
     local co = coroutine.create(fn)
     local args = table.pack(...)
@@ -172,7 +178,7 @@ function T.run(fn, ...)
     end
 end
 
--- Returns the saved position table or nil.
+-- The saved position as { x, y, z, dir, mode }, or nil if there is none.
 function T.loadPos()
     local line = fileio.read(T.dataPath(POS_FILE))
     if not line then return nil end
@@ -186,6 +192,7 @@ function T.loadPos()
     return { x = tonumber(x), y = tonumber(y), z = tonumber(z), dir = tonumber(d), mode = mode }
 end
 
+-- Delete the saved position file: the next job starts from home as (0,0,0).
 function T.clearPos()
     local p = T.dataPath(POS_FILE)
     if fs.exists(p) then fs.delete(p) end
@@ -287,15 +294,16 @@ function T.claim()
     if W then W.owner, W.impl = T, impl end
 end
 
--- Call fn(event) for every successful dig, placement and move from now on,
--- by any program on this turtle that has the wrapped API.  event is a
--- table: kind "dig" (x, y, z the cell; was the block's name and state the
--- block's state table, as the inspect before it gave them), "place" (x, y,
--- z the cell; item the name of what was placed, if it's in the slot's
--- details) or "move" (x, y, z the cell it arrived at; from = { x, y, z }).
--- A listener's error is dropped (except Ctrl+T), so one can't stop the
--- turtle.  Returns a function that removes the listener.  (They last until
--- the computer restarts: remove yours when the program ends.)
+-- Call fn(event) for every successful dig, placement and move from now on, by any program on this
+-- turtle; event.kind is "dig", "place" or "move", with x, y, z.  Returns a function that removes the
+-- listener.
+--
+-- For "dig", x, y, z is the cell, was the block's name and state the block's state table, as the inspect
+-- before it gave them; for "place", x, y, z is the cell and item the name of what was placed, if the slot's
+-- details have it; for "move", x, y, z is the cell it arrived at and from = { x, y, z }.
+--
+-- A listener's error is dropped (except Ctrl+T), so one can't stop the turtle.  Listeners last until the
+-- computer restarts: remove yours when the program ends.
 function T.onChange(fn)
     if not W then return function() end end
     local list = W.listeners
@@ -384,10 +392,9 @@ end
 
 local function isWhole(n) return type(n) == "number" and n == math.floor(n) end
 
--- Protect the box between two corners (x, y, z, in the turtle's frame,
--- either way round) under `name`: a dig that goes into it through the
--- turtle API returns false, "protected: <name>".  Protecting a name that's
--- already there replaces its box.  Returns true, or nil and why.
+-- Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`:
+-- a dig into it returns false, "protected: <name>".  Replaces a box of the same name.  Returns true,
+-- or nil and why.
 function T.protect(name, x1, y1, z1, x2, y2, z2)
     if type(name) ~= "string" or name == "" or text.contains(name, "\n") then
         return nil, "an area needs a name (one line of text)"
@@ -521,9 +528,12 @@ for name, by in pairs(TURN_BY) do
     impl[name] = function() return afterwards(function() turned(by) end, raw[name]()) end
 end
 
+-- Turn a quarter turn to the right, keeping T.dir and the saved position right.
 function T.turnRight() raw.turnRight(); turned(1) end
+-- Turn a quarter turn to the left, keeping T.dir and the saved position right.
 function T.turnLeft()  raw.turnLeft();  turned(3) end
 
+-- Turn to face heading d (0 to 3, as T.dir) by the shorter way.
 function T.face(d)
     if T.dir == d then return end
     if (T.dir + 1) % 4 == d then T.turnRight()
@@ -538,6 +548,7 @@ function T.faceToward(x, z)
     elseif dz == -1 then T.face(2) else T.face(3) end
 end
 
+-- The position as "(x,y,z)".
 function T.posString()
     return string.format("(%d,%d,%d)", T.pos.x, T.pos.y, T.pos.z)
 end
@@ -550,10 +561,11 @@ function T.setDir(d)
     T.savePos()
 end
 
--- What's beside the turtle, by quarter turns to the right of the way it
--- faces: seen[a] is the inspect data at a turns, or false for air.  For
--- checking the heading, so it turns with the raw turtle calls (which
--- leave it facing as it was) and T.dir isn't touched.
+-- What's beside the turtle, by quarter turns to the right of the way it faces:
+-- seen[a] is the inspect data at a turns, or false for air.
+--
+-- For checking the heading, so it turns with the raw turtle calls (which leave
+-- it facing as it was) and T.dir isn't touched.
 function T.lookAround()
     local seen = {}
     for a = 0, 3 do
@@ -605,11 +617,11 @@ end
 T.fuelTrip = nil
 local onFuelTrip = false
 
--- Called before every move.  Below what it takes to get home (plus
--- cfg.fuelMargin) the tank is topped up from the inventory; when that
--- isn't enough and the program set T.fuelTrip, it runs, so the turtle
--- refuels at home instead of running dry in the field.  Without one, or
--- on the trip itself, it waits for the user once truly out.
+-- Called before every move: when the tank is short of the trip home plus T.cfg.fuelMargin, tops it
+-- up from the inventory; if that isn't enough, runs T.fuelTrip, else waits for the user once truly out.
+--
+-- On the trip itself, or with no T.fuelTrip set, it waits for the user once truly out, rather than
+-- starting another trip.
 function T.ensureFuel()
     local level = turtle.getFuelLevel()
     if level == "unlimited" then return end
@@ -669,6 +681,7 @@ end
 --------------------------------------------------------------------------
 local TOOL_SUFFIXES = { "_pickaxe", "_hoe", "_shovel", "_axe", "_sword" }
 
+-- Is the item `name` a tool (a pickaxe, hoe, shovel, axe or sword)?
 function T.isTool(name)
     if not name then return false end
     for _, suffix in ipairs(TOOL_SUFFIXES) do
@@ -684,13 +697,14 @@ local function picks(what, it)
     return it.name == what
 end
 
--- The first empty slot, or the first holding `what`; nil if none.
+-- The first empty slot, or nil if there is none.
 function T.emptySlot()
     for slot = 1, 16 do
         if turtle.getItemCount(slot) == 0 then return slot end
     end
 end
 
+-- The first slot holding `what` (an item name, or a function(name, item) that picks one); nil if none.
 function T.findSlot(what)
     for slot = 1, 16 do
         local it = turtle.getItemDetail(slot)
@@ -808,7 +822,7 @@ function T.equipTool(name, side)
 end
 
 --------------------------------------------------------------------------
--- Peripheral upgrades (a Geo Scanner, a chat box, a crafting table): CC
+-- Peripheral upgrades.  A Geo Scanner, a chat box or a crafting table: CC
 -- attaches one only while it is equipped, so using one takes a swap in and
 -- a swap back.  The upgrade that comes off goes into the slot the new one
 -- came from, so no free slot is needed unless the new one is a stack.
@@ -845,14 +859,12 @@ local function waitForPeripheral(side)
     return nil
 end
 
--- Equip the item `name` (from the inventory, or it is on already) on the
--- side that holds no chunk controller or kept side, preferring an empty
--- side, then one with a tool, then another upgrade; wait until it shows up
--- as a peripheral.  Returns the wrapped peripheral and a function that
--- puts back what was on that side (call it when done; calling it again
--- does nothing), or nil and why: not on board, a tool rather than a
--- peripheral, both sides kept, no free slot for what comes off, or it
--- never showed up.
+-- Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for
+-- it to show up.  Returns the peripheral and a function that puts back what was there, or nil and why.
+--
+-- It prefers an empty side, then one with a tool, then another upgrade.  Call the returned function
+-- when done (calling it again does nothing).  The reasons for nil: not on board, a tool rather than a
+-- peripheral, both sides kept, no free slot for what comes off, or it never showed up.
 function T.equipPeripheral(name)
     if T.isTool(name) then return nil, name .. " is a tool, not a peripheral (T.withTool)" end
     local before = { left = T.equipped("left"), right = T.equipped("right") }
@@ -909,10 +921,11 @@ function T.equipPeripheral(name)
     return p, restore
 end
 
--- Run fn(peripheral) with the item `name` equipped as a peripheral, and
--- put back what was on that side afterwards, even if fn errors (the error
--- is re-thrown).  Returns true and what fn returned, or nil and why it
--- couldn't equip (see T.equipPeripheral).
+-- Run fn(peripheral) with the item `name` equipped as a peripheral, and put back
+-- what was on that side afterwards.  Returns true and what fn returned, or nil
+-- and why it couldn't equip (see T.equipPeripheral).
+--
+-- The side is put back even if fn errors (the error is re-thrown).
 function T.withPeripheral(name, fn)
     local p, restore = T.equipPeripheral(name)
     if not p then return nil, restore end
@@ -933,6 +946,8 @@ local function clearWay(inspect, dig)
     return false
 end
 
+-- Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first).
+-- True, or false if anything else is in the way or T.cfg.maxHeight is reached.
 function T.up()
     if T.pos.y >= T.cfg.maxHeight then return false end
     T.ensureFuel()
@@ -944,6 +959,8 @@ function T.up()
     return false
 end
 
+-- Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first).
+-- True, or false if anything else is in the way or T.cfg.maxDrop is reached.
 function T.down()
     if T.pos.y <= -T.cfg.maxDrop then return false end
     T.ensureFuel()
@@ -955,6 +972,8 @@ function T.down()
     return false
 end
 
+-- Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first).
+-- True, or false if anything else is in the way.
 function T.forward()
     T.ensureFuel()
     for _ = 1, 5 do
@@ -1020,8 +1039,11 @@ function T.sideDir(side)
     return T.dir
 end
 
+-- A copy of T.pos: { x, y, z }.
 function T.here() return { x = T.pos.x, y = T.pos.y, z = T.pos.z } end
+-- Is the turtle at p ({ x, y, z })?
 function T.at(p) return T.pos.x == p.x and T.pos.y == p.y and T.pos.z == p.z end
+-- The key "x,y,z" for a position p.
 function T.posKey(p) return p.x .. "," .. p.y .. "," .. p.z end
 -- Inverse of posKey: the x, y, z of "x,y,z" (whole numbers, as posKey
 -- writes them); nil if k isn't one.
@@ -1030,6 +1052,7 @@ function T.keyPos(k)
     if #part ~= 3 then return nil end
     return convert.toInteger(part[1]), convert.toInteger(part[2]), convert.toInteger(part[3])
 end
+-- The taxicab distance between two positions.
 function T.dist(a, b) return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z) end
 
 -- The block next to the turtle in direction d.
@@ -1045,6 +1068,7 @@ function T.dirTo(p)
     elseif p.z > T.pos.z then return 0 else return 2 end
 end
 
+-- Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 function T.look(d)
     if d == "up" then return turtle.inspectUp() end
     if d == "down" then return turtle.inspectDown() end
@@ -1052,6 +1076,8 @@ function T.look(d)
     return turtle.inspect()
 end
 
+-- Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected
+-- area holds.  Returns turtle.dig's results (false and why if it can't).
 function T.digDir(d)
     if d == "up" then return impl.digUp() end
     if d == "down" then return impl.digDown() end
@@ -1059,6 +1085,8 @@ function T.digDir(d)
     return impl.dig()
 end
 
+-- Face direction d (0 to 3, "up" or "down") and place the selected item there.  Returns
+-- turtle.place's results.
 function T.placeDir(d)
     if d == "up" then return impl.placeUp() end
     if d == "down" then return impl.placeDown() end
@@ -1066,6 +1094,7 @@ function T.placeDir(d)
     return impl.place()
 end
 
+-- Face direction d (0 to 3, "up" or "down") and attack there.  Returns turtle.attack's results.
 function T.attackDir(d)
     if d == "up" then return turtle.attackUp() end
     if d == "down" then return turtle.attackDown() end
@@ -1073,6 +1102,7 @@ function T.attackDir(d)
     return turtle.attack()
 end
 
+-- Face direction d (0 to 3, "up" or "down") and pick up items there.  Returns turtle.suck's results.
 function T.suckDir(d)
     if d == "up" then return turtle.suckUp() end
     if d == "down" then return turtle.suckDown() end
@@ -1156,9 +1186,12 @@ local function stepInto(d, mayDig, avoid)
     return false, "can't move into " .. at .. (name and (" (" .. name .. ")") or ": something is in the way"), name, cell
 end
 
--- Move to the cell x, y, z (the turtle's frame, whole numbers), along the
--- axes in the order opts.order names (default "yxz": up or down first,
--- then x, then z).  opts (all optional):
+-- Move to the cell x, y, z (the turtle's frame), digging only what opts.dig
+-- allows.  Returns true, or false, why, the block's name and cell where one
+-- stopped it.  opts: order, dig, avoid, inside, path.
+--
+-- It goes along the axes in the order opts.order names (default "yxz": up or
+-- down first, then x, then z).  opts (all optional):
 --   dig     false (default), true, a glob or a list of globs: the blocks it
 --           may dig on the way (a protected area, a chest or a computer is
 --           never dug)
@@ -1168,10 +1201,9 @@ end
 --   path    true, or a function(x, y, z, opts): when a straight run is
 --           blocked, ask a route finder (T.travel, from the path module, if
 --           there is one; or this function) to take it the rest of the way
--- Returns true, or false, why (a sentence: "blocked by minecraft:obsidian
--- at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ..."),
--- the block's name and its cell { x, y, z } where a block stopped it.
--- The turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a
+-- The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4",
+-- "protected: castle (...)", "avoiding minecraft:lava at ..."; the cell is
+-- { x, y, z }.  The turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a
 -- program's grid, don't apply.)
 function T.moveTo(x, y, z, opts)
     opts = opts or {}
@@ -1244,6 +1276,7 @@ end
 -- Obstacle map (2D, by column) and BFS routing
 --------------------------------------------------------------------------
 T.blocked = {}
+-- The key "x,z" for a column.
 function T.ckey(x, z) return x .. "," .. z end
 
 -- Inverse of ckey: the x, z a key ("x,z") was made from; nils if k isn't one.
@@ -1252,13 +1285,16 @@ function T.keyXZ(k)
     if #part ~= 2 then return nil, nil end
     return convert.toInteger(part[1]), convert.toInteger(part[2])
 end
+-- Mark column x, z as blocked, for T.bfs and T.goTo.
 function T.markBlocked(x, z) T.blocked[T.ckey(x, z)] = true end
+-- Forget every column marked blocked.
 function T.clearBlocked() T.blocked = {} end
 
 -- Sign and magnitude of a dimension: sgn(-20) -> -1, 20
 local function sgn(n) if n < 0 then return -1, -n else return 1, n end end
 T.sgn = sgn
 
+-- Is column x, z inside the routing area (T.cfg.width and length, plus T.cfg.margin)?
 function T.inBounds(x, z)
     local c = T.cfg
     local sx, w = sgn(c.width)
@@ -1371,13 +1407,12 @@ function T.coverColumn(x, z)
     T.cfg.length = cover(T.cfg.length, z)
 end
 
--- Return to the start from wherever the saved position says we are.
--- Used by the `reset` subcommands and home.lua.  In flat mode the trip is
--- made at height opts.travelY (default 0, the start height), e.g. above
--- tall crops.  The routing area is cfg.width/length, stretched to take in
--- the turtle's position.  opts.check, if given, runs once at travel height
--- before setting off (it may correct T.dir); false from it stops the trip.
--- Returns true if home.
+-- Return to the start from wherever the saved position says we are (used by the `reset` subcommands
+-- and home.lua).  Returns true if home.
+--
+-- In flat mode the trip is made at height opts.travelY (default 0, the start height), e.g. above tall
+-- crops.  The routing area is cfg.width/length, stretched to take in the turtle's position.  opts.check, if
+-- given, runs once at travel height before setting off (it may correct T.dir); false from it stops the trip.
 function T.goHome(opts)
     opts = opts or {}
     local saved = T.loadPos()
@@ -1468,6 +1503,11 @@ local function isOption(a, long)
     return kind == "=" or (kind == true and value == nil)
 end
 
+-- Parse a program's command-line `args` with lib/getopt, options and operands
+-- in any order.  Returns the options table and the operands, or nil and why.
+--
+-- `long` lists the long options: name = true for a flag, "=" for one with a
+-- value.  A dash word that isn't one of them stays an operand.
 function T.options(args, long)
     local given, held = {}, {}
     for i, a in ipairs(args) do
@@ -1536,14 +1576,15 @@ function T.serpentine(width, length)
     return plan
 end
 
--- Positions for light sources so that every tile of the grid is within
--- taxicab distance `radius` of one.  Uses the diamond lattice generated by
--- (r, r+1) and (r+1, -r), which tiles the plane with L1 balls exactly, and
--- clamps lattice points that fall outside the grid onto its edge (which can
--- only shorten their distance to tiles inside).  Returns a set keyed by
--- T.ckey plus an ordered list.
--- Computed on a 0-based grid, then shifted to the 1-based, signed grid
--- the plan uses; the start tile (0,0) is outside it and never gets a torch.
+-- Positions for light sources so that every tile of the grid is within taxicab distance `radius`
+-- of one.  Returns a set keyed by T.ckey and an ordered list.
+--
+-- It uses the diamond lattice generated by (r, r+1) and (r+1, -r), which tiles the plane with L1 balls
+-- exactly, and clamps lattice points that fall outside the grid onto its edge (which can only shorten
+-- their distance to tiles inside).
+--
+-- Computed on a 0-based grid, then shifted to the 1-based, signed grid the plan uses; the start tile
+-- (0,0) is outside it and never gets a torch.
 function T.lightLattice(radius, width, length)
     width, length = width or T.cfg.width, length or T.cfg.length
     local sx, sz
@@ -1595,14 +1636,13 @@ function T.countItem(what)
     return n
 end
 
--- Picked-up items go into the first slot, counting on from the selected
--- one, that is empty or holds the same item (CC:Tweaked's InventoryUtil),
--- so an empty slot ahead of a part stack starts a second stack of it.
--- Merge part stacks of the same item, move part stacks into the empty
--- slots ahead of them, and select slot 1: what's picked up next then
--- joins its stack.  A move takes as long as a step (a failed one hardly
--- any); with nothing to do it only reads the slots.  Returns how many
--- slots it freed.
+-- Merge part stacks of the same item, move part stacks into the empty slots ahead of them and
+-- select slot 1, so what's picked up next joins its stack.  Returns how many slots it freed.
+--
+-- Picked-up items go into the first slot, counting on from the selected one, that is empty or holds the
+-- same item (CC:Tweaked's InventoryUtil), so an empty slot ahead of a part stack starts a second stack
+-- of it.  A move takes as long as a step (a failed one hardly any); with nothing to do it only reads
+-- the slots.
 function T.tidyInventory()
     local items = {}
     for s = 1, 16 do items[s] = turtle.getItemDetail(s) end
@@ -1631,6 +1671,7 @@ function T.tidyInventory()
     return T.freeSlots() - before
 end
 
+-- Is every slot taken?
 function T.inventoryFull()
     for slot = 1, 16 do
         if turtle.getItemCount(slot) == 0 then return false end
@@ -1638,6 +1679,7 @@ function T.inventoryFull()
     return true
 end
 
+-- How many slots are empty.
 function T.freeSlots()
     local n = 0
     for slot = 1, 16 do
@@ -1646,10 +1688,12 @@ function T.freeSlots()
     return n
 end
 
+-- Is the block name a chest or a barrel?
 function T.isContainer(name)
     return text.contains(name, "chest") or text.contains(name, "barrel")
 end
 
+-- Is there a chest or barrel below the turtle?  (T.containerOn("bottom"))
 function T.containerBelow() return T.containerOn("bottom") end
 
 -- What a dump would drop: a list of { slot, n }.  keepCount(item, kept)
@@ -1729,12 +1773,14 @@ function T.inventoryLine(label)
     print(label .. ": " .. (#parts > 0 and table.concat(parts, ", ") or "nothing"))
 end
 
--- Make sure at least `need` slots are free before working a tile whose
--- drops must not spill: if short, and dumping with keepCount would free
--- something, call goDump() (the program's trip to its chest).  Prints
--- `warning` once if still short, and stops making trips that free
--- nothing (no chest) until slots open up again.
 local warnedRoom, dumpFreesNothing = false, false
+
+-- Make sure at least `need` slots are free before working a tile whose drops
+-- must not spill, calling goDump() (the trip to the chest) if short.  Returns
+-- true, or false once still short (printing `warning` once).
+--
+-- It only calls goDump when dumping with keepCount would free something, and
+-- stops making trips that free nothing (no chest) until slots open up again.
 function T.ensureRoom(need, keepCount, goDump, warning)
     T.tidyInventory()
     if T.freeSlots() >= need then dumpFreesNothing = false; return true end
@@ -1752,8 +1798,8 @@ function T.ensureRoom(need, keepCount, goDump, warning)
 end
 
 --------------------------------------------------------------------------
--- A container as a peripheral on one of the turtle's three interaction
--- sides ("front", "top" or "bottom", the CC:Tweaked names for turtle.suck/
+-- Containers.  A chest or barrel as a peripheral on one of the turtle's three
+-- interaction sides ("front", "top" or "bottom", the CC:Tweaked names for turtle.suck/
 -- drop/inspect and their Up/Down variants): counting, tidying, restocking.
 -- Everything degrades gracefully when it can't be wrapped (restocking
 -- falls back to blind sucking).
@@ -1767,9 +1813,12 @@ local function sideFuncs(side)
     error("Unknown turtle side (want front/top/bottom): " .. tostring(side), 0)
 end
 
--- Drop from, suck into the selected slot, or inspect, on a side.
+-- Drop up to n items from the selected slot into whatever is on `side`
+-- ("front", "top" or "bottom"): turtle.drop's results.
 function T.dropSide(side, n) local _, drop = sideFuncs(side); return drop(n) end
+-- Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
 function T.suckSide(side, n) local suck = sideFuncs(side); return suck(n) end
+-- turtle.inspect on `side` ("front", "top" or "bottom"): ok, data.
 function T.inspectSide(side) local _, _, inspect = sideFuncs(side); return inspect() end
 
 -- Is there a chest or barrel on `side`?
@@ -1908,11 +1957,11 @@ local function sortContainer(chest, self, side)
     if not ok then error(err, 0) end
 end
 
--- Tidy the container on `side`: merge part stacks of the same item, so
--- everything sits in as few slots as it can (hoppers and the turtle's own
--- partial takes leave small stacks scattered about), filling the earliest
--- part stack from the latest; then sort it (sortContainer).  Uses the
--- container's pushItems.
+-- Tidy the container on `side`: merge part stacks so everything sits in as few slots as it
+-- can, then sort it.
+--
+-- Hoppers and the turtle's own partial takes leave small stacks scattered about; it fills the
+-- earliest part stack from the latest, then sorts (sortContainer).  Uses the container's pushItems.
 function T.compactContainer(side)
     local chest = peripheral and peripheral.wrap(side)
     if not (chest and chest.list and chest.pushItems and chest.getItemDetail) then return end
@@ -1979,15 +2028,16 @@ local function frontStack(chest, name, suck)
     return chest.pushItems(self, from, 64, 1) > 0, held
 end
 
--- Pull `name` out of the container on `side` until we hold `target` of
--- it.  Sucking from a side always takes from the container's first
--- occupied slot regardless of what it is, so with a readable container
--- the wanted stack is moved to the front first (frontStack) and exactly
--- what's needed is taken.  Otherwise anything else that comes out is set
--- aside and dropped back once we're done (fuel is kept).  opts: label
--- (for messages), quiet (report nothing), room (free slots to leave
--- untouched, default 1).
 local restockWarned = {}
+
+-- Pull `name` out of the container on `side` until the turtle holds `target`
+-- of it (opts: label for messages, quiet, room: free slots to leave, default 1).
+--
+-- Sucking from a side always takes from the container's first occupied slot
+-- regardless of what it is, so with a readable container the wanted stack is
+-- moved to the front first (frontStack) and exactly what's needed is taken.
+-- Otherwise anything else that comes out is set aside and dropped back once
+-- we're done (fuel is kept).
 function T.restockFrom(side, name, target, opts)
     opts = opts or {}
     local room = opts.room or 1
@@ -2083,14 +2133,13 @@ function T.takeInto(side, name, n, slot)
     return turtle.getItemCount(slot)
 end
 
--- Take n (default 1) of the item `name` out of the container on `side`
--- ("front", "top" or "bottom"), into whatever slots will have it: a part
--- stack of it first, else an empty slot.  Sucking from a side takes the
--- container's first stack whatever it is, so each time the wanted stack
--- is moved to the front first (as T.takeInto does), and as many stacks
--- are taken as it needs.  Needs a container it can read (a chest or a
--- barrel).  Returns how many it got, and, when that's short of n, why:
--- no container, none left in it, or no room in the turtle.
+-- Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into
+-- whatever slots will have it.  Returns how many it got and, when short of n, why.
+--
+-- A part stack of it is topped up first, else an empty slot is used.  Sucking from a side takes the
+-- container's first stack whatever it is, so each time the wanted stack is moved to the front first (as
+-- T.takeInto does), and as many stacks are taken as it needs.  Needs a container it can read (a chest or a
+-- barrel).  When short of n, why is: no container, none left in it, or no room in the turtle.
 function T.pull(side, name, n)
     n = n or 1
     if side ~= "front" and side ~= "top" and side ~= "bottom" then
@@ -2163,10 +2212,12 @@ local NEVER_JUNK = { ["minecraft:bucket"] = true, ["minecraft:water_bucket"] = t
 local NEVER_JUNK_PREFIXES = { "advancedperipherals:", "computercraft:" }
 local crafted = {}                         -- what T.craft made this job
 
--- Remember the junk chest: it stands on `side` of the cell x, y, z (the
--- turtle's frame): "up" or "top", "down" or "bottom", or a heading 0 to 3
--- (T.dir's: 0 is +z, 1 is +x).  Kept in a data file, so every program on
--- the turtle uses the same one.  true, or nil and why.
+-- Remember the junk chest: it stands on `side` of the cell x, y, z (the turtle's
+-- frame): "up" or "top", "down" or "bottom", or a heading 0 to 3.  True, or nil
+-- and why.
+--
+-- The heading is T.dir's: 0 is +z, 1 is +x.  Kept in a data file, so every
+-- program on the turtle uses the same one.
 function T.setJunkChest(x, y, z, side)
     for _, n in ipairs({ x, y, z }) do
         if not isWhole(n) then return nil, "the junk chest's cell is x, y, z: whole numbers" end
@@ -2194,6 +2245,7 @@ end
 -- junk for the rest of the job (until the computer restarts, or
 -- T.clearCrafted()).
 function T.markCrafted(name) crafted[name] = true end
+-- Forget what T.markCrafted named: the end of a job.
 function T.clearCrafted() crafted = {} end
 
 -- Is the item `name` junk?  False for what's in T.keep, tools, fuel,
@@ -2206,12 +2258,11 @@ function T.isJunk(name)
     return true
 end
 
--- Go to the junk chest, put every junk stack in it, and come back to
--- where the turtle was, facing as it did.  Nothing is dropped unless a
--- chest is there to take it (it looks first), and what doesn't fit stays.
--- Returns true, how many items went in and how many didn't fit; or
--- false and why (no junk chest set, no way there, no chest there).  With
--- no junk on board it goes nowhere.
+-- Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped
+-- unless a chest is there.  Returns true, items dropped, items left; or false and why.
+--
+-- It looks at the chest first, and what doesn't fit stays aboard.  With no junk on board it goes
+-- nowhere.  The reasons for false: no junk chest set, no way there, no chest there.
 function T.dumpJunk()
     local spot = T.junkChest()
     if not spot then return false, "no junk chest set (T.setJunkChest)" end
@@ -2253,10 +2304,11 @@ function T.dumpJunk()
     return true, dropped, left
 end
 
--- Burn fuel from the container on `side` until the tank holds `target`
--- (capped at the tank's limit), fuel already on board first.  Takes one
--- item of a kind to learn what it's worth, then only as many as needed.
--- Empty buckets left by lava go back in.  True if the target was reached.
+-- Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty
+-- buckets go back in.  True if the target was reached.
+--
+-- It takes one item of a kind to learn what it's worth, then only as many as are needed (capped at
+-- the tank's limit).
 function T.refuelFrom(side, target)
     if turtle.getFuelLevel() == "unlimited" then return true end
     target = math.min(target, turtle.getFuelLimit())
