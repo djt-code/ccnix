@@ -102,6 +102,12 @@ end
 _G.ccnix = { find = find, lib = table.concat(lib), version = version or "unversioned",
              updates = roots[1] == OVER and romMode }   -- (whether this boot took the updates)
 
+-- CC's keys table has no Esc: in the game the key closes the computer's
+-- screen, so it never came.  It does now (the ccnix mod's client gives it
+-- to the computer; telnet makes it from a lone ESC byte), as GLFW numbers
+-- it; vi, readline, irc and screen look it up as keys.escape.
+if type(keys) == "table" and keys.escape == nil then keys.escape = 256 end
+
 if settings.get("craftix.login") ~= nil then            -- (the setting from when ccsh was Craftix)
     if settings.get("ccsh.login") == nil then settings.set("ccsh.login", settings.get("craftix.login")) end
     settings.unset("craftix.login")

@@ -219,15 +219,14 @@ numbers, the text tools and the network tools. Still to try:
 
 ## The mod
 
-- **Esc goes to the computer** (ccnix-mod 0.26.0, the client's jar only:
-  the server's needn't change). On a computer's, turtle's or pocket
-  computer's screen, Esc no longer closes it: in `vi`, Esc leaves insert
-  mode (the first time, "Esc went to the computer: Shift+Esc closes its
-  screen" shows above the hotbar); in ccsh, Esc then b moves a word back.
-  Shift+Esc closes the screen. A client without the mod (or before 0.26):
-  Esc closes it as before, and Ctrl+C still leaves insert mode in vi.
-  Other screens (the inventory, a chest, the gateway dialog): Esc closes
-  them as always.
+- **Esc reaches the programs** (ccnix 0.43.2: boot gives CC's keys
+  table the keys.escape it lacks; reboot after `/ccnix rom update`). In
+  `vi`, Esc leaves insert mode (the first time, "Esc went to the
+  computer: Shift+Esc closes its screen" shows above the hotbar); in
+  ccsh, Esc then b moves a word back; in irc, Esc then 2 goes to buffer
+  2; in screen's scrollback (Ctrl+A [), Esc leaves it. The same on a
+  turtle and a pocket computer. A client without the mod: Esc closes the
+  screen as before, and Ctrl+C still leaves insert mode in vi.
 
 - **The Network Configurator** (ccnix-mod 0.23.0; it was the Network
   Tester). An old Network Tester in an inventory is a Network Configurator
@@ -285,6 +284,14 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ccnix-mod 0.26.0 on the client (the server at 0.25.1):
+  Esc no longer closes a computer's, turtle's or pocket computer's
+  screen, and Shift+Esc does; the inventory, a chest and the gateway
+  dialog still close on Esc.  Not right (fixed in ccnix 0.43.2): vi
+  didn't leave insert mode and ccsh's Esc then b typed a b. The key
+  arrived, but CC's keys table has no escape (the game never let it
+  through), so nothing knew it as Esc; telnet's Esc had the same gap.
 
 - 2026-11-12 — ROM 0.43.0, vi's commands: `:.,+2>`, `:/beta/;+1d`,
   `:ka`/`:kb` then `:'a,'bm$`, `:s/a/A/` then `:&&` then `&` (E486),

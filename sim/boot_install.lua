@@ -130,6 +130,12 @@ check("_G.ccnix: find gives the ROM's copy (nil for what isn't there), lib the R
         and ccnix.lib == "/rom/ccnix/lib/?.lua;/rom/ccnix/turtle/?.lua;", ccnix and ccnix.lib)
 check("nothing set for the end of startup: boot returns, CraftOS's startup goes on",
     ran() == "rom/autorun/ccnix.lua, rom/ccnix/deploy/boot.lua" and r.errText == "", ran() .. show(r.errText))
+local esc = keys.escape
+keys.escape = nil                                   -- (as CC's own keys table is)
+boot(W)
+check("CC's keys has no escape: boot gives it one, as GLFW numbers it (the mod and telnet send it)",
+    keys.escape == 256, tostring(keys.escape))
+keys.escape = esc
 r = W:session({}, function() return W.shell.run("ls", "/rom/ccnix") end)
 check("ls at the prompt is ccnix's, its library found through ccnix.lib",
     r.ok and r.out:find("bin") and r.out:find("deploy") and r.errText == "", show(r.out) .. show(r.errText))
