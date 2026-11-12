@@ -862,3 +862,31 @@ local st25b = resultsIn(4).toolu_3 and tostring(resultsIn(4).toolu_3.content) or
 check("status says nothing of an origin or a job while there is none", st25a ~= "" and not st25a:find("world origin", 1, true) and not st25a:find("job: ", 1, true), st25a)
 check("...and shows the origin and the job's step once there is", st25b:find("world origin: the turtle's 0,0,0 is 100,64,-20 and its +z points north", 1, true)
     and st25b:find("job: build the keep - step 2 of 3: floor", 1, true), st25b)
+
+-- 26. the prompt's prose on using the whole library (ADR-0008, phase 5): a
+--     Building paragraph walks through origin, map, moving, placing and
+--     blueprints, materials and the journals, and every T.name in it is a
+--     function in the index (or one of the settings it names)
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("how do I build")
+local sys26 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local para26 = sys26:match("\nBuilding:(.-)\n\n") or ""
+check("the prompt has a Building paragraph", #para26 > 500, #para26)
+check("...naming the origin, the map, scans, travel, placing, blueprints, crafting, the chests and the journals",
+    para26:find("T.setOrigin", 1, true) and para26:find("T.map.get", 1, true) and para26:find("T.scan(r)", 1, true)
+        and para26:find("T.travel", 1, true) and para26:find("T.placeAt", 1, true) and para26:find("T.build(", 1, true)
+        and para26:find("T.verify", 1, true) and para26:find("T.craft(", 1, true) and para26:find("T.stow", 1, true)
+        and para26:find("T.job.start", 1, true) and para26:find("T.undo", 1, true) and para26:find("T.report", 1, true))
+-- (settings, and T.report, which is a table that can be called: its functions are indexed as T.report.now and so on)
+local fields26 = { ["T.cfg.undo"] = true, ["T.cfg.autoDump"] = true, ["T.report"] = true }
+local missing26 = {}
+for word in para26:gmatch("T%.[%w%.]+") do
+    local name = word:gsub("%.$", "")
+    if not fields26[name] and not ("\n" .. REAL_INDEX):find("\n" .. name .. "(", 1, true) then
+        missing26[#missing26 + 1] = name
+    end
+end
+check("every T.name the paragraph mentions is in the index", #missing26 == 0, table.concat(missing26, " "))
+check("the old interim sentence about scanBlocks now points at T.scan", sys26:find("T.scan(r) does the Geo Scanner's work in this frame for you", 1, true)
+    and sys26:find("r, u and f", 1, true))
