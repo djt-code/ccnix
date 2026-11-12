@@ -159,6 +159,8 @@ end
 -- Write the frames.  True, or nil and why.
 local function saveFrame()
     local f, w = S.frame, S.world
+    if not fs.exists(S.dir) then fs.makeDir(S.dir) end
+    S.onDisk = true
     local lines = { string.format("frame %d %d %d %d %d", f.t, f.dx, f.dy, f.dz, f.aligned and 1 or 0) }
     if w then lines[2] = string.format("world %d %d %d %d", w.s, w.ox, w.oy, w.oz) end
     return fileio.write(fs.combine(S.dir, FRAME_FILE), table.concat(lines, "\n") .. "\n")
@@ -290,6 +292,8 @@ local function encode(c)
 end
 
 local function markDirty(c)
+    -- (the map's first change starts it on disk: its folder and frame, so every program sees there is a map)
+    if not S.onDisk then saveFrame() end
     if c.dirty then return end
     c.dirty = true
     S.ndirty = S.ndirty + 1
@@ -557,8 +561,9 @@ local function ensure()
     if S.dir and S.dir ~= dir then flush() end
     if S.dir ~= dir then
         S.dir, S.cache, S.index, S.bytes, S.count, S.ndirty, S.cells, S.last = dir, {}, {}, 0, 0, 0, 0, nil
-        if not fs.exists(dir) then fs.makeDir(dir) end
-        if not loadFrame() then saveFrame() end
+        -- (nothing is made on disk until something is written: asking makes no map)
+        S.onDisk = fs.exists(dir)
+        loadFrame()
         for _, name in ipairs(fs.list(dir)) do
             local cx, cy, cz = parseName(name)
             if cx then
@@ -583,13 +588,19 @@ local function setLocal(x, y, z, name, state, fresh)
 end
 
 -- Hear a dig, placement or move (T.onChange) and note it.
+--
+-- Only a map on disk is kept up: until a scan, T.map.set or the like starts one, nothing is noted.
 local function heard(e)
     ensure()
-    if not S.frame.aligned then return end
+    if not (S.onDisk and S.frame.aligned) then return end
     if e.kind == "dig" then
         setLocal(e.x, e.y, e.z, AIR)
+    elseif e.kind == "change" then
+        setLocal(e.x, e.y, e.z, e.block, e.state)
     elseif e.kind == "place" then
-        setLocal(e.x, e.y, e.z, e.item and (PLACED_AS[e.item] or e.item) or nil)
+        -- what the cell holds now if it was looked at (a wall torch, a crop), else what the item makes
+        local name = e.block or e.item and (PLACED_AS[e.item] or e.item) or nil
+        setLocal(e.x, e.y, e.z, name, e.block and e.state or nil)
     elseif e.kind == "move" then
         -- the turtle is in the cell it went into, and was in the one it left: not solid (water and lava it may swim through)
         for _, p in ipairs({ { e.x, e.y, e.z }, { e.from.x, e.from.y, e.from.z } }) do
@@ -691,6 +702,7 @@ local function rawScan(radius)
         for try = 1, SCAN_TRIES do
             local ok, entries, err = pcall(method, radius)
             if ok and entries then return entries end
+            if not ok and entries == "Terminated" then error(entries, 0) end
             why = ok and err or entries
             if try < SCAN_TRIES then sleep(1) end
         end
@@ -952,12 +964,13 @@ local function columnTop(columns, mx, mz, lo, hi)
 end
 
 -- The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name;
--- nil and why if the map knows none.
-function T.map.top(x, z)
+-- nil and why if the map knows none.  lo and hi (optional) keep to the cells from y lo up to y hi.
+function T.map.top(x, z, lo, hi)
     local ok, why = ready()
     if not ok then return nil, why end
     local mx, _, mz = toMap(x, 0, z)
-    local my, name = columnTop(columnsOf(), mx, mz, -math.huge, math.huge)
+    local dy = S.frame.dy
+    local my, name = columnTop(columnsOf(), mx, mz, lo and lo + dy or -math.huge, hi and hi + dy or math.huge)
     trim()
     if not my then return nil, "no solid block known in that column" end
     return my - S.frame.dy, name

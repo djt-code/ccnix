@@ -405,20 +405,41 @@ local function record(e)
     end
 end
 
+-- The block's short name, for telling a placed block from the item that placed it (a torch item, a wall_torch block).
+local function shortOf(name)
+    local _, short = text.cut(name, ":")
+    return short or name
+end
+
+-- Is the block one the item places: the same name, or one ending in _<item> (a torch makes a wall_torch)?
+local function madeBy(block, item)
+    local want, found = shortOf(item), shortOf(block)
+    return found == want or text.endsWith(found, "_" .. want)
+end
+
 -- Hear a dig or a placement (T.cfg.undo on, and not while undoing) and write it down.
 local function heard(e)
     if S.undoing or not T.cfg.undo then return end
     if e.kind == "dig" and e.was then
         record({ kind = "dig", x = e.x, y = e.y, z = e.z, name = e.was, state = e.state })
-    elseif e.kind == "place" and e.item then
+    elseif e.kind == "place" and e.item and (not e.block or madeBy(e.block, e.item)) then
+        -- (an item used on a block, bone meal or seeds, made no block of its own: nothing to undo)
         record({ kind = "place", x = e.x, y = e.y, z = e.z, name = e.item })
     end
 end
 
-S.heard = heard
+-- One listener for the turtle, which every program's copy of this module shares: it hands each event to the copy
+-- whose program owns the turtle now (T.owns), so T.cfg.undo set by one program (claude) is neither run by another's
+-- digs (with the first copy's stale position) nor switched off by another program loading the module.
+S.hearers = S.hearers or setmetatable({}, { __mode = "k" })
+S.hearers[T] = heard
 if not S.listening then
     S.listening = true
-    T.onChange(function(e) return S.heard(e) end)
+    T.onChange(function(e)
+        for t, fn in pairs(S.hearers) do
+            if t.owns() then return fn(e) end
+        end
+    end)
 end
 
 -- The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.
@@ -434,11 +455,6 @@ function T.undoClear()
     return true
 end
 
--- The block's short name, for telling a placed block from the item that placed it (a torch item, a wall_torch block).
-local function shortOf(name)
-    local _, short = text.cut(name, ":")
-    return short or name
-end
 
 -- Go to a cell next to `cell` (the way `opts.move` allows) and say which way it is: the direction (T.dirTo), or nil and why.
 local function standBeside(cell, opts)
@@ -469,9 +485,10 @@ local function putBack(e, opts)
     if e.state then
         local placeAt = T.need("placeAt")
         if placeAt then
-            local name, _, how = placeAt(e.x, e.y, e.z, e.name, placeOpts(e.state, opts))
+            -- (a facing is a compass name, so it needs the world origin: without one placeAt says so)
+            local name, why = placeAt(e.x, e.y, e.z, e.name, placeOpts(e.state, opts))
             if name then return true end
-            return false, tostring(how)
+            return false, tostring(why)
         end
     end
     local d, why = standBeside(e, opts)
@@ -493,8 +510,7 @@ local function takeOut(e, opts)
     if d == nil then return false, "can't get next to it: " .. tostring(why) end
     local seen, data = T.look(d)
     if not (seen and type(data) == "table" and data.name) then return true end
-    local want, found = shortOf(e.name), shortOf(data.name)
-    if not (found == want or text.endsWith(found, "_" .. want)) then
+    if not madeBy(data.name, e.name) then
         return false, "the cell holds " .. data.name .. ", not " .. e.name
     end
     local ok, err = T.digDir(d)

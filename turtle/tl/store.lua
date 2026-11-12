@@ -36,7 +36,7 @@ local DUMP_AT = 2
 -- State shared by every copy of this module
 --
 -- Each program has its own turtlelib and its own copy of this module, but one turtle: the dump on a full inventory
--- is one listener, and it asks the newest copy.
+-- is one listener, and it asks the copy whose program owns the turtle now.
 --------------------------------------------------------------------------
 local holder = turtle or _G
 local S = holder._ccnixStore
@@ -123,6 +123,17 @@ local function save(list)
         return false, "couldn't save the list of chests"
     end
     return true
+end
+
+-- turtlelib's hook for a re-zeroed frame (--here somewhere else): every chest's cell is moved with move(x, y, z), and a
+-- side that is a heading turned by `turns`, so each is still the same chest.  (Not a function to call: turtlelib does.)
+T.reframeChests = function(move, turns)
+    local list = load()
+    for _, c in ipairs(list) do
+        c.x, c.y, c.z = move(c.x, c.y, c.z)
+        if type(c.side) == "number" then c.side = (c.side + turns) % 4 end
+    end
+    return save(list)
 end
 
 -- A copy of a chest record.
@@ -552,10 +563,18 @@ local function heard(e)
     S.failedAt = (not ok or after <= before) and after or nil
 end
 
-S.heard = heard
+-- One listener for the turtle, which every program's copy of this module shares: it hands each event to the copy
+-- whose program owns the turtle now (T.owns), so T.cfg.autoDump set by one program (claude) is neither run by another's
+-- digs (with the first copy's stale position) nor switched off by another program loading the module.
+S.hearers = S.hearers or setmetatable({}, { __mode = "k" })
+S.hearers[T] = heard
 if not S.listening then
     S.listening = true
-    T.onChange(function(e) return S.heard(e) end)
+    T.onChange(function(e)
+        for t, fn in pairs(S.hearers) do
+            if t.owns() then return fn(e) end
+        end
+    end)
 end
 
 return T

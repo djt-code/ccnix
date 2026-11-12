@@ -7,7 +7,8 @@ T.clearPos() - Delete the saved position file: the next job starts from home as 
 T.startAtHome(force) - Call at the start of a job: the turtle is at home, facing forward. If a saved position says otherwise, returns it instead of resetting so the program can warn the user.
 The turtle API, wrapped once:
 T.claim() - Make this module the one the wrapped turtle functions keep up to date. Loading turtlelib does it already; call it when another program's module may have loaded since (claude, after run_program).
-T.onChange(fn) - Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "place" or "move", with x, y, z. Returns a function that removes the listener.
+T.owns() - Is this copy of turtlelib the one the wrapped turtle functions keep up to date (the last loaded, or the last to T.claim)? A module's listener that acts for its program (the undo journal, autoDump) acts only while its copy owns the turtle.
+T.onChange(fn) - Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "change", "place" or "move", with x, y, z. Returns a function that removes the listener.
 T.protect(name, x1, y1, z1, x2, y2, z2) - Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>". Replaces a box of the same name. Returns true, or nil and why.
 T.unprotect(name) - Remove the area called `name`. True, or false and why (none by that name).
 T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name, leaves that area out (see T.guarded).
@@ -83,7 +84,7 @@ T.stepTerrain() - Terrain: climb up to maxClimb to get in, then sink onto the gr
 T.goTo(tx, tz) - Navigate to column (tx,tz) with BFS + re-planning.
 T.coverColumn(x, z) - Stretch the routing area (cfg.width/length) so it takes in column (x,z) too: a turtle stopped outside it, on a farm bigger than the defaults or one lying left of or behind home, would otherwise have no route at all.
 T.goHome(opts) - Return to the start from wherever the saved position says we are (used by the `reset` subcommands and home.lua). Returns true if home.
-T.setHomeHere() - `reset --here`: the turtle was put back by hand, so accept where it is (facing forward) as home without moving.
+T.setHomeHere() - `reset --here`: the turtle was put back at home by hand, so accept where it is (facing forward) as home without moving.
 T.requireHome(force, prog) - Start a job: startAtHome, but when the saved position says the turtle is elsewhere, print the standard warning (naming the program's reset command) and return false so the program can stop.
 T.setting(name, default, description) - A setting from CC's settings (`sysctl mine.width=5` at the prompt), defined here so `sysctl -d` describes it with its description; its default where there is no settings API.
 T.saveSettings(values) - Keep values given on the command line ({ [name] = value }) as the settings, so the next run without them (or the autostart) uses them.
@@ -209,7 +210,7 @@ T.toLocal(a, b, c) - Convert a world point (a table with x, y, z, or three numbe
 The map:
 T.map.get(x, y, z) - What the map holds at x, y, z (turtle frame): the block's name, its state table if inspected, and when it was last seen (seconds); nil and why if never seen.
 T.map.set(x, y, z, name, state) - Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)
-T.map.top(x, z) - The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none.
+T.map.top(x, z, lo, hi) - The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none. lo and hi (optional) keep to the cells from y lo up to y hi.
 T.map.find(pattern, box, limit) - The cells in the box (whole map if none) whose block name matches the glob, nearest first: a list of {x, y, z, name}, and true if cut to `limit` (default 500).
 T.map.count(pattern, box) - How many cells inside the box (the whole map if none) hold a block whose name matches the glob (as in T.map.find). Nil and why if the map is unaligned.
 T.map.heights(box) - A height map of the box (17 by 17 about the turtle if none) as text: each column's highest solid y, "." where none is known.

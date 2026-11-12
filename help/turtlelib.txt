@@ -36,6 +36,8 @@ T.dataPath(name)
 
     The programs moved from the repo's top folder into turtle/ on 2026-10-28; a file left up there (a job half done) is moved down the first time it's asked for, so `--resume` and `reset` still find it. A program in ccnix's ROM (/rom/ccnix/turtle) keeps its files in /ccnix/turtle, where its updates go too (the ROM is read-only); one from an install before ccnix (/cc-turtles/turtle) is moved there the same way.
 
+    The program is the one that loaded this copy of turtlelib, whichever is running when the file is written: the wrapped turtle functions of a program that has ended keep its position beside it, not beside the next program.
+
 T.savePos()
     Write T.pos, T.dir and T.mode to the position file, so a stop or a reboot can still find the way home. Raises "Terminated" if a Ctrl+T was held back (see T.run).
 
@@ -60,10 +62,13 @@ T.startAtHome(force)
 T.claim()
     Make this module the one the wrapped turtle functions keep up to date. Loading turtlelib does it already; call it when another program's module may have loaded since (claude, after run_program).
 
-T.onChange(fn)
-    Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "place" or "move", with x, y, z. Returns a function that removes the listener.
+T.owns()
+    Is this copy of turtlelib the one the wrapped turtle functions keep up to date (the last loaded, or the last to T.claim)? A module's listener that acts for its program (the undo journal, autoDump) acts only while its copy owns the turtle.
 
-    For "dig", x, y, z is the cell, was the block's name and state the block's state table, as the inspect before it gave them; for "place", x, y, z is the cell and item the name of what was placed, if the slot's details have it; for "move", x, y, z is the cell it arrived at and from = { x, y, z }.
+T.onChange(fn)
+    Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "change", "place" or "move", with x, y, z. Returns a function that removes the listener.
+
+    For "dig", x, y, z is the cell, was the block's name and state the block's state table, as the inspect before it gave them; for "place", x, y, z is the cell, item the name of what was placed, if the slot's details have it, and block and state what the cell holds after (a torch item makes a wall_torch, seeds a crop; bone meal leaves the crop it grew); for "move", x, y, z is the cell it arrived at and from = { x, y, z }. A dig that left a block in the cell (a hoe tilling dirt into farmland) is kind "change", with was, and block and state for what is there now.
 
     A listener's error is dropped (except Ctrl+T), so one can't stop the turtle. Listeners last until the computer restarts: remove yours when the program ends.
 
@@ -106,7 +111,7 @@ T.posString()
 T.setDir(d)
     The heading is really d (a program worked it out from what's round the turtle: the saved one can be off after a stop between a turn and its save, or a turtle put back by hand).
 
-    That turns the frame the turtle counts in about where it stands, so the map (T.map, if one is kept) is told.
+    Only the heading was wrong: the frame, and the map, protected areas and chests kept in it, stay as they are (the program worked d out from its own layout, which is in that frame).
 
 T.lookAround()
     What's beside the turtle, by quarter turns to the right of the way it faces: seen[a] is the inspect data at a turns, or false for air.
@@ -311,7 +316,9 @@ T.goHome(opts)
     In flat mode the trip is made at height opts.travelY (default 0, the start height), e.g. above tall crops. The routing area is cfg.width/length, stretched to take in the turtle's position. opts.check, if given, runs once at travel height before setting off (it may correct T.dir); false from it stops the trip.
 
 T.setHomeHere()
-    `reset --here`: the turtle was put back by hand, so accept where it is (facing forward) as home without moving.
+    `reset --here`: the turtle was put back at home by hand, so accept where it is (facing forward) as home without moving.
+
+    The saved position is the one the turtle had before it was carried, so it is not taken as where this spot was: home is home, and the map, the protected areas and the chests stay put.
 
 T.requireHome(force, prog)
     Start a job: startAtHome, but when the saved position says the turtle is elsewhere, print the standard warning (naming the program's reset command) and return false so the program can stop.
@@ -871,8 +878,8 @@ T.map.get(x, y, z)
 T.map.set(x, y, z, name, state)
     Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)
 
-T.map.top(x, z)
-    The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none.
+T.map.top(x, z, lo, hi)
+    The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none. lo and hi (optional) keep to the cells from y lo up to y hi.
 
 T.map.find(pattern, box, limit)
     The cells in the box (whole map if none) whose block name matches the glob, nearest first: a list of {x, y, z, name}, and true if cut to `limit` (default 500).

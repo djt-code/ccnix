@@ -132,7 +132,8 @@ local function newTurtle()
         M.actingApi(S, "place", function(x, y, z)
             local it = S.inv[S.sel]
             if get(x, y, z) or not it then return false, "Cannot place block here" end
-            put(x, y, z, it.name)
+            -- (a bucket places its fluid, as in the game)
+            put(x, y, z, ({ ["minecraft:water_bucket"] = "minecraft:water", ["minecraft:lava_bucket"] = "minecraft:lava" })[it.name] or it.name)
             return true
         end))
 end
@@ -401,8 +402,8 @@ put(5, 0, 2, STONE)
 tp(T, 3, 0, 2, 1)
 T.scan(4)
 check("the stone ahead of a turtle at (3,0,2) facing +x is mapped at (5,0,2)", T.map.get(5, 0, 2) == STONE)
-T.setHomeHere()
-check("T.setHomeHere makes the spot (0,0,0) facing 0", T.pos.x == 0 and T.pos.z == 0 and T.dir == 0)
+T.startAtHome(true)                     -- (what a program's --here does)
+check("--here (T.startAtHome(true)) makes the spot (0,0,0) facing 0", T.pos.x == 0 and T.pos.z == 0 and T.dir == 0)
 check("...and the stone is now two ahead: (0,0,2)", T.map.get(0, 0, 2) == STONE and T.map.get(5, 0, 2) == nil)
 local f = T.map.frame()
 check("the transform is a quarter turn and a shift", f.turns == 1 and f.dx == 3 and f.dy == 0 and f.dz == 2 and f.aligned, dump(f))
@@ -425,7 +426,7 @@ local wx, wy, wz = worldOf(3, 0, 2)
 check("T.setOrigin(x, y, z, facing) with where the turtle stands (3,0,2) facing +x", T.setOrigin(wx, wy, wz, COMPASS[(F0 + 1) % 4]) == true)
 local w5 = { worldOf(5, 0, 2) }
 local before5 = T.toWorld({ x = 5, y = 0, z = 2 })
-T.setHomeHere()
+T.startAtHome(true)
 local after5 = T.toWorld({ x = 0, y = 0, z = 2 })
 check("a re-zero leaves the world's cells alone: (0,0,2) now is the world cell (5,0,2) was",
     before5 and after5 and after5.x == w5[1] and after5.y == w5[2] and after5.z == w5[3] and before5.x == w5[1], dump(after5 or {}))
@@ -436,18 +437,31 @@ local ahead2 = T.toWorld({ x = 0, y = 0, z = 2 })
 check("...two ahead of the turtle is the world cell the stone is in", ahead2 and ahead2.x == w5[1] and ahead2.y == w5[2] and ahead2.z == w5[3])
 check("...and the frame's +z points the way the turtle faces", T.origin().facing == COMPASS[(F0 + 1) % 4], T.origin().facing)
 
--- a heading corrected
+-- `reset --here` after the turtle was carried home by hand: the saved position is stale, home is home
+T = fresh()
+put(0, 0, 2, STONE)
+tp(T, 0, 0, 0, 0)
+T.scan(4)
+T.pos.x, T.pos.z, T.dir = 5, 7, 2
+T.savePos()                             -- (where it was when it was picked up)
+T.setHomeHere()
+check("T.setHomeHere (the turtle put back at home by hand) leaves the map where it was", T.map.get(0, 0, 2) == STONE
+    and T.map.frame().turns == 0 and T.map.frame().dx == 0 and T.map.frame().aligned, dump(T.map.frame()))
+cells = T.scan(4)
+check("...so a scan after it agrees: one stone, at (0,0,2)", T.map.count(STONE) == 1 and cells and cells["0,0,2"] == STONE)
+
+-- a heading corrected: only the heading was wrong, so the map stays where it is
 T = fresh()
 put(4, 0, 3, STONE)
 tp(T, 2, 0, 1, 0)
 T.scan(4)
-T.setDir(1)
-check("T.setDir turns the frame about the turtle: the stone 2 ahead and 2 right is now at (4,0,-1)", T.map.get(4, 0, -1) == STONE,
-    tostring(T.map.get(4, 0, -1)))
-mx, my, mz = T.map.toMap(4, 0, -1)
-check("...which is where it was in the map", mx == 4 and my == 0 and mz == 3)
-T.setDir(1)
-check("...and setting the heading it already is changes nothing more", T.map.frame().turns == 3 and T.map.get(4, 0, -1) == STONE)
+T.dir = 3                               -- (a turn lost: the turtle faces 0 but believes 3)
+T.setDir(0)
+check("T.setDir corrects the heading and leaves the map alone: the stone is still at (4,0,3)", T.map.get(4, 0, 3) == STONE
+    and T.map.frame().turns == 0, tostring(T.map.get(4, 0, 3)))
+cells = T.scan(4)
+check("...and a scan after it puts it in the same cell: one stone", T.map.count(STONE) == 1 and cells and cells["4,0,3"] == STONE,
+    tostring(T.map.count(STONE)))
 
 -- T.clearPos then a start, in the same program: the place it was is known
 T = fresh()

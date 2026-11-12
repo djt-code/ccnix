@@ -245,3 +245,95 @@ check("a listener that breaks stops no one, and the turtle goes on", also == 7 a
 off()
 turtle.up()
 check("the remover stops one listener only", #heard == 7 and also == 8, #heard .. " events, " .. also .. " calls")
+
+--------------------------------------------------------------------------
+-- A re-zeroing moves the protected areas and the junk chest with the frame
+--------------------------------------------------------------------------
+local function fresh()
+    -- (a new start of the computer, the disk wiped: the turtle API unwrapped)
+    for k in pairs(S.files) do S.files[k] = nil end
+    turtle._ccnixWrap = nil
+    turtle.dig, turtle.forward, turtle.place = rawDig, rawForward, turtle.place
+    for name, f in pairs(T.raw) do turtle[name] = f end
+    return load()
+end
+T = fresh()
+S.P.x, S.P.y, S.P.z, S.P.d = 0, 0, 0, 0
+T.startAtHome(true)
+T.protect("base", -2, 0, -2, 2, 3, -1)
+T.setJunkChest(0, 0, 0, 2)
+T.pos.x, T.pos.z, T.dir = 3, 10, 1             -- (ten out and three across, facing +x: a job stopped there)
+T.savePos()
+T.startAtHome(true)                             -- (`mine --here`: this spot is home now)
+local area = T.protections()[1]
+check("--here moves a protected area with the frame: the base is still the same blocks",
+    area and area.x1 == 11 and area.x2 == 12 and area.z1 == -5 and area.z2 == -1 and area.y1 == 0 and area.y2 == 3,
+    area and string.format("%d..%d %d..%d", area.x1, area.x2, area.z1, area.z2) or "none")
+check("...so a dig at the new home is not refused, and the base's real cell is",
+    T.protected(0, 0, 1) == nil and T.protected(11, 0, -3) == "base")
+local junk = T.junkChest()
+check("...and the junk chest moves and turns with it: on the old home's -z side, now its +x side",
+    junk and junk.x == 10 and junk.z == -3 and junk.side == 1, junk and string.format("%d,%d,%d side %s", junk.x, junk.y, junk.z, tostring(junk.side)) or "none")
+local T3 = load()
+check("...and another copy of the library reads the moved area from the file", T3.protected(11, 0, -3) == "base")
+T.pos.x, T.pos.z, T.dir = 4, 4, 2
+T.savePos()
+T.setHomeHere()                                  -- (`reset --here`: carried back home by hand)
+check("reset --here (put back at home by hand) leaves the areas where they were", T.protected(11, 0, -3) == "base"
+    and T.protections()[1].x1 == 11)
+
+--------------------------------------------------------------------------
+-- What a dig or placement left behind is told
+--------------------------------------------------------------------------
+T = fresh()
+S.P.x, S.P.y, S.P.z, S.P.d = 0, 0, 0, 0
+T.startAtHome(true)
+heard = {}
+T.onChange(function(e) heard[#heard + 1] = e end)
+set(0, -1, 0, { name = "minecraft:dirt" })
+local rawDigDown = T.raw.digDown
+-- (a hoe's dig on dirt tills it: the block stays, changed)
+T.raw.digDown = function()
+    local b = get(0, -1, 0)
+    if b and b.name == "minecraft:dirt" then set(0, -1, 0, { name = "minecraft:farmland" }); return true end
+    return false, "Nothing to dig here"
+end
+turtle.digDown()
+e = heard[1]
+check("a hoe tilling dirt is told as a change to farmland, not a dig", e and e.kind == "change" and e.was == "minecraft:dirt"
+    and e.block == "minecraft:farmland", e and (e.kind .. " " .. tostring(e.block)) or "nothing")
+S.inv[1] = { name = "minecraft:wheat_seeds", count = 3 }
+S.sel = 1
+local rawPlace = T.raw.place
+T.raw.place = function()
+    -- (seeds make a crop)
+    if get(0, 0, 1) then return false, "Cannot place block here" end
+    set(0, 0, 1, { name = "minecraft:wheat" })
+    return true
+end
+set(0, 0, 1, nil)
+turtle.place()
+e = heard[2]
+check("a placement is told with what the cell holds after: seeds make wheat", e and e.kind == "place"
+    and e.item == "minecraft:wheat_seeds" and e.block == "minecraft:wheat", e and tostring(e.block) or "nothing")
+T.raw.place, T.raw.digDown = rawPlace, rawDigDown
+
+--------------------------------------------------------------------------
+-- A program that has ended keeps its data where it was
+--------------------------------------------------------------------------
+T = fresh()
+shell = M.shellApi("rom/ccnix/turtle/mine.lua")
+T = load()
+S.P.x, S.P.y, S.P.z, S.P.d = 0, 0, 0, 0
+T.startAtHome(true)
+set(0, 0, 1, nil); set(0, 0, 2, nil)
+shell = M.shellApi("rom/programs/turtle/go.lua")  -- (mine has ended; the player types `go forward 2`)
+turtle.forward(); turtle.forward()
+check("moves made by the next program keep the ended one's position, in its own folder",
+    S.files["ccnix/turtle/.turtlepos"] == "0 0 2 0 flat" and S.files["programs/turtle/.turtlepos"] == nil
+    and not S.dirs["programs/turtle"], tostring(S.files["ccnix/turtle/.turtlepos"]))
+local T4 = load()
+check("T.owns says which copy the wrapped calls keep up to date: the newest load", T4.owns() and not T.owns())
+T.claim()
+check("...or the last to T.claim", T.owns() and not T4.owns())
+shell = M.shellApi("x.lua")

@@ -138,6 +138,9 @@ T.DX, T.DZ = DX, DZ
 --------------------------------------------------------------------------
 T.mode = "flat"            -- "flat" or "terrain": which stepper to use going home
 
+-- The program that loaded this copy of the library (nil without a shell)
+local loadedBy = shell and shell.getRunningProgram and shell.getRunningProgram() or nil
+
 -- The path of a data file kept next to the running program (/ccnix/turtle for one in the ROM),
 -- moving an old copy down the first time it's asked for.
 --
@@ -146,8 +149,11 @@ T.mode = "flat"            -- "flat" or "terrain": which stepper to use going ho
 -- program in ccnix's ROM (/rom/ccnix/turtle) keeps its files in /ccnix/turtle, where its updates go too
 -- (the ROM is read-only); one from an install before ccnix (/cc-turtles/turtle) is moved there the same
 -- way.
+--
+-- The program is the one that loaded this copy of turtlelib, whichever is running when the file is written: the
+-- wrapped turtle functions of a program that has ended keep its position beside it, not beside the next program.
 function T.dataPath(name)
-    local prog = shell and shell.getRunningProgram and shell.getRunningProgram() or ""
+    local prog = loadedBy or shell and shell.getRunningProgram and shell.getRunningProgram() or ""
     local dir = fs.getDir(prog)
     local inRom = text.stripPrefix(dir, "rom/")
     if inRom then
@@ -229,14 +235,43 @@ end
 -- the code below knows there is a map whose frame a re-zeroing would move.
 T.MAP_DIR = ".map"
 
--- Tell the map (if there is one) that the frame the turtle counts in changed: the spot
--- that was `old` ({ x, y, z, dir }, or nil if that isn't known) is now `new` (default
--- the start, 0,0,0 facing 0).  Without a map on disk this does nothing, and loads nothing.
-local function frameMoved(old, new)
+-- What turtlelib keeps in the turtle's frame (the protected areas, the junk chest) moves with
+-- it: functions(move, turns) added below, where move(x, y, z) gives a cell's new x, y, z and
+-- a heading h becomes (h + turns) % 4.
+local reframers = {}
+-- ...and what the modules keep, by data file: the T function (a registry name) that moves it.
+-- The module is loaded only if its file is there.  (An unfinished T.build and the undo journal
+-- are not moved: they belong to the frame they were made in.)
+local REFRAMED_FILES = { [".chests"] = "reframeChests" }
+
+-- (x, z) turned by k quarter turns to the right, as tl.world turns its frames
+local TURN_XZ = { [0] = { 1, 0, 0, 1 }, { 0, 1, -1, 0 }, { -1, 0, 0, -1 }, { 0, -1, 1, 0 } }
+
+-- The frame the turtle counts in changed: the spot that was `old` ({ x, y, z, dir }, or nil
+-- if that isn't known) is now the start, 0,0,0 facing 0.  What is kept in the turtle's frame
+-- is moved to match, and the map (if there is one on disk) is told.  With `old` unknown, the
+-- map is marked unaligned and the rest is left where it was (nobody knows better).
+local function frameMoved(old)
+    local home = old and old.x == 0 and old.y == 0 and old.z == 0 and old.dir == 0
+    if home then return end
+    if old then
+        local turns = (0 - old.dir) % 4
+        local m = TURN_XZ[turns]
+        local function move(x, y, z)
+            local px, pz = x - old.x, z - old.z
+            return m[1] * px + m[2] * pz, y - old.y, m[3] * px + m[4] * pz
+        end
+        for _, fn in ipairs(reframers) do fn(move, turns) end
+        for file, name in pairs(REFRAMED_FILES) do
+            if fs.exists(T.dataPath(file)) then
+                local f = T.need(name)
+                if f then f(move, turns) end
+            end
+        end
+    end
     if not fs.exists(T.dataPath(T.MAP_DIR)) then return end
-    if old and old.x == 0 and old.y == 0 and old.z == 0 and old.dir == 0 and not new then return end
     local changed = T.need("frameChanged")
-    if changed then pcall(changed, old, new) end
+    if changed then pcall(changed, old) end
 end
 
 -- Where the turtle was when T.clearPos last forgot it: the frame it left, for the map
@@ -247,6 +282,15 @@ function T.clearPos()
     local p = T.dataPath(POS_FILE)
     cleared = T.loadPos() or { x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = T.dir }
     if fs.exists(p) then fs.delete(p) end
+end
+
+-- The spot the turtle stands on is (0,0,0) facing 0 from now on; it was `old` in the frame
+-- before (nil: not known).
+local function rezero(old)
+    cleared = nil
+    T.pos.x, T.pos.y, T.pos.z, T.dir = 0, 0, 0, 0
+    T.savePos()
+    frameMoved(old)
 end
 
 -- Call at the start of a job: the turtle is at home, facing forward.
@@ -262,11 +306,7 @@ function T.startAtHome(force)
     if saved and not force and (saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
         return saved
     end
-    local old = saved or cleared
-    cleared = nil
-    T.pos.x, T.pos.y, T.pos.z, T.dir = 0, 0, 0, 0
-    T.savePos()
-    frameMoved(old)
+    rezero(saved or cleared)
     return nil
 end
 
@@ -319,6 +359,10 @@ local TURN_BY = { turnRight = 1, turnLeft = 3 }
 -- a name that has one of these words in it, or starts with one of these
 local NEVER_DIG_WORDS = { "chest", "barrel", "shulker", "spawner" }
 local NEVER_DIG_PREFIXES = { "computercraft:" }
+-- Blocks a hoe's dig turns into farmland (or a path) rather than breaking:
+-- the wrapped dig looks again after digging one of these
+local TILLED = { ["minecraft:dirt"] = true, ["minecraft:grass_block"] = true, ["minecraft:coarse_dirt"] = true,
+                 ["minecraft:rooted_dirt"] = true, ["minecraft:dirt_path"] = true }
 
 local W                                -- the marker: raw, listeners, areas, owner, impl
 local raw = {}                         -- the turtle's own functions, as before wrapping
@@ -353,13 +397,23 @@ function T.claim()
     if W then W.owner, W.impl = T, impl end
 end
 
+-- Is this copy of turtlelib the one the wrapped turtle functions keep up to date (the last
+-- loaded, or the last to T.claim)?  A module's listener that acts for its program (the undo
+-- journal, autoDump) acts only while its copy owns the turtle.
+function T.owns()
+    return W ~= nil and turtle[WRAP_KEY] == W and W.owner == T
+end
+
 -- Call fn(event) for every successful dig, placement and move from now on, by any program on this
--- turtle; event.kind is "dig", "place" or "move", with x, y, z.  Returns a function that removes the
+-- turtle; event.kind is "dig", "change", "place" or "move", with x, y, z.  Returns a function that removes the
 -- listener.
 --
 -- For "dig", x, y, z is the cell, was the block's name and state the block's state table, as the inspect
--- before it gave them; for "place", x, y, z is the cell and item the name of what was placed, if the slot's
--- details have it; for "move", x, y, z is the cell it arrived at and from = { x, y, z }.
+-- before it gave them; for "place", x, y, z is the cell, item the name of what was placed, if the slot's
+-- details have it, and block and state what the cell holds after (a torch item makes a wall_torch, seeds a
+-- crop; bone meal leaves the crop it grew); for "move", x, y, z is the cell it arrived at and from = { x, y, z }.
+-- A dig that left a block in the cell (a hoe tilling dirt into farmland) is kind "change", with was, and
+-- block and state for what is there now.
 --
 -- A listener's error is dropped (except Ctrl+T), so one can't stop the turtle.  Listeners last until the
 -- computer restarts: remove yours when the program ends.
@@ -447,6 +501,19 @@ local function saveAreas(list)
         lines[#lines + 1] = string.format("%d %d %d %d %d %d %s", a[1], a[2], a[3], a[4], a[5], a[6], a.name)
     end
     return fileio.write(path, table.concat(lines, "\n") .. "\n")
+end
+
+-- A re-zeroing moves every area with the frame, so each still guards the same blocks.
+reframers[#reframers + 1] = function(move)
+    local list = areas()
+    if #list == 0 then return end
+    for i, a in ipairs(list) do
+        local x1, y1, z1 = move(a[1], a[2], a[3])
+        local x2, y2, z2 = move(a[4], a[5], a[6])
+        list[i] = { name = a.name, math.min(x1, x2), math.min(y1, y2), math.min(z1, z2),
+                    math.max(x1, x2), math.max(y1, y2), math.max(z1, z2) }
+    end
+    saveAreas(list)
 end
 
 local function isWhole(n) return type(n) == "number" and n == math.floor(n) end
@@ -541,9 +608,19 @@ function T.neverDig(name)
     return false
 end
 
+-- What's in the cell on `side` now: its name and state, or nil for air.
+local function lookAt(side)
+    local inspect = turtle[INSPECT_SIDE[side]]
+    if not inspect then return nil end
+    local ok, data = inspect()
+    if ok and type(data) == "table" then return data.name, data.state end
+    return nil
+end
+
 -- The wrapped digs: refuse what's protected, look at what's there (the
 -- listeners are told it), then dig (with the tool side the caller named,
--- if any).
+-- if any).  A dig of a block a hoe tills is looked at again after, since
+-- the block may still be there, changed.
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -556,15 +633,20 @@ for name, side in pairs(DIG_SIDE) do
             return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
         end
         return afterwards(function()
-            if W and W.listeners[1] then
-                tell({ kind = "dig", x = x, y = y, z = z,
-                       was = ok and data and data.name or nil, state = ok and data and data.state or nil })
+            if not (W and W.listeners[1]) then return end
+            local was = ok and data and data.name or nil
+            local event = { kind = "dig", x = x, y = y, z = z, was = was, state = ok and data and data.state or nil }
+            if was and TILLED[was] then
+                local now, nowState = lookAt(side)
+                if now then event.kind, event.block, event.state = "change", now, nowState end
             end
+            tell(event)
         end, raw[name](...))
     end
 end
 
--- The wrapped placements: place, then tell the listeners what went where.
+-- The wrapped placements: place, then tell the listeners what went where
+-- (the item, and what the cell holds now).
 for name, side in pairs(PLACE_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -574,7 +656,9 @@ for name, side in pairs(PLACE_SIDE) do
             item = it and it.name
         end
         return afterwards(function()
-            tell({ kind = "place", x = x, y = y, z = z, item = item })
+            if not (W and W.listeners[1]) then return end
+            local block, state = lookAt(side)
+            tell({ kind = "place", x = x, y = y, z = z, item = item, block = block, state = state })
         end, raw[name](...))
     end
 end
@@ -616,12 +700,10 @@ end
 -- turtle: the saved one can be off after a stop between a turn and its
 -- save, or a turtle put back by hand).
 --
--- That turns the frame the turtle counts in about where it stands, so the map (T.map, if
--- one is kept) is told.
+-- Only the heading was wrong: the frame, and the map, protected areas and
+-- chests kept in it, stay as they are (the program worked d out from its
+-- own layout, which is in that frame).
 function T.setDir(d)
-    if d ~= T.dir then
-        frameMoved({ x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = T.dir }, { x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = d })
-    end
     T.dir = d
     T.savePos()
 end
@@ -1513,10 +1595,13 @@ function T.goHome(opts)
     return false
 end
 
--- `reset --here`: the turtle was put back by hand, so accept where it is
+-- `reset --here`: the turtle was put back at home by hand, so accept where it is
 -- (facing forward) as home without moving.
+--
+-- The saved position is the one the turtle had before it was carried, so it is not taken as
+-- where this spot was: home is home, and the map, the protected areas and the chests stay put.
 function T.setHomeHere()
-    T.startAtHome(true)
+    rezero({ x = 0, y = 0, z = 0, dir = 0 })
     print("Home set to the current position.")
 end
 
@@ -2312,6 +2397,14 @@ function T.junkChest()
     return nil
 end
 
+-- A re-zeroing moves the junk chest's place with the frame (a side that is a heading turns too).
+reframers[#reframers + 1] = function(move, turns)
+    local j = T.junkChest()
+    if not j then return end
+    local x, y, z = move(j.x, j.y, j.z)
+    T.setJunkChest(x, y, z, type(j.side) == "number" and (j.side + turns) % 4 or j.side)
+end
+
 -- The craft module calls this for each item it makes, so it is never
 -- junk for the rest of the job (until the computer restarts, or
 -- T.clearCrafted()).
@@ -2458,7 +2551,7 @@ T.registry = {
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",
     -- tl.store: the chests at home, what is in them, putting away and fetching
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
-    fetch = "tl.store", stow = "tl.store", autoDump = "tl.store",
+    fetch = "tl.store", stow = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
     -- tl.journal: the job journal, the undo journal and reports to the player
