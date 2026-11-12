@@ -38,7 +38,7 @@ section.
     "[[:digit:]]*"`, an IRC `/ignore *!*@host`.
   - **numbers:** `test 99999999999999999999 -gt 99999999999999999998`,
     `expr +5 + 1` (now 6), `sleep +1`, `printf "%d %x\n" 0x1f 255`, `seq -s
-    "\t" 3`, `tr -d "[:punct:]"`, `touch -d "2026-01-02 03:04:05+02:00" f`.
+    "\t" 3`, `tr -d "[:punct:]"`.
   - **text:** `diff -b` on lines with leading blanks, the pager wrapping a
     long coloured line (`vim` on a long line, `help` in a narrow window),
     a long IRC message split in two (now at the last space that fits, with
@@ -53,10 +53,10 @@ section.
     ways; vi `:r` of an empty file (adds nothing, as vim); a Lua page
     using `text` and `fileio`; jbod on the fileserver (reads through the
     disk under the pool).
-  - **coreutils, second pass:** a long `sort`, `grep -r`, `find /` and
-    `wc` on a big file don't get "Too long without yielding" (cu.breathe
-    now yields once a second); `od -j 0x10 -N 8` and `od -d`; `printf "%x
-    %o %#08X\n" -1 8 255`; `touch` a file; `df` (its columns);
+  - **coreutils, second pass:** a long `sort`, `grep -c` over many
+    files, `find /` and `wc` on a big file don't get "Too long without yielding" (cu.breathe
+    now yields once a second); `od -j 0x10 -N 8`; `printf "%x
+    %o %#08X\n" -1 8 255`; `df` (its columns);
     `mkdir`/`rmdir`/`tee` errors without the path in front.
   - **behaviour that changed on purpose:** WHOIS idle reads "5m 3s";
     `head -n x`, `uniq -f x`, `strings -n x`, `xargs -s 0` say "bad -n x"
@@ -319,6 +319,16 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.3, the text libraries' smoke test on Lab-B:
+  `ls *.lua`, `ls [[:upper:]]*`, `find . -name "[[:digit:]]*"`, `case b
+  in [a"-"c])` (no), `test` on 20-digit numbers, `expr +5 + 1` (6),
+  `printf "%d %x\n" 0x1f 255`, `printf "%x %o %#08X\n" -1 8 255`, `seq -s
+  "\t" 3 | od -c`, `tr -d "[:punct:]"`, `cut -d: -f1`, `sort -n`, `head -n
+  x` (bad -n x), `sleep +1`, a `for` loop into `wc -l`, `diff -b` (leading
+  blanks still differ, as GNU's), `od -d`: all as expected.  `touch -d
+  <date>` parses it (CraftOS can't set a file's time, as touch's help
+  says); grep has no -r (nor has POSIX's).
 
 - 2026-11-12 — ROM 0.42.3: `/mc tell nobody hi`: "Can't: nobody isn't in
   the game"; a tell with the player's name in another case still told
