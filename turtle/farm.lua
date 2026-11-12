@@ -85,6 +85,15 @@
 --  * Navigation is at a fixed cruise height (turtlelib.stepFlat) with a
 --    learned obstacle map and BFS re-routing.  Position is saved to disk
 --    after every move so `farm reset` can bring it home after a Ctrl+T.
+--  * Obstacles are kept: a block that stops a step at travel height is
+--    written in the map (T.map) with its name, and every pass and later run
+--    starts with the columns the map holds a block in at that height already
+--    avoided, so the turtle doesn't bump into the same post over and over.
+--    If that leaves no way to a tile it forgets them for the trip and finds
+--    out for itself.  `sysctl farm.map=false` turns it off.
+--  * Protected areas (T.protect, by another program or by hand) are kept
+--    to: crops in one are left alone, not harvested, and the pass says how
+--    many.
 
 -- What this file defines at the top level goes in a table of its own,
 -- not in local variables: CC's Lua counts every local still in scope in
@@ -187,9 +196,73 @@ TILLABLE = {
     ["minecraft:rooted_dirt"] = true,
 }
 
-T.step = T.stepFlat
 T.mode = "flat"
 T.diggable = {}            -- never dig while moving
+
+--------------------------------------------------------------------------
+-- Obstacles kept in the map
+--------------------------------------------------------------------------
+-- A block that stops a step at travel height is noted in the map (T.map),
+-- and the columns the map holds a block in at that height start every pass
+-- blocked, so the turtle doesn't bump into the same post again and again,
+-- pass after pass or run after run.  The memory is only a hint: when a
+-- trip can't find a way with it, it is dropped for the trip and the turtle
+-- finds out for itself (a cell it moves through is air in the map again).
+USE_MAP = T.setting("farm.map", true, "Keep the obstacles farm runs into in the map, so later passes and runs route round them")
+remembered = {}          -- column key -> true: obstacles at travel height, from the map and from this run
+obstaclesLoaded = false
+noting = true            -- false while the heading is in doubt: where the turtle bumps is then not where it thinks
+-- What does not stop a turtle: air, and the liquids it can swim through.
+PASSABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true,
+             ["minecraft:water"] = true, ["minecraft:lava"] = true }
+
+-- The columns the map holds a block in at travel height, inside the routing area.
+function loadObstacles()
+    obstaclesLoaded = true
+    if not fs.exists(T.dataPath(T.MAP_DIR)) then return end
+    local w, l = math.abs(T.cfg.width) + T.cfg.margin, math.abs(T.cfg.length) + T.cfg.margin
+    for x = -w, w do
+        for z = -l, l do
+            if T.inBounds(x, z) then
+                local name = T.map.get(x, travelY, z)
+                if name and not PASSABLE[name] then remembered[T.ckey(x, z)] = true end
+            end
+        end
+    end
+end
+
+-- T.stepFlat, noting in the map what stopped it, if there is a block there.
+function stepNoting()
+    if T.stepFlat() then return true end
+    if USE_MAP and noting and T.pos.y == travelY then
+        local seen, block = turtle.inspect()
+        if seen and not PASSABLE[block.name] then
+            local ahead = T.neighbour(T.dir)
+            remembered[T.ckey(ahead.x, ahead.z)] = true
+            T.map.set(ahead.x, ahead.y, ahead.z, block.name, block.state)
+        end
+    end
+    return false
+end
+T.step = stepNoting
+
+-- T.clearBlocked, then the obstacles the map knows of blocked again.
+function forgetObstacles()
+    T.clearBlocked()
+    if not USE_MAP then return end
+    if not obstaclesLoaded then loadObstacles() end
+    for k in pairs(remembered) do T.blocked[k] = true end
+end
+
+-- T.goTo, and when the remembered obstacles leave no way, once more without them.
+realGoTo = T.goTo
+function T.goTo(tx, tz)
+    if realGoTo(tx, tz) then return true end
+    if next(remembered) == nil then return false end
+    for k in pairs(remembered) do T.blocked[k] = nil end
+    remembered = {}
+    return realGoTo(tx, tz)
+end
 
 --------------------------------------------------------------------------
 -- Farm layout map: tiles[key] = "crop" | "cane" | "water" | "other", and
@@ -1636,7 +1709,7 @@ end
 -- The tiles looked at are the farm tiles nearest the turtle, as they lie
 -- with the turtle facing each way in turn (from home, the wrong ways all
 -- face off the farm), the saved heading first: if those fit, that's it.
-function checkHeading()
+function lookAtHeading()
     local px, py, pz = T.pos.x, T.pos.y, T.pos.z
     local near = {}
     for k, kind in pairs(tiles) do
@@ -1679,7 +1752,7 @@ function checkHeading()
     T.toY(travelY)
     local back = T.goTo(px, pz) and T.toY(py)
     T.cfg.margin = margin
-    T.clearBlocked()
+    forgetObstacles()
     if back and r == 0 then return true end
     if back and r then
         T.setDir((T.dir + r) % 4)
@@ -1691,6 +1764,17 @@ function checkHeading()
     print("faces, so its saved position can't be trusted. Carry it home, face it")
     print("along the farm, and run `farm reset --here`.")
     return false
+end
+
+-- lookAtHeading, with what stops the turtle on the way not noted in the map:
+-- while the heading is in doubt, where the turtle thinks it bumps is too.
+function checkHeading()
+    forgetObstacles()
+    noting = false
+    local ok, fits = pcall(lookAtHeading)
+    noting = true
+    if not ok then error(fits, 0) end
+    return fits
 end
 
 --------------------------------------------------------------------------
@@ -1756,7 +1840,7 @@ if haveMap and not doClone then
 end
 
 T.withTool(HOE, function()
-    T.clearBlocked()
+    forgetObstacles()
     T.inventoryLine("On board")
     if findCompostHopper() then
         print("Compost hopper behind home: surplus wheat and beetroot seeds go into it.")
@@ -1778,14 +1862,14 @@ T.withTool(HOE, function()
             dumpAtHome()
             -- learning saw every tile, so only its gaps need fixing
             if #gaps > 0 then
-                T.clearBlocked()
+                forgetObstacles()
                 repair(gaps)
             end
         end
     end
     -- a cloned layout gets checked lanes and all once
     if doRepair or doClone then
-        T.clearBlocked()
+        forgetObstacles()
         fullRepair()
     end
     if doRepair then
@@ -1793,7 +1877,7 @@ T.withTool(HOE, function()
         return
     end
     while true do
-        T.clearBlocked()
+        forgetObstacles()
         restartAfter = REPEAT > 0 and REPEAT * 60 or nil
         local ok, damaged = pcall(farmPass, true, false)
         restartAfter = nil
@@ -1802,7 +1886,7 @@ T.withTool(HOE, function()
             dumpAtHome()
             if #damaged > 0 then
                 -- missing ground: check the whole farm, lanes included
-                T.clearBlocked()
+                forgetObstacles()
                 fullRepair()
             end
             growPasses()
