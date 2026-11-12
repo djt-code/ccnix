@@ -241,8 +241,9 @@ function S.attach(srv, opts)
                     player = found
                 end
                 local code = string.format("%06d", random(0, 999999))
+                local sent, why = mc.tell(player, "IRC: " .. c.nick .. " says this is you. If so, in IRC: /msg NickServ CONFIRM " .. code, "NickServ")
+                if not sent then return tell(NickServ, c, "Can't whisper to " .. player .. ": " .. tostring(why)) end
                 pending[c] = { player = player, code = code, untilT = srv.clock() + S.CODE_LIFE }
-                mc.tell(player, "IRC: " .. c.nick .. " says this is you. If so, in IRC: /msg NickServ CONFIRM " .. code, "NickServ")
                 tell(NickServ, c, "A code is on its way to " .. player .. " in the game: /msg NickServ CONFIRM <code>")
             end },
         CONFIRM = { usage = "<code>", about = "the code: your nick is that Minecraft player now", min = 1,

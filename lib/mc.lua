@@ -19,8 +19,10 @@
 --     (says, tells, hears chat: its "chat" event), a Player Detector (who's
 --     on; its join and leave events), an Environment Detector (rain and
 --     thunder).  Both names AP has used are looked for (chatBox and
---     chat_box ...), and both of its ways of calling (an options table,
---     and the older arguments in a row), so the version doesn't matter.
+--     chat_box ...), both of its ways of calling (0.8's options table,
+--     the older arguments in a row) and both of its events' layouts
+--     (0.8's UUID first, the name first before), so the version doesn't
+--     matter.  What can't be sent at all is dropped, and says why.
 --   * A command computer's commands API: `list` for who's on and
 --     `tellraw` to speak (no hearing chat: that needs the Chat Box).
 -- What isn't there is nil in mc.has, and its function returns nil and
@@ -30,6 +32,7 @@
 -- rule), and isn't an event here.
 
 local text = require("text")
+local convert = require("convert")
 
 local M = {}
 
@@ -42,16 +45,19 @@ local function findPeripheral(...)
     return nil
 end
 
--- Call p[name] with an options table, else with the older arguments
--- (positional); the result, or nil and why.
-local function callEither(p, name, withOptions, positional)
+-- Call p[name] with each way of passing the arguments in turn (AP's
+-- versions differ), until one is taken: "sent", or "busy" (refused for
+-- now: the cooldown), or nil and why it can't be done at all.
+local function call(p, name, ...)
     local f = p[name]
     if type(f) ~= "function" then return nil, "no " .. name end
-    local ok, a, b = pcall(f, table.unpack(withOptions))
-    if ok then return a, b end                  -- (it took them: a cooldown's false is an answer too)
-    local ok2, c, d = pcall(f, table.unpack(positional))
-    if ok2 then return c, d end
-    return nil, tostring(c)
+    local why
+    for _, args in ipairs({ ... }) do
+        local ok, a, b = pcall(f, table.unpack(args))
+        if ok then return a and "sent" or "busy", b end
+        why = tostring(a)
+    end
+    return nil, why
 end
 
 -- "There are 2 of a max of 20 players online: Steve, Alex" (and the
@@ -69,6 +75,20 @@ local PLAYER_EVENTS = {
     playerLeave = "leave", player_leave = "leave",
     playerDeath = "death", player_death = "death",
 }
+
+-- Where an event's player, text and $-hidden flag are, as AP has laid
+-- them out: 0.8 puts the player's UUID first (chat: uuid, name, message,
+-- hidden, the message as UTF-8 bytes; the others: uuid, name ...), older
+-- versions the name (chat: name, message, uuid, hidden).
+local LAYOUTS = {
+    uuidFirst = { player = 2, text = 3, hidden = 4, utf8 = 5 },
+    nameFirst = { player = 1, text = 2, hidden = 4 },
+}
+-- A UUID has dashes, and a player's name can't (letters, digits, _).
+local function layoutOf(first)
+    if first == nil or text.find(tostring(first), "-") then return LAYOUTS.uuidFirst end
+    return LAYOUTS.nameFirst
+end
 
 function M.new(opts)
     opts = opts or {}
@@ -116,30 +136,38 @@ function M.new(opts)
         return nil, "nothing here can tell who's on"
     end
 
-    -- Speak now (the chat box may refuse: its cooldown); true, or nil and why.
+    -- Speak now: "sent", "busy" (the chat box's cooldown), or nil and why.
+    -- To one player: sendMessageToPlayer before AP 0.8, sendMessage with
+    -- the player in its options since (never a sendMessage that could
+    -- tell everyone instead).
     local function speak(item)
         local from = item.from
         if chat then
             if item.player then
-                return callEither(chat, "sendMessageToPlayer", { item.text, item.player, { prefix = from } },
+                local r, why = call(chat, "sendMessageToPlayer", { item.text, item.player, { prefix = from } },
                     { item.text, item.player, from })
+                if r or type(chat.sendMessageToPlayer) == "function" then return r, why end
+                return call(chat, "sendMessage", { item.text, { prefix = from, player = item.player } })
             end
-            return callEither(chat, "sendMessage", { item.text, { prefix = from } }, { item.text, from })
+            return call(chat, "sendMessage", { item.text, { prefix = from } }, { item.text, from })
         end
         if commands and commands.exec then
             local json = textutils.serializeJSON({ text = (from and ("[" .. from .. "] ") or "") .. item.text })
             local ok, done = pcall(commands.exec, "tellraw " .. (item.player or "@a") .. " " .. json)
-            if ok and done then return true end
+            if ok and done then return "sent" end
             return nil, "tellraw failed"
         end
         return nil, "no chat box or command computer"
     end
 
+    -- What waits, sent in order until the chat box is busy; what can't be
+    -- sent at all is dropped (item.failed says why), not left in the way.
     function self.flush()
         while queue[1] do
-            local ok = speak(queue[1])
-            if not ok then return false end
-            table.remove(queue, 1)
+            local r, why = speak(queue[1])
+            if r == "busy" then return false end
+            local item = table.remove(queue, 1)
+            if not r then item.failed = why or "it failed" end
         end
         return true
     end
@@ -149,6 +177,7 @@ function M.new(opts)
         if #queue >= 50 then table.remove(queue, 1) end   -- (a flood: the oldest goes)
         queue[#queue + 1] = item
         self.flush()
+        if item.failed then return nil, item.failed end
         return true
     end
     function self.say(message, from) return enqueue({ text = message, from = from }) end
@@ -156,13 +185,17 @@ function M.new(opts)
     function self.waiting() return #queue end
 
     -- A CC event as a game event, or nil.
-    function self.event(name, a, b, _, d)
+    function self.event(name, ...)
+        local args = { ... }
+        local at = layoutOf(args[1])
         if name == "chat" then
-            if not chat or d == true then return nil end          -- ($: hidden)
-            return { kind = "chat", player = a, text = b }
+            if not chat or args[at.hidden] == true then return nil end          -- ($: hidden)
+            local said = args[at.text]
+            if at.utf8 and type(args[at.utf8]) == "string" then said = convert.fromUTF8(args[at.utf8]) end
+            return { kind = "chat", player = args[at.player], text = said }
         end
         local kind = PLAYER_EVENTS[name]
-        return kind and { kind = kind, player = a } or nil
+        return kind and { kind = kind, player = args[at.player] } or nil
     end
 
     -- Without a detector's events: who came and went since the last ask.

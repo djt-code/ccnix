@@ -134,15 +134,12 @@ check("match: ascii casemapping keeps [ and { apart; compileMask is the same tes
 local mcLib = require("mc")
 local said = {}
 local busy = 0
-local chatNew = {                       -- AP 0.8: an options table
+local chatNew = {                       -- AP 0.8: an options table (player in it: no sendMessageToPlayer)
     sendMessage = function(text, o)
         if type(o) ~= "table" then error("bad argument #2 (table expected)") end
         if busy > 0 then busy = busy - 1; return false, "cooldown" end
-        said[#said + 1] = "[" .. tostring(o.prefix) .. "] " .. text
-        return true
-    end,
-    sendMessageToPlayer = function(text, who, o)
-        said[#said + 1] = who .. " <- [" .. tostring(type(o) == "table" and o.prefix or o) .. "] " .. text
+        if o.player and o.player ~= "Steve" and o.player ~= "Alex" then error("player not found") end
+        said[#said + 1] = (o.player and (o.player .. " <- ") or "") .. "[" .. tostring(o.prefix) .. "] " .. text
         return true
     end,
 }
@@ -165,6 +162,28 @@ local gameOld = mcLib.new({ chatBox = { sendMessage = function(text, prefix)
 end } })
 gameOld.say("hi", "amy")
 check("mc: an older chat box (arguments in a row) works too", old[1] == "[amy] hi")
+local toldOk = game.tell("Steve", "psst", "MC")
+local toldBad, whyBad = game.tell("Nobody", "psst", "MC")
+game.say("after", "bob")
+check("mc: AP 0.8's tell is sendMessage with the player; one it can't send is dropped, says why, and doesn't hold up the rest",
+    toldOk and said[3] == "Steve <- [MC] psst" and not toldBad and text.find(tostring(whyBad), "player not found")
+    and said[4] == "[bob] after" and game.waiting() == 0, text.join(said, " | "))
+local toldOld = {}
+local gameOld2 = mcLib.new({ chatBox = {
+    sendMessage = function() error("a tell must not go to everyone") end,
+    sendMessageToPlayer = function(t, who, prefix)
+        if type(prefix) == "table" then error("bad argument #3 (string expected)") end
+        toldOld[#toldOld + 1] = who .. " <- [" .. prefix .. "] " .. t
+        return true
+    end } })
+check("mc: an older chat box's tell is sendMessageToPlayer", gameOld2.tell("Alex", "hey", "MC") and toldOld[1] == "Alex <- [MC] hey")
+local uuid = "1883d3ba-cf30-4e5c-ad96-e7bf6b8ade44"
+local n1 = game.event("chat", uuid, "Steve", "caf?", false, "caf\195\169")
+local n2 = game.event("chat", uuid, "Steve", "$psst", true, "$psst")
+local n3, n4 = game.event("player_join", uuid, "Alex", "minecraft:overworld"), game.event("player_death", uuid, "Alex", "lava")
+check("mc: AP 0.8's events (the UUID first; chat's UTF-8 bytes as CC's text)",
+    n1.player == "Steve" and n1.text == "caf\233" and n2 == nil and n3.kind == "join" and n3.player == "Alex"
+    and n4.kind == "death" and n4.player == "Alex", n1 and (tostring(n1.player) .. " " .. tostring(n1.text)))
 local e1 = game.event("chat", "Steve", "yo", "uuid", false)
 local e2 = game.event("chat", "Steve", "$secret", "uuid", true)
 local e3, e4 = game.event("playerJoin", "Alex", "overworld"), game.event("player_leave", "Alex")
@@ -350,6 +369,14 @@ bob.say("WHOIS alice")
 check("NickServ: VERIFY whispers a code to the player (named as the game has it); CONFIRM ties them; WHOIS says so",
     code ~= nil and fakeGame.told[1]:sub(1, 7) == "Steve: " and al2.has("is the Minecraft player Steve now")
     and bob.has(" 320 bob alice :is the Minecraft player Steve") and bob.has(" 330 bob alice alice "))
+local realTell = fakeGame.tell
+fakeGame.tell = function() return nil, "player not found" end
+al2.clear()
+al2.say("PRIVMSG NickServ :VERIFY steve")
+al2.say("PRIVMSG NickServ :CONFIRM 000000")
+fakeGame.tell = realTell
+check("NickServ: VERIFY says so when the whisper can't be sent, and no code waits",
+    al2.has("Can't whisper to Steve: player not found") and al2.has("No code is waiting"), al2.dump and al2.dump("NickServ"))
 
 -- a ping timeout
 CLOCK = CLOCK + 91

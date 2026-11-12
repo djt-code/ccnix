@@ -5,11 +5,23 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## irc: a script's sent line (0.42.1)
+## irc: the Minecraft bridge on Advanced Peripherals 0.8 (0.42.2)
 
-- With hello.lua loaded on Lab-B, someone on Lab-A says `!ping` in the
-  channel: Lab-B's buffer now shows its own "nick: pong" line too, as
-  yours, as well as Lab-A seeing it.
+- **The game's chat into #minecraft**: say something in the game. It
+  comes in as `<player> text` (it was `<uuid> player`: AP 0.8 puts the
+  player's UUID first in its events). A word with an accent (é) comes
+  through as itself.
+- **`/mc tell <player> hi`**: arrives in the game for that player only
+  (it was "Told ..." with nothing sent: AP 0.8 has no
+  sendMessageToPlayer, the player now goes in sendMessage's options).
+  Then say something in #minecraft: it still reaches the game (a tell
+  that failed used to hold up everything after it). `/mc tell nobody
+  hi`: "Can't: ...".
+- **`/ns verify <your player>`**: the code is whispered to you in the
+  game; `/ns confirm <code>`, then `/whois Lab-B` shows "is the
+  Minecraft player ...".
+- **Joins, leaves, deaths**: log out and back in, or die: each shows in
+  #minecraft with your name (the same UUID-first layout).
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
@@ -261,17 +273,6 @@ section.
   advanced monitor): the buffer list on the left, the nick list on the
   right; a click on a buffer goes there. A pocket computer: no time,
   shorter nick column, still readable.
-- **The Minecraft bridge** (0.35.0). An Advanced Peripherals Chat Box
-  beside A (and a Player Detector): `/join #minecraft` from B, say
-  something: it shows in the game's chat as [nick] text. Say something
-  in the game: it comes into #minecraft as <player> text; a player
-  joining or leaving the game shows too. `/mc players`, `/mc time`,
-  `/mc weather` (with an Environment Detector), `/mc tell <player> hi`
-  (a whisper). `/ns verify <your player>`: a code is whispered to you
-  in the game; `/ns confirm <code>`, then `/whois` shows "is the
-  Minecraft player ...". Untried: which of AP 0.8's ways of calling the
-  chat box answers (the options table or the old arguments), and the
-  event names for join and leave (both are listened for).
 - **A real client and server through the gateway** (0.35.0). From the
   VM: `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. From B,
   with the network reaching out: `irc irc.libera.chat` (plain 6667),
@@ -341,6 +342,15 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.1: hello.lua's "!ping" answer now shows on the
+  sender's own screen too.  The Minecraft bridge on AP 0.8.2a: a Chat Box,
+  Player Detector and Environment Detector beside Lab-A, `service restart
+  ircd`: its log names all three.  #minecraft from Lab-A reaches the game
+  as "[Lab-A] hello".  `/mc players`, `/mc time`, `/mc weather` answer.
+  Not right (fixed in 0.42.2): the game's chat came in as `<uuid>
+  player`, with the text lost; `/mc tell` and `/ns verify` said sent but
+  nothing arrived.
 
 - 2026-11-12 — ROM 0.42.0: `sysctl ircd.oper=...`, `service restart
   ircd`, `/quote OPER x <password>`: "You are now an IRC operator", +o,
