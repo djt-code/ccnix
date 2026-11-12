@@ -53,6 +53,12 @@
 -- what's new.  When a goal ends its tokens are printed: those read from
 -- the cache, written to it and new, and what came out.
 --
+-- The log, claude.log beside the program: each entry with its time (UTC);
+-- the options a session started with, the goals, the code and what it
+-- did, the thinking, each call's tokens and how long it took, retries,
+-- clears, and each goal's tokens in all.  A call that writes many tokens
+-- to the cache after a long gap is the cache having run out (--cache 1h).
+--
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
 -- ...) and ccnix's libraries for text, the network and the world (text,
@@ -415,9 +421,15 @@ end
 local okNet, net = pcall(require, "net")
 if not (okNet and type(net) == "table") then net = nil end
 
+-- Seconds since 1970 (CC's os.epoch is in ms; plain Lua has os.time)
+local function now()
+    return os.epoch and math.floor(os.epoch("utc") / 1000) or os.time()
+end
+
+-- Each entry in the log starts with when it was written (UTC).
 local function log(line)
     local f = fs.open(LOG_FILE, "a")
-    if f then f.writeLine(line); f.close() end
+    if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
 end
 
 local function clip(s)
@@ -1120,20 +1132,31 @@ local function request()
             again = (not code) or RETRY_CODES[code] == true
         end
         if not again or attempt > RETRIES then
-            return nil, string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
+            local failure = string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
+            log(failure)
+            return nil, failure
         end
         say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
+        log(string.format("API: %s; trying again in %ds", detail, wait))
         sleep(wait)
         wait = wait * 2
     end
 end
 
-local function count(reply)
+-- Counted, and logged with how long the round trip took (`took`, seconds),
+-- so the log shows where the tokens went and when the cache was written
+-- again (a long gap before a call, then many tokens written)
+local function count(reply, took)
     local u = reply.usage or {}
     usage.input = usage.input + (u.input_tokens or 0)
     usage.output = usage.output + (u.output_tokens or 0)
     usage.written = usage.written + (u.cache_creation_input_tokens or 0)
     usage.cached = usage.cached + (u.cache_read_input_tokens or 0)
+    local thought = (u.output_tokens_details or {}).thinking_tokens
+    log(string.format("tokens: %d in (%d from the cache, %d written to it, %d new), %d out%s; %ds",
+        (u.input_tokens or 0) + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0),
+        u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0, u.input_tokens or 0,
+        u.output_tokens or 0, thought and string.format(" (%d thinking)", thought) or "", took))
 end
 
 -- The tokens a goal took (since `before`), and the session's in all
@@ -1186,6 +1209,7 @@ local function converse(goal)
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
     while true do
+        local started = now()
         local reply, err = request()
         if not reply then
             say("red", err)
@@ -1195,7 +1219,7 @@ local function converse(goal)
             if last.role == "user" and last.content == goal then messages[#messages] = nil end
             return false
         end
-        count(reply)
+        count(reply, now() - started)
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
@@ -1258,13 +1282,24 @@ local function main()
     if not takeSavedPos() then T.startAtHome(true) end
     say("yellow", string.format("Claude at the controls (%s, effort %s). Turtle at %s facing %d, fuel %s.",
         MODEL, EFFORT, T.posString(), T.dir, tostring(turtle.getFuelLevel())))
+    -- the options as given, and what they came to
+    local given = {}
+    for _, k in ipairs({ "model", "effort", "steps", "cache" }) do
+        if opts[k] then given[#given + 1] = "--" .. k .. " " .. opts[k] end
+    end
+    if CONFIRM then given[#given + 1] = "--confirm" end
+    log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)",
+        #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
+        CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     if goal == "" then
         goal = ask("Goal: ")
     end
     while goal ~= "" do
         local before = tables.copy(usage)
         converse(goal)
-        say("grey", tokenLine(before))
+        local line = tokenLine(before)
+        say("grey", line)
+        log("goal done: " .. line)
         goal = ask("> ")
     end
 end

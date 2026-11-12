@@ -122,6 +122,17 @@ check("the conversation is cached too (the top-level mark), for the API's defaul
 check("the token totals were printed, cache reads and writes counted in",
     Mine.logHas("^%[525 tokens in: 150 from the cache, 75 written to it, 300 new; 60 out; 585 in all%]"))
 check("the code was logged to claude.log", (Mine.files["claude.log"] or ""):find("T.turnRight") ~= nil)
+-- The log's entries: each starting with its time; the session's start, each
+-- call's tokens and how long it took, and the goal's in all.
+local logText = Mine.files["claude.log"] or ""
+local STAMP = "%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d "
+local _, calls = logText:gsub("\n" .. STAMP .. "tokens: 175 in %(50 from the cache, 25 written to it, 100 new%), 20 out; %d+s\n", "")
+check("claude.log: each entry starts with its time, the first with the session's options",
+    logText:find("^" .. STAMP .. "start: claude %(model claude%-opus%-5%-5, effort medium, steps 60, cache 5m; at %(0,0,0%) facing 0, fuel 1000%)\n")
+        and logText:find("\n" .. STAMP .. "goal: go two forward and one right\n"), logText:sub(1, 200))
+check("claude.log: each call's tokens (from the cache, written, new, out) and how long it took", calls == 3, calls)
+check("claude.log: the goal's tokens in all when it's done",
+    logText:find("\n" .. STAMP .. "goal done: %[525 tokens in: 150 from the cache, 75 written to it, 300 new; 60 out; 585 in all%]\n"))
 
 -- 2. the sandbox: fs is out of reach, a syntax error and a runtime error
 --    come back as error results, tables are serialised, definitions
@@ -154,6 +165,7 @@ HTTP.queue = {
 }
 run("something it won't do")
 check("retried after the 529 and the failed connection", #HTTP.requests == 3 and Mine.logHas("trying again"))
+check("the retries are in claude.log too", select(2, (Mine.files["claude.log"] or ""):gsub("; trying again in %d+s\n", "")) == 2)
 check("the refusal was reported with its category", Mine.logHas("Claude declined %(cyber%)"))
 
 -- 3b. an error the API won't recover from stops the goal with its message
@@ -205,6 +217,9 @@ local g1 = HTTP.requests[1]
 check("the goal keeps its words; the options are taken out",
     g1 and g1.body.messages[1].content == "go -2 blocks on -x" and g1.body.model == "claude-x"
         and g1.body.output_config.effort == "low", g1 and g1.body.messages[1].content)
+check("claude.log: the options as given, and what they came to",
+    (Mine.files["claude.log"] or ""):find("start: claude --model claude-x --effort low (model claude-x, effort low, steps 60, cache 5m;", 1, true),
+    (Mine.files["claude.log"] or ""):sub(1, 160))
 fresh({ "" })
 run("dig", "--steps")
 check("an option with no word after it: getopt's message, nothing sent",
@@ -215,6 +230,8 @@ run("dig", "--cache", "1h")
 local c1 = HTTP.requests[1]
 check("--cache 1h: the conversation and the system prompt both cached for an hour",
     c1 and c1.body.cache_control and c1.body.cache_control.ttl == "1h" and c1.body.system[1].cache_control.ttl == "1h")
+check("claude.log: --cache 1h among the options",
+    (Mine.files["claude.log"] or ""):find("start: claude --cache 1h (model claude-opus-5-5, effort medium, steps 60, cache 1h;", 1, true))
 fresh({ "" })
 run("dig", "--cache", "15m")
 check("--cache 15m: refused (the API has 5m and 1h), nothing sent",
