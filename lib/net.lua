@@ -1153,6 +1153,13 @@ function N.hook(S, osT)
         elseif ev == "timer" and a == timer then
             timer = nil
             if S.tick() then S.wantTick() end
+        elseif ev == "peripheral" then
+            -- a modem attached again (a turtle's taken off and put back, a
+            -- wired one turned off and on) comes with no channels open:
+            -- the ones the interfaces on it listen on, opened again
+            for _, ifc in pairs(S.ifaces) do
+                if ifc.modem == a then pcall(peripheral.call, a, "open", ifc.channel) end
+            end
         end
     end
     local function pull(filter)

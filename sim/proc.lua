@@ -75,7 +75,7 @@ local fakeSettings = {
     getNames = function() local t = {} for k in pairs(STORE) do t[#t + 1] = k end table.sort(t) return t end,
 }
 
-local KEYS = { leftCtrl = 29, rightCtrl = 157, z = 44, leftShift = 42, rightShift = 54, pageUp = 201, pageDown = 209 }
+local KEYS = { leftCtrl = 29, rightCtrl = 157, z = 44, leftShift = 42, rightShift = 54, pageUp = 201, pageDown = 209, printScreen = 283, f2 = 291 }
 local K = P.new({ native = native, osT = fakeOs, term = fakeTerm, window = fakeWindow, settings = fakeSettings,
     env = { BASE = "yes" }, keys = KEYS })
 -- drain: hand every queued event on, as init's loop does
@@ -607,6 +607,9 @@ check("Shift+Page Up: the scrollback over the console (the window hidden, the pr
     not cwin.visible and scr.lines[1]:find("^bb ") and scr.lines[3]:find("^scrollback: 1 up") and not saw("conp:"):find("201"),
     saw() .. " " .. tostring(scr.lines[1]) .. "|" .. tostring(scr.lines[3]))
 K.input("con", "key_up", KEYS.leftShift)
+K.input("con", "key", KEYS.printScreen)
+K.input("con", "key", KEYS.f2)
+check("PrintScreen or F2 (a screenshot) leaves the scrollback where it is", not cwin.visible and K.sb.back == 1, K.sb.back)
 K.input("con", "char", "x")
 check("any other key: back to the live screen, and the key on to the program",
     cwin.visible and cwin.redraws == 1 and K.sb.back == 0 and saw("conp:"):find("conp:char:x", 1, true), saw())

@@ -529,6 +529,22 @@ check("run_program ip: bin/ip ran, what it wrote with io.write came back",
     ranWith and ranWith[1]:find("bin/ip$") and ranWith[2] == "up"
         and progOut(1):find("^up: 1 interface\npartial\n%[ip finished") ~= nil and io.output() == screenOut, progOut(1))
 
+-- ping without a count would go on for ever: it gets -c 4, unless it has
+-- -c or -w already
+fresh({ "" })
+Mine.files["bin/ping.lua"] = "-- ping"
+local pings = {}
+shell.run = function(_, ...) pings[#pings + 1] = table.concat({ ... }, " "); return true end
+HTTP.queue = {
+    reply({ toolUse("run_program", { program = "ping", args = "10.1.4.1" }) }, "tool_use"),
+    reply({ toolUse("run_program", { program = "ping", args = "-qc2 10.1.4.1" }) }, "tool_use"),
+    reply({ toolUse("run_program", { program = "ping", args = "-w 5 10.1.4.1" }) }, "tool_use"),
+    reply({ text("Pinged.") }, "end_turn"),
+}
+run("ping the gateway")
+check("ping gets -c 4 when it has no count or deadline, and not when it has",
+    pings[1] == "-c 4 10.1.4.1" and pings[2] == "-qc2 10.1.4.1" and pings[3] == "-w 5 10.1.4.1", table.concat(pings, " | "))
+
 -- Ctrl+T in the program stops claude too
 fresh({ "" })
 Mine.files["turtle/mine.lua"] = "-- mine"

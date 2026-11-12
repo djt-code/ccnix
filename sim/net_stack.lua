@@ -316,6 +316,13 @@ check("hooked: a frame two coroutines see is handled once, and neither returns f
 coroutine.resume(c1, "modem_message", "back", 99, 99, { ccnet = 1 }, 3)
 coroutine.resume(c1, "modem_message", "back", N.CHANNEL + 20, N.CHANNEL + 20, { ccnet = 1 }, 3)
 check("a message on another channel (or a VLAN it isn't on) isn't the stack's", handled == 1)
+local opened, realPeripheral = {}, rawget(_G, "peripheral")
+peripheral = { call = function(side, method, ch) opened[#opened + 1] = side .. " " .. method .. " " .. tostring(ch) end }
+coroutine.resume(c1, "peripheral", "back")
+coroutine.resume(c1, "peripheral", "left")
+peripheral = realPeripheral
+check("a modem attached again (a turtle's put back on) has its interfaces' channels opened again, another's not",
+    #opened == 1 and opened[1] == "back open " .. N.CHANNEL, table.concat(opened, ", "))
 coroutine.resume(c1, "custom"); coroutine.resume(c2, "custom")
 check("the event they wait for still reaches them", #got == 2)
 H.unhook()

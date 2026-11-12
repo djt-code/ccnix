@@ -124,6 +124,10 @@ local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 60000, 6, 10000
 -- the network
 local PROGRAMS = { mine = "turtle/mine", farm = "turtle/farm", mow = "turtle/mow", home = "turtle/home",
                    ip = "bin/ip", ping = "bin/ping" }
+-- Those that go on until stopped unless told otherwise: the option letters
+-- that end them, and what's added when none of those is given (a ping
+-- left to run would hold the session for ever)
+local BOUNDED = { ping = { letters = { "c", "w" }, add = { "-c", "4" } } }
 
 --------------------------------------------------------------------------
 -- Arguments
@@ -207,7 +211,7 @@ local TOOLS = {
     },
     {
         name = "run_program",
-        description = "Run one of ccnix's turtle programs (mine, farm, mow or home) or network tools (ip, ping: `ip` with no arguments shows the network, `ip help` its commands), with its arguments as you'd type them (\"3 3 32 --spacing 4\"), and wait until it ends; what it prints comes back, with where the turtle is afterwards. With help = true, its manual comes back instead and nothing runs.",
+        description = "Run one of ccnix's turtle programs (mine, farm, mow or home) or network tools (ip, ping: `ip` with no arguments shows the network, `ip help` its commands; ping gets -c 4 unless you give -c or -w), with its arguments as you'd type them (\"3 3 32 --spacing 4\"), and wait until it ends; what it prints comes back, with where the turtle is afterwards. With help = true, its manual comes back instead and nothing runs.",
         input_schema = {
             type = "object",
             properties = {
@@ -795,6 +799,19 @@ local function runProgram(input)
     local file = sysenv.findProgram(PROGRAMS[name])
     if not (file and shell and shell.run) then return name .. " isn't on this computer.", true end
     local words = text.words(tostring(input.args or ""))
+    local bound = BOUNDED[name]
+    if bound then
+        local ends = false
+        for _, w in ipairs(words) do
+            local opts = text.startsWith(w, "-") and not text.startsWith(w, "--") and w:sub(2) or ""
+            for _, letter in ipairs(bound.letters) do
+                if text.contains(opts, letter) then ends = true end
+            end
+        end
+        if not ends then
+            for i, a in ipairs(bound.add) do table.insert(words, i, a) end
+        end
+    end
     local line = #words > 0 and (name .. " " .. text.join(words, " ")) or name
     say("lightBlue", "--- run " .. line)
     log("run: " .. line)

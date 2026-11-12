@@ -388,6 +388,17 @@ function P.new(o)
         return false
     end
 
+    -- Keys that leave the scrollback where it is: they type nothing and ask
+    -- nothing of the program (PrintScreen for a screenshot, the lock keys,
+    -- Ctrl or Alt alone, the function keys the game takes for itself)
+    local QUIET_KEYS = {}
+    for _, name in ipairs({ "printScreen", "scrollLock", "pause", "numLock", "capsLock", "leftSuper", "rightSuper",
+                            "menu", "leftCtrl", "rightCtrl", "leftAlt", "rightAlt", "f1", "f2", "f3", "f4", "f5",
+                            "f6", "f7", "f8", "f9", "f10", "f11", "f12" }) do
+        local code = keysT and keysT[name]
+        if code then QUIET_KEYS[code] = true end
+    end
+
     -- Shift+Page Up/Down or the wheel at the console: true if it was the
     -- scrollback's.
     local function scrollKey(t, ev)
@@ -409,7 +420,7 @@ function P.new(o)
                 showBack()
                 return true
             end
-        elseif sb.back > 0 and (kind == "key" or kind == "char" or kind == "paste") then
+        elseif sb.back > 0 and ((kind == "key" and not QUIET_KEYS[k]) or kind == "char" or kind == "paste") then
             sb.back = 0
             showBack()
         end

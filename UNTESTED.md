@@ -5,20 +5,17 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## claude: UTF-8, and ip and ping (0.41.0)
+## Fixes after the claude run (0.41.1)
 
-- **Text past ASCII**: ask for something the model answers with "×",
-  "—" or curly quotes (`claude how big a tunnel is 3 by 3 by 5? use the
-  times sign`), then go on in the same session with a web search and
-  another question: no "Invalid signature in thinking block" error (the
-  model's text went back as "Ã—" before, which broke its thinking
-  blocks), "×" shown as itself, dashes and quotes as - and '.  The web
-  search's own code steps show as `--- code execution` (they showed as
-  an empty `--- web search:`).
-- **ip and ping through run_program**: on a turtle with a modem, `claude
-  set the network up on the left modem as 10.1.4.30/24, gateway 10.1.4.1,
-  DNS 4.2.2.1, and start it at boot`: it reads ip's manual, runs `ip`
-  (its output comes back), and pings to check.
+- **PrintScreen in the scrollback**: Shift+Page Up into init's
+  scrollback, then PrintScreen (or F2, F1, the lock keys, Ctrl or Alt
+  alone): it stays where it is; any other key still goes back down.
+- **ping through run_program** ends by itself: `claude ping the
+  gateway` runs `ping -c 4 ...` unless it gave -c or -w.
+- **A modem taken off and put back**: with the network up on a turtle's
+  modem, `turtle.equipLeft()` with an empty slot selected, then again
+  with the modem: pings still work, no `ip up` needed (its channels are
+  opened again).  The same with a wired modem turned off and on.
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
@@ -369,17 +366,27 @@ section.
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
 - `ip up` on a turtle (2026-11-11, ROM 0.40.3) seemed not to bring the
-  network up: pings worked only after `ip boot` and a reboot. Not
-  reproduced or understood yet: what was set, and in what order, matters.
+  network up: pings worked only after `ip boot` and a reboot. `ip up` was
+  run before the routes and DNS were set, which apply at once anyway.
+  One cause found: claude had swapped the turtle's modem out and back for
+  mine's pickaxe, which leaves its channels shut (reopened since
+  0.41.1).
 - httpd on Lab-B (2026-11-11, ROM 0.40.3), started at boot and logging
   "listening on port 80", later had no listener (`netstat -al` empty,
   "connection refused") while `service status` said running; `service
   restart httpd` brought it back. Before it: the 8.5 network tests
   (`ip neigh add`, a reboot, `ping -c 0` stopped with Ctrl+C, a `ping &`
   stopped with Ctrl+T after `fg`, `nc -w 3` to a host that was down).
-  Not found by reading lib/net, lib/proc, lib/httpd yet.
+  Not found by reading lib/net, lib/proc, lib/httpd yet. After the next
+  reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-11 — claude on ROM 0.41.0: "×" shown as itself, a web search
+  after it in the same session with no error, its code steps shown as
+  `--- code execution`; the network set up through run_program `ip`
+  (addr del/add, boot) and checked with ping (which ran until stopped:
+  -c 4 added since 0.41.1).
 
 - 2026-11-11 — claude on ROM 0.40.3 (a turtle with a wireless modem and a
   chunk controller): `claude fetch https://example.com and tell me its
