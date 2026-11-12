@@ -1,7 +1,8 @@
 # ADR-0009: CI, a protected main, pull requests, releases and publishing the mod
 
-**Status:** Proposed (2026-11-12). D2, D7 and D9 are the user's answers;
-the rest are recommendations.
+**Status:** Accepted (2026-11-12). D2, D7 and D9 are the user's
+answers. The user took the rest as recommended, along with the lockstep
+automation (D4) and the shared board (D11) proposed after it.
 **Date:** 2026-11-12
 **Deciders:** Dan Theisen
 
@@ -54,7 +55,13 @@ GitHub Actions CI on both repos. A ruleset on each `main` that takes
 changes only through a pull request with CI green. Merge commits only.
 A release, made by a workflow, whenever a merged pull request raises the
 version. The mod's release workflow also uploads the jar to CurseForge
-and Modrinth with mc-publish. ccnix-claude stays as it is.
+and Modrinth with mc-publish.
+
+The lockstep between the repos is automated: a ccnix release opens the
+ccnix-mod pull request that carries the new ROM, and that pull request
+merges itself on green. So a Lua-only change is one pull request, and
+the rest follows. One GitHub Project, "ccnix", tracks the issues and
+pull requests of both repos. ccnix-claude stays as it is.
 
 ## Decisions
 
@@ -81,17 +88,52 @@ bypass would let a direct push to `main` through without a word, which
 is the thing this is meant to stop. In an emergency the owner turns the
 ruleset off for a moment on GitHub.
 
-**D4. The submodule round trip** becomes:
+**D4. The lockstep, automated.** Two workflows do the submodule round
+trip, so most changes need one pull request:
 
-1. The ccnix pull request merges.
-2. The ccnix-mod pull request bumps `ccnix/` to that merge, plus
-   `mod_version`, and merges.
-3. ccnix's `mod/` catches up in the next ccnix pull request, not in a
-   third one of its own.
+1. **ccnix releases, so the mod follows.** When ccnix's release workflow
+   tags a new version (D5), a job opens a ccnix-mod pull request on
+   branch `bump/ccnix-vX.Y.Z`:
+   - it moves `ccnix/` to the tagged commit;
+   - it raises `mod_version` by a patch;
+   - it is labelled `lockstep`, and has auto-merge (merge commit) set;
+   - it merges once CI is green, and the mod's own release follows
+     (D5, D6, D7).
+2. **The mod releases, so ccnix catches up.** When ccnix-mod's release
+   workflow tags a version, a job opens a ccnix pull request on branch
+   `bump/mod-vX.Y.Z`. It moves only `mod/`, and auto-merges the same
+   way.
 
-This is the existing rule ("the last one bumped lags its sibling by
-one"), with the lag carried by the next change. CLAUDE.md in both repos
-says so.
+Rules that keep it sound:
+
+- **It ends.** Step 2's pull request changes only `mod/`, not
+  `deploy/version`, so ccnix doesn't release and step 1 doesn't run
+  again. ccnix's `mod/` stays one mod release behind; that is the
+  existing "the last one bumped lags its sibling by one", now kept up
+  without anyone doing it.
+- **Only releases move the mod.** A merged ccnix change that doesn't
+  raise `deploy/version` reaches the mod with the next ccnix release. So
+  the mod isn't released, and uploaded to CurseForge and Modrinth, for
+  each edit to a help page.
+- **Mod code makes it two pull requests.** A change that needs mod code
+  too (a frame both sides speak, a setting) is made by hand:
+  - the ccnix pull request first;
+  - then a ccnix-mod pull request with the code, the `ccnix/` bump and
+    the version, opened together and linked, and labelled `lockstep`.
+
+  Step 1 does nothing while an open ccnix-mod pull request has the
+  `lockstep` label, so the two don't race.
+- **One credential.** It is a fine-grained token, as the repository
+  secret `LOCKSTEP_TOKEN` in both repos. It is limited to ccnix and
+  ccnix-mod, with Contents and Pull requests read and write, and expires
+  after a year (the renewal goes on the board as an issue). The
+  workflows' own `GITHUB_TOKEN` won't do: a pull request it opens
+  doesn't start CI, so the required check would never come and the pull
+  request could never merge.
+- **Auto-merge.** "Allow auto-merge" is turned on in both repos.
+
+CLAUDE.md in both repos says how this works, and when a change needs
+the two pull requests made by hand.
 
 **D5. When a release is made:** when a push to `main` (a merged pull
 request) carries a version that has no tag yet. The workflow tags it
@@ -162,6 +204,43 @@ small skills repo with nothing to build, keeps pushing straight to
   `main`" habit becomes "commit on a branch, push it, open a pull
   request, merge on green".
 
+**D11. One board for both repos: the GitHub Project "ccnix".** It is
+owned by the user's account and linked to both repos.
+
+- **Fields:**
+  - Status (Todo, In progress, In review, Done);
+  - Area (turtles, network, shell and tools, ROM and deploy, mod and
+    gateway, release);
+  - Release (the version it ships in);
+  - the repo, which GitHub adds itself.
+- **Views:**
+  - a board by Status;
+  - a table by Area;
+  - "Needs in-game test", for items with that label.
+- **Built-in workflows:** a closed issue or a merged pull request goes
+  to Done. The one auto-add workflow a free account gets adds ccnix's
+  issues and pull requests.
+- **ccnix-mod's items** are added when they're opened (`gh issue create
+  --project ccnix`, and the same for pull requests). That is the rule in
+  CLAUDE.md. The auto-add can't cover a second repo on a free plan. An
+  Action can't add them either: neither fine-grained tokens nor GitHub
+  Apps reach a Project owned by a personal account, and a classic token
+  with the `project` scope is broader than this is worth.
+- **Labels, the same in both repos:**
+  - `bug`, `feature`, `docs`;
+  - `lockstep`, a change that needs both repos;
+  - `needs-in-game-test`;
+  - `release`.
+- **Cross-repo work:** a change needing both repos is one issue in ccnix
+  with a sub-issue in ccnix-mod. Each pull request says `Closes` its
+  issue.
+
+**Later, decided on its own: UNTESTED.md as issues.** UNTESTED.md is
+already a backlog of things to try by hand. Its entries could become
+`needs-in-game-test` issues on the board, closed when tried. That
+changes how the walkthroughs are recorded, so it waits until the board
+has been used for a while.
+
 ## Options considered
 
 ### Merging
@@ -180,6 +259,15 @@ small skills repo with nothing to build, keeps pushing straight to
 | A tag pushed by hand | full control | easy to forget, or to put on the wrong commit |
 | release-please / changesets | changelogs, version bumps from commit messages | another set of rules over the existing semver habit |
 
+### The lockstep between the repos
+
+| Option | For | Against |
+|---|---|---|
+| A release opens the sibling's bump pull request, which auto-merges (chosen) | one pull request for a Lua-only change; the mod always carries the latest ccnix release | one token to keep, and a year's expiry to renew |
+| Two or three pull requests by hand | no token, nothing automatic to trust | every release costs two to three pull requests, in order |
+| A GitHub Project over both repos | one place to see the work | it tracks; it can't open, order or merge anything, so the pull requests stay manual |
+| One repo for both | no lockstep at all | undoes the two-repo design, and the history and URLs change for both |
+
 ### Publishing
 
 | Option | For | Against |
@@ -194,11 +282,17 @@ small skills repo with nothing to build, keeps pushing straight to
   request to look back at.
 - A one-line fix now costs a branch, a pull request and a CI run (a few
   minutes). Claude Code does that part.
-- A lockstep change is two pull requests, ccnix's then ccnix-mod's.
-  ccnix's `mod/` pointer is one release behind until the next ccnix
-  change.
-- The user creates the CurseForge and Modrinth projects and the tokens.
-  Moderation reviews the first upload.
+- A Lua-only change is one pull request. Its release brings a mod
+  release, and the CurseForge and Modrinth uploads, with no one doing
+  more. A change with mod code is two linked pull requests made by hand.
+- Each ccnix release makes a mod patch release, so both sites get a new
+  file for each ccnix release.
+- `LOCKSTEP_TOKEN` expires after a year. If it lapses, the bump pull
+  requests stop being opened, and that is the symptom to recognise.
+- The user creates the CurseForge and Modrinth projects, their tokens and
+  `LOCKSTEP_TOKEN`. Moderation reviews the first upload.
+- Items opened in ccnix-mod reach the board only when they are opened
+  with `--project`.
 - **Before the first upload,** check:
   - **The jar's network use.** It has no native code, but in TUN mode it
     starts the operator-built `ccnix-tun` helper, and `/ccnix rom update`
@@ -213,12 +307,16 @@ small skills repo with nothing to build, keeps pushing straight to
 
 ## Action items
 
-1. [ ] The user installs gh (done 2026-11-12, 2.103.3) and runs `gh auth login`.
+1. [ ] The user installs gh (done 2026-11-12, 2.103.3) and runs `gh auth login -s project`.
 2. [ ] ccnix: `.github/workflows/ci.yml`, in its first pull request (this ADR with it).
 3. [ ] ccnix-mod: `.github/workflows/ci.yml`, in its first pull request.
-4. [ ] Both: the merge settings (merge commits only, delete branches on merge) and the D3 ruleset, set through `gh api` once CI has run once (so the check names exist).
-5. [ ] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D10).
-6. [ ] Both: `.github/workflows/release.yml` (D5, D6). The first releases: ccnix v0.50.2 and ccnix-mod v0.26.9.
-7. [ ] CurseForge readiness: the description and summary, a 400×400 logo, mods.toml dependencies, the network-use note, and the attribution check above.
-8. [ ] The user creates the CurseForge and Modrinth projects and the tokens, and adds them as secrets and variables.
-9. [ ] The release workflow publishes with mc-publish (D7). The first upload goes to moderation.
+4. [ ] Both: the merge settings (merge commits only, allow auto-merge, delete branches on merge) and the D3 ruleset, set through `gh api` once CI has run once (so the check names exist).
+5. [ ] The Project "ccnix" (D11): its fields, views and built-in workflows, both repos linked, and the shared labels.
+6. [ ] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D4's rules, D10, D11's `--project` rule).
+7. [ ] Both: `.github/workflows/release.yml` (D5, D6). The first releases: ccnix v0.50.2 and ccnix-mod v0.26.9.
+8. [ ] The user makes `LOCKSTEP_TOKEN` (a fine-grained token, D4) and sets it in both repos with `gh secret set`. An issue on the board for its renewal.
+9. [ ] The lockstep jobs (D4) in both release workflows. Tried once end to end with a patch release of ccnix.
+10. [ ] CurseForge readiness: the description and summary, a 400×400 logo, mods.toml dependencies, the network-use note, and the attribution check above.
+11. [ ] The user creates the CurseForge and Modrinth projects and their tokens, and adds them as secrets and variables.
+12. [ ] The release workflow publishes with mc-publish (D7). The first upload goes to moderation.
+13. [ ] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11).
