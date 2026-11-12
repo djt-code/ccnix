@@ -1198,6 +1198,51 @@ end
 -- Scans
 --------------------------------------------------------------------------
 
+-- Read a scanner's entries taken at the turtle's place px,py,pz facing dir with radius r: { ["x,y,z"] = name } in the
+-- turtle's frame, the same names by their offset in the scan (for the map), and how many.  Nil and why if the
+-- entries carry no r, u and f.
+local function readEntries(entries, r, px, py, pz, dir)
+    local ahead, right = T.DELTA[dir], T.DELTA[(dir + 1) % 4]
+    local w = 2 * r + 1
+    local cells, named, n = {}, {}, 0
+    for _, e in ipairs(entries) do
+        local er, eu, ef = round(e.r), round(e.u), round(e.f)
+        if not (er and eu and ef) then
+            return nil, "the scan's entries carry no r, u and f (right, up, forward): this scanner is too old for T.scan"
+        end
+        if (er ~= 0 or eu ~= 0 or ef ~= 0) and type(e.name) == "string" then
+            local dx, dz = ef * ahead[1] + er * right[1], ef * ahead[3] + er * right[3]
+            if math.abs(dx) <= r and math.abs(dz) <= r and math.abs(eu) <= r then
+                cells[(px + dx) .. "," .. (py + eu) .. "," .. (pz + dz)] = e.name
+                named[((eu + r) * w + (dz + r)) * w + (dx + r)] = e.name
+                n = n + 1
+            end
+        end
+    end
+    return cells, named, n
+end
+
+-- Put a scan's blocks (by their offset, from readEntries) in the map: every cell of the cube of side 2r + 1 about
+-- px,py,pz, the ones no block was listed for as air unless `air` is false.
+local function mergeNamed(named, r, px, py, pz, air)
+    local w = 2 * r + 1
+    S.now = clock()
+    for dz = -r, r do
+        for dy = -r, r do
+            for dx = -r, r do
+                local name = named[((dy + r) * w + (dz + r)) * w + (dx + r)]
+                if name then
+                    setLocal(px + dx, py + dy, pz + dz, name, nil, true)
+                elseif air then
+                    setLocal(px + dx, py + dy, pz + dz, AIR, nil, true)
+                end
+            end
+        end
+        breathe()
+    end
+    settle(true)
+end
+
 -- Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 --
 -- opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air).  The info
@@ -1216,23 +1261,8 @@ function T.scan(r, opts)
     local px, py, pz, dir = T.pos.x, T.pos.y, T.pos.z, T.dir
     local entries, why = rawScan(r)
     if not entries then return nil, why end
-    local ahead, right = T.DELTA[dir], T.DELTA[(dir + 1) % 4]
-    local w = 2 * r + 1
-    local cells, named, n = {}, {}, 0
-    for _, e in ipairs(entries) do
-        local er, eu, ef = round(e.r), round(e.u), round(e.f)
-        if not (er and eu and ef) then
-            return nil, "the scan's entries carry no r, u and f (right, up, forward): this scanner is too old for T.scan"
-        end
-        if (er ~= 0 or eu ~= 0 or ef ~= 0) and type(e.name) == "string" then
-            local dx, dz = ef * ahead[1] + er * right[1], ef * ahead[3] + er * right[3]
-            if math.abs(dx) <= r and math.abs(dz) <= r and math.abs(eu) <= r then
-                cells[(px + dx) .. "," .. (py + eu) .. "," .. (pz + dz)] = e.name
-                named[((eu + r) * w + (dz + r)) * w + (dx + r)] = e.name
-                n = n + 1
-            end
-        end
-    end
+    local cells, named, n = readEntries(entries, r, px, py, pz, dir)
+    if not cells then return nil, named end
     local fuel1 = turtle.getFuelLevel and turtle.getFuelLevel()
     local info = { radius = r, blocks = n, merged = false }
     if type(fuel0) == "number" and type(fuel1) == "number" then info.fuel = fuel0 - fuel1 end
@@ -1241,25 +1271,29 @@ function T.scan(r, opts)
     elseif not S.frame.aligned then
         info.why = UNALIGNED
     else
-        S.now = clock()
-        local air = opts.air ~= false
-        for dz = -r, r do
-            for dy = -r, r do
-                for dx = -r, r do
-                    local name = named[((dy + r) * w + (dz + r)) * w + (dx + r)]
-                    if name then
-                        setLocal(px + dx, py + dy, pz + dz, name, nil, true)
-                    elseif air then
-                        setLocal(px + dx, py + dy, pz + dz, AIR, nil, true)
-                    end
-                end
-            end
-            breathe()
-        end
-        settle(true)
+        mergeNamed(named, r, px, py, pz, opts.air ~= false)
         info.merged = true
     end
     return cells, info
+end
+
+-- Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
+--
+-- entries is the list a geo scanner gives (each with name, r, u and f: right, up and forward of the turtle), radius r
+-- (default 8) the scan's, and it was taken where the turtle stands and faces now.  The cells it lists no block for are
+-- noted as air unless opts.air is false.  For a program that does its own scanning (mine) and wants the map to know
+-- what it saw; T.scan does the whole job when the entries don't matter.  An unaligned map takes nothing.
+function T.mergeScan(entries, r, opts)
+    opts = opts or {}
+    r = r or MAX_RADIUS
+    if type(entries) ~= "table" then return nil, "mergeScan wants the list of entries a scanner gave" end
+    if not (whole(r) and r >= 1) then return nil, "the radius of a scan is a whole number from 1" end
+    ensure()
+    if not S.frame.aligned then return nil, UNALIGNED end
+    local cells, named, n = readEntries(entries, r, T.pos.x, T.pos.y, T.pos.z, T.dir)
+    if not cells then return nil, named end
+    mergeNamed(named, r, T.pos.x, T.pos.y, T.pos.z, opts.air ~= false)
+    return true, n
 end
 
 -- The centres of the scans that tile [lo, hi] along one axis with scans of radius r.

@@ -5,6 +5,20 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## mine on the shared pieces (ADR-0008 phase 5)
+
+- **The Geo Scanner through T.withPeripheral**: `mine` with a scanner in the start's top chest and a chunk
+  controller on one side: the scanner goes on the side without the controller (an empty side first, then the
+  pickaxe's), the scan is made, and the pickaxe is back on afterwards. Before, the scanner always took the
+  pickaxe's place; with an empty side the pickaxe now stays on. Check the controller never comes off, and a
+  scan that comes back "cooling down" is asked again.
+- **Scans in the map**: after a `mine` run with a scanner, `T.map.get(x, y, z)` (in claude's code, or a Lua
+  prompt with `require("turtlelib")`) names the wall blocks the scans looked at and says air in the tunnel;
+  `T.map.stats()` shows the cubes. A scan costs the merge's time (4913 cells at radius 8; the loop yields every
+  0.4 s): time one on a real turtle, and `sysctl mine.map=false` if it is too slow. Check a second tunnel from the
+  same start adds to the map, and that `mine --here` somewhere else does not leave the map wrong (it takes
+  the new spot for the old one: `T.map.clear()` before a start somewhere new).
+
 ## tl.journal: T.job, T.undo and T.report (ADR-0008 phase 4, ccnix 0.49.0)
 
 - **T.job.start(goal, steps)** then **T.job.done()** as each step finishes; reboot the computer (or Ctrl+T and

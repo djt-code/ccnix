@@ -71,6 +71,12 @@ Mine.SIZE = SIZE
 -- The start (chests above and below), with the top one stocked.
 function Mine.setup(stock)
     for key in pairs(W) do W[key] = nil end
+    -- a new start of the computer for the map (tl.world): what it kept in
+    -- memory and who was listening go, as the disk does with Mine.files = {}
+    -- (its folders too)
+    Mine.dirs = {}
+    turtle._ccnixWorld = nil
+    if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
     Mine.ENTITIES, Mine.GROUND, BURNT, CRAFTED = {}, {}, {}, {}
     set(0, 1, 0, Mine.chest(stock))                 -- valuables and supplies
     set(0, -1, 0, Mine.chest())                     -- bulk

@@ -450,6 +450,71 @@ check("tunnel clear", leftIn(0, 2, 0, 2, 1, 16) == 0, leftIn(0, 2, 0, 2, 1, 16) 
 checkFloor(0, 2, -1, 1, 16)
 check("back at the start", atStart())
 
+-- 11m. what a scan sees goes in the map (T.map): the walls it looked at,
+--      the air inside the tunnel, nothing out beyond its reach; the map
+--      is on the disk, so it's there after a restart too, and a second
+--      run from the same start adds to it.  With mine.map off, nothing is kept
+local function mapAfterRestart()
+    turtle._ccnixWorld = nil                       -- (as a new start of the computer does)
+    turtle._ccnixWrap.listeners = {}
+    package.loaded.turtlelib, package.loaded["tl.world"] = nil, nil
+    return require("turtlelib")
+end
+local function mapHas(lib, x, y, z, name)
+    local got = lib.map.get(x, y, z)
+    return got == name, tostring(got)
+end
+setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, SCANS = 2000, 0, 0
+run("3", "3", "12")
+local tlib = require("turtlelib")
+local rockOk, rockGot, rockCells = true, "", 0
+for _, c in ipairs({ { -1, 1, 5 }, { 3, 1, 5 }, { 1, 3, 4 }, { 1, -1, 6 }, { -3, 0, 9 }, { 4, 2, 8 } }) do
+    local want = get(c[1], c[2], c[3])
+    if want then
+        rockCells = rockCells + 1
+        local ok, got = mapHas(tlib, c[1], c[2], c[3], want.name)
+        rockOk = rockOk and ok
+        if not ok then rockGot = rockGot .. string.format(" (%d,%d,%d) %s not %s;", c[1], c[2], c[3], got, want.name) end
+    end
+end
+check("the walls the scans looked at are in the map by name", rockCells >= 4 and rockOk, rockCells .. " cells" .. rockGot)
+check("the tunnel's own cells are air in the map", tlib.map.get(1, 1, 5) == "minecraft:air" and tlib.map.get(0, 0, 2) == "minecraft:air",
+    tostring(tlib.map.get(1, 1, 5)))
+check("a cell past the scans' reach isn't in the map", tlib.map.get(1, 1, 40) == nil and tlib.map.get(30, 1, 5) == nil)
+local mapFiles = 0
+for path in pairs(Mine.files) do if path:find("%.map/") then mapFiles = mapFiles + 1 end end
+check("the map is on the disk", mapFiles >= 2, mapFiles .. " files")
+tlib = mapAfterRestart()
+check("...and read back after a restart", tlib.map.get(-1, 1, 5) == get(-1, 1, 5).name and tlib.map.get(1, 1, 5) == "minecraft:air",
+    tostring(tlib.map.get(-1, 1, 5)))
+local cellsBefore = tlib.map.stats().cubes
+set(-3, 1, 30, ore("minecraft:iron_ore"))
+local farZ                                       -- a wall block in the new part, 3 out on the right
+for z = 25, 35 do if farZ == nil and get(3, 1, z) then farZ = z end end
+run("3", "3", "36", "--new")
+tlib = require("turtlelib")
+check("a second run adds to the map: the far part is in it, the first part still is",
+    farZ and tlib.map.get(3, 1, farZ) == get(3, 1, farZ).name and tlib.map.get(-1, 1, 5) == get(-1, 1, 5).name and tlib.map.stats().cubes > cellsBefore,
+    tostring(farZ and tlib.map.get(3, 1, farZ)) .. ", " .. tlib.map.stats().cubes .. " cubes against " .. cellsBefore)
+
+setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, SCANS = 2000, 0, 0
+local defaults, chosen = {}, { ["mine.map"] = false }
+settings = { define = function(name, o) defaults[name] = o.default end,
+             get = function(name) if chosen[name] ~= nil then return chosen[name] end return defaults[name] end,
+             set = function() end, save = function() end }
+run("3", "3", "12")
+settings = nil
+local files = 0
+for path in pairs(Mine.files) do if path:find("%.map/") then files = files + 1 end end
+local names = {}; for path in pairs(Mine.files) do if path:find("%.map/") then names[#names + 1] = path end end
+check("mine.map off: nothing is kept in the map", files == 0, files .. " files " .. table.concat(names, ","))
+
 -- 11e. torches knocked off after they're placed: a scan's fetch going
 --      through a niche lit before the scan (gold 4 out level with the
 --      z=48 niche, fetched by the scan at z=53), and a vein through the

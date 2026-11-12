@@ -774,4 +774,41 @@ report = T.scanBox({ 0, 0, 0, 5, 2, 2 })
 check("no scanner: the failure says why, and it stops", report and report.scanned == 0 and #report.failed == 1 and report.failed[1].why:find("no " .. SCANNER, 1, true))
 EQ.left = SCANNER
 
+--------------------------------------------------------------------------
+-- A scan somebody else took (mine's own)
+--------------------------------------------------------------------------
+T = fresh()
+sprinkle()
+tp(T, 0, 0, 0, 1)
+local entries = scanBlocks(5)
+local merged, n = T.mergeScan(entries, 5)
+check("T.mergeScan puts the scanner's entries in the map: true and how many blocks", merged == true and n == 5, tostring(merged) .. " " .. tostring(n))
+check("...each in its own cell, turned as the turtle is", T.map.get(2, 0, 3) == STONE and T.map.get(-3, 1, 0) == DIRT and T.map.get(0, -1, -4) == GOLD
+    and T.map.get(4, 2, -2) == IRON and T.map.get(5, 0, 0) == GLASS)
+check("...air where it lists nothing, and nothing beyond its radius", T.map.get(1, 0, 3) == "minecraft:air" and T.map.get(6, 0, 0) == nil)
+local T2 = fresh()
+sprinkle()
+tp(T2, 0, 0, 0, 1)
+T2.scan(5)
+local same5 = true
+for dx = -5, 5 do for dy = -5, 5 do for dz = -5, 5 do
+    if T.map.get(dx, dy, dz) ~= T2.map.get(dx, dy, dz) then same5 = false end
+end end end
+check("...the same cells as T.scan makes of the same scan", same5)
+T = fresh()
+sprinkle()
+merged, why = T.mergeScan({ { name = STONE, x = 1, y = 0, z = 1 } }, 5)
+check("entries with no r, u and f are refused with the reason", merged == nil and why:find("r, u and f", 1, true), tostring(why))
+merged, why = T.mergeScan("nothing", 5)
+check("...and so is something that isn't a list", merged == nil and why)
+merged, why = T.mergeScan(scanBlocks(5), 0)
+check("...and a radius of 0", merged == nil and why)
+T.map.clear()
+T.frameChanged(nil, nil)
+tp(T, 0, 0, 0, 0)
+T.map.set(0, 0, 3, STONE)
+T.frameChanged(nil, nil)
+merged, why = T.mergeScan(scanBlocks(5), 5)
+check("an unaligned map takes nothing, and says so", merged == nil and why:find("unaligned", 1, true), tostring(why))
+
 print = realPrint

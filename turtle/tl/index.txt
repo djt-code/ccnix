@@ -222,6 +222,7 @@ T.map.fromMap(mx, my, mz) - A point of the map's frame in the turtle's: x, y, z.
 T.map.cube(cx, cy, cz) - The cube at cx, cy, cz (map frame) as its 4096 bytes and its palette, for code that reads many cells at once; nil if there is none.
 Scans:
 T.scan(r, opts) - Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
+T.mergeScan(entries, r, opts) - Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
 T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 Inspecting:
 T.inspectAt(x, y, z, opts) - Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.

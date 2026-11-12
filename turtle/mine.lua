@@ -133,7 +133,12 @@
 --    If water got in while it dug, it walks the floor after, as on a
 --    resume, for any still getting in.  Low on fuel, it scans as it digs
 --    and fetches the coal first.  See the Geo Scanner section for how it
---    lines the scan's world directions up with the tunnel.
+--    lines the scan's world directions up with the tunnel.  What a scan
+--    sees also goes in the map (T.map, kept on the disk, so later runs,
+--    `--resume` and the other programs know what has been seen); `sysctl
+--    mine.map=false` leaves it out.  A scan whose directions mine had to
+--    work out from the dug tunnel (an older scanner without right, up and
+--    forward) is not kept.
 --  * Veins: an ore it touches (anything tagged as an ore, *_ore blocks,
 --    ancient debris) is mined along with its whole vein: the turtle
 --    follows it block by block, looking all round each one, up to
@@ -227,6 +232,7 @@ end
 forceHere, resume, fresh, toStart = opts.here == true, opts.resume == true, opts.new == true, opts["to-start"] == true
 lights = not opts["no-lights"]
     and T.setting("mine.lights", true, "Light mined tunnels with torches in wall niches")
+keepMap = T.setting("mine.map", true, "Keep mine's Geo Scanner scans in the map (T.map), so later runs know what they saw")
 spacingArg, homeArg = opts.spacing and tonumber(opts.spacing), opts.home and tonumber(opts.home)
 doReset = args[1] == "reset"
 doHaul = args[1] == "haul"
@@ -2185,6 +2191,21 @@ function fetchTargets(which)
     alongAxis("y", start.y); alongAxis("x", start.x); alongAxis("z", start.z)
 end
 
+-- Put a scan in the map (T.mergeScan), so a later run, `--resume` and
+-- other programs know what it saw.  The map is a convenience: if it
+-- won't take the scan, say so once and carry on mining.
+warnedMap = false
+function mapScan(blocks)
+    if not keepMap then return end
+    local ok, done, why = pcall(T.mergeScan, blocks, SCAN_RADIUS)
+    if not ok and done == "Terminated" then error(done, 0) end
+    if ok and done then return end
+    if not warnedMap then
+        warnedMap = true
+        print("Map: not keeping the scans (" .. tostring(ok and why or done) .. ").")
+    end
+end
+
 -- Scan from here (a block of the segment) and file what it finds: true
 -- if it did.
 function takeScan(z1, z2)
@@ -2241,6 +2262,7 @@ function takeScan(z1, z2)
             facing = true
             print("Geo scanner lined up with the tunnel.")
         end
+        mapScan(blocks)
     else
         -- world axes only: line them up with the tunnel from what's dug
         if not facing then

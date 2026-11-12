@@ -2442,7 +2442,7 @@ T.registry = {
     -- tl.world: the map, the frames and the scanner
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
-    alignMap = "tl.world", frameChanged = "tl.world",
+    alignMap = "tl.world", frameChanged = "tl.world", mergeScan = "tl.world",
     -- tl.path: routes
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
