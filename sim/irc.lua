@@ -534,6 +534,15 @@ for id, at in pairs(timers) do
 end
 pump()
 check("client: autorejoin joins again after its delay", chan.joined)
+S.files[".irc/scripts/pong.lua"] = "irc.signal_add(\"message public\", function(server, text, nick, address, target)\n"
+    .. "    if text == \"!ping\" then server:send_message(target, nick .. \": pong\") end\nend)\n"
+client:command("/script load pong")
+dan.clear()
+dan.say("PRIVMSG #ccnix :!ping")
+pump()
+check("client: a script's server:send_message goes out and shows in the buffer, as yours",
+    dan.has("PRIVMSG #ccnix :dan2: pong") and lastLine(chan) == "dan2: pong" and chan.lines[#chan.lines].prefix == "cc7")
+client:command("/script unload pong")
 local failing = "irc.signal_add(\"message public\", function() error(\"boom\") end)\n"
 S.files[".irc/scripts/bad.lua"] = failing
 client:command("/script load bad")

@@ -52,7 +52,7 @@ The irc table:
 
 A buffer: name, kind ("core", "server", "channel", "query", "script"), server, topic, lines (each { time, prefix, prefixColour, text, level, hilight }), activity (0-3), joined (a channel); buffer:print(text, opts) (opts: prefix, prefixColour, level, hilight), buffer:command(line), buffer:nickList() (each { nick, prefix }), buffer:getNick(nick), buffer:number().
 
-A server: name, address, port, nick, network, registered, isupport (the server's 005 tokens), buffer; server:send_raw(line), server:send_message(target, text), server:command(line) ("msg bob hi", no /), server:isMe(nick), server:isChannel(name), server:fold(name) (in the server's case rules).
+A server: name, address, port, nick, network, registered, isupport (the server's 005 tokens), buffer; server:send_raw(line), server:send_message(target, text) (shown in your buffer as yours), server:command(line) ("msg bob hi", no /), server:isMe(nick), server:isChannel(name), server:fold(name) (in the server's case rules).
 
 Signals, with what they pass:
   "message public"        server, text, nick, address, target

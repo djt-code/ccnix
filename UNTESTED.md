@@ -5,6 +5,12 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## irc: a script's sent line (0.42.1)
+
+- With hello.lua loaded on Lab-B, someone on Lab-A says `!ping` in the
+  channel: Lab-B's buffer now shows its own "nick: pong" line too, as
+  yours, as well as Lab-A seeing it.
+
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **status after Ctrl+T in `mine`**: the `mine` job under way shows.
@@ -317,9 +323,6 @@ section.
 
 ## Known issues seen, not yet looked at
 
-- irc scripts (2026-11-12, ROM 0.42.0): what a script sends with
-  `server:send_message` (hello.lua's "!ping" answer) goes out, and the
-  others see it, but isn't shown in the sender's own buffer.
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
 - `ip up` on a turtle (2026-11-11, ROM 0.40.3) seemed not to bring the

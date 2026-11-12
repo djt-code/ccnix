@@ -611,7 +611,19 @@ function Server:message(target, body, command)
     for _, p in ipairs(pieces) do self:send(irc.build(command, target, p)) end
     return pieces
 end
-Server.send_message = function(self, target, body) return self:message(target, body) end
+
+-- A script's message, shown as /msg shows yours: in the target's buffer,
+-- else the server's with "-> target:".  No "message own" signal: a script
+-- answering its own lines would go round and round.
+function Server:send_message(target, body)
+    local pieces = self:message(target, body)
+    local b = self.client:findBuffer(self, target)
+    for _, p in ipairs(pieces) do
+        self.client:print(b or self.buffer, (b and "" or (colour(14, "->") .. " " .. colour(C.nickColour(target), target) .. ": ")) .. p,
+            { prefix = b and self.nick or "", prefixColour = 0, level = "own" })
+    end
+    return pieces
+end
 
 -- A command as typed, for this server (a script's server:command("msg x hi")).
 function Server:command(line)
