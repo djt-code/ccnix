@@ -148,10 +148,8 @@ numbers, the text tools and the network tools. Still to try:
 
 ## Setup and boot
 
-- **sysctl keeps a switch a switch** (0.43.3): `sysctl ccsh.login=yes`
-  refused ("ccsh.login is a boolean: not yes"), status 1; `sysctl
-  ccsh.login=true` fine. `sysctl syslog.maxSize=2M` then a log rotating
-  at that size.
+- **`syslog.maxSize` with K/M** (0.21.0): `sysctl syslog.maxSize=2M`
+  (taken, tested), then a log rotating at that size.
 
 - **`ccnix update` on many computers at once** (0.30.2): GitHub answered
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
@@ -225,6 +223,9 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.3: `sysctl ccsh.login=yes` refused ("ccsh.login
+  is a boolean: not yes", status 1); `sysctl ccsh.login=true` taken.
 
 - 2026-11-12 — ROM 0.43.2: a /startup.lua's output kept on the console
   under init; the wheel scrolls the console's scrollback (ping's output
