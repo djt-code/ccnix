@@ -228,10 +228,6 @@ section.
   some with 504; git now tries a 5xx again after 2, 4 and 8 s.  If the
   API's hourly limit for the server's address runs out, it says until when.
 
-- **CraftOS's startup after ccnix on a plain Computer** with `init.boot`
-  (0.30.1: boot draws in a window first, so init has something to copy):
-  the startup files' output and the MOTD above the prompt.
-
 - **`wget run …/deploy/setup.lua` on a bare old install** (0.20.0): a
   computer that still has only `/cc-turtles` (from before ccnix): moved to
   `/ccnix`, pointed at the ccnix repo, pulled, old startup lines swapped.
@@ -369,6 +365,13 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-11 — CraftOS's startup after ccnix on a plain (basic) Computer
+  under init (ROM 0.41.1, `init.boot`, `ccsh.login`, `motd.enable` on):
+  the tip of the day, then `/startup.lua`'s and `/startup/a`'s output
+  (their errors: they were written from CraftOS's shell, whose quoting
+  knows only `"`), above the ccsh prompt and kept; `ps` (init, ccsh) and
+  Shift+Page Up's scrollback.
 
 - 2026-11-11 — ROM 0.41.1: PrintScreen in init's scrollback leaves it
   where it is; claude's ping through run_program ran as `ping -c 4` and
