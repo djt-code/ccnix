@@ -219,15 +219,6 @@ numbers, the text tools and the network tools. Still to try:
 
 ## The mod
 
-- **Esc reaches the programs** (ccnix 0.43.2: boot gives CC's keys
-  table the keys.escape it lacks; reboot after `/ccnix rom update`). In
-  `vi`, Esc leaves insert mode (the first time, "Esc went to the
-  computer: Shift+Esc closes its screen" shows above the hotbar); in
-  ccsh, Esc then b moves a word back; in irc, Esc then 2 goes to buffer
-  2; in screen's scrollback (Ctrl+A [), Esc leaves it. The same on a
-  turtle and a pocket computer. A client without the mod: Esc closes the
-  screen as before, and Ctrl+C still leaves insert mode in vi.
-
 - **The Network Configurator** (ccnix-mod 0.23.0; it was the Network
   Tester). An old Network Tester in an inventory is a Network Configurator
   after the update. On a gateway, the dialog's labels fit their column
@@ -284,6 +275,11 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.2 with ccnix-mod 0.26.0 on the client: Esc
+  leaves vi's insert mode, Esc then b moves ccsh's cursor a word back,
+  Esc then 2 goes to irc's buffer 2, Esc leaves screen's scrollback; the
+  same on a turtle and a pocket computer.
 
 - 2026-11-12 — ccnix-mod 0.26.0 on the client (the server at 0.25.1):
   Esc no longer closes a computer's, turtle's or pocket computer's
