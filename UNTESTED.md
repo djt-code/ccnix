@@ -5,18 +5,6 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## Fixes after the claude run (0.41.1)
-
-- **PrintScreen in the scrollback**: Shift+Page Up into init's
-  scrollback, then PrintScreen (or F2, F1, the lock keys, Ctrl or Alt
-  alone): it stays where it is; any other key still goes back down.
-- **ping through run_program** ends by itself: `claude ping the
-  gateway` runs `ping -c 4 ...` unless it gave -c or -w.
-- **A modem taken off and put back**: with the network up on a turtle's
-  modem, `turtle.equipLeft()` with an empty slot selected, then again
-  with the modem: pings still work, no `ip up` needed (its channels are
-  opened again).  The same with a wired modem turned off and on.
-
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **status after Ctrl+T in `mine`**: the `mine` job under way shows.
@@ -381,6 +369,11 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-11 — ROM 0.41.1: PrintScreen in init's scrollback leaves it
+  where it is; claude's ping through run_program ran as `ping -c 4` and
+  ended; a turtle's modem taken off and put back (`turtle.equipLeft()`
+  twice) and `ping` worked with no `ip up`.
 
 - 2026-11-11 — claude on ROM 0.41.0: "×" shown as itself, a web search
   after it in the same session with no error, its code steps shown as
