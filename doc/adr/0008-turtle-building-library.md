@@ -523,9 +523,26 @@ gets anything new. Then, where the new pieces make it better:
 16. [x] mine, farm, mow onto the shared pieces, sims identical (mine's
     scanner swap is `T.withPeripheral`; its crafting stays its own, see 15).
 17. [x] Their improvements, as D7 decides, each with a sim.
-18. [ ] UNTESTED.md entries, help regenerated, versions bumped (ccnix's
-    minor per phase), ccnix-mod's ROM bumped with each. (ccnix's side is
-    done, 0.50.0; the ROM bump in ccnix-mod is left.)
+18. [x] UNTESTED.md entries, help regenerated, versions bumped (ccnix's
+    minor per phase), ccnix-mod's ROM bumped with each. (The ROM was bumped
+    once at the end, not per phase: ccnix 0.50.1 in ccnix-mod 0.26.8.)
+18a. [x] A review pass after phase 5, its fixes in ccnix 0.50.1: a `--here`
+    moves the protected areas, the junk chest and the chests with the frame
+    (an unfinished build and the undo journal are not moved); `reset
+    --here` and a heading correction leave the frames alone; autoDump and
+    the undo journal act only for the program that owns the turtle; a
+    program's copy of turtlelib keeps its data beside it after it ends;
+    asking the map makes none; tills and bone meal are told as what the cell
+    holds; Ctrl+T stops a scan; mow's ground under leaves and its way home
+    through a protected base; tl.place learns nothing from slab on slab and
+    `T.forgetPlacements` resets what it learnt (the Consequences' "T.forget"
+    for placements; the map has `T.map.clear`); blueprints name items (wall
+    torches), build double slabs and carry on a named plan; tl.craft takes a
+    wood's every log, caps crafts by the stack size and smelts from split
+    stacks; setup ships lib/mc; buildworld's look order and ladder rule.
+    Not done: undoing a faced block without a world origin (the journal
+    keeps compass facings), and moving an unfinished build or the undo
+    journal on a re-zero.
 
 ### In game, in order
 

@@ -5,6 +5,46 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## ADR-0008 after review: frames, owners, building fixes (ccnix 0.50.1)
+
+In-game order for all of ADR-0008 (the ADR's own list): 1. phase 1 with claude on the castle turtle (a helper
+kept over a cleared conversation, the log rotating, a protected area refusing a dig); 2. a scan in the turtle's
+frame and a route round the moat; 3. stairs and slabs both ways, a small blueprint built, stopped, resumed and
+verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, a fetch from the chest wall;
+5. mine, farm and mow runs, as before. The fixes below ride along with those.
+
+- **`--here` moves what is kept in the turtle's frame**: protect a box (`T.protect`), set a junk chest and add a
+  chest (`T.addChest`), walk away ten blocks and turn, run `mine --here`: `T.protections()`, `T.junkChest()` and
+  `T.chests()` should name the same blocks in the new frame (a dig into the real box refused, the new home's
+  tunnel not). An unfinished `T.build` and the undo journal are not moved: finish or restart them first.
+- **`reset --here` and a heading correction leave the frames alone**: carry the turtle home by hand and run
+  `farm reset --here` (or `mine reset --here`): the map, areas and chests stay where they were (no shift by the
+  stale saved position). Lose a turn (Ctrl+T outside T.run) and let farm or mine correct the heading: the map
+  is not turned.
+- **An ended program's moves**: after `mine` ends, `go forward 2` (or excavate): no `/programs/turtle` folder
+  appears, and `ccnix/turtle/.turtlepos` follows the moves (mine's copy of turtlelib keeps tracking them).
+- **autoDump and undo belong to claude's code**: with `T.cfg.autoDump = true` and `T.cfg.undo = true` in
+  claude, `run_program mine`: no stow trip during mine's digs, mine's digs not in `.undo`; after it, claude's
+  own digs are journalled again and a full inventory makes the trip.
+- **No map from asking**: on a turtle with no `.map`, claude's `status` makes none, and mine/farm don't start
+  loading tl.world afterwards.
+- **Farm digs and bone meal in the map**: with a map kept, a hoe's till leaves farmland in the map (not air),
+  seeds leave wheat, bone meal leaves the crop. Costs one more inspect after each placement and after digging
+  dirt or grass, only while something listens (a map, undo, autoDump).
+- **Ctrl+T during a scan** (`T.scan(16, { force = true })` in claude): stops it; no second scan is made.
+- **mow under a tree / with a protected base**: a tile under leaves the map knows is still mowed; with a
+  protected area over home, mow crosses it to get out and back, leaving its tiles alone.
+- **Slabs and wall torches**: a slab placed over a half slab of its kind (`T.placeAt`) writes nothing to
+  `.placements`; `T.forgetPlacements()` empties it. A plan with `torch[facing=south]` builds a wall torch and
+  `T.verify` is clean; `T.blueprint.fromMap` over it writes `torch[...]`; a double slab in a plan is built as a
+  bottom slab plus a second placed down on it (two slabs counted). `T.build(plan, { name = "hut" })` given again
+  carries on.
+- **Crafting**: oak planks from stripped logs and oak wood; 20 boats crafted in rounds of at most ten, none
+  dropped; `T.smelt` with the cobblestone split 5 + 15 over two slots. A sparse `setup mine` install has
+  `lib/mc.lua`, so `sysctl mine.report=true` can tell the player.
+- **Placement facts in the mock** (to compare with the game): a torch from placeDown over leaves, with blocks
+  ahead of and right of the target, hangs on the one ahead; a ladder is not placed against a ladder's front.
+
 ## farm and mow on the shared pieces (ADR-0008 phase 5, ccnix 0.50.0)
 
 - **Protected areas hold for farm's crop digs**: `T.protect("garden", x1, y, z1, x2, y, z2)` over a few ripe crop
@@ -361,13 +401,13 @@ then `turtle.inspect*` from beside it.
   Walk, dig and place with other programs (`mine`, `farm`): the map follows,
   written in batches (a minute of work may leave a few changes unwritten if the
   turtle is stopped with Ctrl+T: `T.map.flush()` writes them).
-- **The frames**: scan, walk off, run `mine --here` (or `T.setHomeHere()`),
+- **The frames**: scan, walk off, run `mine --here` (`T.startAtHome(true)`),
   scan again: `T.map.get` in the new frame should still agree with the first
   scan, and `T.map.frame()` shows the quarter turns and shift. Delete
   `.turtlepos` and start a program: `T.map.get` answers "the map is
   unaligned" until `T.alignMap(dx, dy, dz, turns)` (or `T.map.clear()`).
-  (`T.setDir`, which mine's heading check and farm's map check use, is a frame
-  change too and is handled the same way.)
+  (`reset --here`, `T.setHomeHere`, and `T.setDir`, mine's and farm's heading
+  correction, leave the map where it is: see the integration entry above.)
 - **The origin**: `T.setOrigin(x, y, z, "north")` with the coordinates from F3,
   then `T.toWorld(...)` against what F3 says at another place; `T.setOrigin(x,
   y, z)` (the facing from a scan) and `T.setOrigin()` (GPS too, if the world
