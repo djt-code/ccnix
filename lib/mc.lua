@@ -5,7 +5,7 @@
 --   mc.weather()           -- "clear", "rain", "thunder", or nil if it can't tell
 --   mc.players()           -- { "Steve", "Alex" }, or nil if it can't tell
 --   mc.say(text, from)     -- into the game's chat, as [from] text
---   mc.tell(player, text, from)   -- to one player only
+--   mc.tell(player, text, from)   -- to one player only (nil and why if they aren't on)
 --   local e = mc.event(table.unpack(ev))   -- a CC event, as what happened in the game:
 --     { kind = "chat", player = "Steve", text = "hi" } | { kind = "join", player = ... }
 --     | { kind = "leave", player = ... } | { kind = "death", player = ... } | nil
@@ -181,7 +181,18 @@ function M.new(opts)
         return true
     end
     function self.say(message, from) return enqueue({ text = message, from = from }) end
-    function self.tell(player, message, from) return enqueue({ text = message, from = from, player = player }) end
+    -- (AP 0.8 sends to nobody, and says it did, for a player who isn't on:
+    -- so who's on is asked first, when something here can say.)
+    function self.tell(player, message, from)
+        local online = self.players()
+        if online then
+            local found
+            for _, p in ipairs(online) do if text.equalFold(p, player) then found = p end end
+            if not found then return nil, player .. " isn't in the game" end
+            player = found
+        end
+        return enqueue({ text = message, from = from, player = player })
+    end
     function self.waiting() return #queue end
 
     -- A CC event as a game event, or nil.

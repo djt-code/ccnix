@@ -138,7 +138,7 @@ local chatNew = {                       -- AP 0.8: an options table (player in i
     sendMessage = function(text, o)
         if type(o) ~= "table" then error("bad argument #2 (table expected)") end
         if busy > 0 then busy = busy - 1; return false, "cooldown" end
-        if o.player and o.player ~= "Steve" and o.player ~= "Alex" then error("player not found") end
+        if o.player == "Broken" then error("bad argument") end      -- (anyone else, on or not: "sent", as AP 0.8 says)
         said[#said + 1] = (o.player and (o.player .. " <- ") or "") .. "[" .. tostring(o.prefix) .. "] " .. text
         return true
     end,
@@ -162,12 +162,16 @@ local gameOld = mcLib.new({ chatBox = { sendMessage = function(text, prefix)
 end } })
 gameOld.say("hi", "amy")
 check("mc: an older chat box (arguments in a row) works too", old[1] == "[amy] hi")
-local toldOk = game.tell("Steve", "psst", "MC")
-local toldBad, whyBad = game.tell("Nobody", "psst", "MC")
+local toldOk = game.tell("steve", "psst", "MC")
+local gameNoDetector = mcLib.new({ chatBox = chatNew })
+local toldBad, whyBad = gameNoDetector.tell("Broken", "psst", "MC")
 game.say("after", "bob")
-check("mc: AP 0.8's tell is sendMessage with the player; one it can't send is dropped, says why, and doesn't hold up the rest",
-    toldOk and said[3] == "Steve <- [MC] psst" and not toldBad and text.find(tostring(whyBad), "player not found")
-    and said[4] == "[bob] after" and game.waiting() == 0, text.join(said, " | "))
+check("mc: AP 0.8's tell is sendMessage with the player (named as the game has it); one it can't send is dropped, says why, and doesn't hold up the rest",
+    toldOk and said[3] == "Steve <- [MC] psst" and not toldBad and text.find(tostring(whyBad), "bad argument")
+    and said[4] == "[bob] after" and game.waiting() == 0 and gameNoDetector.waiting() == 0, text.join(said, " | "))
+local toldNobody, whyNobody = game.tell("Nobody", "psst", "MC")
+check("mc: a tell to someone not in the game is refused (AP 0.8 would say sent)",
+    not toldNobody and whyNobody == "Nobody isn't in the game" and #said == 4, tostring(whyNobody) .. " | " .. text.join(said, " | "))
 local toldOld = {}
 local gameOld2 = mcLib.new({ chatBox = {
     sendMessage = function() error("a tell must not go to everyone") end,

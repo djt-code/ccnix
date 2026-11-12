@@ -5,23 +5,11 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## irc: the Minecraft bridge on Advanced Peripherals 0.8 (0.42.2)
+## irc: a tell to someone not in the game (0.42.3)
 
-- **The game's chat into #minecraft**: say something in the game. It
-  comes in as `<player> text` (it was `<uuid> player`: AP 0.8 puts the
-  player's UUID first in its events). A word with an accent (é) comes
-  through as itself.
-- **`/mc tell <player> hi`**: arrives in the game for that player only
-  (it was "Told ..." with nothing sent: AP 0.8 has no
-  sendMessageToPlayer, the player now goes in sendMessage's options).
-  Then say something in #minecraft: it still reaches the game (a tell
-  that failed used to hold up everything after it). `/mc tell nobody
-  hi`: "Can't: ...".
-- **`/ns verify <your player>`**: the code is whispered to you in the
-  game; `/ns confirm <code>`, then `/whois Lab-B` shows "is the
-  Minecraft player ...".
-- **Joins, leaves, deaths**: log out and back in, or die: each shows in
-  #minecraft with your name (the same UUID-first layout).
+- `/mc tell nobody hi` (with the Player Detector beside Lab-A): "Can't:
+  nobody isn't in the game" (AP 0.8 said sent to nobody). `/mc tell
+  <player> hi` in another case: still reaches you.
 
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
@@ -342,6 +330,15 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.2, the Minecraft bridge on AP 0.8.2a: the game's
+  chat comes into #minecraft as `<player> text` (é as itself, in CC's
+  small font); #minecraft reaches the game as "[Lab-A] hi"; `/mc tell
+  <player> hi` arrives in the game; `/ns verify`'s code is whispered in
+  the game, `/ns confirm` takes it, `/whois` says "is the Minecraft player
+  <player>"; leaving and joining the game show in #minecraft (with a
+  chunk loader keeping Lab-A loaded).  Not right: `/mc tell nobody`
+  said "Told nobody." (fixed in 0.42.3).
 
 - 2026-11-12 — ROM 0.42.1: hello.lua's "!ping" answer now shows on the
   sender's own screen too.  The Minecraft bridge on AP 0.8.2a: a Chat Box,
