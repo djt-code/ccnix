@@ -514,6 +514,33 @@ do
     check("dropDown onto a furnace the turtle placed", turtle.dropDown() == true and w.get(0, 0, 1).inv[1].name == "minecraft:sand")
 end
 
+-- Flint and steel: a fire in the target cell, lit from beside (the block beyond clicked) or from above
+-- (placeDown onto the block under the target); it needs something solid under the fire and an empty cell,
+-- and the item stays
+do
+    local FLINT = "minecraft:flint_and_steel"
+    local w = world(nil, { { 0, -1, 1, "minecraft:netherrack" }, { 0, 0, 2, STONE } })
+    w.give(1, FLINT, 1)
+    local ok = turtle.place()
+    check("flint and steel sideways onto the block beyond: fire in the target cell, the item stays",
+        ok == true and w.get(0, 0, 1) and w.get(0, 0, 1).name == "minecraft:fire" and w.carrying(FLINT) == 1)
+    w = world(nil, { { 0, -1, 1, "minecraft:netherrack" } })
+    w.stand(0, 1, 1)
+    w.give(1, FLINT, 1)
+    ok = turtle.placeDown()
+    check("flint and steel from above onto a block: the fire is in the cell above it, where the turtle looks",
+        ok == true and w.get(0, 0, 1) and w.get(0, 0, 1).name == "minecraft:fire")
+    w = world(nil, { { 0, 0, 2, STONE } })
+    w.give(1, FLINT, 1)
+    check("flint and steel with nothing solid under the fire: refused", turtle.place() == false and w.get(0, 0, 1) == nil)
+    w = world(nil, { { 0, -1, 1, "minecraft:netherrack" }, { 0, 0, 1, STONE } })
+    w.give(1, FLINT, 1)
+    check("flint and steel into a cell that is not empty: refused", turtle.place() == false and w.get(0, 0, 1).name == STONE)
+    w = world(nil, { { 0, -1, 1, "minecraft:netherrack" }, { 0, 0, 1, "minecraft:water" }, { 0, 0, 2, STONE } })
+    w.give(1, FLINT, 1)
+    check("flint and steel into water: refused", turtle.place() == false and w.get(0, 0, 1).name == "minecraft:water")
+end
+
 --------------------------------------------------------------------------
 -- The pieces: names, directions
 --------------------------------------------------------------------------

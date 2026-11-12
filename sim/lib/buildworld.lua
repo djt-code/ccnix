@@ -55,7 +55,8 @@
 --
 -- Simplifications (what it leaves out): waterlogging (always false), double chests, fence and wall
 -- connections, redstone, blocks falling, fluids flowing, entities moving, an empty bucket picking a
--- liquid up.  A bucket places a source block in the target cell.
+-- liquid up.  A bucket places a source block in the target cell.  Flint and steel puts a fire in the cell
+-- the click lands in (an empty one with something solid under it); the item is not used up.
 
 local M = require("mock")
 local B = {}
@@ -682,6 +683,13 @@ function B.new(opts)
         if ITEM_LIQUID[item] then
             w.set(px, py, pz, ITEM_LIQUID[item], { level = 0 })
             S.inv[S.sel] = { name = "minecraft:bucket", count = 1 }
+            return true
+        end
+        -- flint and steel: a fire in the cell the click lands in, if it is empty and has something solid under it
+        -- (the item is damaged, not used up)
+        if short(item) == "flint_and_steel" then
+            if into ~= nil or not sturdy(w.at(px, py - 1, pz), "up") then return false end
+            w.put(px, py, pz, { name = "minecraft:fire", state = { age = 0 } })
             return true
         end
         if not isBlockItem(item) then return false end
