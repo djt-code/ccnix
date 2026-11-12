@@ -239,9 +239,6 @@ section.
 
 ## screen
 
-- **A click on a window in the status bar** (0.42.0) goes to it; a
-  click between the labels does nothing.  And `ps aux` (BSD's letters)
-  lists as `ps -l` does.
 - **The rest of screen** (0.36.0). Ctrl+A a gives ccsh its Ctrl+A;
   `screen -x` from the console while B has it: both show it, both type
   into it; a different-sized screen resizes the windows. `sysctl
@@ -250,9 +247,7 @@ section.
 ## IRC
 
 - **ircd as a service, the rest** (0.35.0). `service disable ircd`,
-  reboot: not running. `sysctl ircd.oper=pw` (ircd, with the d),
-  `service restart ircd`, then `/quote OPER x pw` from a client (x: any
-  operator name) gives +o and "You are now an IRC operator".
+  reboot: not running.
 - **irc, the rest** (0.35.0). A third client: hilights chime on a
   speaker if one is attached; Alt+A to the buffer with something new.
 - **irc on a monitor or a wide screen** (0.35.0). On a computer with an
@@ -278,9 +273,7 @@ section.
   SASL.
 - **Scripts, the rest** (0.35.0). `/script load hilightwin` (a hilight
   buffer gathers hilights); `/script load autorejoin`, get kicked: back
-  in 3 s; a script of your own in /.irc/scripts (`help irc-scripts`'
-  hello example); `/script autorun slap`, restart irc: loaded at the
-  start.
+  in 3 s; `/script autorun slap`, restart irc: loaded at the start.
 - **readline's editor** (0.35.0): ccsh's prompt is unchanged (Ctrl+A/E,
   Ctrl+R, Tab completion, history), since read() is now built on it.
 
@@ -324,6 +317,9 @@ section.
 
 ## Known issues seen, not yet looked at
 
+- irc scripts (2026-11-12, ROM 0.42.0): what a script sends with
+  `server:send_message` (hello.lua's "!ping" answer) goes out, and the
+  others see it, but isn't shown in the sender's own buffer.
 - The first boot's lines can appear twice in `/var/log/messages`, the first
   copy cut short.
 - `ip up` on a turtle (2026-11-11, ROM 0.40.3) seemed not to bring the
@@ -342,6 +338,14 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.0: `sysctl ircd.oper=...`, `service restart
+  ircd`, `/quote OPER x <password>`: "You are now an IRC operator", +o,
+  and /kill works.  `help irc-scripts`' hello.lua in /.irc/scripts:
+  `/script load hello`, `/hello Lab-A`, `/set hello_word hey`, and
+  Lab-A's "!ping" answered "Lab-A: pong" (seen by Lab-A; not shown on the
+  sender's own screen: known issues).  A click on a window's label in
+  screen's status bar switches to it.  `ps aux` lists as `ps -l`.
 
 - 2026-11-12 — IRC on ROM 0.41.2 (ircd on Lab-A, irc on Lab-B and in
   screen on Lab-A): `/ns register`, back without identifying: Guest1
