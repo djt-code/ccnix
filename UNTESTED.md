@@ -5,12 +5,6 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## irc: a tell to someone not in the game (0.42.3)
-
-- `/mc tell nobody hi` (with the Player Detector beside Lab-A): "Can't:
-  nobody isn't in the game" (AP 0.8 said sent to nobody). `/mc tell
-  <player> hi` in another case: still reaches you.
-
 ## claude: http, the network, programs, memory, the web, the rest (0.39.0)
 
 - **status after Ctrl+T in `mine`**: the `mine` job under way shows.
@@ -256,11 +250,6 @@ section.
   reboot: not running.
 - **irc, the rest** (0.35.0). A third client: hilights chime on a
   speaker if one is attached; Alt+A to the buffer with something new.
-- **irc on a monitor or a wide screen** (0.35.0). On a computer with an
-  80-column monitor redirected (`monitor right irc ...`, or a big
-  advanced monitor): the buffer list on the left, the nick list on the
-  right; a click on a buffer goes there. A pocket computer: no time,
-  shorter nick column, still readable.
 - **A real client and server through the gateway** (0.35.0). From the
   VM: `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. From B,
   with the network reaching out: `irc irc.libera.chat` (plain 6667),
@@ -330,6 +319,14 @@ section.
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.42.3: `/mc tell nobody hi`: "Can't: nobody isn't in
+  the game"; a tell with the player's name in another case still told
+  them.  irc on an advanced monitor (`monitor scale <side> 0.5`, then
+  `monitor <side> irc`): the buffer list and nick list need 5 blocks
+  wide (4 is under 80 columns); a tap on a buffer switches to it, a tap on
+  a nick puts it in the line; typing goes through the computer.  irc on a
+  pocket computer: readable, no time column, Alt+digits switch buffers.
 
 - 2026-11-12 — ROM 0.42.2, the Minecraft bridge on AP 0.8.2a: the game's
   chat comes into #minecraft as `<player> text` (é as itself, in CC's
