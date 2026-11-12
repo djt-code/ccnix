@@ -170,6 +170,18 @@ check("Ctrl+A space: the next", s.current == w1)
 clearInputs()
 ctrlA(d, "a")
 check("Ctrl+A a: a Ctrl+A for the window", inputsOf("scr/work.1"):find("key " .. keys.leftCtrl .. " false, key " .. keys.a, 1, true))
+clearInputs()
+-- as CC sends it in the game: no char for Ctrl+A (Ctrl held), then the
+-- command letter's key and char
+d:event("key", keys.leftCtrl, false)
+d:event("key", keys.a, false)
+d:event("key_up", keys.a)
+d:event("key_up", keys.leftCtrl)
+d:event("key", keys.a, false)
+d:event("char", "a")
+check("Ctrl+A a as CC sends it (no char for Ctrl+A): one a is the command, a Ctrl+A for the window",
+    inputsOf("scr/work.1"):find("key " .. keys.leftCtrl .. " false, key " .. keys.a, 1, true) and not d.awaiting,
+    inputsOf("scr/work.1"))
 ctrlA(d, "t")
 check("Ctrl+A t: a terminate for the window", inputsOf("scr/work.1"):find("terminate", 1, true))
 procs[w1.pid + 100] = { pid = w1.pid + 100, tty = w1.tty, name = "irc" }

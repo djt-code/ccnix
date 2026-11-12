@@ -477,6 +477,10 @@ function Display:event(name, ...)
             self.awaiting = nil
             return self:command(a)
         end
+        -- (a key pressed: Ctrl+A's own char, if any, came before it, so the
+        -- one this key brings is the command's; CC sends none while Ctrl
+        -- is held, and Ctrl+A a would want a second a)
+        if name == "key" then self.swallow = nil end
         if name == "key" and a == keys.escape then self.awaiting = nil end
         if name == "key" and a == keys.backspace then self.awaiting = nil; s:step(-1) end
         return nil                                         -- (keys and key_ups for the command's char: not the window's)

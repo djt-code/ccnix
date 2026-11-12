@@ -38,16 +38,10 @@ numbers, the text tools and the network tools. Still to try:
 
 ## Editors
 
-- **Ctrl+C in `vi`, the rest** (0.29.1). Over telnet Ctrl+C does the
-  same.
-
-- **vi and vim parse with lib/scan, the rest** (0.27.1, no change
-  meant). `vim` on a ccsh script: quotes over several lines, comments
-  after `;`. Normal mode: `*` from just before a word.
-
-- **`vi` over telnet** (0.25.0). The client's Esc key leaves insert mode
-  (lib/telnet now sends a lone Esc as the Esc key); arrows and Ctrl
-  keys work.
+- **Esc through telnet** (0.43.6): with the ccnix mod on the client,
+  `telnet 10.1.1.10`, `vi /tmp/x`, `i`, text, Esc: insert mode left (the
+  client now sends Esc as a lone ESC; before, it sent nothing). From a
+  real terminal (PuTTY) Esc does the same.
 
 ## ccsh
 
@@ -162,22 +156,16 @@ numbers, the text tools and the network tools. Still to try:
 
 ## screen
 
-- **The rest of screen** (0.36.0). Ctrl+A a gives ccsh its Ctrl+A;
-  `screen -x` from the console while B has it: both show it, both type
-  into it; a different-sized screen resizes the windows. `sysctl
-  screen.prefix=b`, then Ctrl+B is the key.
+- **Ctrl+A a with one a** (0.43.6): in screen, Ctrl+A then a gives ccsh
+  its Ctrl+A (the start of the line) at once; it wanted a second a (a char
+  for Ctrl+A itself was waited for, and CC sends none while Ctrl is held).
 
 ## IRC
 
-- **irc, the rest** (0.35.0). Hilights chime on a speaker if one is
-  attached.
-- **A real client and server through the gateway** (0.35.0). From the
-  VM: `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. From B,
-  with the network reaching out: `irc irc.libera.chat` (plain 6667),
-  /join a channel; `/set network.<name>.sasl_user` and `sasl_pass` for
-  SASL.
-- **readline's editor** (0.35.0): ccsh's prompt is unchanged (Ctrl+A/E,
-  Ctrl+R, Tab completion, history), since read() is now built on it.
+- **A real client through the gateway** (0.35.0). From the VM:
+  `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. On Libera,
+  `/set network.<name>.sasl_user` and `sasl_pass` for SASL (a channel
+  that wants a NickServ account, as #minecraft there does).
 
 ## The mod
 
@@ -194,12 +182,6 @@ numbers, the text tools and the network tools. Still to try:
   existing eula.txt alone; on a fresh host the server doesn't start until
   eula.txt says true; `-e minecraft_eula_accepted=true` writes it.
 
-
-## Help pages
-
-- **Trademark and wording notes** (0.25.2): `help git`, `help tcpdump`,
-  `help claude`, `help vi` and `help vim` end with the new trademark,
-  credit and wording paragraphs. Docs only; just read them.
 
 ## Known issues seen, not yet looked at
 
@@ -221,6 +203,17 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-12 — ROM 0.43.5: vim colours a ccsh script (a string over two
+  lines, comments after `;`); `*` from a space searches the next word.
+  irc: a hilight chimed on Lab-B's speaker; `irc irc.libera.chat`
+  connected and joined #minecraft there (speaking needs a NickServ
+  account); ccsh's Ctrl+A/E, Ctrl+R, Tab, history.  screen: `screen -x`
+  over telnet with Lab-A's console (both showing and typing),
+  `screen.prefix=b`.  `help git/tcpdump/claude/vi/vim` end with their
+  trademark notes.  Not right (fixed in 0.43.6): Esc in a telnet session
+  didn't reach the far side's vi, and Ctrl+A a in screen wanted a second
+  a.
 
 - 2026-11-12 — ROM 0.43.3, claude's long session: it equipped a chat box
   from its inventory in the modem's place and said "hello from the

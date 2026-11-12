@@ -556,10 +556,12 @@ end
 -- that types a character (that comes as a char event).
 function T.keyBytes(code, ctrl, keysT)
     keysT = keysT or keys
-    local name = keysT.getName and keysT.getName(code)
+    -- (CC's getName doesn't know Esc: its table never had it; boot gives
+    -- keys.escape, which the ccnix mod's client sends)
+    local name = (keysT.getName and keysT.getName(code)) or (code == keysT.escape and "escape") or nil
     if not name then return nil end
     if ctrl and scan.isAlpha(name) then return string.char(name:byte() - 96) end
-    local SEQ = { enter = "\r", numPadEnter = "\r", backspace = "\127", tab = "\t",
+    local SEQ = { enter = "\r", numPadEnter = "\r", backspace = "\127", tab = "\t", escape = "\27",
         up = "\27[A", down = "\27[B", right = "\27[C", left = "\27[D", home = "\27[H", ["end"] = "\27[F",
         insert = "\27[2~", delete = "\27[3~", pageUp = "\27[5~", pageDown = "\27[6~" }
     return SEQ[name]

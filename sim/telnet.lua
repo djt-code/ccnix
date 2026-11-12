@@ -174,6 +174,10 @@ check("SGR mouse: left click and release, right click, drag, wheel",
 check("keyBytes: Up, Enter, Ctrl+B; a letter is left to its char event",
     T.keyBytes(200, false, fakeKeys) == "\27[A" and T.keyBytes(28, false, fakeKeys) == "\r"
         and T.keyBytes(48, true, fakeKeys) == "\2" and T.keyBytes(30, false, fakeKeys) == nil)
+local ccKeys = { up = 200, escape = 256 }       -- (as CC's after boot: escape set, getName not knowing it)
+ccKeys.getName = function(code) if code == 200 then return "up" end end
+check("keyBytes: Esc (the ccnix mod sends it) as a lone ESC, though CC's getName doesn't know it",
+    T.keyBytes(256, false, ccKeys) == "\27" and T.keyBytes(200, false, ccKeys) == "\27[A")
 check("mouseBytes round trip: a right click at 7,4 and a wheel up",
     decoded(T.mouseBytes("mouse_click", 2, 7, 4) .. T.mouseBytes("mouse_scroll", -1, 3, 3))
         == "mouse_click,2,7,4 mouse_scroll,-1,3,3")
