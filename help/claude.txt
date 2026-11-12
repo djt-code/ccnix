@@ -32,11 +32,13 @@ The log, claude.log beside the program: each entry with its time (UTC); the opti
 
 Its helpers: functions it wants again are kept in /claude/helpers.lua (it can write there).  At the start of each session that file, if it's there, is run in the code's own world, so what it defines is in scope for every chunk the model runs.  A broken file is told to the model with its first goal, and the session goes on without it.
 
+What it can call: the system prompt carries turtlelib's index, one line a function (turtle/tl/index.txt, made from the comments above the functions by sim/mkhelp.py), and says where help/turtlelib.txt, the full reference, is to read with fs.  The index is read when claude starts; if it isn't on the computer the prompt says so and sends the model to the source.
+
 The code has the turtle, turtlelib, peripherals, the plain Lua bits, CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty, ...) and ccnix's libraries for text, the network and the world (text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc, mc), and the files: fs, io, loadfile and dofile read anything but the API key, and write only under /claude/ (so it can't rewrite the programs or the startup).  No shell.
 
 The other tools:
   status
-      where it is, fuel, what's around, what it carries, the tools equipped, what's attached, a mine job, the network
+      where it is, fuel, what's around, what it carries, the tools equipped, what's attached, the protected areas near it, a mine job, the network
   run_program
       runs one of ccnix's turtle programs (mine, farm, mow, home), or ip and ping for the network, with arguments, or reads its manual (help/)
   ask_user

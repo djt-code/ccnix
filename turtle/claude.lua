@@ -67,6 +67,12 @@
 -- chunk the model runs.  A broken file is told to the model with its first
 -- goal, and the session goes on without it.
 --
+-- What it can call: the system prompt carries turtlelib's index, one line a
+-- function (turtle/tl/index.txt, made from the comments above the functions
+-- by sim/mkhelp.py), and says where help/turtlelib.txt, the full reference,
+-- is to read with fs.  The index is read when claude starts; if it isn't on
+-- the computer the prompt says so and sends the model to the source.
+--
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
 -- ...) and ccnix's libraries for text, the network and the world (text,
@@ -77,7 +83,8 @@
 --
 -- The other tools:
 --   status       where it is, fuel, what's around, what it carries, the
---                tools equipped, what's attached, a mine job, the network
+--                tools equipped, what's attached, the protected areas
+--                near it, a mine job, the network
 --   run_program  runs one of ccnix's turtle programs (mine, farm, mow,
 --                home), or ip and ping for the network, with arguments,
 --                or reads its manual (help/)
@@ -137,6 +144,7 @@ local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
 local RETRIES = 4               -- on rate limits, overload and outages
 local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in CC; the
                                 -- reply is streamed, so a long one keeps coming
+local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
@@ -205,16 +213,47 @@ if not http then say("red", "HTTP is disabled on this server."); return end
 --------------------------------------------------------------------------
 -- What the model is told
 --------------------------------------------------------------------------
+-- A file of ccnix's (ccnix's, else the checkout's), or nil
+local function findFile(rel)
+    local file = ccnix and ccnix.find and ccnix.find(rel)
+    if not file and shell and shell.getRunningProgram then
+        file = sysenv.repoRoot() .. "/" .. rel
+        if not fs.exists(file) then file = nil end
+    end
+    return file
+end
+
+-- turtlelib's index (one line a function, made from the comments above
+-- them) and where its full reference is, for the prompt below
+local INDEX_FILE = findFile("turtle/tl/index.txt")
+local INDEX = INDEX_FILE and fileio.read(INDEX_FILE)
+local MANUAL_FILE = findFile("help/turtlelib.txt")
+if not INDEX then
+    say("yellow", "turtle/tl/index.txt isn't on this computer: Claude gets no list of turtlelib's functions (ccnix update, or setup, brings it).")
+    INDEX = "(The index of turtlelib's functions, turtle/tl/index.txt, isn't on this computer. The functions are the ones the source, turtlelib.lua in the turtle folder, defines as `function T.name(...)`: read it with fs and search it for a name before you guess.)"
+end
+
+local DETAILS = MANUAL_FILE
+    and ("When a line is not enough (all the options, the cases, how it fails), the full reference is help/turtlelib.txt, at " .. MANUAL_FILE
+        .. ": each function has a paragraph under its signature line. It is long, so don't print it whole; read the part you need, for instance: local f = fs.open(\""
+        .. MANUAL_FILE .. "\", \"r\"); local all = f.readAll(); f.close(); local a = all:find(\"T.moveTo(\", 1, true); print(all:sub(a, a + 1800)).")
+    or "The full reference, help/turtlelib.txt, isn't on this computer: for the details read the source, turtlelib.lua in the turtle folder, with fs."
+
 local SYSTEM = [==[
 You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside the turtle. You act mostly by calling the `lua` tool with Lua code (Lua 5.2 as CC runs it), which runs on the turtle; what it prints and returns comes back to you. Nothing happens unless you call a tool.
 
-Coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`: it started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is. turtlelib wraps the turtle API, so they stay right when you call turtle.forward(), back(), up(), down(), turnLeft() or turnRight() yourself: nothing is lost. T's moves do more on top of that: fuel (T.ensureFuel), digging what T.diggable lists (empty to start) and attacking what's in the way: T.forward(), T.back(), T.up(), T.down(), T.turnLeft(), T.turnRight(), T.face(d), T.moveDir(d) (d a heading, "up" or "down"), T.toY(y), T.goTo(x, z) (routes to a column at the current height, learning obstacles). T.forward() and the others only dig blocks listed in T.diggable: to dig, call turtle.dig(), turtle.digUp() or turtle.digDown() first, or set T.diggable["minecraft:stone"] = true for what it may dig on the way. The digs are wrapped too: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk; T.unprotect(name), T.protected(x, y, z), T.protections() to look), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that works in its own area. Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too, unless T.cfg.digContainers = true. T.onChange(fn) tells fn every dig, placement and move ({kind = "dig"|"place"|"move", x, y, z, ...}); it returns a function that stops it. Moves cost one fuel each; T.refuelTo(n) burns fuel items from the inventory.
+Frames: coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`. It started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is. turtlelib wraps the turtle API, so they stay right however a move is made: turtle.forward(), back(), up(), down(), turnLeft() and turnRight() called straight are counted, and so are digs and placements. T's own moves add fuel (T.ensureFuel), digging what T.diggable lists (empty to start; or set T.diggable["minecraft:stone"] = true) and attacking what's in the way. The Geo Scanner's scanBlocks entries carry r, u and f (right, up and forward of the turtle, relative to its heading) as well as the world x, y and z: use r/u/f for cells in this frame. A program run with `--here` makes where the turtle stands its (0,0,0), and so yours.
 
-Also useful: T.look(d) / T.digDir(d) / T.placeDir(d) (inspect, dig, place in a direction, facing it first); turtle.inspect(), turtle.inspectUp(), turtle.inspectDown() -> ok, {name=..., state=...}; turtle.detect/detectUp/detectDown(); turtle.select(slot), turtle.getItemDetail(slot), turtle.getItemCount(slot); T.selectItem(name), T.countItem(name), T.freeSlots(), T.tidyInventory(); turtle.place/placeUp/placeDown(), turtle.drop/dropUp/dropDown(n), turtle.suck/suckUp/suckDown(n); turtle.getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds); T.posString(). Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps or programs you keep between goals.
+Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk.
 
-More of turtlelib: T.goHome() goes back to (0,0,0); T.inventoryFull(); T.dumpDown() empties the inventory into the container below (tools and the items in T.keep, torches to start, stay); T.containerCounts(side) -> { [name] = count } of a chest beside, above or below ("front", "top", "bottom"); T.restockFrom(side, name, target) takes items from it until the turtle has target of them; T.dropSide(side, n), T.suckSide(side, n), T.inspectSide(side); T.hasMineJob() and T.loadMineJob() -> { width, height, length, spacing, homes, state } tell whether the `mine` program has a job under way (leave it alone unless asked).
+Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves.
 
-Keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write: it is loaded into the code's world at the start of every session, so what it defines is there in every lua call, not only in this conversation. Notes on turtlelib: T.takeInto(side, name, n, slot) takes name from the chest on a side into a slot until it holds n; T.refuelFrom(side, target) burns fuel from a chest until the tank holds target; T.keep is the table of item names T.dumpDown leaves in the turtle. The Geo Scanner's scanBlocks entries carry r, u and f (right, up and forward of the turtle, relative to its heading) as well as the world x, y and z.
+How to work: do several steps per call, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls, but not between sessions or after old results are cleared: keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write; it is loaded into the code's world at the start of every session, so what it defines is there in every lua call. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+
+What you can call in turtlelib (T), one line a function, with what it does and returns (made from the code's own comments, so it is right). A line ending in a colon is a group heading, not a function.
+@INDEX@
+
+@DETAILS@
 
 Libraries: `local text = require("text")` and so on give ccnix's own; use them rather than writing string code by hand or using Lua patterns.
 - text: trim(s), trimStart, trimEnd, squeeze (runs of blanks as one space), words(s) -> list, split(s, sep [, keep]) -> trimmed pieces (keep: as they are, empty ones too), join(list, sep), cut(s, sep) / cutLast(s, sep) -> before, after, lines(s), startsWith, endsWith, stripPrefix, stripSuffix, find(s, part [, from]) / findLast (plain text), contains(s, part), containsAny(s, chars), count(s, part), replace(s, old, new) (plain text, never a pattern), padRight(s, w) / padLeft / center / truncate(s, w), columns(rows [, right]) -> aligned lines, wrap(s, w) -> lines, equalFold(a, b), capitalize, swapCase.
@@ -233,7 +272,8 @@ Programs: run_program runs ccnix's own turtle programs, tested and careful about
 
 Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it tidy. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
-Each tool call is a slow network round trip, so do several steps per call: write loops, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls. Call `status` to see where the turtle is, what's around it, what it carries and has attached, and whether the network is up. Never dig or break chests, barrels, hoppers or computers, and don't break blocks you weren't asked to. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
+Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, and whether the network is up. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
+SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
 
 local TOOLS = {
     {
@@ -247,7 +287,7 @@ local TOOLS = {
     },
     {
         name = "status",
-        description = "Where the turtle is (position, heading), its fuel, what's in front, above and below it, what it carries, the tools it has equipped, the peripherals attached, the computer's label, whether `mine` has a job under way, and whether http and ccnix's network are up (its addresses).",
+        description = "Where the turtle is (position, heading), its fuel, what's in front, above and below it, what it carries, the tools it has equipped, the peripherals attached, the protected areas within 16 blocks of it, the computer's label, whether `mine` has a job under way, and whether http and ccnix's network are up (its addresses).",
         input_schema = { type = "object", properties = {} },
     },
     {
@@ -686,6 +726,23 @@ local function status()
     end
     lines[#lines + 1] = "attached: " .. (#attached > 0 and table.concat(attached, ", ") or "nothing")
     lines[#lines + 1] = string.format("computer %d, label %s", os.getComputerID(), os.getComputerLabel() or "none")
+    -- the protected areas within NEAR_AREAS blocks of the turtle (the distance to the box: 0 inside it)
+    local areas, near = T.protections(), {}
+    for _, a in ipairs(areas) do
+        local gap = 0
+        for _, axis in ipairs({ "x", "y", "z" }) do
+            local lo, hi = a[axis .. "1"], a[axis .. "2"]
+            gap = gap + math.max(0, lo - T.pos[axis], T.pos[axis] - hi)
+        end
+        if gap <= NEAR_AREAS then
+            near[#near + 1] = string.format("%s (%d,%d,%d to %d,%d,%d)%s", a.name, a.x1, a.y1, a.z1, a.x2, a.y2, a.z2,
+                gap == 0 and " - the turtle is inside it" or "")
+        end
+    end
+    if #areas > 0 then
+        lines[#lines + 1] = "protected areas near: " .. (#near > 0 and table.concat(near, ", ")
+            or string.format("none within %d blocks (%d elsewhere: T.protections())", NEAR_AREAS, #areas))
+    end
     local job = T.loadMineJob()
     if job then
         lines[#lines + 1] = string.format("mine job under way: %d wide, %d high, %s long, spacing %d, %s",
@@ -858,9 +915,7 @@ end
 --------------------------------------------------------------------------
 -- A program's manual (help/<name>.txt: ccnix's, else the checkout's), or nil
 local function manualOf(name)
-    local rel = "help/" .. name .. ".txt"
-    local file = ccnix and ccnix.find and ccnix.find(rel)
-    if not file and shell and shell.getRunningProgram then file = sysenv.repoRoot() .. "/" .. rel end
+    local file = findFile("help/" .. name .. ".txt")
     return file and fileio.read(file) or nil
 end
 

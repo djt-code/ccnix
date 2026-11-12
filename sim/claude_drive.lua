@@ -54,10 +54,20 @@ local function resultsIn(n)
     return out, last
 end
 
+local function repoFile(rel)
+    local f = assert(io.open(PROJ .. "/" .. rel, "rb"))
+    local data = f:read("a")
+    f:close()
+    return data
+end
+REAL_INDEX, REAL_MANUAL = repoFile("turtle/tl/index.txt"), repoFile("help/turtlelib.txt")
+
 local function fresh(answersList)
     Mine.setup(Mine.stock(0, 0))
     Mine.startAt()
-    Mine.inv, Mine.files = {}, { ["claude.key"] = "sk-test-key\n" }
+    -- (turtlelib's index and reference are on the computer, as setup puts them)
+    Mine.inv, Mine.files = {}, { ["claude.key"] = "sk-test-key\n", ["turtle/tl/index.txt"] = REAL_INDEX,
+                                 ["help/turtlelib.txt"] = REAL_MANUAL }
     HTTP.queue, HTTP.requests, ids = {}, {}, 0
     for i = #answers, 1, -1 do answers[i] = nil end
     for _, a in ipairs(answersList or {}) do answers[#answers + 1] = a end
@@ -776,3 +786,59 @@ check("a module loaded through T reads what the code's own fs may not (turtlelib
     viaT:find("^%-> true\n") and viaT:find("API key isn't readable", 1, true) and FIXTURE_LOADS == 1, viaT)
 check("...a second function of it needs no second load",
     resultsIn(3).toolu_2 and tostring(resultsIn(3).toolu_2.content):find("^%-> hello again") and FIXTURE_LOADS == 1)
+
+-- 24. the system prompt carries turtlelib's index (ADR-0008, phase 1): one
+--     line a function, from turtle/tl/index.txt, and says where the full
+--     reference is and how to read it; with no index on the computer the
+--     prompt says so; status names the protected areas near the turtle
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+T.protect("keep", 3, 0, 3, 5, 4, 5)
+T.protect("far", 100, 0, 100, 105, 4, 105)
+return #T.protections()]] }) }, "tool_use"),
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ toolUse("lua", { code = "T.pos.x = 4; T.pos.y = 1; T.pos.z = 4; return 1" }) }, "tool_use"),
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("index please")
+local sys24 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local nIndexLines = 0
+for line in REAL_INDEX:gmatch("[^\n]+") do
+    if line:sub(1, 2) == "T." then
+        nIndexLines = nIndexLines + 1
+        if not sys24:find(line, 1, true) then nIndexLines = -1000 end
+    end
+end
+check("the system prompt holds every line of turtle/tl/index.txt, whole", nIndexLines > 100, nIndexLines)
+check("...among them the ones for the wrap, protection and the new moves",
+    sys24:find("T.protect(name, x1, y1, z1, x2, y2, z2) - ", 1, true) and sys24:find("T.onChange(fn) - ", 1, true)
+        and sys24:find("T.moveTo(x, y, z, opts) - ", 1, true) and sys24:find("T.pull(side, name, n) - ", 1, true)
+        and sys24:find("T.withPeripheral(name, fn) - ", 1, true) and sys24:find("T.dumpJunk() - ", 1, true))
+check("it says where the full reference is and how to read part of it with fs",
+    sys24:find("help/turtlelib.txt", 1, true) and sys24:find('all:find("T.moveTo(", 1, true)', 1, true)
+        and sys24:find("fs.open(", 1, true))
+check("the interim notes are folded in: helpers file, T.keep, r/u/f, the frame, safety and cost",
+    sys24:find("/claude/helpers.lua", 1, true) and sys24:find("T.keep", 1, true) and sys24:find("r, u and f", 1, true)
+        and sys24:find("Frames:", 1, true) and sys24:find("Safety:", 1, true) and sys24:find("Cost:", 1, true))
+check("the prompt still ends the way it did", sys24:find("say plainly if something failed.", 1, true) ~= nil)
+check("the placeholders are all filled", not sys24:find("@INDEX@", 1, true) and not sys24:find("@DETAILS@", 1, true))
+-- the path the prompt names is one the code's own fs can read
+local readsManual = sys24:match('fs%.open%("([^"]+)"')
+check("the path the prompt gives for the reference exists", readsManual ~= nil and fs.exists(readsManual), tostring(readsManual))
+local st1 = resultsIn(3).toolu_2 and tostring(resultsIn(3).toolu_2.content) or ""
+check("status names the protected area near the turtle and leaves out the far one, counting it",
+    st1:find("protected areas near: keep (3,0,3 to 5,4,5)", 1, true) and not st1:find("far (", 1, true), st1)
+local st2 = resultsIn(5).toolu_4 and tostring(resultsIn(5).toolu_4.content) or ""
+check("...and says when the turtle is inside one", st2:find("keep (3,0,3 to 5,4,5) - the turtle is inside it", 1, true), st2)
+
+fresh({ "" })
+Mine.files["turtle/tl/index.txt"] = nil
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("no index")
+local sysNone = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("with no index on the computer the prompt says so and points at the source",
+    sysNone:find("index of turtlelib's functions, turtle/tl/index.txt, isn't on this computer", 1, true)
+        and sysNone:find("turtlelib.lua", 1, true) and sysNone:find("say plainly if something failed.", 1, true)
+        and not sysNone:find("@INDEX@", 1, true))

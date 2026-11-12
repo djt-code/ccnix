@@ -5,6 +5,31 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## turtlelib's reference and claude's prompt (ADR-0008 phase 1, 0.46.0)
+
+- **The index in the prompt**: start `claude` on a turtle with the ROM (or an
+  updated checkout): the first request's system prompt should hold the
+  "What you can call in turtlelib" section with a line a function, and a path
+  for the reference. Ask it "what does T.moveTo return?" without letting it
+  read anything: it should answer from the index. If `turtle/tl/index.txt`
+  is not on the computer, claude prints a yellow line at start and the prompt
+  says the index is missing (try it by moving the file away).
+- **The reference on the turtle**: `help turtlelib` pages the full reference
+  (about 20 KB, so check the pager copes), and `help ccnix` lists it under
+  the turtle programs. In claude, ask it to read what T.pull does in more
+  detail than the index: it should open `help/turtlelib.txt` through fs and
+  print only the part it needs (the prompt gives it the path and an example).
+- **setup and update**: `ccnix setup claude` (and mine, farm, mow) on a
+  checkout install brings `turtle/tl/` (just `index.txt` until the first
+  module lands) and `help/turtlelib.txt`; `ccnix update` on a ROM turtle
+  fetches them (the update takes the whole `turtle/` folder).
+- **status and protection**: `T.protect("home", ...)` around the turtle in
+  claude's code, then `status`: "protected areas near: home (...) - the
+  turtle is inside it". A far area is only counted.
+- **The prompt's new prose** (frames, safety, cost, how to work): read a
+  session's first replies for anything that no longer fits what the turtle
+  really does; the prompt is cached, so a long session pays for it once.
+
 ## turtlelib: withPeripheral, pull, moveTo, junk, the module loader (ADR-0008)
 
 - **withPeripheral**: with a chunk controller on one side and a pickaxe on
