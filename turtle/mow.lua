@@ -36,10 +36,14 @@
 --    column something solid stopped it in is left out for the rest of the
 --    run, so a second pass doesn't run into the same pillar again.  A
 --    column of unknown height is taken to be level with where the turtle
---    stands.  `sysctl mow.map=false` turns the heights off.
+--    stands; of what the map knows in a column, the ground is the block
+--    nearest the start's level with nothing solid on it (leaves or a roof
+--    over a tile aren't its ground).  `sysctl mow.map=false` turns the
+--    heights off.
 --  * Protected areas (T.protect, by another program or by hand) are kept
 --    out of: the tiles in one are left alone, the routes go round them, and
---    mow says how many tiles it kept out of.
+--    mow says how many tiles it kept out of.  The area home is in, if any,
+--    is crossed to get out and back (its tiles are still left alone).
 --  * Telling the player: with `sysctl mow.report=true` and a player named
 --    in turtle.player (`sysctl turtle.player=<name>`), mow tells them
 --    through a chat box when it is done, and after a pass that gave up on
@@ -116,10 +120,15 @@ local function gardenAt(x, z)
     return T.guarded(x, g and g + 1 or 0, z)
 end
 
+-- The protected area home is in, if any: mow has to cross it to get out and
+-- back, so it is no garden to keep out of (its tiles are still left alone).
+local homeArea
+
 -- Is the step from column x, z into nx, nz one to plan?  A column whose
 -- ground isn't known is taken to be level with the ground under the turtle.
 local function stepAllowed(x, z, nx, nz)
-    if gardenAt(nx, nz) then return false end
+    local garden = gardenAt(nx, nz)
+    if garden and garden ~= homeArea then return false end
     local here = T.pos.y - 1
     local a, b = groundAt(x, z) or here, groundAt(nx, nz) or here
     return math.abs(a - b) <= T.cfg.maxClimb
@@ -133,11 +142,28 @@ local function noteGround()
     if USE_MAP then T.map.set(T.pos.x, T.pos.y - 1, T.pos.z, block.name, block.state) end
 end
 
+-- The ground of column x, z as the map knows it: of the solid cells with
+-- no solid cell right above them (where a turtle could stand), within the
+-- heights mow works in, the one nearest the start's ground (y -1); a lower
+-- one wins a tie.  So a tree's leaves or a roof over a tile are not taken
+-- for its ground.  nil if the map knows none.
+local function groundFromMap(x, z)
+    local best, above
+    local hi = T.cfg.maxHeight - 1
+    while true do
+        local y = T.map.top(x, z, -1 - T.cfg.maxDrop, hi)
+        if not y then break end
+        if above ~= y + 1 and (not best or math.abs(y + 1) <= math.abs(best + 1)) then best = y end
+        above, hi = y, y - 1
+    end
+    return best
+end
+
 -- What the map knows of the lawn's ground from earlier runs.
 local function loadGround(plan)
     if not (USE_MAP and fs.exists(T.dataPath(T.MAP_DIR))) then return end
     for _, t in ipairs(plan) do
-        local y = T.map.top(t.x, t.z)
+        local y = groundFromMap(t.x, t.z)
         if y then ground[T.ckey(t.x, t.z)] = y end
     end
 end
@@ -246,6 +272,7 @@ print(string.format("Mowing %dx%d (%d tiles). Fuel: %s", WIDTH, LENGTH, #plan,
     tostring(turtle.getFuelLevel())))
 T.step = stepOver
 T.edgeOK = stepAllowed
+homeArea = T.guarded(0, 0, 0)
 loadGround(plan)
 local kept, keptIn = 0, {}
 for _, t in ipairs(plan) do

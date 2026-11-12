@@ -353,3 +353,27 @@ EQ.left = "minecraft:diamond_hoe"
 withSettings({ ["mow.report"] = true }, function() run("4", "3", "notorch") end)
 check("on, but no player set: no one is told, and mow says why", #told == 0 and logHas("Couldn't tell the player %(no player to tell"), table.concat(told, " | "))
 package.loaded.mc = nil
+
+--------------------------------------------------------------------------
+-- 10. a canopy: leaves five above a lawn tile, known to the map (a scan),
+--     are not taken for its ground: the tile is mowed on the next run
+allGrass(4, 4)
+withSettings({}, function() run("4", "4", "notorch") end)        -- (the map holds the lawn's ground)
+GRASS = {}
+for x = 1, 4 do for z = 1, 4 do plant(x, 0, z) end end
+set(2, 5, 2, block("minecraft:oak_leaves"))
+T = package.loaded.turtlelib
+T.map.set(2, 5, 2, "minecraft:oak_leaves")
+withSettings({}, function() run("4", "4", "notorch") end)
+check("leaves known above a tile don't make it out of reach: every tile cut", uncut() == 0 and not logHas("Can't reach")
+    and not logHas("^Gave up"), uncut() .. " uncut")
+
+--------------------------------------------------------------------------
+-- 11. home in a protected area (the base): mow crosses it to get out and
+--     back, and still leaves its tiles alone
+allGrass(5, 4)
+Mine.files[".protected"] = "-1 0 -1 0 1 0 base\n"
+run("5", "4", "notorch")
+check("a protected area over home: the lawn is cut and the turtle gets home", uncut() == 0 and P.x == 0 and P.y == 0 and P.z == 0
+    and not logHas("Couldn't get home"), string.format("at %d,%d,%d, %d uncut", P.x, P.y, P.z, uncut()))
+
