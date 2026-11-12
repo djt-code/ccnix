@@ -46,12 +46,12 @@
 -- in 1 and 2 the turtle's heading; in 3 the heading (looking down); in 4 the OPPOSITE of the place
 -- direction for a sideways place (so a stair placed that way faces back at the turtle), and the heading
 -- for placeDown/placeUp.  The same for "the nearest looking directions" torches, ladders, buttons and
--- levers use: the placer's order (heading, down, right, left, up, behind for a level look; down, right,
--- heading, behind, left, up looking down; up first looking up) with the direction opposite the clicked
--- face moved to the front.  The order after the front one comes from the South-facing case of
--- Direction.orderedByNearest; for other headings Minecraft's own order depends on float rounding of a
--- quarter turn and may swap two of them (it matters only for a torch, ladder, button or lever with no
--- support on the side clicked).  UNVERIFIED in game.
+-- levers use: the placer's order with the direction opposite the clicked face moved to the front.  The
+-- order is Direction.orderedByNearest's, worked out with Mth's float sine table for the yaws and pitches
+-- CC gives: looking down, down, heading, right, left, behind, up (up first and down last looking up); a
+-- level look facing south or west, heading, down, right, left, up, behind; facing north or east, heading,
+-- right, down, up, left, behind (the float rounding of a quarter turn).  It matters only for a torch,
+-- ladder, button or lever with no support on the side clicked.  UNVERIFIED in game.
 --
 -- Simplifications (what it leaves out): waterlogging (always false), double chests, fence and wall
 -- connections, redstone, blocks falling, fluids flowing, entities moving.  A bucket of water or lava
@@ -183,8 +183,10 @@ end
 --------------------------------------------------------------------------
 local function lookOrder(facing, pitch, face, replaceClicked)
     local order
-    if pitch == "down" then order = { "down", cw(facing), facing, OPP[facing], ccw(facing), "up" }
-    elseif pitch == "up" then order = { "up", cw(facing), facing, OPP[facing], ccw(facing), "down" }
+    -- (Direction.orderedByNearest, worked out with Mth's float sine table for each yaw and pitch CC gives)
+    if pitch == "down" then order = { "down", facing, cw(facing), ccw(facing), OPP[facing], "up" }
+    elseif pitch == "up" then order = { "up", facing, cw(facing), ccw(facing), OPP[facing], "down" }
+    elseif facing == "north" or facing == "east" then order = { facing, cw(facing), "down", "up", ccw(facing), OPP[facing] }
     else order = { facing, "down", cw(facing), ccw(facing), "up", OPP[facing] } end
     if replaceClicked then return order end
     local front = OPP[face]                       -- the way back to the block that was clicked
@@ -332,13 +334,14 @@ FAMILIES = {
         end,
     },
 
-    -- a ladder hangs on a side; ladders stack on a ladder of the same facing
+    -- a ladder hangs on a side; never on the front of another ladder
     ladder = {
         sturdy = no, full = no,
         place = function(ctx)
             local c = ctx.clicked
+            -- (LadderBlock: never against the front of a ladder that faces the clicked side)
             if not ctx.replaceClicked and c and familyOf(c.name) == "ladder" and c.state.facing == ctx.face then
-                return { facing = ctx.face, waterlogged = false }
+                return nil
             end
             for _, d in ipairs(ctx.look) do
                 if CIDX[d] and hangs(ctx, d) then return { facing = OPP[d], waterlogged = false } end

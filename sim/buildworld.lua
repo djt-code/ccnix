@@ -139,6 +139,8 @@ row("torch on a fence: standing (the post supports the centre)", TO, "front", { 
 refused("torch hung on the side of a bottom slab: refused (not a full face)", TO, "front", { { 0, 0, 2, SL, { type = "bottom" } } })
 row("torch on the back of a stair (its tall side toward the turtle): hung on it", TO, "front", { { 0, 0, 2, ST, { facing = "south", half = "bottom" } } }, { want(F, "wall_torch", { facing = "south" }) })
 refused("torch on a stair's low side: refused (only its back is full)", TO, "front", { { 0, 0, 2, ST, { facing = "north", half = "bottom" } } })
+row("torch placeDown over leaves, stone ahead of the target and to its right: hung on the one ahead (the order looking down)", TO, "down",
+    { { 0, -2, 0, "minecraft:oak_leaves" }, stone(0, -1, 1), stone(1, -1, 0) }, { want(D, "wall_torch", { facing = "south" }) })
 
 -- Ladders hang on a side only
 local LA = "minecraft:ladder"
@@ -147,7 +149,7 @@ refused("ladder sideways, only a floor: refused", LA, "front", { FU })
 refused("ladder sideways, nothing about: refused", LA, "front", {})
 refused("ladder placeDown over a floor: refused", LA, "down", { DB })
 row("ladder with a wall to the west only: on it, facing east", LA, "front", { stone(-1, 0, 1) }, { want(F, "ladder", { facing = "east" }) })
-row("a ladder onto the face of a ladder that looks at it: same facing", LA, "front", { { 0, 0, 2, LA, { facing = "south" } } }, { want(F, "ladder", { facing = "south" }) })
+refused("a ladder onto the face of a ladder that looks at it, nothing else about: refused (LadderBlock)", LA, "front", { { 0, 0, 2, LA, { facing = "south" } } })
 
 -- Buttons and levers: floor, wall or ceiling
 local TO_WALL = "minecraft:wall_torch"

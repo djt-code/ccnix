@@ -287,8 +287,11 @@ then `turtle.inspect*` from beside it.
   wall to one side the mock hangs it on that wall. A torch on a bottom slab or
   the side of a bottom slab is refused. When two supports compete for a
   torch, ladder, button or lever, the mock uses the clicked side first, then
-  down, then the placer's right, left, up, behind; Minecraft's order for the
-  last ones depends on float rounding at a quarter turn and may differ.
+  Direction.orderedByNearest's order as worked out from Minecraft's float
+  sine table: looking down (placeDown), down, ahead, right, left, behind, up;
+  level, facing south or west, ahead, down, right, left, up, behind; facing
+  north or east, ahead, right, down, up, left, behind. A ladder is never
+  placed against the front of another ladder.
 - **Doors**: refused with no solid block under the target (even with one
   beyond) or something in the cell above; a door beside a full block gets
   its hinge on that side (the click is always the middle, so left otherwise).
