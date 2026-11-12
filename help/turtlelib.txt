@@ -13,6 +13,7 @@ Provides:
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
+  * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -439,6 +440,9 @@ T.markCrafted(name)
 T.clearCrafted()
     Forget what T.markCrafted named: the end of a job.
 
+T.isEssential(name)
+    Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
+
 T.isJunk(name)
     Is the item `name` junk? False for what's in T.keep, tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 
@@ -661,6 +665,58 @@ T.ignite(x, y, z, opts)
     Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 
     The turtle goes to the cell over it and uses the flint and steel downward on the block under it, which puts the fire in the cell between (so there must be a solid block under the cell, and the cell empty). Inside an obsidian frame that lights a nether portal, and what it finds is nether_portal. opts.move and opts.inside are as for T.placeAt. Returns the name of what burns there (minecraft:fire, soul_fire or nether_portal), and true if it was already burning.
+
+tl.store: chests at home: where they are, what is in them, fetching from them and putting away
+
+Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue, T.where, T.fetch, T.stow, T.autoDump), or when T.cfg.autoDump is set.
+
+A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known it takes the junk chest's trip instead (T.dumpJunk).
+
+The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds) and the lines "item count name" after it are what it held.  Fetching and stowing read the chest again as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
+
+== The list of chests, in a data file ==
+
+T.addChest(x, y, z, side, bulk)
+    Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
+
+    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again keeps what was written down of it. Kept in the data file .chests.
+
+T.forgetChest(x, y, z, side)
+    Forget the chest at this place (as T.addChest was given it). True, or false and why.
+
+T.chests()
+    The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never.
+
+== Cataloguing ==
+
+T.catalogue(spots, opts)
+    Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
+
+    `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered (T.addChest); nil goes round the ones already known. opts.find, a box in the map (six numbers, as T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it. opts.move is T.moveTo's (default { path = true, scan = false }). The nearest comes next and the turtle ends where it began, facing as before. Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
+
+== Where an item is, and fetching it ==
+
+T.where(name)
+    Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk }, the nearest to the turtle first, and the total. Moves nothing.
+
+    It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; nil and why when no chest is known.
+
+T.fetch(name, n, opts)
+    Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
+
+    `name` is an item's name (minecraft: assumed). The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. opts.move is T.moveTo's.
+
+== Putting away ==
+
+T.stow(opts)
+    Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+
+    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. What no chest holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count } }; opts.move is T.moveTo's.
+
+T.autoDump()
+    Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
+
+    T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few, the turtle makes this trip and comes back where it was, facing as before. A dump that did nothing is not tried again until there is less room.
 
 tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
 

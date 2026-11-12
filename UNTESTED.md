@@ -5,6 +5,36 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.store: the chests at home, fetching, stowing and T.cfg.autoDump (ADR-0008 phase 4)
+
+`T.addChest(x, y, z, side, bulk)` tells the turtle where a chest is (the cell it
+stands in and the side the chest is on, as `T.setJunkChest` does); the list and
+what each chest held is in the data file `.chests`. Start with two or three
+chests in a row and the turtle at home:
+
+- **T.catalogue()**: goes round the chests nearest first, reads each one
+  (`peripheral.wrap(side).list()`), writes down what is in it, and comes back
+  facing as it was. A chest that was broken or can't be reached is reported
+  (`false, why, info`) and the rest are read. Check that it works on a barrel
+  too, and that `T.catalogue(nil, { find = box })` (the chests the map shows in a
+  box) stands in a sensible cell beside each.
+- **T.where(name)** lists the chests with an item (a name or a glob), nearest
+  first, with the total, and moves nothing. **T.fetch(name, n)** goes there, takes
+  the count with `T.pull` (a mixed chest, a part stack, across two chests), reads
+  the chest again and comes back; a chest someone emptied since is put right and
+  the next one tried.
+- **T.stow()** puts away what is not kept (not in `T.keep`, not crafted this job,
+  no tool, fuel, bucket or peripheral): into a chest that already holds the item,
+  else into the bulk chest. `T.stow({ all = true })` puts away the kept things
+  too, never the tools or fuel. What does not fit stays aboard and is told.
+  Check that nothing is ever dropped in the world (a chest that is full, a chest
+  that is gone).
+- **T.cfg.autoDump = true** (or a number of free slots; true is 2): after a dig
+  that leaves that few free slots the turtle goes to the chests (or the junk chest,
+  with no chests) and comes back where it was. Check it in the middle of a dig run
+  (`T.moveTo` with digging, or mine with it set): that the position is right afterwards, that
+  it does not loop when there is nothing to put away, and that Ctrl+T stops it.
+
 ## tl.craft: T.craft, T.canCraft, T.smelt and the fuel and smelting tables (ADR-0008 phase 4)
 
 Recipes are data (`T.RECIPES`, `T.recipe(name)`, `T.addRecipe(spec)`); `T.craft(name, n)`

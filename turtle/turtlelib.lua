@@ -44,6 +44,10 @@
 --     rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral
 --     (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short;
 --     T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
+--   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue
+--     goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes
+--     some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and
+--     T.cfg.autoDump = true does that on its own when the inventory nearly fills
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2305,14 +2309,20 @@ function T.markCrafted(name) crafted[name] = true end
 -- Forget what T.markCrafted named: the end of a job.
 function T.clearCrafted() crafted = {} end
 
+-- Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting
+-- table or a peripheral?  (Never junk, and never put away in a chest by T.stow.)
+function T.isEssential(name)
+    if T.fuel[name] or T.isTool(name) or NEVER_JUNK[name] then return true end
+    for _, prefix in ipairs(NEVER_JUNK_PREFIXES) do
+        if text.startsWith(name, prefix) then return true end
+    end
+    return false
+end
+
 -- Is the item `name` junk?  False for what's in T.keep, tools, fuel,
 -- buckets, a crafting table, peripherals and what was crafted this job.
 function T.isJunk(name)
-    if T.keep[name] or T.fuel[name] or T.isTool(name) or crafted[name] or NEVER_JUNK[name] then return false end
-    for _, prefix in ipairs(NEVER_JUNK_PREFIXES) do
-        if text.startsWith(name, prefix) then return false end
-    end
-    return true
+    return not (T.keep[name] or crafted[name] or T.isEssential(name))
 end
 
 -- Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped
@@ -2436,6 +2446,9 @@ T.registry = {
     -- tl.craft: recipes, crafting from a chest, and smelting
     craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",
+    -- tl.store: the chests at home, what is in them, putting away and fetching
+    addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
+    fetch = "tl.store", stow = "tl.store", autoDump = "tl.store",
 }
 local loadingModule = {}
 
@@ -2473,6 +2486,13 @@ setmetatable(T, { __index = function(_, name)
     local f, why = T.need(name)
     if f then return f end
     return function() error(why, 2) end
+end })
+
+-- T.cfg.autoDump = true (or a number of free slots) turns on the store module's dumping when the
+-- inventory nearly fills; a program only sets it, so setting it the first time loads the module.
+setmetatable(T.cfg, { __newindex = function(cfg, key, value)
+    rawset(cfg, key, value)
+    if key == "autoDump" and value then pcall(T.need, "autoDump") end
 end })
 
 -- A map on disk is kept right by every program that digs, places or moves, so its module
