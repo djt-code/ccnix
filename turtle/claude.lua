@@ -1046,7 +1046,13 @@ local function runTool(name, input)
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
     elseif name == "status" then
-        return status()
+        -- (a fault in it goes to the model, not out of claude; Ctrl+T still stops it)
+        local ok, out = pcall(status)
+        if ok then return out end
+        if out == "Terminated" then error(out, 0) end
+        say("red", tostring(out))
+        log("error:\nstatus: " .. tostring(out))
+        return "status failed: " .. tostring(out), true
     elseif name == "run_program" then
         return runProgram(input)
     elseif name == "ask_user" then

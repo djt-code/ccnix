@@ -893,3 +893,19 @@ check("the old interim sentence about scanBlocks now points at T.scan", sys26:fi
 check("the prompt says what moves with a --here, how to drop a wrong lesson, and whose autoDump and undo they are",
     sys26:find("move with the frame", 1, true) and para26:find("T.forgetPlacements()", 1, true)
     and para26:find("not while a program you run has the turtle", 1, true) and para26:find("not a program's you run", 1, true))
+
+-- 27. a fault inside the status tool goes back to the model as a tool error;
+-- claude carries on (in game a missing .map folder ended the session here)
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+T.loadMineJob = function() error("disk on fire", 0) end
+return 1]] }) }, "tool_use"),
+    reply({ toolUse("status", {}) }, "tool_use"),
+    reply({ text("Status is broken.") }, "end_turn"),
+}
+run("where are you")
+local st27 = resultsIn(3).toolu_2
+check("a status that fails goes back as a tool error saying why",
+    st27 and st27.is_error == true and tostring(st27.content):find("status failed: disk on fire", 1, true), st27 and tostring(st27.content))
+check("...and the session carries on to the model's answer", #HTTP.queue == 0 and Mine.logHas("Status is broken%."))

@@ -5,6 +5,13 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## A turtle with no map yet (ccnix 0.50.2)
+
+- **claude starts on a turtle with no `.map`**: the first `status` no longer stops claude with
+  `tl/world.lua:567: .../.map: No such file` (0.50.1 listed the map's folder before checking it was there).
+  `status` works, and no `.map` folder appears. Also: any fault inside `status` now goes back to the model as
+  a tool error ("status failed: ...") instead of ending the session.
+
 ## ADR-0008 after review: frames, owners, building fixes (ccnix 0.50.1)
 
 In-game order for all of ADR-0008 (the ADR's own list): 1. phase 1 with claude on the castle turtle (a helper

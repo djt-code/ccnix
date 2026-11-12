@@ -564,7 +564,7 @@ local function ensure()
         -- (nothing is made on disk until something is written: asking makes no map)
         S.onDisk = fs.exists(dir)
         loadFrame()
-        for _, name in ipairs(fs.list(dir)) do
+        for _, name in ipairs(S.onDisk and fs.list(dir) or {}) do
             local cx, cy, cz = parseName(name)
             if cx then
                 local size = fs.getSize(fs.combine(dir, name))

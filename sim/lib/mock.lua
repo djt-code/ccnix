@@ -391,10 +391,23 @@ function M.fsApi(S)
         isDir = function(p) return S.dirs[combine(p)] ~= nil end,
         makeDir = function(p) S.dirs[combine(p)] = true end,
         isReadOnly = function() return false end,
-        getSize = function(p) return #(S.files[combine(p)] or "") end,
-        -- the names in a folder: its files' and folders' next part, sorted
+        -- (a missing path is an error, as CC's is)
+        getSize = function(p)
+            p = combine(p)
+            if S.files[p] then return #S.files[p] end
+            if S.dirs[p] or p == "" then return 0 end
+            error("/" .. p .. ": No such file", 2)
+        end,
+        -- the names in a folder: its files' and folders' next part, sorted (a missing folder or a
+        -- file is an error, as CC's is)
         list = function(p)
             p = combine(p)
+            if S.files[p] then error("/" .. p .. ": Not a directory", 2) end
+            if p ~= "" and not S.dirs[p] then
+                local inside = false
+                for k in pairs(S.files) do if k:sub(1, #p + 1) == p .. "/" then inside = true; break end end
+                if not inside then error("/" .. p .. ": No such file", 2) end
+            end
             local seen, out = {}, {}
             local function add(key)
                 local rest = p == "" and key or (key:sub(1, #p + 1) == p .. "/" and key:sub(#p + 2))
