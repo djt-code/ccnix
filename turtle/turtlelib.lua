@@ -30,6 +30,11 @@
 --     protected areas, lava, fire and doors, and T.travel, which walks one
 --     along a clear layer (or the search), planning again at a block it did
 --     not expect; T.moveTo's opts.path asks for it
+--   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab,
+--     log, torch, door or the like down with the state wanted (facing, half,
+--     axis), choosing how to place it from a table of what each approach
+--     gives, checking and trying another way if the game differed, and
+--     remembering what it learnt; T.ignite lights a fire from above
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -2415,6 +2420,8 @@ T.registry = {
     alignMap = "tl.world", frameChanged = "tl.world",
     -- tl.path: routes
     path = "tl.path", travel = "tl.path",
+    -- tl.place: blocks placed with the state wanted, and fire
+    placeAt = "tl.place", ignite = "tl.place",
 }
 local loadingModule = {}
 

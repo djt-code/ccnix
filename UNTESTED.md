@@ -5,6 +5,48 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## tl.place: T.placeAt and T.ignite (ADR-0008 phase 3)
+
+`T.placeAt(x, y, z, item, { facing, half, axis })` places a block with the state
+wanted: it picks, from a table of what each way of placing gives (sideways,
+from above, from below; `T.PLACE_TABLE`), the way the map says is possible,
+goes there, places, inspects, and digs and retries if the state is wrong. The
+table is the building mock's (read from CC:Tweaked's source), so the facts under
+"The building mock's placement rules" below are what to check first; then:
+
+- **Stairs and slabs both ways**: with the origin set (`T.setOrigin`),
+  `T.placeAt(x, y, z, "minecraft:oak_stairs", { facing = "north", half = "top" })`
+  in the open (placeDown, nothing below: top half), then under a ceiling block
+  (placeUp: top half), then sideways onto a wall (bottom half). Inspect each
+  (`turtle.inspect*`, or `T.map.get`). The result's third value says which way
+  was used.
+- **Facing needs the compass**: a stair `facing` is a compass name, so
+  `T.setOrigin(x, y, z, facing)` first (or a geo scan or GPS gives it). Place one
+  in each of the four facings and compare with F3.
+- **A wrong table row is learnt**: if the game gives something the table does
+  not say, the first try is dug out and the next approach used, and the row is
+  noted in the data file `.placements` (a line like `stairs down always half=top`);
+  the next placement of that kind goes right the first time. A guess on cells
+  the map has never seen is not noted. Look at the file after a placement that
+  took a second try, and delete it to forget.
+- **A wrong try inside a protected area** is dug out all the same (the library's
+  own block); check the area still refuses `turtle.dig()` of anything else.
+- **Logs, torches, doors**: a log's `axis` (standing, along the heading, across);
+  a torch with `facing` on a wall (it walks round to the far side if the wall is
+  between) and with nothing asked on a floor; a ladder, button, lever, trapdoor,
+  fence gate and chest by `facing`/`half`/`face`; a door needs a solid block under
+  it and the cell above free (the map is asked; a door with air under it is
+  refused before any move) and goes in after the walls round it.
+- **`T.ignite(x, y, z)`**: flint and steel from above: the turtle goes to the
+  cell over it and uses the flint and steel downward on the block under, which
+  should put the fire in the cell between (netherrack, say). Inside an obsidian
+  frame that lights a portal and `T.ignite` should report `minecraft:nether_portal`.
+  The fire cell is sideways-lit by the mock the same way (a click on the block
+  beyond); only the downward one is used. Confirm CC lets a turtle light fire
+  this way and the flint and steel is not used up.
+- **The map's name for what was placed**: after a placement the map holds the
+  block as inspected (`wall_torch`, with its state), not the item's name.
+
 ## The building mock's placement rules (ADR-0008 phase 3, sim/lib/buildworld.lua)
 
 The mock models `turtle.place*` from the source of CC:Tweaked 1.120.2

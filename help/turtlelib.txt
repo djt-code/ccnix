@@ -10,6 +10,7 @@ Provides:
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
   * routes (tl.path, loaded when first used): T.path, A* over the map round protected areas, lava, fire and doors, and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
+  * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -490,6 +491,35 @@ T.travel(x, y, z, opts)
     Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
 
     Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6). opts are T.path's (dig, avoid, inside, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
+
+tl.place: placing blocks the right way round: stairs, slabs, logs, torches, doors and the rest, and lighting a fire
+
+Loaded by turtlelib the first time T.placeAt or T.ignite is used.  Cells are the turtle's own (the frame it counts in).
+
+A turtle does not choose how a block lands.  What it gets depends on how the turtle places it, because the game has the turtle's fake player click a block, and the block's state comes from the click (CC:Tweaked's TurtlePlaceCommand, and Minecraft's rules for each block).  The game tries, in order: a block already in the target cell, the block BEYOND the target (clicked on the face toward the turtle), for a sideways place the block under the target (clicked on its top), and last the turtle's own block.  A sideways click lands just below the middle of a face, so what that gives is, in short:
+  sideways
+      stairs and slabs bottom half, the stair facing the turtle's heading; a log lying along the heading with a block beyond (standing with only a floor); a torch, ladder, button or lever hung on the block beyond; a door, gate or chest facing as the turtle does
+  placeDown
+      stairs and slabs bottom half if there is a block under the target, else top half
+  placeUp
+      stairs and slabs top half if there is a block over the target, else bottom half
+(With nothing to click but the turtle's own block, a sideways stair faces back at the turtle.) The table of what each approach yields is data (T.PLACE_TABLE): per family of block, per approach (front, down, up), rows that say "if there is a block beyond (or a floor under the target), these state values".  A row's value is a plain word (half=bottom) or relative to the turtle's heading: facing=heading, back, right or left, and axis=along (the heading's) or across.  The rest of this comment is how it is used.
+
+T.placeAt(x, y, z, item, { facing, half, axis }) works out which approaches the table says give that state and the map (tl.world) says are possible, goes to the nearest, places, inspects, and if the state came out wrong digs the block and tries the next.  Facing is a compass name, so it needs the world origin (T.setOrigin: the compass way the turtle's frame points); half and axis do not.  Where the map does not know what is beside the target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it and the cell above free; T.ignite lights a fire from above with flint and steel.
+
+== Placing a block with the state wanted ==
+
+T.placeAt(x, y, z, item, opts)
+    Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
+
+    It works out from the table which approaches (placing sideways, from above or from below, from each side) give the state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is wrong digs the block and tries the next approach, learning what the game actually gave (see the overview). opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever. Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may dig and walk in), tries (approaches to try, default 6). A cell that already holds the item as wanted comes back as it is; one holding anything else is not touched. Returns the block's name, its state, and { approach, from, heading, tries } (approach is front, down or up; from the cell the turtle stood in).
+
+== Lighting a fire ==
+
+T.ignite(x, y, z, opts)
+    Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
+
+    The turtle goes to the cell over it and uses the flint and steel downward on the block under it, which puts the fire in the cell between (so there must be a solid block under the cell, and the cell empty). Inside an obsidian frame that lights a nether portal, and what it finds is nether_portal. opts.move and opts.inside are as for T.placeAt. Returns the name of what burns there (minecraft:fire, soul_fire or nether_portal), and true if it was already burning.
 
 tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
 

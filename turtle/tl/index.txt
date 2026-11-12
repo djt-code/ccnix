@@ -132,6 +132,10 @@ The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
 T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+Placing a block with the state wanted:
+T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
+Lighting a fire:
+T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 Frames and the world:
 T.frameChanged(old, new) - Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.
 T.alignMap(dx, dy, dz, turns) - Say how the turtle's frame sits in the map's, and mark the map aligned. Returns true, or nil and why.
