@@ -5,6 +5,44 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## The building mock's placement rules (ADR-0008 phase 3, sim/lib/buildworld.lua)
+
+The mock models `turtle.place*` from the source of CC:Tweaked 1.120.2
+(TurtlePlaceCommand and TurtlePlayer, read for this) and from Minecraft's
+rules as remembered; the pieces on top (tl.place, tl.blueprint) will trust it,
+so these are the facts to see once in game. Place each with the item in hand,
+then `turtle.inspect*` from beside it.
+
+- **The last resort faces back**: a stair placed sideways with no block beyond
+  and no floor under the target (in mid-air) should come out `facing` the
+  OPPOSITE of the turtle's heading (the placer is put in the target cell
+  looking back at the turtle). With a floor under the target, or a block
+  beyond, `facing` is the heading. placeDown and placeUp always give the
+  heading.
+- **Halves and axes**: sideways stairs/slabs always bottom half; placeDown top
+  half when nothing is under the target, bottom with a block below it;
+  placeUp the reverse; a log sideways lies along the heading with a block
+  beyond, stands with only a floor.
+- **Torches**: sideways onto a block beyond: a wall torch hung on it;
+  floor only: standing; placeUp: refused. With no block beyond, no floor and a
+  wall to one side the mock hangs it on that wall. A torch on a bottom slab or
+  the side of a bottom slab is refused. When two supports compete for a
+  torch, ladder, button or lever, the mock uses the clicked side first, then
+  down, then the placer's right, left, up, behind; Minecraft's order for the
+  last ones depends on float rounding at a quarter turn and may differ.
+- **Doors**: refused with no solid block under the target (even with one
+  beyond) or something in the cell above; a door beside a full block gets
+  its hinge on that side (the click is always the middle, so left otherwise).
+- **Slab on a slab**: placeDown with a slab onto a bottom slab of its kind
+  makes a double slab; with another kind it is refused.
+- **Stair corners**: the `shape` (inner/outer, left/right) the game gives two
+  stairs at right angles, and the neighbour changing shape when the second goes
+  in, against the mock's.
+- **Furnace**: fuel dropped from the side or the underside goes in the fuel
+  slot, items dropped from above in the input slot, the result comes out of
+  the underside by `suckUp`; a stone block dropped from the side is refused;
+  crimson and warped planks are not accepted as fuel.
+
 ## tl.path: routes over the map (ADR-0008 phase 2, 0.47.0)
 
 - **A route and its cost**: with a scanned area, `T.path(x, y, z)` in claude's
