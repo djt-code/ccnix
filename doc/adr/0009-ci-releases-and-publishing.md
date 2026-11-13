@@ -269,7 +269,7 @@ Modrinth instead", and its newest file there is 1.113.1, from September
 - a CurseForge user can't get a CC: Tweaked that works with ccnix from
   CurseForge;
 - a CurseForge modpack can't carry one, short of the jar added by hand,
-  as the dma.space pack's dev server does;
+  as this project's own dev server does;
 - the required relation on CurseForge points at a project that will
   never have a build that works.
 
