@@ -3,8 +3,8 @@
 **Status:** Accepted (2026-11-12). D2, D7 and D9 are the user's
 answers. The user took the rest as recommended, along with the lockstep
 automation (D4) and the shared board (D11) proposed after it. Revised
-after a review the same day (see Review). One question is open: whether
-to publish on CurseForge now (D7).
+after a review the same day (see Review). After the review the user
+chose to publish on CurseForge now as well as Modrinth (D7).
 **Date:** 2026-11-12
 **Deciders:** Dan Theisen
 
@@ -273,8 +273,11 @@ Modrinth instead", and its newest file there is 1.113.1, from September
 - the required relation on CurseForge points at a project that will
   never have a build that works.
 
-If ccnix goes on CurseForge, its description says where to get CC:
-Tweaked. Whether it goes there now is the user's call.
+The user chose (2026-11-12) to publish on both now. ccnix's CurseForge
+description says, at the top, that CC: Tweaked 1.120 or later comes from
+Modrinth or CC: Tweaked's own site, not CurseForge. The required
+relation to `cc-tweaked` is declared there all the same, so the page
+shows what it needs.
 
 **D8. What CI runs.** Every action is pinned by commit, with its version
 in a comment. `.github/dependabot.yml` (`github-actions`, weekly) keeps
