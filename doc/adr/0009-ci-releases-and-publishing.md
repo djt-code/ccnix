@@ -450,11 +450,12 @@ has been used for a while.
     fetches the ROM from GitHub. Both go in Modrinth's disclosures and in
     the description. CurseForge's published rules don't cover either
     case.
-  - **The 2026-11-06 attribution audit's three required items**, all
-    three confirmed fixed:
-    - R1, jbod's completion, looks done (it loads the ROM's own);
-    - R2, boot's startup search, looks gone;
-    - R3, shellworld in the sims, is not yet checked.
+  - **The 2026-11-06 attribution audit's three required items:** all
+    three were rewritten in ccnix 0.25.1 (a757ede), confirmed 2026-11-12:
+    - R1, jbod's completion, now loads the ROM's own;
+    - R2, boot's startup search, was rewritten;
+    - R3, shellworld in the sims, was rewritten (the sims aren't in the
+      ROM or the jar anyway).
   - **The mod's name.** `ccnix` was free on both sites on 2026-11-12.
 
 ## Review (2026-11-12)
@@ -495,17 +496,17 @@ changed it as follows.
 ## Action items
 
 1. [x] The user installs gh (2.103.3) and runs `gh auth login -s project` (done 2026-11-12: scopes repo, project).
-2. [ ] ccnix: `.github/workflows/ci.yml` (D8, with the `release` job of D5 once the CI has run green), in its first pull request, this ADR with it.
-3. [ ] ccnix-mod: `.github/workflows/ci.yml` the same way, in its first pull request.
-4. [ ] Both: `.github/dependabot.yml` for `github-actions`.
-5. [ ] Both: the merge settings (merge commits only, allow auto-merge, delete branches on merge) and the D3 ruleset (`sims` / `build`, not strict, merge only, no bypass), through `gh api`.
-6. [ ] The Project "ccnix" (D11): its fields, views and built-in workflows, both repos linked, and the shared labels.
-7. [ ] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D4's rules and order, D10, D11's `--project` rule).
-8. [ ] The `release` jobs (D5, D6). The first releases: ccnix v0.50.2, and ccnix-mod v0.26.9 with the jar.
-9. [ ] The user makes `LOCKSTEP_TOKEN` (D4) and sets it in both repos with `gh secret set`.
-10. [ ] The lockstep jobs (D4), tried end to end with the next ccnix release: the mod's patch release, then ccnix's `bump/mod` merges.
-11. [ ] mods.toml: the mc-publish slugs for CC: Tweaked, and Advanced Peripherals as optional (D7).
-12. [ ] Readiness for the sites: the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
+2. [x] ccnix: `.github/workflows/ci.yml` (D8, with the `release` job of D5 once the CI has run green), in its first pull request, this ADR with it.
+3. [x] ccnix-mod: `.github/workflows/ci.yml` the same way, in its first pull request.
+4. [x] Both: `.github/dependabot.yml` for `github-actions`.
+5. [x] Both: the merge settings (merge commits only, allow auto-merge, delete branches on merge) and the D3 ruleset (`sims` / `build`, not strict, merge only, no bypass), through `gh api`.
+6. [x] The Project "ccnix" (D11): its fields, views and built-in workflows, both repos linked, and the shared labels.
+7. [x] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D4's rules and order, D10, D11's `--project` rule).
+8. [x] The `release` jobs (D5, D6). The first releases: ccnix v0.50.2, and ccnix-mod v0.26.9 with the jar.
+9. [x] The user makes `LOCKSTEP_TOKEN` (D4) and sets it in both repos with `gh secret set`.
+10. [ ] The lockstep jobs (D4): built (ccnix #5, ccnix-mod #4). The mod's direction was tried end to end on 2026-11-12: its release opened ccnix's `bump/mod` (#6), which merged itself, and ccnix's next run found nothing to do. ccnix's direction (a release opening ccnix-mod's `bump/ccnix`) waits for the next ccnix release that changes the ROM.
+11. [x] mods.toml: the mc-publish slugs for CC: Tweaked, and Advanced Peripherals as optional (D7).
+12. [ ] Readiness for the sites (the page text is ccnix-mod's `doc/listing.md`; the attribution check is done; the icon is still to make): the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
 13. [ ] The user creates the Modrinth (and CurseForge) projects and their tokens, and adds them as secrets and variables.
-14. [ ] The mc-publish steps (D7). The first upload goes to moderation.
+14. [ ] The mc-publish steps (D7): built (ccnix-mod #6), each idle until its token is set. The first upload goes to moderation.
 15. [ ] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11).
