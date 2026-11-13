@@ -5,6 +5,11 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## The mod's icon (ccnix-mod 0.26.10)
+
+- **The mod list**: Mods → ccnix shows the icon (a gold computer with a green `#!_`), sharp, not blurred; the
+  page's links go to the repo and its issues.
+
 ## A turtle with no map yet (ccnix 0.50.2)
 
 - **claude starts on a turtle with no `.map`**: the first `status` no longer stops claude with
