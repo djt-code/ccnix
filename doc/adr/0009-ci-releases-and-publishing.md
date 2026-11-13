@@ -140,7 +140,11 @@ Rules that keep it sound:
   a version).
 - **Nothing to do is nothing done.** If the sibling's `main` already
   points at the commit, the job closes its open pull request, if there
-  is one, and stops.
+  is one, and stops. Step 1 also stops when the ROM's files (`bin lib
+  turtle pc help deploy`) are the same at the tag as at the mod's
+  `ccnix/`: the mod would ship nothing new. A real ccnix release changes
+  `deploy/version`, so this happens only when the mod already carries
+  it, as at the start.
 - **It ends.** Step 2 changes only `mod/`, not `deploy/version`, so
   ccnix makes no release and step 1 doesn't run again.
   - After a full round, ccnix's `mod/` is at the mod's newest release.
@@ -210,12 +214,21 @@ wrong commit.
   in the mod.
 - **ccnix-mod:** the jar. Its notes start with the ROM's version ("ROM:
   ccnix vA.B.C", given as `--notes` ahead of the generated ones).
-- **The first releases:**
-  - ccnix v0.50.2 comes from the first green `main` after this lands.
-  - The mod's first release is the 0.26.10 that ccnix v0.50.2's bump
-    pull request makes. 0.26.9 is never released by hand: it would carry
-    the same ROM.
-  - The first notes will be nearly empty, since there's no earlier tag.
+- **The first releases** (amended 2026-11-12, when the release jobs were
+  built):
+  - ccnix v0.50.2 comes from the first green `main` after its release job
+    lands.
+  - The mod's first release is 0.26.9, from its own release job landing.
+    Its `ccnix/` (588aa65, the 0.50.2 fix) holds the same ROM files as
+    ccnix v0.50.2: everything since then is docs, CI and sims. So that is
+    the ROM 0.26.9 carries, and v0.50.2's lockstep has nothing to ship
+    (D4's rule on ROM files).
+
+    The plan before was a 0.26.10 from v0.50.2's bump, to avoid two
+    releases of one ROM. With the ROM already the same, that would have
+    been the second release, not the first.
+  - The first notes list every merged pull request so far, since there's
+    no earlier tag.
 
 **D7. Where the mod is published: Modrinth, and CurseForge** (the user's
 answer; see the note on CurseForge below). In the mod's `release` job,
@@ -224,8 +237,9 @@ commit (`Kir-Antipov/mc-publish@<sha> # v3.3.2`); it supports NeoForge,
 and runs on Node 24. Its inputs are set in full, because its defaults
 assume a `release` event and the job runs on `push`:
 
-- **the release:** `version`, `version-type: beta` while the mod is 0.x,
-  which also marks the GitHub release a pre-release;
+- **the release:** `version`, and `version-type: beta` while the mod is
+  0.x (on the sites; the GitHub release, made first by `gh`, is a normal
+  one);
 - **the game:** `loaders: neoforge`, `game-versions: 1.21.1`, `java: 21`;
 - **the project IDs**, from repository variables;
 - **the files:** the GitHub release already exists, so its own inputs go
@@ -487,9 +501,9 @@ changed it as follows.
 5. [ ] Both: the merge settings (merge commits only, allow auto-merge, delete branches on merge) and the D3 ruleset (`sims` / `build`, not strict, merge only, no bypass), through `gh api`.
 6. [ ] The Project "ccnix" (D11): its fields, views and built-in workflows, both repos linked, and the shared labels.
 7. [ ] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D4's rules and order, D10, D11's `--project` rule).
-8. [ ] The `release` jobs (D5, D6). The first release, ccnix v0.50.2.
+8. [ ] The `release` jobs (D5, D6). The first releases: ccnix v0.50.2, and ccnix-mod v0.26.9 with the jar.
 9. [ ] The user makes `LOCKSTEP_TOKEN` (D4) and sets it in both repos with `gh secret set`.
-10. [ ] The lockstep jobs (D4), tried end to end: ccnix v0.50.2's bump makes the mod's first release, 0.26.10, then ccnix's `bump/mod` merges.
+10. [ ] The lockstep jobs (D4), tried end to end with the next ccnix release: the mod's patch release, then ccnix's `bump/mod` merges.
 11. [ ] mods.toml: the mc-publish slugs for CC: Tweaked, and Advanced Peripherals as optional (D7).
 12. [ ] Readiness for the sites: the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
 13. [ ] The user creates the Modrinth (and CurseForge) projects and their tokens, and adds them as secrets and variables.

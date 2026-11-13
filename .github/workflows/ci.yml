@@ -1,11 +1,14 @@
 # The checks every pull request and every push to main must pass (ADR-0009):
-# the syntax and help checks, then every simulator in sim/.
+# the syntax and help checks, then every simulator in sim/. After a green run
+# on main, the release job makes release vX.Y.Z for deploy/version if there
+# isn't one yet (D5).
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:              # (to retry a release: runs on main's tip)
 
 permissions:
   contents: read
@@ -32,3 +35,28 @@ jobs:
         run: python sim/run.py --check
       - name: sims
         run: python sim/run.py
+
+  release:
+    name: release
+    needs: sims
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write             # the tag and the release; nothing else may write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: deploy/version
+      - name: release deploy/version unless it's out
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(tr -d '[:space:]' < deploy/version)
+          if gh release view "v$v" > /dev/null 2>&1; then
+            echo "ccnix v$v is out already: nothing to do"
+            exit 0
+          fi
+          gh release create "v$v" --target "$GITHUB_SHA" --title "ccnix v$v" --generate-notes
