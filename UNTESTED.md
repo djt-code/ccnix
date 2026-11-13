@@ -5,13 +5,6 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## A long paste (ccnix-mod 0.26.11)
-
-- **Paste 512 characters or more** into any computer on the server (one line, plain text): you stay connected,
-  and the computer gets the first 512 characters. Before, CC: Tweaked's server refused a full-length paste
-  and kicked the player ("Failed to decode packet 'serverbound/minecraft:custom_payload'"). Only the server's
-  jar matters for this one.
-
 ## The mod's icon (ccnix-mod 0.26.10)
 
 - **The mod list**: Mods → ccnix shows the icon (a gold computer with a green `#!_`), sharp, not blurred; the
@@ -728,6 +721,11 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-13 — ccnix-mod 0.26.11: a paste of 547 characters into claude
+  on a turtle no longer kicks the player; the computer gets the first 512.
+  (0.26.10 and before: "Failed to decode packet
+  'serverbound/minecraft:custom_payload'", CC: Tweaked's paste off-by-one.)
 
 - 2026-11-12 — ROM 0.44.0, claude caching the conversation: hours of the
   castle build with `--cache 1h`. The Console's usage for one hour: 5.96M
