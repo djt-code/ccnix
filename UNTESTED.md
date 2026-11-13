@@ -5,6 +5,13 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## A long paste (ccnix-mod 0.26.11)
+
+- **Paste 512 characters or more** into any computer on the server (one line, plain text): you stay connected,
+  and the computer gets the first 512 characters. Before, CC: Tweaked's server refused a full-length paste
+  and kicked the player ("Failed to decode packet 'serverbound/minecraft:custom_payload'"). Only the server's
+  jar matters for this one.
+
 ## The mod's icon (ccnix-mod 0.26.10)
 
 - **The mod list**: Mods → ccnix shows the icon (a gold computer with a green `#!_`), sharp, not blurred; the
