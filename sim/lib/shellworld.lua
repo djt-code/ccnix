@@ -670,7 +670,11 @@ local function osApi(W)
         run = function(env, path, ...) return (W:osRun(clean(path), { ... }, env)) end,
         shutdown = function() error("os.shutdown called", 0) end,
         reboot = function() error("os.reboot called", 0) end,
-    }, { __index = os })
+    }, { __index = function(_, k)
+        -- CraftOS has no os.getenv (ccsh adds one), and the host's would leak in: $USER differs
+        -- between machines
+        if k ~= "getenv" then return os[k] end
+    end })
 end
 
 -- What mock.termApi leaves out, as no-ops or near enough.
