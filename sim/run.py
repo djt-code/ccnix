@@ -112,11 +112,12 @@ def main(args):
         sys.stdout.flush()
         try:
             p = subprocess.run([sys.executable, __file__, "--one", path], timeout=TIMEOUT,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                               errors="replace")   # (a sim may print bytes that aren't text)
             out = p.stdout
             status = "ERROR" if p.returncode != 0 or "   ERROR:" in out else "ok"
         except subprocess.TimeoutExpired as e:
-            out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+            out = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             status = "TIMEOUT"
         print(out, end="" if out.endswith("\n") else "\n")
         results.append((name, status))
