@@ -27,11 +27,15 @@
 -- T.build puts a plan up.  It checks the materials first (what is short, and what could be crafted if the
 -- craft module is there), then goes layer by layer from the bottom, standing over each cell and placing down; in a
 -- layer the plain blocks come first, then stairs and slabs, then what hangs on others (torches, ladders, buttons,
--- trapdoors, gates), then doors, so a thing goes in after its support.  A stair, slab, log, torch or door goes
--- through T.placeAt for the state it names.  The plan is kept as text in the data file .build, and how far the
--- build has got (the number of the last cell tried and the cells that failed, with why) in .build.progress, so a
--- stop, a crash or a reboot carries on where it was with a plain T.build().  A build never digs a block out of a
--- cell it fills (T.replace swaps blocks).  A finished build can protect itself (opts.protect).
+-- trapdoors, gates), then doors, so a thing goes in after its support.  With order = "column" the blocks, stairs and
+-- slabs go up column by column instead, each column from the bottom, the columns in a serpentine (on to the nearest
+-- one left), so a wall costs a climb a column rather than a lap a layer; then what hangs and the doors, layer by
+-- layer.  A stair, slab, log, torch or door goes through T.placeAt for the state it names.  The plan is kept as text
+-- in the data file .build, and how far the build has got (the number of the last cell tried, the cells that failed,
+-- with why, and the order) in .build.progress, so a stop, a crash or a reboot carries on where it was, in the same
+-- order, with a plain T.build().  A build that spends over three times the fuel T.fuelFor gives for its cells stops
+-- and says it is circling.  A build never digs a block out of a cell it fills (T.replace swaps blocks).  A finished
+-- build can protect itself (opts.protect).
 --
 -- T.verify walks the plan and says which cells differ, states included: a cell with a state to match, or that the
 -- map has never seen, is looked at with T.inspectAll; the rest is read from the map.  T.replace swaps every block
@@ -522,7 +526,7 @@ end
 -- number, from 1), x, y, z, name, state, entry }.  Layer by layer from the bottom; in a layer by rank (see RANK),
 -- each rank in a snake over the lines.  Air, leave-alone cells and a door's upper half are not placed.  Returns true if
 -- fn stopped it.
-local function eachBuildCell(plan, fn)
+local function eachLayerCell(plan, fn)
     local n = 0
     local a = plan.anchor
     for li, rows in ipairs(plan.layers) do
@@ -552,24 +556,108 @@ local function eachBuildCell(plan, fn)
     return false
 end
 
+-- The ranks built column by column: what holds others up (blocks, logs, fences, walls, panes) and stairs, slabs and chests
+local COLUMN_RANKS = 1
+-- The column order of each plan, worked out once (the plan tables are kept while a build runs)
+local columnCache = setmetatable({}, { __mode = "k" })
+
+-- The cells of a plan in column order, as a list: first every block, stair and slab (the ranks to COLUMN_RANKS),
+-- column by column, each column from the bottom up, the columns in a serpentine that goes on to the nearest column not
+-- yet built (the first is the first the layer order meets); then what hangs on them and the doors, layer by layer as
+-- the layer order has them.  So everything is still placed after what holds it.
+local function columnList(plan)
+    if columnCache[plan] then return columnCache[plan] end
+    local a = plan.anchor
+    local columns, byKey, late = {}, {}, {}
+    for li, rows in ipairs(plan.layers) do
+        local after = {}
+        for rank = COLUMN_RANKS + 1, RANKS do after[rank] = {} end
+        for ri, row in ipairs(rows) do
+            for k = 1, #row do
+                local ci = ri % 2 == 1 and k or (#row - k + 1)
+                local entry = entryAt(plan, row:sub(ci, ci))
+                if entry and not AIRS[entry.name] and not isUpperHalf(plan, li, ri, ci, entry) then
+                    local rank = RANK[infoOf(entry).family] or 0
+                    local cell = { x = a.x + ci - 1, y = a.y + li - 1, z = a.z - ri + 1, name = entry.name, state = entry.state, entry = entry }
+                    if rank <= COLUMN_RANKS then
+                        local key = ri .. "," .. ci
+                        local col = byKey[key]
+                        if not col then
+                            col = { ri = ri, ci = ci, index = #columns + 1, cells = {} }
+                            byKey[key] = col
+                            columns[#columns + 1] = col
+                        end
+                        col.cells[#col.cells + 1] = cell
+                    else
+                        local bucket = after[rank]
+                        bucket[#bucket + 1] = cell
+                    end
+                end
+            end
+            breathe()
+        end
+        for rank = COLUMN_RANKS + 1, RANKS do
+            for _, cell in ipairs(after[rank]) do late[#late + 1] = cell end
+        end
+    end
+    -- the serpentine: from the first column, on to the nearest one left (the earliest met on a tie)
+    local list, left, at = {}, {}, nil
+    for i, col in ipairs(columns) do left[i] = col end
+    while #left > 0 do
+        local best = 1
+        if at then
+            local bestD
+            for i, col in ipairs(left) do
+                local d = math.abs(col.ri - at.ri) + math.abs(col.ci - at.ci)
+                if not bestD or d < bestD then best, bestD = i, d end
+            end
+        end
+        at = table.remove(left, best)
+        for _, cell in ipairs(at.cells) do list[#list + 1] = cell end
+        breathe()
+    end
+    for _, cell in ipairs(late) do list[#list + 1] = cell end
+    for n, cell in ipairs(list) do cell.n = n end
+    columnCache[plan] = list
+    return list
+end
+
+-- The cells in column order (see columnList), as eachLayerCell gives them.
+local function eachColumnCell(plan, fn)
+    for _, cell in ipairs(columnList(plan)) do
+        if fn({ n = cell.n, x = cell.x, y = cell.y, z = cell.z, name = cell.name, state = cell.state, entry = cell.entry }) then return true end
+    end
+    return false
+end
+
+-- The orders a build can go in: "layer" (the default) or "column"
+local ORDERS = { layer = eachLayerCell, column = eachColumnCell }
+
+-- Call fn(cell) for each cell to place, in the order `order` builds them ("layer" if nil), until fn returns true.
+local function eachBuildCell(plan, fn, order)
+    return ORDERS[order or "layer"](plan, fn)
+end
+
 --------------------------------------------------------------------------
 -- The saved build
 --------------------------------------------------------------------------
 
 local function dataFile(name) return T.dataPath(name) end
 
--- The saved build: { plan, text, done, failed = { [n] = why }, total }, or nil.
+-- The saved build: { plan, text, order, done, failed = { [n] = why }, total }, or nil.
 local function loadSaved()
     local planText = fileio.read(dataFile(PLAN_FILE))
     if not planText then return nil end
     local plan = parsePlan(planText)
     if not plan then return nil end
-    local saved = { plan = plan, text = planText, done = 0, failed = {} }
+    local saved = { plan = plan, text = planText, order = "layer", done = 0, failed = {} }
     local progress = fileio.read(dataFile(PROGRESS_FILE))
     for _, line in ipairs(progress and text.lines(progress) or {}) do
         local kind, rest = text.cut(line, " ")
         if kind == "done" then
             saved.done = convert.toInteger(rest or "") or 0
+        elseif kind == "order" and ORDERS[rest] then
+            saved.order = rest
         elseif kind == "failed" and rest then
             local number, why = text.cut(rest, " ")
             number = convert.toInteger(number)
@@ -577,7 +665,7 @@ local function loadSaved()
         end
     end
     local total = 0
-    eachBuildCell(plan, function() total = total + 1 end)
+    eachBuildCell(plan, function() total = total + 1 end, saved.order)
     saved.total = total
     return saved
 end
@@ -597,6 +685,7 @@ end
 local function saveProgress(job)
     tellJob(job)
     local out = { "name " .. (job.plan.name or ""), "done " .. job.done }
+    if job.order ~= "layer" then out[#out + 1] = "order " .. job.order end      -- (no line: the layer order)
     for _, n in ipairs(tables.sortedKeys(job.failed)) do
         out[#out + 1] = "failed " .. n .. " " .. text.replace(tostring(job.failed[n]), "\n", " ")
     end
@@ -620,7 +709,7 @@ local function tally(plan, job)
             if want.facing or (want.axis and want.axis ~= "y") then compass = true end
             if not mapHolds(cell, want) then need[cell.name] = (need[cell.name] or 0) + (isDouble(cell.entry) and 2 or 1) end
         end
-    end)
+    end, job.order)
     return need, cells, compass
 end
 
@@ -710,8 +799,43 @@ local function protectName(plan, opts)
     return plan.name or "build"
 end
 
--- Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept.
--- Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+-- The fuel watch: a build stops when it has spent more than WATCH_LIMIT times what T.fuelFor says its cells so far should
+-- cost, once WATCH_AFTER cells are tried (a few cells may cost more than their share)
+local WATCH_LIMIT, WATCH_AFTER = 3, 8
+
+-- What T.fuelFor says a plan costs: its info, or nil if there is no estimate.  (It answers true, info or false, why, info.)
+local function estimateOf(fuelFor, plan)
+    local ok, first, second, third = pcall(fuelFor, plan)
+    if not ok then
+        if first == "Terminated" then error(first, 0) end
+        return nil
+    end
+    if first == true then return second end
+    if first == false then return third end
+    return nil
+end
+
+-- The fuel watch for a build: { approach (the way to the first cell to try), perCell, spent = 0 } from T.fuelFor's
+-- estimates (a cell's share of the whole plan's, less the way to it), or nil if there are none.
+local function fuelWatch(job)
+    local fuelFor = T.need("fuelFor")
+    if not fuelFor or job.total < 1 then return nil end
+    local x1, y1, z1 = bp.extent(job.plan)
+    local first
+    eachBuildCell(job.plan, function(cell)
+        if cell.n > job.done or job.failed[cell.n] then first = cell end
+        return first ~= nil
+    end, job.order)
+    first = first or { x = x1, y = y1, z = z1 }
+    local all = estimateOf(fuelFor, { build = job.text })
+    local corner = estimateOf(fuelFor, { route = { { x = x1, y = y1, z = z1 } } })
+    local way = estimateOf(fuelFor, { route = { { x = first.x, y = first.y, z = first.z } } })
+    if not (all and corner and way) then return nil end
+    return { approach = way.route, perCell = math.max(all.build - corner.route, job.total) / job.total, spent = 0 }
+end
+
+-- Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it
+-- circles.  Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 --
 -- `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a
 -- reboot.  The same plan again carries on too; a different plan while one is unfinished is refused unless
@@ -722,18 +846,25 @@ end
 -- out of a cell it fills: a block in the way is a failure.
 -- A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built
 -- over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead.
+-- opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the
+-- order it began with.  The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they
+-- come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E";
+-- opts.fuelWatch = false turns it off.
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
 -- false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart,
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
--- that name; only when no cell failed).  Info is { name, done, total, failed = list of { n, x, y, z, item, why },
--- placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short }.
+-- that name; only when no cell failed), order, fuelWatch.  Info is { name, done, total, failed = list of { n, x, y, z,
+-- item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected,
+-- short, order, fuel = { spent, estimate, perCell } }.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
+    if opts.order ~= nil and not ORDERS[opts.order] then return nil, "opts.order is \"layer\" or \"column\", not " .. tostring(opts.order) end
     local job
     if plan == nil then
         if not saved then return nil, "no build in progress: give T.build a plan" end
-        job = { plan = saved.plan, text = saved.text, done = saved.done, failed = saved.failed, total = saved.total, resumed = true }
+        job = { plan = saved.plan, text = saved.text, order = saved.order, done = saved.done, failed = saved.failed, total = saved.total,
+                resumed = true }
     else
         local p, why = planOf(plan)
         if not p then return nil, why end
@@ -748,15 +879,17 @@ function T.build(plan, opts)
         local planText = formatPlan(p)
         local unfinished = saved and (saved.done < saved.total or next(saved.failed) ~= nil)
         if saved and saved.text == planText and unfinished and not opts.restart then
-            job = { plan = saved.plan, text = saved.text, done = saved.done, failed = saved.failed, total = saved.total, resumed = true }
+            job = { plan = saved.plan, text = saved.text, order = saved.order, done = saved.done, failed = saved.failed, total = saved.total,
+                    resumed = true }
         else
             if saved and unfinished and not opts.restart then
                 return nil, "the build \"" .. (saved.plan.name or "build") .. "\" is unfinished (" .. saved.done .. " of " .. saved.total ..
                     " cells tried): T.build() carries it on, or pass restart = true to start this plan instead"
             end
+            local order = opts.order or "layer"
             local total = 0
-            eachBuildCell(p, function() total = total + 1 end)
-            job = { plan = p, text = planText, done = 0, failed = {}, total = total }
+            eachBuildCell(p, function() total = total + 1 end, order)
+            job = { plan = p, text = planText, order = order, done = 0, failed = {}, total = total }
         end
     end
     local target = job.plan
@@ -766,7 +899,7 @@ function T.build(plan, opts)
         return nil, "this plan names a compass facing or axis, which needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local info = { name = target.name, done = job.done, total = job.total, failed = {}, placed = 0, there = 0, resumed = job.resumed == true,
-                   finished = false }
+                   finished = false, order = job.order }
     local short = shortOf(need)
     if #short > 0 and not opts.partial then
         info.short = short
@@ -776,9 +909,15 @@ function T.build(plan, opts)
     if not wrote then return nil, "couldn't save the plan: " .. tostring(err), info end
     saveProgress(job)
     local move = opts.move or { path = true, scan = false }
+    if job.order == "column" and move.order == nil then      -- (from the top of one column across to the next, then down)
+        move = tables.copy(move)
+        move.order = "xzy"
+    end
     local attempted, limit = 0, opts.limit or math.huge
     local sinceSave = 0
     local startDone = job.done
+    local watch = opts.fuelWatch ~= false and fuelWatch(job) or nil
+    info.fuel = watch and { estimate = math.ceil(watch.approach), spent = 0, perCell = watch.perCell } or nil
 
     local function attempt(cell)
         local good, extra = putCell(cell, move, opts.look)      -- (extra: already there, or why not)
@@ -791,6 +930,14 @@ function T.build(plan, opts)
         end
         sinceSave = sinceSave + 1
         if sinceSave >= 8 then sinceSave = 0; saveProgress(job) end
+        if watch then
+            local estimate = math.ceil(watch.approach + watch.perCell * attempted)
+            info.fuel.estimate, info.fuel.spent = estimate, watch.spent
+            if attempted >= WATCH_AFTER and watch.spent > WATCH_LIMIT * estimate then
+                job.circling = "circling: " .. watch.spent .. " fuel for " .. attempted .. " cells, estimate " .. estimate
+                return true
+            end
+        end
         return attempted >= limit
     end
     local function run()
@@ -799,15 +946,19 @@ function T.build(plan, opts)
             local stop = attempt(cell)
             job.done = cell.n
             return stop
-        end)
+        end, job.order)
         if stopped or opts.retry == false then return stopped end
         return eachBuildCell(target, function(cell)
             if cell.n > startDone or not job.failed[cell.n] then return false end
             return attempt(cell)
-        end)
+        end, job.order)
     end
     local function go()
+        local stopWatching = watch and T.onChange(function(e)
+            if e.kind == "move" then watch.spent = watch.spent + 1 end
+        end)
         local ok, result = pcall(run)
+        if stopWatching then stopWatching() end
         saveProgress(job)
         if not ok then error(result, 0) end
         return result
@@ -823,7 +974,7 @@ function T.build(plan, opts)
         eachBuildCell(target, function(cell)
             local f = byNumber[cell.n]
             if f then f.x, f.y, f.z, f.item = cell.x, cell.y, cell.z, cell.name end
-        end)
+        end, job.order)
     end
     info.finished = job.done >= job.total and #info.failed == 0
     if info.finished and opts.protect then
@@ -834,6 +985,11 @@ function T.build(plan, opts)
         if not ok then info.protectWhy = why end
     end
     if info.finished then return true, info end
+    if job.circling then
+        local hint = job.order == "layer" and "order = \"column\" may cost less; " or ""
+        return false, job.circling .. ": stopped after " .. job.done .. " of " .. job.total .. " cells (" .. hint .. "T.build() carries on, " ..
+            "opts.fuelWatch = false turns the watch off)", info
+    end
     if stopped and job.done < job.total then
         return false, "stopped after " .. attempted .. " cells (" .. job.done .. " of " .. job.total .. " tried): T.build() carries on", info
     end

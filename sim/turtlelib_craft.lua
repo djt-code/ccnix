@@ -10,9 +10,21 @@
 --   * short materials reported before anything moves; room in the chest checked first; no table, no chest; the table
 --     taken from the chest and put back; the table already on; a chest to walk to; a partial craft;
 --   * T.addRecipe (checked, newest first, crafted); T.canCraft (inventory plus chest);
+--   * T.craftBatch: planks, sticks and torches in one go with one stash (the tools in the chest, nothing outside the grid
+--     at a craft, the table on and off once), the products left in the chest or taken aboard, a recipe that fails noted
+--     and the rest made, refusals with nothing touched;
+--   * T.craftPlan: torches down to logs, in order, with the base materials and what is short (coal or charcoal), what
+--     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
+--     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
+--     it and opts.take brings the targets aboard, a short plan refused;
+--   * blocks of nine built in both ways, every one the game has (the mock's own list): coal from coal blocks, a bone block
+--     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
 --     one up, fuel from beside, the item from above, the results from below, taken back, the turtle home; the refusals,
---     and a block in the way that makes it take the furnace back from the side.
+--     and a block in the way that makes it take the furnace back from the side;
+--   * T.smeltAt at a furnace standing in the world: fuel from a side (from below when no side is free), the item from the
+--     top, the results from below; loaded and left (opts.wait = false) and fetched later with n = 0; opts.fuel = false and
+--     opts.stay; a block under it, no furnace, the refusals.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -380,6 +392,8 @@ do
         "minecraft:oak_door", "minecraft:dark_oak_door", "minecraft:birch_trapdoor", "minecraft:ladder", "minecraft:oak_fence_gate", "minecraft:oak_fence",
         "minecraft:stone_bricks", "minecraft:iron_bars", "minecraft:glass_pane", "minecraft:bucket", "minecraft:chain",
         "minecraft:cobbled_deepslate_wall", "minecraft:mud_brick_slab", "minecraft:bamboo_door",
+        "minecraft:coal_block", "minecraft:coal", "minecraft:iron_block", "minecraft:iron_ingot", "minecraft:iron_nugget",
+        "minecraft:bone_block", "minecraft:bone_meal", "minecraft:gold_nugget", "minecraft:lapis_block",
     }
     local compared, wrong, notKnown = 0, {}, {}
     for _, out in ipairs(outs) do
@@ -417,6 +431,209 @@ do
     fresh()
     fill(0, 0, 1, { [1] = { "minecraft:stone_bricks", 12 } })
     check("T.canCraft(item, n) first result is true when it can be made (what tl.blueprint keeps)", (T.canCraft("minecraft:stone_brick_stairs", 3)) == true)
+end
+
+--------------------------------------------------------------------------
+-- T.craftBatch: many recipes, one stash
+--------------------------------------------------------------------------
+-- Count what the turtle drops into containers by name, the equipping, and whether anything lay outside the grid at a craft.
+local DROPS, EQUIPS, OUTSIDE = {}, 0, 0
+local GRID = { [1] = true, [2] = true, [3] = true, [5] = true, [6] = true, [7] = true, [9] = true, [10] = true, [11] = true }
+local function watchBatch()
+    DROPS, EQUIPS, OUTSIDE = {}, 0, 0
+    local rawDrop = turtle.drop
+    turtle.drop = function(n)
+        local it = W.S.inv[W.S.sel]
+        if it then DROPS[it.name] = (DROPS[it.name] or 0) + 1 end
+        return rawDrop(n)
+    end
+    for _, side in ipairs({ "equipLeft", "equipRight" }) do
+        local raw = turtle[side]
+        turtle[side] = function() EQUIPS = EQUIPS + 1; return raw() end
+    end
+    local rawWrap = peripheral.wrap
+    peripheral.wrap = function(side)
+        local p = rawWrap(side)
+        if p and p.craft then
+            local rawCraft = p.craft
+            p.craft = function(...)
+                for s = 1, 16 do
+                    if W.S.inv[s] and not GRID[s] then OUTSIDE = OUTSIDE + 1 end
+                end
+                return rawCraft(...)
+            end
+        end
+        return p
+    end
+end
+do
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 4 }, [2] = { "minecraft:coal", 2 } })
+    W.give(1, TABLE, 1)
+    W.give(3, "minecraft:cobblestone", 10)
+    W.give(5, "minecraft:iron_shovel", 1)
+    W.give(9, "minecraft:bucket", 1)
+    watchBatch()
+    local ok, info = T.craftBatch({ { "minecraft:oak_planks", 16 }, { "minecraft:stick", 8 }, { "minecraft:torch", 8 } })
+    check("a batch: planks from logs, sticks from those planks, torches from those sticks, in one go", ok == true and info.crafted["minecraft:oak_planks"] == 16
+        and info.crafted["minecraft:stick"] == 8 and info.crafted["minecraft:torch"] == 8 and #info.failed == 0,
+        tostring(ok) .. " " .. tostring(info) .. " / " .. chestLine())
+    check("...the products stay in the chest: 12 planks, 6 sticks, 8 torches, no logs or coal left", chestHas("minecraft:oak_planks") == 12 and chestHas("minecraft:stick") == 6
+        and chestHas("minecraft:torch") == 8 and chestHas("minecraft:oak_log") == 0 and chestHas("minecraft:coal") == 0, chestLine())
+    check("...one stash for the three: the cobblestone, the shovel and the bucket went into the chest once each",
+        DROPS["minecraft:cobblestone"] == 1 and DROPS["minecraft:iron_shovel"] == 1 and DROPS["minecraft:bucket"] == 1,
+        tostring(DROPS["minecraft:cobblestone"]) .. " " .. tostring(DROPS["minecraft:iron_shovel"]))
+    check("...the crafting table put on once and taken off once (the pickaxe it swapped out was stashed too)", EQUIPS == 2 and DROPS[PICK] == 1,
+        tostring(EQUIPS) .. " " .. tostring(DROPS[PICK]))
+    check("...nothing lay outside the grid at any craft (tools, the pickaxe and the shovel, all in the chest)", OUTSIDE == 0, tostring(OUTSIDE))
+    check("...and the inventory is back slot for slot, the controller never off, the pickaxe back on, home",
+        inventory() == "1=1 " .. TABLE .. ", 3=10 minecraft:cobblestone, 5=1 minecraft:iron_shovel, 9=1 minecraft:bucket"
+        and EQ.left == PICK and EQ.right == CONTROLLER and RIGHT_EQUIPS == 0 and here(), inventory())
+    check("...what it made is not junk", T.isJunk("minecraft:torch") == false and T.isJunk("minecraft:stick") == false)
+end
+
+do
+    -- opts.take, a recipe with none, a short one, and the rest going on
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 2 }, [2] = { "minecraft:stone_bricks", 6 } })
+    W.give(1, TABLE, 1)
+    local ok, why, info = T.craftBatch({ { "minecraft:dirt", 1 }, { name = "minecraft:oak_planks", n = 8 }, { "minecraft:chest", 2 },
+        { "minecraft:stone_brick_stairs", 4 } }, { take = true })
+    check("a batch with one that has no recipe and one that is short: false, the first named, the rest made", ok == false
+        and why:find("2 of 4 failed, the first dirt: no recipe", 1, true) and info.crafted["minecraft:oak_planks"] == 8
+        and info.crafted["minecraft:stone_brick_stairs"] == 4, tostring(why))
+    check("...the short one says what it lacks", info.failed[2] and info.failed[2].name == "minecraft:chest" and info.failed[2].why:find("short of", 1, true) ~= nil,
+        info.failed[2] and info.failed[2].why)
+    check("...opts.take brings what was made aboard (8 planks, 4 stairs) after the inventory is back", carrying("minecraft:oak_planks") == 8
+        and carrying("minecraft:stone_brick_stairs") == 4 and W.S.inv[1].name == TABLE and info.taken["minecraft:stone_brick_stairs"] == 4, inventory())
+    -- refusals with nothing touched
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 2 } })
+    local inv, chestBefore = inventory(), chestLine()
+    ok, why = T.craftBatch({ { "minecraft:oak_planks", 4 } })
+    check("a batch with no crafting table: refused before anything moves", ok == nil and why:find("no crafting table", 1, true) and inventory() == inv
+        and chestLine() == chestBefore, tostring(why))
+    ok, why = T.craftBatch({ { "minecraft:oak_planks", 0 } })
+    check("...a count that is not one or more, or an empty list: refused", ok == nil and why:find("whole number", 1, true) and T.craftBatch({}) == nil, tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- T.craftPlan: the recipe tree against what there is, and T.craftBatch crafting it
+--------------------------------------------------------------------------
+-- A plan's steps as words: "oak_planks 4 (1), stick 4 (1), torch 16 (4)".
+local function stepsLine(plan)
+    local parts = {}
+    for i, s in ipairs(plan.steps) do parts[i] = s.name:sub(11) .. " " .. s.n .. " (" .. s.crafts .. ")" end
+    return table.concat(parts, ", ")
+end
+local function countsLine(counts)
+    local names = {}
+    for name in pairs(counts) do names[#names + 1] = name end
+    table.sort(names)
+    for i, name in ipairs(names) do names[i] = name:sub(11) .. " " .. counts[name] end
+    return table.concat(names, ", ")
+end
+do
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 2 }, [2] = { "minecraft:coal", 4 } })
+    W.give(1, TABLE, 1)
+    local plan, why = T.craftPlan({ ["minecraft:torch"] = 16 }, { chest = "front" })
+    check("a plan for 16 torches: logs into planks, planks into sticks, sticks and coal into torches, in that order", plan and plan.ok
+        and stepsLine(plan) == "oak_planks 4 (1), stick 4 (1), torch 16 (4)", plan and stepsLine(plan) or tostring(why))
+    check("...the base materials it takes: 1 log and 4 coal, nothing short", plan and countsLine(plan.base) == "coal 4, oak_log 1" and next(plan.short) == nil,
+        plan and countsLine(plan.base))
+    check("...and planning moves nothing", here() and chestHas("minecraft:oak_log") == 2)
+    local ok, info = T.craftBatch(plan, { take = true })
+    check("T.craftBatch(plan) crafts it with one stash, and opts.take brings the targets (only) aboard", ok == true and carrying("minecraft:torch") == 16
+        and carrying("minecraft:stick") == 0 and chestHas("minecraft:oak_planks") == 2 and chestHas("minecraft:oak_log") == 1 and info.crafted["minecraft:stick"] == 4,
+        tostring(ok) .. " " .. tostring(info) .. " / " .. inventory() .. " / " .. chestLine())
+
+    -- short: what is missing, and the batch refuses it
+    local short, swhy = T.craftPlan({ { "minecraft:torch", 8 } }, { stock = { oak_log = 1 } })
+    check("short of coal (or charcoal): the plan says so, and that it is not to be crafted; the rest of the tree still planned", short and short.ok == false
+        and short.short["coal or charcoal"] == 2 and swhy:find("short of coal or charcoal 2", 1, true) and stepsLine(short) == "oak_planks 4 (1), stick 4 (1), torch 8 (2)",
+        tostring(swhy) .. " / " .. (short and stepsLine(short) or ""))
+    local inv = inventory()
+    local nope, nwhy = T.craftBatch(short)
+    check("...and T.craftBatch refuses a short plan before anything moves", nope == nil and nwhy:find("short of coal or charcoal 2", 1, true) and inventory() == inv, tostring(nwhy))
+end
+
+do
+    fresh()
+    -- what there is is used first: sticks on hand are not made again
+    local plan = T.craftPlan({ ["minecraft:torch"] = 16 }, { stock = { stick = 10, coal = 4 } })
+    check("sticks there already are used, not made: one step, torches", stepsLine(plan) == "torch 16 (4)" and countsLine(plan.base) == "coal 4, stick 4",
+        stepsLine(plan))
+    -- the target itself is made, even with some there
+    plan = T.craftPlan({ ["minecraft:stick"] = 4 }, { stock = { stick = 64, oak_planks = 2 } })
+    check("a target is made even when there are some already (the batch makes what was asked)", stepsLine(plan) == "stick 4 (1)", stepsLine(plan))
+    -- any planks: the wood there is
+    plan = T.craftPlan({ ["minecraft:stick"] = 4 }, { stock = { birch_log = 1 } })
+    check("sticks take any planks: the plan makes birch planks from the birch log there is", plan.ok and stepsLine(plan) == "birch_planks 4 (1), stick 4 (1)",
+        stepsLine(plan))
+    -- a mixed recipe takes from several
+    plan = T.craftPlan({ ["minecraft:chest"] = 1 }, { stock = { oak_planks = 5, spruce_planks = 3 } })
+    check("a chest from mixed planks: 5 oak and 3 spruce, nothing made", plan.ok and stepsLine(plan) == "chest 1 (1)" and countsLine(plan.base) == "oak_planks 5, spruce_planks 3",
+        countsLine(plan.base))
+    -- blocks of nine are undone when that is what there is
+    plan = T.craftPlan({ ["minecraft:torch"] = 32 }, { stock = { coal_block = 1, stick = 8 } })
+    check("coal from a coal block when that is what there is (9 coal, 1 spare)", plan.ok and stepsLine(plan) == "coal 9 (1), torch 32 (8)", stepsLine(plan))
+    -- a loop in the tree (a coal block is nine coal, coal is a ninth of a block) ends
+    plan = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
+    check("a loop in the recipes ends: a coal block with no coal is short of 9 coal", plan.ok == false and countsLine(plan.short) == "coal 9", countsLine(plan.short))
+    -- two targets share what there is; a list form
+    plan = T.craftPlan({ { "minecraft:stick", 4 }, { "minecraft:crafting_table", 1 } }, { stock = { oak_log = 2 } })
+    check("two targets from 2 logs: planks for the sticks with 2 over, the table from those and 2 more", plan.ok
+        and stepsLine(plan) == "oak_planks 4 (1), stick 4 (1), oak_planks 4 (1), crafting_table 1 (1)" and countsLine(plan.base) == "oak_log 2", stepsLine(plan))
+    check("bad targets: nil and why", T.craftPlan("minecraft:torch") == nil and T.craftPlan({}) == nil and T.craftPlan({ { "minecraft:torch", 0 } }) == nil)
+end
+
+do
+    -- the chests T.catalogue has read are counted, with the inventory
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
+    W.give(2, "minecraft:coal", 1)
+    T.addChest(0, 0, 0, 0)
+    T.catalogue()
+    local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
+    check("with no chest named, the catalogue's chests and the inventory are what there is", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1",
+        plan and countsLine(plan.base) .. " / " .. countsLine(plan.short))
+end
+
+--------------------------------------------------------------------------
+-- Blocks of nine, each way
+--------------------------------------------------------------------------
+do
+    fresh()
+    local wrong = {}
+    local items = {}
+    for item in pairs(B.NINE) do items[#items + 1] = item end
+    table.sort(items)
+    T.recipe("minecraft:chest")
+    -- (a row of the table: an ingot is made from its block and from nine nuggets, so not only the first recipe is looked at)
+    local function row(out, from, count, rows)
+        for _, r in ipairs(T.RECIPES) do
+            if r.out == out and r.key.X == from and r.count == count and #r.shape == rows then return true end
+        end
+        return false
+    end
+    for _, item in ipairs(items) do
+        local block = B.NINE[item]
+        if not row("minecraft:" .. block, "minecraft:" .. item, 1, 3) then wrong[#wrong + 1] = block .. " from nine " .. item end
+        if not row("minecraft:" .. item, "minecraft:" .. block, 9, 1) then wrong[#wrong + 1] = "nine " .. item .. " from " .. block end
+    end
+    check("every block of nine the game has is built in both ways: nine into the block, the block back into nine", #wrong == 0 and #items >= 18,
+        table.concat(wrong, "; "))
+    fill(0, 0, 1, { [1] = { "minecraft:coal_block", 2 }, [2] = { "minecraft:bone_meal", 20 } })
+    W.give(1, TABLE, 1)
+    local ok, made = T.craft("minecraft:coal", 18)
+    check("18 coal from 2 coal blocks, with no recipe added", ok == true and made == 18 and carrying("minecraft:coal") == 18 and chestHas("minecraft:coal_block") == 0,
+        tostring(ok) .. " " .. tostring(made) .. " / " .. inventory())
+    ok, made = T.craft("minecraft:bone_block", 2)
+    check("a bone block from nine bone meal, two of them: 18 used and 2 left", ok == true and made == 2 and carrying("minecraft:bone_block") == 2
+        and chestHas("minecraft:bone_meal") == 2, tostring(ok) .. " " .. tostring(made) .. " / " .. chestLine())
+    ok, made = T.craft("minecraft:bone_block", 1)
+    check("...and a third is short, saying of what", ok == nil and made == "short of bone_meal: need 9, have 2", tostring(made))
 end
 
 --------------------------------------------------------------------------
@@ -583,6 +800,89 @@ do
     ok, why = T.smelt("minecraft:sand", 3, "minecraft:coal")
     check("facing east: the furnace is set up that way, glass out, the turtle faces east again", ok == true and carrying("minecraft:glass") == 3 and T.dir == 1 and W.S.P.d == 1
         and W.S.P.x == 0 and W.S.P.z == 0 and W.get(1, 1, 0) == nil, tostring(why) .. " / " .. inventory())
+end
+
+--------------------------------------------------------------------------
+-- T.smeltAt: a furnace standing in the world
+--------------------------------------------------------------------------
+-- Which way the turtle put things in: drops forward (from a side), down (from the top) and up (from below), by item.
+local PUT = {}
+local function watchPuts()
+    PUT = { front = {}, down = {}, up = {} }
+    for way, fn in pairs({ front = "drop", down = "dropDown", up = "dropUp" }) do
+        local raw = turtle[fn]
+        turtle[fn] = function(n)
+            local it = W.S.inv[W.S.sel]
+            if it then PUT[way][it.name] = (PUT[way][it.name] or 0) + math.min(n or it.count, it.count) end
+            return raw(n)
+        end
+    end
+end
+local OVEN = { 0, 2, 3 }                    -- a furnace hung in the air, as the turtle's courtyard ones
+do
+    fresh(false)
+    W.set(0, 2, 3, FURNACE)
+    W.give(2, "minecraft:raw_iron", 3); W.give(3, "minecraft:coal", 2)
+    watchPuts()
+    local t0 = W.time
+    local ok, got = T.smeltAt(OVEN, "minecraft:raw_iron", 3, { fuel = "minecraft:coal" })
+    check("smeltAt a furnace standing in the world: 3 raw iron in, 3 ingots out, a furnace's time (30 s)", ok == true and got == 3
+        and carrying("minecraft:iron_ingot") == 3 and carrying("minecraft:raw_iron") == 0 and W.time - t0 >= 30, tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+    check("...the coal in from a side, the iron from the top, the ingots out of the underside", PUT.front["minecraft:coal"] == 1 and PUT.down["minecraft:raw_iron"] == 3
+        and not PUT.up["minecraft:coal"] and carrying("minecraft:coal") == 1, tostring(PUT.front["minecraft:coal"]) .. " " .. tostring(PUT.down["minecraft:raw_iron"]))
+    check("...the furnace left standing, the turtle back where it began facing as before, the ingots not junk",
+        W.get(0, 2, 3) and W.get(0, 2, 3).name == FURNACE and here() and T.isJunk("minecraft:iron_ingot") == false)
+
+    -- loaded and left to cook, then fetched
+    W.give(4, "minecraft:sand", 4)
+    t0 = W.time
+    local info
+    ok, got, info = T.smeltAt(OVEN, "minecraft:sand", 4, { wait = false })
+    check("opts.wait = false: it loads the furnace and returns at once, saying when it will be ready", ok == true and got == 0 and info and info.ready == 40
+        and W.time - t0 < 10 and carrying("minecraft:sand") == 0 and here(), tostring(ok) .. " " .. tostring(got) .. " t=" .. (W.time - t0))
+    W.advance(45)
+    ok, got = T.smeltAt(OVEN, "minecraft:sand", 0)
+    check("...and smeltAt(cell, item, 0) comes back and takes out the 4 glass, adding nothing", ok == true and got == 4 and carrying("minecraft:glass") == 4 and here(),
+        tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+
+    -- a furnace with fuel in it already, and staying put
+    W.get(0, 2, 3).inv[2] = { name = "minecraft:coal", count = 1 }
+    W.give(5, "minecraft:cobblestone", 2); W.give(6, "minecraft:coal", 3)
+    watchPuts()
+    ok, got = T.smeltAt(OVEN, "minecraft:cobblestone", 2, { fuel = false, stay = true })
+    check("opts.fuel = false puts no fuel in (the furnace has some), opts.stay leaves the turtle under it", ok == true and got == 2 and carrying("minecraft:stone") == 2
+        and next(PUT.front) == nil and next(PUT.up) == nil and carrying("minecraft:coal") == 3 and W.S.P.x == 0 and W.S.P.y == 1 and W.S.P.z == 3, tostring(ok) .. " " .. tostring(got))
+end
+
+do
+    -- a furnace set in a wall: no side to stand at, the fuel goes in from below
+    fresh(false)
+    W.set(0, 2, 3, FURNACE)
+    for _, c in ipairs({ { -1, 2, 3 }, { 1, 2, 3 }, { 0, 2, 2 }, { 0, 2, 4 } }) do W.set(c[1], c[2], c[3], "minecraft:stone") end
+    for _, c in ipairs({ { -1, 2, 3 }, { 1, 2, 3 }, { 0, 2, 2 }, { 0, 2, 4 } }) do T.map.set(c[1], c[2], c[3], "minecraft:stone") end
+    W.give(2, "minecraft:raw_gold", 2); W.give(3, "minecraft:charcoal", 1)
+    watchPuts()
+    local ok, got = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("a furnace in a wall, no side free: the fuel (charcoal, chosen) goes in from below, the gold comes out", ok == true and got == 2
+        and carrying("minecraft:gold_ingot") == 2 and PUT.up["minecraft:charcoal"] == 1 and here(), tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+
+    -- refusals
+    T.map.set(0, 1, 3, "minecraft:stone")
+    W.set(0, 1, 3, "minecraft:stone")
+    W.give(2, "minecraft:raw_gold", 2); W.give(3, "minecraft:charcoal", 1)
+    local moves = W.S.moves
+    local why
+    ok, why = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("the map shows a block under the furnace: refused before it moves, saying the results come out only from below", ok == nil
+        and why:find("under it", 1, true) and W.S.moves == moves and carrying("minecraft:raw_gold") == 2, tostring(why))
+    W.set(0, 1, 3, nil); T.map.set(0, 1, 3, "minecraft:air")
+    W.set(0, 2, 3, "minecraft:stone")
+    ok, why = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("no furnace there: nil, what is there instead, and back home with the gold and the fuel", ok == nil and why:find("no furnace at 0,2,3 (minecraft:stone", 1, true)
+        and carrying("minecraft:raw_gold") == 2 and carrying("minecraft:charcoal") == 1 and here(), tostring(why))
+    ok, why = T.smeltAt(OVEN, "minecraft:dirt", 1)
+    check("...an item that does not smelt, a bad cell, too many: refused", ok == nil and why:find("does not smelt", 1, true)
+        and T.smeltAt({ 0, 2 }, "minecraft:raw_gold", 1) == nil and T.smeltAt(OVEN, "minecraft:raw_gold", 65) == nil)
 end
 
 --------------------------------------------------------------------------

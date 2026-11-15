@@ -150,7 +150,7 @@ T.blueprint.at(plan, x, y, z) - The block a plan has at x, y, z (turtle frame): 
 T.blueprint.extent(plan) - The box a plan covers: x1, y1, z1, x2, y2, z2 of the turtle's frame (the cells its text reaches).
 T.blueprint.put(plan, x, y, z, item) - Set one cell of a plan to a block (`item`, with a state in brackets if it has one; "air" for air; nil or " " to leave it alone). Returns true, or nil and why.
 Building:
-T.build(plan, opts) - Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+T.build(plan, opts) - Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it circles. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 Checking:
 T.verify(plan, opts) - Check a plan against the world: the cells that differ, as a list of { x, y, z, want, wantState, found, foundState, why, unverified }, and { checked, inspected, differing, unverified }; nil and why if it can't start.
 Swapping blocks:
@@ -159,12 +159,16 @@ Reading and adding recipes, and asking what is short:
 T.addRecipe(spec) - Add a recipe (modded items, say): out (the item made), count, shape, key, mixed, and for a family of, from or map. True, or nil and why not.
 T.recipe(name) - The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
 T.canCraft(name, n, opts) - Can the item be crafted: true, or false, why and the short list. Counts the inventory and the chest.
+Planning:
+T.craftPlan(targets, opts) - Work out crafting { [name] = n } down the recipe tree (torches, sticks, planks, logs) against the inventory and the chests: the plan { steps, base, short, ok }, and why when short; nil, why. T.craftBatch(plan) crafts it.
 Crafting from a chest:
 T.craft(name, n, opts) - Craft n of an item from a chest (stash the inventory, fill the grid, craft, put it all back): true and how many, or false/nil and why.
+T.craftBatch(list, opts) - Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
 Fuel and smelting:
 T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it smelts an item in 200), or nil if it is not a fuel.
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
 T.smelt(item, n, fuel, opts) - Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
+T.smeltAt(cell, item, n, opts) - Smelt n at a furnace standing at cell {x, y, z}: fuel in from a side, the item from the top, the results from below. True, got (true, 0, info with opts.wait = false: n = 0 fetches them later); false, why, got; nil, why.
 Harvesting:
 T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in by and ones under sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 Fuel from lava:
@@ -208,9 +212,13 @@ Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+What there is, everywhere:
+T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:
 T.stow(opts) - Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+Getting ready for a job:
+T.prepare(spec) - Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch what is, come back, check the room. True, info; false, why, info (what is short, too few slots free); nil, why.
 T.autoDump() - Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
 Frames and the world:
 T.frameChanged(old, new) - Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.

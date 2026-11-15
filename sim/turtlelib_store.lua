@@ -13,6 +13,11 @@
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so; nothing is ever dropped in the world;
+--   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
+--   * T.inventoryReport: every item across the chests and the turtle, totalled, with each count's age, as lines too,
+--     sorted by name or count, matched; it moves nothing;
+--   * T.prepare: one trip that puts away what isn't needed and fetches what is (home only at the end), refused before
+--     moving when the chests' list is short, spec.partial, too few free slots after;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
 --     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
 local PROJ = ...
@@ -509,6 +514,91 @@ do
     W.give(1, COBBLE, 10)
     ok, why = T.stow()
     check("the chest that held it is gone: the bulk chest takes it", ok == true and chestHas(0, 0, -3, COBBLE) == 10 and here(), tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- Staying at the chest; the report of everything; getting ready in one trip
+--------------------------------------------------------------------------
+do
+    setUp()
+    T.catalogue()
+    local got = T.fetch(COBBLE, 5, { stay = true })
+    check("T.fetch with opts.stay takes the count and stays at the chest (no walk back)", got == 5 and carrying(COBBLE) == 5 and here(3, 0, 0, 0),
+        W.S.P.x .. "," .. W.S.P.y .. "," .. W.S.P.z)
+    W.give(9, DIRT, 3)
+    local ok = T.stow({ stay = true })
+    check("T.stow with opts.stay stays at the last chest too", ok == true and carrying(DIRT) == 0 and here(0, 0, -2, 2), W.S.P.x .. "," .. W.S.P.z)
+    W.give(9, DIRT, 3); W.give(10, STONE, 2)
+    ok = T.stow({ keep = { "dirt" } })
+    check("T.stow's opts.keep leaves what it names aboard (a list, no namespace)", ok == true and carrying(DIRT) == 3 and carrying(STONE) == 0)
+end
+
+do
+    fresh()
+    local report, info = T.inventoryReport()
+    check("the report with no chests: what is aboard only, empty here", #report == 0 and info.kinds == 0 and info.chests == 0)
+    setUp()
+    T.catalogue()
+    W.give(1, COBBLE, 6)
+    CLOCK = CLOCK + 300
+    T.fetch(PLANKS, 1)                                  -- (B is read again now: its count is new, A's is 5 minutes old)
+    local moves = W.S.moves
+    report, info = T.inventoryReport()
+    local names = {}
+    for i, r in ipairs(report) do names[i] = r.name:sub(11) .. " " .. r.total end
+    check("T.inventoryReport: every item across the chests and the turtle, totalled, by name", table.concat(names, ", ")
+        == "cobblestone 70, dirt 30, iron_ingot 7, oak_planks 45, stone 10" and info.kinds == 5 and info.items == 162 and info.chests == 4,
+        table.concat(names, ", "))
+    check("...each with what is aboard, in the chests and in how many, and the oldest count's age", report[1].turtle == 6 and report[1].chests == 64
+        and report[1].places == 1 and report[1].age == 300 and report[4].turtle == 1 and report[4].places == 2 and report[4].age == 300 and report[5].age == 0
+        and info.oldest == 300, tostring(report[1].age) .. " " .. tostring(report[5].age))
+    check("...as lines too", info.text:find("cobblestone 70: turtle 6, 1 chest, read 5m ago\n", 1, true) ~= nil
+        and info.text:find("oak_planks 45: turtle 1, 2 chests, read 5m ago", 1, true) ~= nil and info.text:find("stone 10: 1 chest, read 0s ago", 1, true) ~= nil,
+        info.text)
+    check("...and it moves nothing", W.S.moves == moves and here())
+    report = T.inventoryReport({ sort = "count" })
+    check("opts.sort = \"count\": the most first", report[1].name == COBBLE and report[2].name == PLANKS and report[5].name == IRON)
+    report = T.inventoryReport({ match = "*planks" })
+    check("opts.match: only what it names", #report == 1 and report[1].total == 45)
+    CLOCK = 1000
+end
+
+do
+    setUp()
+    T.catalogue()
+    W.give(1, DIRT, 10)
+    W.give(2, "minecraft:torch", 5)
+    W.give(3, "minecraft:coal", 3)
+    W.give(4, STONE, 4)
+    W.give(5, "minecraft:gravel", 2)
+    local homes = 0
+    local remove = T.onChange(function(e) if e.kind == "move" and e.x == 0 and e.y == 0 and e.z == 0 then homes = homes + 1 end end)
+    local ok, info = T.prepare({ need = { cobblestone = 20, [STONE] = 4, [IRON] = 3 }, freeSlots = 10 })
+    remove()
+    check("T.prepare: the dirt, the gravel and the torches put away, 20 cobblestone and 3 iron fetched, the stone kept", ok == true
+        and carrying(COBBLE) == 20 and carrying(IRON) == 3 and carrying(STONE) == 4 and carrying(DIRT) == 0 and carrying("minecraft:gravel") == 0
+        and carrying("minecraft:torch") == 0 and info.fetched[COBBLE] == 20 and info.stowed == 17, tostring(ok) .. " " .. tostring(info and info.stowed))
+    check("...fuel stays aboard, and the room asked for is there", carrying("minecraft:coal") == 3 and info.free >= 10, tostring(info.free))
+    check("...in one trip: home only at the end, facing as before", homes == 1 and here(), tostring(homes))
+    check("...the chests' list says where it all went", line(T.chests(), 0, -2, 2).items[DIRT] == 40 and line(T.chests(), 3, 0, 0).items[COBBLE] == 44)
+
+    -- short in the chests' list: refused before it moves
+    local moves = W.S.moves
+    local why
+    ok, why, info = T.prepare({ need = { diamond = 2, [COBBLE] = 30 } })
+    check("T.prepare short of something (as the chests were last read): refused before moving, naming what and how much", ok == nil
+        and why == "short of diamond: need 2, have 0 (aboard and in the chests as last read; T.catalogue reads them again, spec.partial goes for what there is)"
+        and info.short[1].item == "minecraft:diamond" and W.S.moves == moves, tostring(why))
+    -- spec.partial: what there is, and it says what is still short
+    ok, why, info = T.prepare({ need = { [IRON] = 10 }, partial = true })
+    check("...spec.partial goes for what there is, then fails loudly with what is still short", ok == false and why:find("short of iron_ingot: need 10, have 7", 1, true)
+        and carrying(IRON) == 7 and here(), tostring(why))
+    -- not the room asked for
+    for s = 6, 16 do W.give(s, "minecraft:iron_pickaxe", 1) end
+    ok, why, info = T.prepare({ need = {}, freeSlots = 8 })
+    check("...and too few slots free after: false, saying how many", ok == false and why:find("only 4 slots free, 8 wanted", 1, true) and info.free == 4,
+        tostring(why))
+    check("bad arguments: nil and why", T.prepare({ need = { stone = -1 } }) == nil and T.prepare({ freeSlots = 17 }) == nil)
 end
 
 --------------------------------------------------------------------------

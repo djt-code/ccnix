@@ -3,7 +3,12 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
 == 0.51.0
--- more lines from the other ADR-0011 work go here
+Blocks of nine craft both ways with no recipe added (coal and coal blocks, bone meal and bone blocks, iron, gold, nuggets...): the T.addRecipe calls in your helpers.lua can go.
+T.craftBatch(list) crafts many recipes with one stash and leaves the products in the chest (opts.take brings them aboard): your batchCraft can go.
+T.craftPlan{[name] = n} works out the steps down to logs, the base materials and what's short; then T.craftBatch(plan).
+T.smeltAt({x, y, z}, item, n) smelts at a furnace you placed ({wait = false} returns at once; n = 0 collects later): your furnaceSmelt can go.
+T.fetch(name, n, {stay = true}) skips the walk back; T.inventoryReport() totals everything with each count's age; T.prepare{need = {...}, freeSlots = k} stows, fetches and checks in one trip.
+T.build(plan, {order = "column"}) builds walls column by column for less fuel; a build stops with "circling: ..." when its fuel runs over 3 times the estimate (fuelWatch = false turns that off).
 Route digs (moveTo/travel with dig=) refuse a cell with lava or a water source beside or above it: "digging X at c would release lava at c'". Pass liquid = true to dig anyway; T.liquidNear(x,y,z) tells you first. A dig under gravel returns a warning as the second result.
 T.digCell(x,y,z) digs exactly one cell from beside it, refusing liquid or protected cells: your helpers.lua digCell can go. moveTo{digOnly={"x,y,z",...}} limits a route's digs to those cells.
 Routes cross protected areas through air the map knows (doorways, halls); they never dig there. Don't raise limit for a "no route" through an area: read what it says walled it in.

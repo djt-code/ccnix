@@ -1,14 +1,16 @@
--- craft.lua -- crafting and smelting: recipes as data, T.craft, T.canCraft, T.smelt, and what burns and smelts
+-- craft.lua -- crafting and smelting: recipes as data, T.craft, T.craftBatch, T.canCraft, T.smelt, what burns and smelts
 --
--- Loaded by turtlelib the first time one of its functions is used (T.craft, T.canCraft, T.recipe, T.addRecipe,
--- T.smelt, T.fuelTicks, T.smeltsTo).
+-- Loaded by turtlelib the first time one of its functions is used (T.craft, T.craftBatch, T.craftPlan, T.canCraft,
+-- T.recipe, T.addRecipe, T.smelt, T.smeltAt, T.fuelTicks, T.smeltsTo).
 --
 -- Recipes are written as the game's data packs write them: up to three rows of letters (a dot is an empty cell), what
 -- each letter stands for (a name, a list of names or a glob like "*_planks", minecraft: assumed), what comes out and
 -- how many.  A family is one entry: "minecraft:{}_stairs" over a list of blocks makes every one's stairs, the {} being
 -- the block's name without its ending (oak_planks gives oak, stone_bricks gives stone_brick); a map entry gives the
--- block each result is made from (chiseled forms from their slabs).  T.addRecipe adds more, for modded items.  The
--- table is T.RECIPES (it exists once this module has loaded), the newest first.
+-- block each result is made from (chiseled forms from their slabs).  A block of nine (coal, iron, gold, copper,
+-- redstone, lapis, emerald, diamond, bone meal and the rest, nuggets into ingots) is made both ways: nine into the
+-- block, the block back into nine.  T.addRecipe adds more, for modded items.  The table is T.RECIPES (it exists once
+-- this module has loaded), the newest first.
 --
 -- A turtle crafts through the crafting table as a peripheral, and only when every slot outside the grid is empty.  So
 -- T.craft works from a chest: it checks the chest has room for the whole inventory, puts the crafting table on (through
@@ -16,13 +18,19 @@
 -- ingredients into the grid's slots (1-3, 5-7 and 9-11), crafts, stashes again, and at the end puts the inventory back
 -- and the product with it.  What it made is never junk (T.markCrafted).  T.canCraft says what is short, from the
 -- inventory and the chest.  A craft does the recipe asked for; an ingredient that is itself crafted (planks from logs,
--- sticks from planks) is made first with its own T.craft.
+-- sticks from planks) is made first with its own T.craft, or in the same T.craftBatch: that stashes the inventory once
+-- for a list of recipes, each product going back in the chest for the next to use, and puts the inventory back at the
+-- end (T.craft is a batch of one that takes its product aboard).  T.craftPlan works the whole tree out first (torches
+-- need sticks, sticks planks, planks logs) against the inventory and the chests: the steps, the base materials, what
+-- is short; T.craftBatch takes the plan.
 --
 -- T.smelt runs a furnace: a furnace takes fuel through its sides, the item through its top, and gives the result
 -- through its underside only.  It sets the furnace up in front of the turtle, one block up, so the cell under it is
 -- free to stand in, drops the fuel from beside, the item from above, sucks the results from below as they cook (ten
--- seconds an item), and takes the furnace back.  What burns and how long (T.fuelTicks; the nether's woods do not) and
--- what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and T.SMELTS.
+-- seconds an item), and takes the furnace back.  T.smeltAt does the same at a furnace standing in the world (fuel from
+-- a side, the item from the top, the results from below), and need not wait for it.  What burns and how long
+-- (T.fuelTicks; the nether's woods do not) and what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and
+-- T.SMELTS.
 
 local T = require("turtlelib")
 local text = require("text")
@@ -128,6 +136,14 @@ local SQUARE_OF_4 = {
 local SQUARE_OF_1 = {
     sandstone = "sand", red_sandstone = "red_sand", bricks = "brick", nether_bricks = "nether_brick",
     quartz_block = "quartz", prismarine = "prismarine_shard", glowstone = "glowstone_dust",
+}
+-- Blocks of nine: block = the item nine of make it, and one block crafts back into the nine (a nugget's ingot too)
+local BLOCK_OF_NINE = {
+    coal_block = "coal", iron_block = "iron_ingot", gold_block = "gold_ingot", copper_block = "copper_ingot",
+    redstone_block = "redstone", lapis_block = "lapis_lazuli", emerald_block = "emerald", diamond_block = "diamond",
+    netherite_block = "netherite_ingot", raw_iron_block = "raw_iron", raw_gold_block = "raw_gold",
+    raw_copper_block = "raw_copper", bone_block = "bone_meal", slime_block = "slime_ball", hay_block = "wheat",
+    dried_kelp_block = "dried_kelp", iron_ingot = "iron_nugget", gold_ingot = "gold_nugget",
 }
 -- Chiseled and pillar forms: two of the slab, one over the other
 local CHISELED = {
@@ -366,12 +382,17 @@ define { out = "soul_torch", count = 4, shape = { "C", "S", "X" },
          key = { C = { "coal", "charcoal" }, S = "stick", X = { "soul_sand", "soul_soil" } } }
 define { out = "lantern", shape = { "NNN", "NTN", "NNN" }, key = { N = "iron_nugget", T = "torch" } }
 define { out = "soul_lantern", shape = { "NNN", "NTN", "NNN" }, key = { N = "iron_nugget", T = "soul_torch" } }
-define { out = "iron_nugget", count = 9, shape = { "I" }, key = { I = "iron_ingot" } }
 define { out = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" } }
 define { out = "iron_bars", count = 16, shape = { "III", "III" }, key = { I = "iron_ingot" } }
 define { out = "glass_pane", count = 16, shape = { "GGG", "GGG" }, key = { G = "glass" } }
 define { out = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" } }
 define { out = "nether_brick_fence", count = 6, shape = { "NIN", "NIN" }, key = { N = "nether_bricks", I = "nether_brick" } }
+-- Blocks of nine, each way (coal blocks into coal, bone meal into a bone block, nuggets into an ingot)
+for _, block in ipairs(tables.sortedKeys(BLOCK_OF_NINE)) do
+    local item = BLOCK_OF_NINE[block]
+    define { out = block, shape = { "XXX", "XXX", "XXX" }, key = { X = NS .. item } }
+    define { out = item, count = 9, shape = { "X" }, key = { X = NS .. block } }
+end
 
 -- (A map row's out is only a placeholder: what it makes is the map's keys.)
 T.RECIPES = rows
@@ -634,6 +655,249 @@ function T.canCraft(name, n, opts)
 end
 
 --------------------------------------------------------------------------
+-- Planning: the recipe tree against what there is
+--------------------------------------------------------------------------
+
+-- Give the rest of the computer a turn when planning has run for a while (CC stops code that goes seven seconds without
+-- yielding).
+local lastYield = 0
+local function breathe()
+    local t = os.clock()
+    if t - lastYield > 0.4 then
+        lastYield = t
+        sleep(0)
+    end
+end
+
+-- Every item some recipe makes, by name, sorted (what a glob like "*_planks" may be made as).  Kept until a recipe is added.
+local outputs = { rows = -1 }
+local function allOutputs()
+    if outputs.rows == #rows then return outputs.list end
+    local seen = {}
+    for _, row in ipairs(rows) do
+        if row.map then
+            for result in pairs(row.map) do seen[result] = true end
+        elseif row.from then
+            for _, item in ipairs(row.from) do seen[text.replace(row.out, "{}", stem(item))] = true end
+        else
+            seen[row.out] = true
+        end
+    end
+    outputs.rows, outputs.list = #rows, tables.sortedKeys(seen)
+    return outputs.list
+end
+
+-- A plan's working state: left (what there is, by name), spare (made over what was asked, by name), base (taken from
+-- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order).
+local function newState(stock)
+    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {} }
+end
+
+local function copyState(st)
+    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {} }
+    for i, s in ipairs(st.steps) do out.steps[i] = { name = s.name, n = s.n, crafts = s.crafts } end
+    return out
+end
+
+local function shortTotal(st)
+    local n = 0
+    for _, k in pairs(st.short) do n = n + k end
+    return n
+end
+
+local resolve                                         -- (below: resolve and expand call each other)
+
+-- Of the names in `names` (what one letter of a recipe may be), the one to make n of: the first that can be made in
+-- full.  If none can, the letter is short, as `label` ("coal or charcoal", "*_planks"); if every one goes round in a
+-- loop, st.loop says so.  One name is simply made.  Changes st.
+local function makeOneOf(st, names, label, n, visiting)
+    if #names == 1 then return resolve(st, names[1], n, visiting) end
+    local before, loops = shortTotal(st), 0
+    for _, name in ipairs(names) do
+        local trial = copyState(st)
+        resolve(trial, name, n, visiting)
+        if trial.loop then
+            loops = loops + 1
+        elseif shortTotal(trial) == before then
+            for k, v in pairs(trial) do st[k] = v end
+            return
+        end
+    end
+    if #names > 0 and loops == #names then
+        st.loop = true
+        return
+    end
+    st.short[label] = (st.short[label] or 0) + n
+end
+
+-- The names a letter of a recipe may be, to make some of: its list, or the items some recipe makes that match it.
+local function makeable(row, letter)
+    local spec = row.key[letter]
+    if type(spec) == "table" then
+        local out = {}
+        for i, s in ipairs(spec) do out[i] = full(s) end
+        return out
+    end
+    if not glob.hasWildcards(full(spec)) then return { full(spec) } end
+    local test, out = testFor(row, letter), {}
+    for _, name in ipairs(allOutputs()) do
+        if test(name) then out[#out + 1] = name end
+    end
+    return out
+end
+
+-- The names in what there is that a letter may be, with some left: the most first.
+local function inStock(st, test)
+    local out = {}
+    for _, name in ipairs(tables.sortedKeys(st.left)) do
+        if st.left[name] > 0 and test(name) then out[#out + 1] = name end
+    end
+    table.sort(out, function(a, b)
+        if st.left[a] ~= st.left[b] then return st.left[a] > st.left[b] end
+        return a < b
+    end)
+    return out
+end
+
+-- n crafts' worth of a recipe's ingredients, then its step.  `cand` is a candidate from candidatesFor.
+local function expand(st, cand, name, n, visiting)
+    local row = cand.row
+    local crafts = math.ceil(n / row.count)
+    local count, order = {}, {}
+    for _, c in ipairs(cellsOf(row)) do
+        if not count[c.letter] then order[#order + 1] = c.letter; count[c.letter] = 0 end
+        count[c.letter] = count[c.letter] + 1
+    end
+    for _, letter in ipairs(order) do
+        local need = count[letter] * crafts
+        local item = cand.fixed[letter]
+        if item then
+            resolve(st, item, need, visiting)
+        else
+            local have = inStock(st, testFor(row, letter))
+            if row.mixed then                          -- (any mix: what there is of each, then the rest made)
+                for _, got in ipairs(have) do
+                    if need == 0 then break end
+                    local take = math.min(need, st.left[got])
+                    resolve(st, got, take, visiting)
+                    need = need - take
+                end
+                if need > 0 then makeOneOf(st, makeable(row, letter), labelOf(row.key[letter]), need, visiting) end
+            elseif have[1] then                        -- (one item all through: the one there is most of)
+                resolve(st, have[1], need, visiting)
+            else
+                makeOneOf(st, makeable(row, letter), labelOf(row.key[letter]), need, visiting)
+            end
+        end
+    end
+    local made = crafts * row.count
+    local last = st.steps[#st.steps]
+    if last and last.name == name then                -- (the same item again straight after: one step)
+        last.n, last.crafts = last.n + made, last.crafts + crafts
+    else
+        st.steps[#st.steps + 1] = { name = name, n = made, crafts = crafts }
+    end
+    st.spare[name] = (st.spare[name] or 0) + made - n
+end
+
+-- n of the item: what was made over before first, then what there is (unless `top`: a target is made), then made by
+-- the recipe that leaves the least short; what is left is short.  A recipe that needs the item it is making on the way
+-- (coal from a coal block from coal) is not one: st.loop says it went round.  Changes st.
+function resolve(st, name, n, visiting, top)
+    local spare = math.min(st.spare[name] or 0, n)
+    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
+    if not top then
+        local use = math.min(st.left[name] or 0, n)
+        if use > 0 then
+            st.left[name] = st.left[name] - use
+            st.base[name] = (st.base[name] or 0) + use
+            n = n - use
+        end
+    end
+    if n == 0 then return end
+    if visiting[name] then
+        st.loop = true
+        return
+    end
+    visiting[name] = true
+    local best, bestShort
+    local before = shortTotal(st)
+    for _, cand in ipairs(candidatesFor(name)) do
+        local trial = copyState(st)
+        expand(trial, cand, name, n, visiting)
+        local s = shortTotal(trial) - before
+        if not trial.loop and (not best or s < bestShort) then best, bestShort = trial, s end
+        if best and s == 0 then break end
+        breathe()
+    end
+    visiting[name] = nil
+    if not best then
+        st.short[name] = (st.short[name] or 0) + n
+        return
+    end
+    for k, v in pairs(best) do st[k] = v end
+end
+
+-- What there is to plan with: opts.stock (counts by name), else the inventory and the chest at opts.chest (a side), else
+-- the inventory and every chest T.catalogue has read.
+local function planStock(opts)
+    if type(opts.stock) == "table" then
+        local n = {}
+        for name, count in pairs(opts.stock) do n[full(name)] = count end
+        return n
+    end
+    if opts.chest ~= nil then return stockOf(chestSide(opts)) end
+    local n = stockOf(nil)
+    if fs.exists(T.dataPath(".chests")) then
+        local chests = T.need("chests")
+        for _, c in ipairs(chests and chests() or {}) do
+            for name, count in pairs(c.items) do n[name] = (n[name] or 0) + count end
+        end
+    end
+    return n
+end
+
+-- Counts by name as words, sorted: "coal 2, stick 1".
+local function countsText(counts)
+    local parts = {}
+    for _, name in ipairs(tables.sortedKeys(counts)) do parts[#parts + 1] = shortName(name) .. " " .. counts[name] end
+    return table.concat(parts, ", ")
+end
+
+-- Work out crafting { [name] = n } down the recipe tree (torches, sticks, planks, logs) against the inventory and the
+-- chests: the plan { steps, base, short, ok }, and why when short; nil, why.  T.craftBatch(plan) crafts it.
+--
+-- `targets` is { [name] = n } or { { name, n }, ... }.  The tree is followed down (torches need sticks and coal, sticks
+-- planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the
+-- inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is
+-- made, and what can't be made is short.  The targets themselves are made, not taken from what there is.  Smelting is
+-- not planned: charcoal or glass that isn't there is short.  The plan is { targets, steps = { { name, n, crafts } } in
+-- the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it),
+-- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok }.
+function T.craftPlan(targets, opts)
+    opts = opts or {}
+    if type(targets) ~= "table" then return nil, "T.craftPlan wants the items to make: { [name] = n } or { { name, n }, ... }" end
+    local want, order = {}, {}
+    local list = #targets > 0 and targets or {}
+    if #targets == 0 then
+        for _, name in ipairs(tables.sortedKeys(targets)) do list[#list + 1] = { name, targets[name] } end
+    end
+    for i, e in ipairs(list) do
+        local name, n = type(e) == "table" and (e.name or e[1]) or nil, type(e) == "table" and (e.n or e[2] or 1) or nil
+        if type(name) ~= "string" or not isCount(n) then return nil, "target " .. i .. " is not { name, n } with n a whole number of 1 or more" end
+        name = full(name)
+        if not want[name] then order[#order + 1] = name end
+        want[name] = (want[name] or 0) + n
+    end
+    if #order == 0 then return nil, "nothing to plan: no targets" end
+    local st = newState(planStock(opts))
+    for _, name in ipairs(order) do resolve(st, name, want[name], {}, true) end
+    local plan = { targets = want, steps = st.steps, base = st.base, short = st.short, ok = next(st.short) == nil }
+    if plan.ok then return plan end
+    return plan, "short of " .. countsText(st.short) .. " (not there, and not to be crafted from what is)"
+end
+
+--------------------------------------------------------------------------
 -- Crafting from a chest
 --------------------------------------------------------------------------
 
@@ -671,75 +935,64 @@ local function oneRound(bench, side, outName, r)
     return made
 end
 
--- Put back what the stash held: each stack into the slot it came from (what was used up is not there to come back),
--- then the product.  Returns how many of the product are not aboard.
-local function unstash(side, snap, outName, made)
-    for _, e in ipairs(snap) do T.takeInto(side, e.name, e.count, e.slot) end
-    local left = 0
-    if made > 0 then
-        local got = T.pull(side, outName, made)
-        left = made - got
+-- Rounds of one recipe, the inventory stashed already: fill the grid, craft, stash the product, round after round.
+-- Returns how many of the item they made, and why they stopped short (nil if they didn't).
+local function runRounds(bench, side, outName, rounds)
+    local made = 0
+    for _, r in ipairs(rounds) do
+        local m, roundWhy = oneRound(bench, side, outName, r)
+        made = made + m
+        local again, againWhy = stashAll(side)
+        if roundWhy then return made, roundWhy end
+        if not again then return made, againWhy end
     end
-    return left
+    return made
 end
 
--- Crafting with the table on: the stash, the rounds, the stash again, the putting back.  Returns the number made,
--- why it stopped, and how many are still in the chest.
-local function workWith(bench, side, outName, rounds)
+-- Crafting with the table on, T.craft's and T.craftBatch's alike: the inventory stashed once, work() run (its products
+-- go into the chest), then each stack put back into the slot it came from (what was used up is not there to come
+-- back), then back() (to take products aboard).  Returns why the stash failed (work never ran), or nil.
+local function workWith(side, work, back)
     local snap = {}
     for s = 1, 16 do
         local it = turtle.getItemDetail(s)
         if it then snap[#snap + 1] = { slot = s, name = it.name, count = it.count } end
     end
-    local made, why = 0, nil
+    local stashWhy
     local sel = turtle.getSelectedSlot()
     local ok, err = pcall(function()
-        local stashed, stashWhy = stashAll(side)
-        if not stashed then why = stashWhy; return end
-        for _, r in ipairs(rounds) do
-            local m, roundWhy = oneRound(bench, side, outName, r)
-            made = made + m
-            local again, againWhy = stashAll(side)
-            if roundWhy then why = roundWhy; break end
-            if not again then why = againWhy; break end
-        end
+        local stashed, why = stashAll(side)
+        if not stashed then stashWhy = why; return end
+        work()
     end)
-    local left = unstash(side, snap, outName, made)
+    for _, e in ipairs(snap) do T.takeInto(side, e.name, e.count, e.slot) end
+    if back then back() end
     turtle.select(sel)
     if not ok then error(err, 0) end
-    return made, why, left
+    return stashWhy
 end
 
--- Craft with the chest on `side`: all of it but the walking.  See T.craft.
-local function craftAt(side, name, n, cands, opts)
+-- At the chest on `side`, with nothing moved yet: a crafting table to hand (on a side, in the turtle or in the chest),
+-- and room in the chest for the whole inventory, `products` stacks (`what`, for the message) and a spare.  Then the table
+-- out of the chest if it is there, put on, run(bench), and the table back where it came from.  Returns true, or nil and
+-- why (nothing was touched, or the table wouldn't go on).
+local function atBench(side, products, what, run)
     local chest = peripheral.wrap(side)
-    if not (chest and chest.list and chest.size and chest.pushItems) then
-        return nil, "no container I can read on the " .. side
-    end
-    local stock = stockOf(side)
-    local cand, cells, rounds, need, done = choose(cands, n, stock, opts.partial)
-    if not cand then
-        return nil, cells, rounds
-    end
-    local count = cand.row.count
-    -- the crafting table: on a side already, in the turtle, or in the chest
     local equippedTable = T.equipped("left") == TABLE or T.equipped("right") == TABLE
     local inChest = T.countContainer(side, TABLE) or 0
     local pulled = false
     if not equippedTable and T.countItem(TABLE) == 0 and inChest == 0 then
         return nil, "no crafting table on the turtle or in the chest"
     end
-    -- room in the chest for the whole inventory and the product (checked first, before anything moves)
     local used = 0
     for s = 1, 16 do
         if turtle.getItemCount(s) > 0 then used = used + 1 end
     end
     local free = chest.size()
     for _ in pairs(chest.list()) do free = free - 1 end
-    local products = math.ceil(done * count / stackOf(name))
     if free < used + products + 1 then
         return nil, "no room in the chest to work in: it needs " .. (used + products + 1) .. " free slots (the inventory " ..
-            "is " .. used .. " stacks, the product " .. products .. ", and one spare), it has " .. free
+            "is " .. used .. " stacks, " .. what .. " " .. products .. ", and one spare), it has " .. free
     end
     if not equippedTable and T.countItem(TABLE) == 0 then
         local got, why = T.pull(side, TABLE, 1)
@@ -747,12 +1000,39 @@ local function craftAt(side, name, n, cands, opts)
         pulled = true
     end
     local sel = turtle.getSelectedSlot()
-    local ran, made, why, left = T.withPeripheral(TABLE, function(bench) return workWith(bench, side, name, rounds) end)
+    local ran, err = T.withPeripheral(TABLE, run)
     if pulled then                                       -- the table goes back where it came from
         if T.selectItem(TABLE) then T.dropSide(side, 1) end
     end
     turtle.select(sel)
-    if not ran then return nil, "couldn't put the crafting table on: " .. tostring(made) end
+    if not ran then return nil, "couldn't put the crafting table on: " .. tostring(err) end
+    return true
+end
+
+-- Is there a container on `side` that can be read and taken from?
+local function readable(side)
+    local chest = peripheral.wrap(side)
+    return chest and chest.list and chest.size and chest.pushItems and true or false
+end
+
+-- Craft with the chest on `side`: all of it but the walking.  See T.craft.
+local function craftAt(side, name, n, cands, opts)
+    if not readable(side) then return nil, "no container I can read on the " .. side end
+    local stock = stockOf(side)
+    local cand, cells, rounds, need, done = choose(cands, n, stock, opts.partial)
+    if not cand then
+        return nil, cells, rounds
+    end
+    local count = cand.row.count
+    local made, why, left = 0, nil, 0
+    local ran, benchWhy = atBench(side, math.ceil(done * count / stackOf(name)), "the product", function(bench)
+        why = workWith(side, function()
+            made, why = runRounds(bench, side, name, rounds)
+        end, function()
+            if made > 0 then left = made - T.pull(side, name, made) end
+        end) or why
+    end)
+    if not ran then return nil, benchWhy end
     if made > 0 then T.markCrafted(name) end
     if why then return false, why .. " (made " .. made .. " of " .. need * count .. ")", made end
     if left > 0 then
@@ -834,6 +1114,123 @@ function T.craft(name, n, opts)
     return atSpot(spot, opts, function(there) return craftAt(there, name, n, cands, opts) end)
 end
 
+-- The entries of a batch, each { name, n }, from a list of { name, n } (or { name =, n = }, or a bare name for one), or
+-- from a plan's steps; nil and why for one it can't read.
+local function entriesOf(list)
+    if type(list) ~= "table" then return nil, "T.craftBatch wants a list of { name, n }, or a plan from T.craftPlan" end
+    local source = list.steps or list
+    local out = {}
+    for i, e in ipairs(source) do
+        local name, n
+        if type(e) == "string" then name, n = e, 1
+        elseif type(e) == "table" then name, n = e.name or e[1], e.n or e[2] or 1 end
+        if type(name) ~= "string" then return nil, "entry " .. i .. " of the batch is not { name, n }" end
+        if not isCount(n) then return nil, "entry " .. i .. " (" .. name .. "): how many to make is a whole number of 1 or more" end
+        out[#out + 1] = { name = full(name), n = n }
+    end
+    if #out == 0 then return nil, "nothing in the batch to craft" end
+    return out
+end
+
+-- Which names of a batch come aboard at the end: opts.take true is the batch's targets (every entry, or a plan's
+-- targets), a name, list or set is those.  A test on names, or nil for none.
+local function takeTest(list, entries, take)
+    if not take then return nil end
+    if take ~= true then return T.nameTest(take) end
+    local names = {}
+    if list.targets then
+        for name in pairs(list.targets) do names[#names + 1] = name end
+    else
+        for _, e in ipairs(entries) do names[#names + 1] = e.name end
+    end
+    return T.nameTest(names)
+end
+
+-- Craft a batch with the chest on `side`: all of it but the walking.  See T.craftBatch.
+local function batchAt(side, list, entries, opts)
+    if not readable(side) then return nil, "no container I can read on the " .. side end
+    local biggest = 0
+    for _, e in ipairs(entries) do biggest = math.max(biggest, math.ceil(e.n / stackOf(e.name))) end
+    local info = { crafted = {}, failed = {}, taken = {}, left = {} }
+    local take = takeTest(list, entries, opts.take)
+    local function failed(e, why) info.failed[#info.failed + 1] = { name = e.name, n = e.n, why = why } end
+    local stashWhy
+    local ran, benchWhy = atBench(side, biggest, "the biggest product", function(bench)
+        stashWhy = workWith(side, function()
+            for i, e in ipairs(entries) do
+                if T.freeSlots() < 16 then                -- (a stash that didn't all go in: the chest is full)
+                    for j = i, #entries do failed(entries[j], "not tried: the chest filled up") end
+                    return
+                end
+                local cands = candidatesFor(e.name)
+                local cand, cells, rounds, need
+                if #cands > 0 then cand, cells, rounds, need = choose(cands, e.n, stockOf(side), opts.partial) end
+                if #cands == 0 then
+                    failed(e, "no recipe for " .. e.name .. " (T.addRecipe adds one)")
+                elseif not cand then
+                    failed(e, cells)
+                else
+                    local made, why = runRounds(bench, side, e.name, rounds)
+                    info.crafted[e.name] = (info.crafted[e.name] or 0) + made
+                    if made > 0 then T.markCrafted(e.name) end
+                    local asked = need * cand.row.count
+                    if why then failed(e, why .. " (made " .. made .. " of " .. asked .. ")")
+                    elseif made < asked then failed(e, "made " .. made .. " of the " .. asked .. " asked: the rest is short") end
+                end
+            end
+        end, function()
+            if not take then return end
+            for _, name in ipairs(tables.sortedKeys(info.crafted)) do
+                local made = info.crafted[name]
+                if made > 0 and take(name) then
+                    local got = T.pull(side, name, made)
+                    info.taken[name] = got
+                    if got < made then info.left[name] = made - got end
+                end
+            end
+        end)
+    end)
+    if not ran then return nil, benchWhy end
+    if stashWhy then return false, stashWhy .. " (nothing crafted)", info end
+    if #info.failed > 0 then
+        local first = info.failed[1]
+        return false, #info.failed .. " of " .. #entries .. " failed, the first " .. shortName(first.name) .. ": " .. first.why, info
+    end
+    local stayed = tables.sortedKeys(info.left)
+    if #stayed > 0 then
+        return false, info.left[stayed[1]] .. " " .. shortName(stayed[1]) .. " stayed in the chest: no room for them in the turtle", info
+    end
+    return true, info
+end
+
+-- Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take:
+-- aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
+--
+-- The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts); a plan is its steps
+-- (one that is short is refused unless opts.partial).  It works from a chest as T.craft does (the same opts.chest, and the junk
+-- chest by default), but stashes the inventory only once: the tools go in too, the crafting table goes on, and each
+-- recipe's ingredients come from the chest into the grid, are crafted, and the product goes back in the chest, where
+-- the next recipe can use it (planks, then sticks, then torches).  At the end the inventory comes back as it was;
+-- the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or
+-- set of names) brings them aboard.  A recipe that can't be made is noted and the rest go on.  opts: chest, take,
+-- partial (craft what the ingredients allow), move.  Info is { crafted = { name = n }, failed = { { name, n, why } },
+-- taken = { name = n }, left = { name = n } (made, but no room aboard) }.
+function T.craftBatch(list, opts)
+    opts = opts or {}
+    local entries, why = entriesOf(list)
+    if not entries then return nil, why end
+    if list.steps and list.ok == false and not opts.partial then
+        return nil, "the plan is short of " .. countsText(list.short or {}) .. " (opts.partial crafts what it can)"
+    end
+    local side = chestSide(opts)
+    if side then return batchAt(side, list, entries, opts) end
+    local spot = chestSpot(opts)
+    if not spot then
+        return nil, "no chest to craft from: put one in front, above or below the turtle, or give opts.chest, or set a junk chest"
+    end
+    return atSpot(spot, opts, function(there) return batchAt(there, list, entries, opts) end)
+end
+
 --------------------------------------------------------------------------
 -- Fuel and smelting
 --------------------------------------------------------------------------
@@ -880,6 +1277,57 @@ local function noFuelWhy(name)
     return name .. " is not a furnace fuel (T.FURNACE_FUEL lists them)"
 end
 
+-- The fuel to smelt n of the item with, and how many of it: `fuel` is a name, or nil for the first of FUEL_PREFER there
+-- is enough of.  Nil and why if there is none, it doesn't burn, or there is too little of it.
+local function fuelToBurn(item, n, fuel)
+    if fuel == nil then
+        fuel = chooseFuel(item, n)
+        if not fuel then return nil, "no fuel on the turtle to smelt " .. n .. " with (charcoal, coal, planks or logs)" end
+    else
+        fuel = full(fuel)
+    end
+    local ticks = FURNACE_FUEL[fuel]
+    if not ticks then return nil, noFuelWhy(fuel) end
+    local fuelCount = math.ceil(n * SMELT_TICKS / ticks)
+    local haveFuel = T.countItem(fuel) - (fuel == item and n or 0)
+    if haveFuel < fuelCount then
+        return nil, "short of " .. fuel .. " to burn: " .. n .. " items need " .. fuelCount .. ", have " .. math.max(haveFuel, 0)
+    end
+    return fuel, fuelCount
+end
+
+-- Drop `count` of the item `name` with how(n) (turtle.drop, dropDown, dropUp), from every slot that holds it, as far as
+-- it takes: a stack split over slots goes in whole.  Returns how many went.
+local function dropAll(name, count, how)
+    local before = T.countItem(name)
+    for slot = 1, 16 do
+        local gone = before - T.countItem(name)
+        if gone >= count then break end
+        local it = turtle.getItemDetail(slot)
+        if it and it.name == name then
+            turtle.select(slot)
+            if not how(math.min(count - gone, it.count)) then break end
+        end
+    end
+    return before - T.countItem(name)
+end
+
+-- Take the results out of the furnace above as they cook, until n have come or the time is up (ten seconds an item and
+-- thirty over).  Returns how many came, and the seconds waited.
+local function collect(result, n)
+    local got, waited = 0, 0
+    local limit = n * (SMELT_TICKS / 20) + 30
+    while got < n and waited <= limit do
+        local before = T.countItem(result)
+        turtle.suckUp()
+        got = got + T.countItem(result) - before
+        if got >= n then break end
+        sleep(5)
+        waited = waited + 5
+    end
+    return got, waited
+end
+
 -- Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and
 -- why.
 --
@@ -902,19 +1350,9 @@ function T.smelt(item, n, fuel, opts)
     if not result then return nil, item .. " does not smelt into anything (T.SMELTS lists what does)" end
     if T.countItem(item) < n then return nil, "short of " .. item .. ": need " .. n .. ", have " .. T.countItem(item) end
     if T.countItem(FURNACE) < 1 then return nil, "no furnace on the turtle (T.craft makes one from 8 cobblestone)" end
-    if fuel == nil then
-        fuel = chooseFuel(item, n)
-        if not fuel then return nil, "no fuel on the turtle to smelt " .. n .. " with (charcoal, coal, planks or logs)" end
-    else
-        fuel = full(fuel)
-    end
-    local ticks = FURNACE_FUEL[fuel]
-    if not ticks then return nil, noFuelWhy(fuel) end
-    local fuelCount = math.ceil(n * SMELT_TICKS / ticks)
-    local haveFuel = T.countItem(fuel) - (fuel == item and n or 0)
-    if haveFuel < fuelCount then
-        return nil, "short of " .. fuel .. " to burn: " .. n .. " items need " .. fuelCount .. ", have " .. math.max(haveFuel, 0)
-    end
+    local fuelCount
+    fuel, fuelCount = fuelToBurn(item, n, fuel)
+    if not fuel then return nil, fuelCount end
     local start, heading = T.here(), T.dir
     local v = T.DELTA[heading]
     local stand = { x = start.x, y = start.y + 1, z = start.z }                           -- beside the furnace
@@ -966,20 +1404,6 @@ function T.smelt(item, n, fuel, opts)
         if not home then note = note .. " (and can't get home: " .. tostring(homeWhy) .. ")" end
         return note
     end
-    -- (from every slot that holds it, as far as it takes: a stack split over slots goes in whole)
-    local function dropAll(name, count, how)
-        local before = T.countItem(name)
-        for slot = 1, 16 do
-            local gone = before - T.countItem(name)
-            if gone >= count then break end
-            local it = turtle.getItemDetail(slot)
-            if it and it.name == name then
-                turtle.select(slot)
-                if not how(math.min(count - gone, it.count)) then break end
-            end
-        end
-        return before - T.countItem(name)
-    end
     -- the steps, each returning nil and why when it cannot go on
     local function steps()
         local ok, why = go(stand)
@@ -1004,22 +1428,167 @@ function T.smelt(item, n, fuel, opts)
     end
     local ok, why = steps()
     local got, waited = 0, 0
-    if ok then
-        local limit = n * (SMELT_TICKS / 20) + 30
-        while got < n and waited <= limit do
-            local before = T.countItem(result)
-            turtle.suckUp()
-            got = got + T.countItem(result) - before
-            if got >= n then break end
-            sleep(5)
-            waited = waited + 5
-        end
-    end
+    if ok then got, waited = collect(result, n) end
     local note = cleanUp()
     if got > 0 then T.markCrafted(result) end
     if not ok then return nil, tostring(why) .. note end
     if got < n then
         return false, "got " .. got .. " of " .. n .. " " .. result .. " in " .. waited .. " seconds (out of fuel, or the furnace was slow)" .. note, got
+    end
+    if note ~= "" then return false, "smelted " .. got .. " but" .. note, got end
+    return true, got
+end
+
+-- What a furnace standing in the world may be (they all take fuel through the sides and the underside, the item through
+-- the top, and give the result through the underside)
+local FURNACES = T.nameTest({ FURNACE, "minecraft:blast_furnace", "minecraft:smoker" })
+local AIRS = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true }
+local WALK = { path = true, scan = false }
+
+-- A cell from { x, y, z } or { x =, y =, z = }, or nil.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local x, y, z = c.x or c[1], c.y or c[2], c.z or c[3]
+    if not (isWhole(x) and isWhole(y) and isWhole(z)) then return nil end
+    return { x = x, y = y, z = z }
+end
+
+-- Go to the cell p, and the other way round the axes if that is blocked.  True, or false and why.
+local function goTo(p, move)
+    local ok, why = T.moveTo(p.x, p.y, p.z, move)
+    if ok then return true end
+    local other = copyOf(move)
+    other.order = "xzy"
+    if T.moveTo(p.x, p.y, p.z, other) then return true end
+    return false, why
+end
+
+-- Is it a furnace the turtle faces in direction d?  True, or false and what is there instead.
+local function furnaceThere(d)
+    local seen, data = T.look(d)
+    local name = seen and type(data) == "table" and data.name or "nothing"
+    if seen and FURNACES(name) then return true end
+    return false, name
+end
+
+-- The cells beside the furnace to drop the fuel in from, as the map knows them: air first, then never seen (not a
+-- block it has seen), the nearest first.
+local function sideStands(cell)
+    local out = {}
+    for d = 0, 3 do
+        local v = T.DELTA[d]
+        local s = { x = cell.x - v[1], y = cell.y, z = cell.z - v[3], d = d }        -- (from there the furnace is in direction d)
+        local name = T.map.get(s.x, s.y, s.z)
+        s.rank = name == nil and 2 or AIRS[name] and 1 or nil
+        if s.rank then
+            s.dist = T.dist(T.pos, s)
+            out[#out + 1] = s
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.rank ~= b.rank then return a.rank < b.rank end
+        if a.dist ~= b.dist then return a.dist < b.dist end
+        return a.d < b.d
+    end)
+    return out
+end
+
+-- Smelt n at a furnace standing at cell {x, y, z}: fuel in from a side, the item from the top, the results from below.
+-- True, got (true, 0, info with opts.wait = false: n = 0 fetches them later); false, why, got; nil, why.
+--
+-- `cell` is the furnace's { x, y, z }.  The fuel goes in from a side (from below if no side can be reached), the item
+-- from the top, and the results are taken from below, so the cells over and under it must be free.  n is how many (1
+-- to 64), or 0 to only take out what has cooked.  It waits for them (ten seconds an item) unless opts.wait = false: then
+-- it loads the furnace and returns at once (info.ready is the seconds it takes), and T.smeltAt(cell, item, 0) fetches
+-- them later.  opts: fuel (a name, as T.smelt's; false: put none in, it has some), stay (don't go back to where it
+-- began), move (for T.moveTo; default { path = true, scan = false }).  What comes out is marked as crafted.
+function T.smeltAt(cell, item, n, opts)
+    opts = opts or {}
+    local at = cellOf(cell)
+    if not at then return nil, "T.smeltAt wants the furnace's cell: { x, y, z }, whole numbers" end
+    if type(item) ~= "string" then return nil, "T.smeltAt wants an item name, like minecraft:raw_iron" end
+    item = full(item)
+    n = n == nil and 1 or n
+    if not (isWhole(n) and n >= 0 and n <= STACK) then return nil, "how many to smelt is a whole number from 0 to " .. STACK end
+    local result = SMELTS[item]
+    if not result then return nil, item .. " does not smelt into anything (T.SMELTS lists what does)" end
+    if T.countItem(item) < n then return nil, "short of " .. item .. ": need " .. n .. ", have " .. T.countItem(item) end
+    local fuel, fuelCount
+    if n > 0 and opts.fuel ~= false then
+        fuel, fuelCount = fuelToBurn(item, n, opts.fuel)
+        if not fuel then return nil, fuelCount end
+    end
+    local over, under = { x = at.x, y = at.y + 1, z = at.z }, { x = at.x, y = at.y - 1, z = at.z }
+    local below = T.map.get(under.x, under.y, under.z)
+    if below and not AIRS[below] then
+        return nil, "the furnace at " .. T.posKey(at) .. " has " .. below .. " under it: the results come out only from below, " ..
+            "so that cell must be free"
+    end
+    local move = opts.move or WALK
+    local start, heading = T.here(), T.dir
+    local checked = false
+    -- the steps, each returning nil (nothing went in) or false (something did) and why when it cannot go on; true once
+    -- the turtle is under the furnace with it loaded
+    local function load()
+        if fuel then
+            for _, s in ipairs(sideStands(at)) do
+                if goTo(s, move) then
+                    local isFurnace, found = furnaceThere(s.d)
+                    if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+                    checked = true
+                    local took = dropAll(fuel, fuelCount, turtle.drop)
+                    if took < fuelCount then return false, "the furnace took only " .. took .. " of the " .. fuelCount .. " " .. fuel end
+                    fuel = nil
+                    break
+                end
+            end
+        end
+        if n > 0 then
+            local ok, why = goTo(over, move)
+            if not ok then return false, "can't get above the furnace at " .. T.posKey(at) .. ": " .. tostring(why) end
+            local isFurnace, found = furnaceThere("down")
+            if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+            checked = true
+            local took = dropAll(item, n, turtle.dropDown)
+            if took < n then return false, "the furnace took only " .. took .. " of the " .. n .. " " .. item .. " (is something else in it?)" end
+        end
+        local ok, why = goTo(under, move)
+        if not ok then return false, "can't get under the furnace at " .. T.posKey(at) .. " for the results: " .. tostring(why) end
+        if not checked then
+            local isFurnace, found = furnaceThere("up")
+            if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+        end
+        if fuel then                                    -- (no side to reach: the underside takes fuel too)
+            local took = dropAll(fuel, fuelCount, turtle.dropUp)
+            if took < fuelCount then return false, "the furnace took only " .. took .. " of the " .. fuelCount .. " " .. fuel end
+        end
+        return true
+    end
+    local ok, why = load()
+    local got, waited, info = 0, 0, nil
+    if ok then
+        if n == 0 then
+            local before = T.countItem(result)
+            while turtle.suckUp() do end
+            got = T.countItem(result) - before
+        elseif opts.wait == false then
+            info = { put = n, ready = n * SMELT_TICKS / 20 }
+        else
+            got, waited = collect(result, n)
+        end
+    end
+    local note = ""
+    if not opts.stay then
+        local home, homeWhy = goTo(start, move)
+        T.face(heading)
+        if not home then note = " (and can't get back to " .. T.posKey(start) .. ": " .. tostring(homeWhy) .. ")" end
+    end
+    if got > 0 then T.markCrafted(result) end
+    if not ok then return ok, tostring(why) .. note, got end
+    if info then return true, 0, info end
+    if got < n then
+        return false, "got " .. got .. " of " .. n .. " " .. result .. " in " .. waited .. " seconds (out of fuel, or the furnace " ..
+            "was slow): T.smeltAt(cell, item, 0) takes out the rest later" .. note, got
     end
     if note ~= "" then return false, "smelted " .. got .. " but" .. note, got end
     return true, got

@@ -16,7 +16,12 @@
 --     stray block in a cell the plan wants empty, a cell it could not look at listed, the saved build checked with no
 --     plan;
 --   * T.replace: a wall's blocks swapped each from a free side, the one inside reported (and not dug to), a
---     protected area refusing unless the job owns it, a stateful block, short of blocks, a block changed since the map.
+--     protected area refusing unless the job owns it, a stateful block, short of blocks, a block changed since the map;
+--   * order = "column": walls built column by column, each from the bottom, the columns in a serpentine round them, for
+--     less fuel than layer by layer; the house's torch and door still after what holds them; the order kept with the
+--     progress so a resumed build goes on the same way; a bad order refused;
+--   * the fuel watch: posts far apart stop the build ("circling: N fuel for M cells, estimate E"), progress kept, again
+--     on carrying on, finished with opts.fuelWatch = false; the house is within it.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -660,4 +665,111 @@ do
     build(hut, { name = "hut", limit = 3 })
     ok, why = build(hut, { name = "hut" })
     check("the same plan with the same name carries on (opts.name)", ok == true and has(1, 0, 4, "cobblestone"), tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- Column by column, and the fuel watch
+--------------------------------------------------------------------------
+-- Build `plan` in a fresh world with these options: ok, why, info, the moves it took and the cells placed in order.
+local function buildFresh(plan, opts, give)
+    fresh()
+    give(W)
+    local order = {}
+    T.onChange(function(e) if e.kind == "place" then order[#order + 1] = e end end)
+    local moves = W.S.moves
+    local ok, why, info = build(plan, opts)
+    return ok, why, info, W.S.moves - moves, order
+end
+local function stoneOnly(world) world.give(1, STONE, 64); world.give(2, STONE, 64) end
+local function ringBuilt()
+    local good = true
+    for x = 2, 7 do for z = 2, 7 do for y = 0, 2 do
+        local ring = x == 2 or x == 7 or z == 2 or z == 7
+        good = good and (ring == has(x, y, z, "stone"))
+    end end end
+    return good
+end
+do
+    local ring = assert(T.blueprint.walls(2, 0, 2, 7, 2, 7, STONE))      -- four walls 6 by 6, 3 high: 60 blocks
+    local okL, whyL, _, layerMoves = buildFresh(ring, nil, stoneOnly)
+    check("the walls built layer by layer (as before), for the fuel against column order", okL == true and ringBuilt(), tostring(whyL))
+    local ok, why, info, moves, order = buildFresh(ring, { order = "column" }, stoneOnly)
+    check("order = \"column\": the same walls built, and the info says the order", ok == true and ringBuilt() and info.order == "column", tostring(why))
+    check("...for less fuel than layer by layer", moves < layerMoves, moves .. " moves against " .. layerMoves)
+    local columns, contiguous, upward = {}, true, true
+    for i, e in ipairs(order) do
+        local key = e.x .. "," .. e.z
+        local prev = order[i - 1]
+        if prev and prev.x == e.x and prev.z == e.z then
+            if e.y ~= prev.y + 1 then upward = false end
+        elseif columns[key] then
+            contiguous = false
+        end
+        columns[key] = true
+    end
+    check("...each column from the bottom up, all of it before the next", contiguous and upward and #order == 60, #order .. " placed")
+    local steps = 0
+    for i = 2, #order do
+        if order[i].x ~= order[i - 1].x or order[i].z ~= order[i - 1].z then
+            steps = steps + math.abs(order[i].x - order[i - 1].x) + math.abs(order[i].z - order[i - 1].z)
+        end
+    end
+    check("...the columns in a serpentine round the walls: each next to the last, never across the middle", steps == 19, tostring(steps))
+end
+
+do
+    -- what hangs and the doors still go in after what holds them; the order is kept for a resumed build
+    local ok, why, info, _, order = buildFresh(HOUSE, { order = "column" }, stock)
+    check("the house column by column: built as the plan says", ok == true and houseIsBuilt(), tostring(why))
+    local function indexOf(x, y, z)
+        for i, e in ipairs(order) do
+            if e.x == x and e.y == y and e.z == z then return i end
+        end
+    end
+    local lastBlock = 0
+    for i, e in ipairs(order) do
+        if not (e.x == 4 and e.z == 3 and e.y >= 1) and not (e.x == 3 and e.y == 1 and e.z == 6) then lastBlock = math.max(lastBlock, i) end
+    end
+    local door, torch = indexOf(4, 1, 3), indexOf(3, 1, 6)
+    check("...the torch and the door after every block and the stair (what holds them is up first)", torch and door and torch > lastBlock - 1 and door > torch
+        and lastBlock < torch, table.concat({ lastBlock, torch or -1, door or -1 }, " "))
+    local whole = {}
+    for i, e in ipairs(order) do whole[i] = e.x .. "," .. e.y .. "," .. e.z end
+
+    fresh()
+    stock(W)
+    local seen = {}
+    T.onChange(function(e) if e.kind == "place" then seen[#seen + 1] = e.x .. "," .. e.y .. "," .. e.z end end)
+    build(HOUSE, { order = "column", limit = 20 })
+    local progress = fileText(".build.progress")
+    check("a column build stopped partway keeps its order with the progress", progress and progress:find("order column", 1, true) ~= nil, tostring(progress))
+    restart()                                           -- (the listener stays: it hears every copy of the library)
+    ok, why = build(HOUSE)
+    check("...and the plan given again with no order carries on in column order, each cell once, as one build would have",
+        ok == true and houseIsBuilt() and table.concat(seen, " ") == table.concat(whole, " "), tostring(why) .. " / " .. table.concat(seen, " ") .. " / " .. table.concat(whole, " "))
+    fresh()
+    stock(W)
+    local lok, lwhy = build(HOUSE, { limit = 20 })
+    check("a layer build keeps its progress file as before (no order line)", fileText(".build.progress") and not fileText(".build.progress"):find("order", 1, true),
+        tostring(lok) .. " " .. tostring(lwhy))
+    ok, why = build(HOUSE, { order = "sideways" })
+    check("an order that is neither: nil and why", ok == nil and why:find("\"layer\" or \"column\"", 1, true), tostring(why))
+end
+
+do
+    -- the fuel watch: posts far apart cost far more than T.fuelFor's estimate per cell
+    local posts = { anchor = { 0, 0, 3 }, legend = { B = STONE }, layers = { string.rep("B" .. string.rep(" ", 14), 19) .. "B" } }   -- (20, 15 apart)
+    local ok, why, info = buildFresh(posts, nil, stoneOnly)
+    check("a build that spends over 3 times the estimate stops, saying so: \"circling: N fuel for M cells, estimate E\"", ok == false
+        and why:find("circling: ", 1, true) == 1 and why:find(" fuel for 8 cells, estimate ", 1, true) ~= nil and info.done == 8 and info.fuel and info.fuel.spent > 3 * info.fuel.estimate,
+        tostring(why))
+    local again
+    ok, again, info = build()
+    check("...the progress is kept: T.build() carries on, and stops again 8 cells on, still circling", fileText(".build.progress"):find("done 16", 1, true) ~= nil
+        and tostring(again):find("circling", 1, true) ~= nil and info.done == 16, tostring(again))
+    ok, why, info = build(nil, { fuelWatch = false })
+    check("...opts.fuelWatch = false lets it finish", ok == true and info.finished and has(285, 0, 3, "stone"), tostring(why))
+    ok, why, info = buildFresh(HOUSE, nil, stock)
+    check("the house, layer by layer, is within the watch: it reports the fuel against the estimate", ok == true and info.fuel and info.fuel.spent > 0
+        and info.fuel.spent <= 3 * info.fuel.estimate, info.fuel and (info.fuel.spent .. " of " .. info.fuel.estimate) or "no info.fuel")
 end
