@@ -1399,3 +1399,34 @@ HTTP.api.post, os.time = postWas, timeWas33
 peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
 settings = nil
 end
+
+-- 34. the harness's own settings (ADR-0011 D10): T.cfg.maxHeight is 256 in a
+--     session, unless the helpers set it otherwise, and the prompt says so;
+--     a lua call with review = true is shown and asked about first, a no
+--     being a normal result
+do
+fresh({ "n", "y", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.dig(); return 'dug'", review = true }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.dig(); return 'dug'", review = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("climb high")
+local h1, v2, v3 = resultsIn(2).toolu_1, resultsIn(3).toolu_2, resultsIn(4).toolu_3
+check("T.cfg.maxHeight is 256 in a session", h1 and h1.content == "-> 256", h1 and h1.content)
+check("review = true: the code shown and asked about; a no is a normal result, nothing run",
+    v2 and v2.content == "not run: declined" and v2.is_error == nil and Mine.logHas("^Claude asks you to review this%. Run it%? %[y/N%]"), v2 and v2.content)
+check("...and a yes runs it", v3 and v3.content == "-> dug" and DIGS == 1, v3 and v3.content)
+local sys34 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua34 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].input_schema.properties.review
+check("the prompt tells of maxHeight 256 and review = true; the lua tool takes review",
+    sys34:find("In this session T.cfg.maxHeight is 256", 1, true) and sys34:find("A lua call with review = true shows its code", 1, true)
+        and lua34 and lua34.type == "boolean")
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "T.cfg.maxHeight = 20"
+HTTP.queue = { reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("not so high")
+Mine.files["claude/helpers.lua"] = nil
+check("...unless the helpers set it otherwise", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 20")
+end

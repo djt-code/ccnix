@@ -22,7 +22,8 @@
 --                reading it, not 5 minutes (for long pauses between
 --                goals: writing it costs more, 2x the input price, not
 --                1.25x; reading it is cheap either way)
---   --confirm    show each piece of code and ask before running it
+--   --confirm    show each piece of code and ask before running it (the
+--                model can ask that for one piece: review = true)
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
@@ -126,7 +127,8 @@
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
--- facing +z.
+-- facing +z.  In a session T.cfg.maxHeight is 256 (programs keep 16), unless
+-- the helpers or the model set it otherwise.
 --
 -- Claude and Anthropic are trademarks of Anthropic.  This program calls
 -- the Claude API with your own API key, under Anthropic's terms; it isn't
@@ -167,6 +169,7 @@ local REMIND_CHAT = tonumber(T.setting("claude.remindChat", 15,
     "claude: minutes without a chat message to the player before the model is reminded to tell them (0: never)")) or 15
 local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
 local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
+local MAX_HEIGHT = 256          -- T.cfg.maxHeight in a session (blocks above the start; programs keep 16)
 local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
                                 -- thinking before it counts too
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
@@ -293,7 +296,7 @@ You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside th
 
 Frames: coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`. It started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is. turtlelib wraps the turtle API, so they stay right however a move is made: turtle.forward(), back(), up(), down(), turnLeft() and turnRight() called straight are counted, and so are digs and placements. T's own moves add fuel (T.ensureFuel), digging what T.diggable lists (empty to start; or set T.diggable["minecraft:stone"] = true) and attacking what's in the way. T.scan(r) does the Geo Scanner's work in this frame for you (see Building below); if you call scanBlocks yourself, its entries carry r, u and f (right, up and forward of the turtle, relative to its heading) as well as the world x, y and z: use r/u/f for cells in this frame. A program run with `--here` makes where the turtle stands its (0,0,0), and so yours; the map, the protected areas, the junk chest and the chests at home move with the frame, so they still name the same blocks.
 
-Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk.
+Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk. In this session T.cfg.maxHeight is 256 (T.up and the other moves stop that far above where the turtle started; a program keeps 16): set it lower for a ceiling. A lua call with review = true shows its code to the person at the turtle and runs only on a yes: use it before something risky you can't undo.
 
 Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves. The cache keeps the conversation for @CACHE@ with no call reading it: a call or a wait (sleep, ask_user, a chat that asks) longer than that has the whole conversation written to the cache again, at more than the call costs. So keep a call to a few minutes, and give every long loop caps on fuel, time and count.
 
@@ -337,7 +340,10 @@ local TOOLS = {
         description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
-            properties = { code = { type = "string", description = "The Lua code to run." } },
+            properties = {
+                code = { type = "string", description = "The Lua code to run." },
+                review = { type = "boolean", description = "Show the code to the person at the turtle first, and run it only if they say yes." },
+            },
             required = { "code" },
         },
     },
@@ -1331,10 +1337,13 @@ local function runTool(name, input)
         say("lightBlue", "--- lua")
         showCode(code)
         log("lua:\n" .. code)
-        if CONFIRM then
-            local a = ask("Run it? [y/N] ")
+        -- (--confirm asks of every call; review = true, of the model's choosing, of this one)
+        if CONFIRM or input.review == true then
+            local a = ask(input.review == true and "Claude asks you to review this. Run it? [y/N] " or "Run it? [y/N] ")
             if not text.startsWith(a:lower(), "y") then
                 say("orange", "--- not run")
+                log("not run: declined")
+                if input.review == true then return "not run: declined" end
                 return "The user declined to run this code.", true
             end
         end
@@ -1767,6 +1776,8 @@ end
 
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
+    -- (a session climbs further than a program: the helpers or the model may set it otherwise)
+    T.cfg.maxHeight = MAX_HEIGHT
     say("yellow", string.format("Claude at the controls (%s, effort %s). Turtle at %s facing %d, fuel %s.",
         MODEL, EFFORT, T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     -- the options as given, and what they came to

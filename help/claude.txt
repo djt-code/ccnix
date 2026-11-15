@@ -16,7 +16,7 @@ Usage:
   --cache 1h
       keep the conversation cached for an hour with no call reading it, not 5 minutes (for long pauses between goals: writing it costs more, 2x the input price, not 1.25x; reading it is cheap either way)
   --confirm
-      show each piece of code and ask before running it
+      show each piece of code and ask before running it (the model can ask that for one piece: review = true)
 
 When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit. Ctrl+T stops it (under T.run, so the saved position stays right).
 
@@ -57,6 +57,6 @@ The other tools:
       run on Anthropic's side, not the turtle's (each costs a little; at most a few a reply)
 Old tool calls (the code and its results) and old thinking are cleared from the conversation once it's long (the API's context editing), the memory tool's kept; when the API says the conversation is too long all the same, it's sent again with more of it cleared.  A reply paused partway through its web searches is carried on.
 
-Position: it picks up turtlelib's saved position (.turtlepos) if there is one, so `home` still works afterwards; otherwise here is (0,0,0) facing +z.
+Position: it picks up turtlelib's saved position (.turtlepos) if there is one, so `home` still works afterwards; otherwise here is (0,0,0) facing +z.  In a session T.cfg.maxHeight is 256 (programs keep 16), unless the helpers or the model set it otherwise.
 
 Claude and Anthropic are trademarks of Anthropic.  This program calls the Claude API with your own API key, under Anthropic's terms; it isn't made or endorsed by Anthropic.
