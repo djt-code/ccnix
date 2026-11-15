@@ -231,6 +231,19 @@ check("claude.log: the options as given, and what they came to",
     (Mine.files["claude.log"] or ""):find("start: claude --model claude-x --effort low (model claude-x, effort low, steps 60, cache 5m;", 1, true),
     (Mine.files["claude.log"] or ""):sub(1, 160))
 fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig", "--model", "sonnet")
+local ms = HTTP.requests[1]
+check("--model sonnet: the short name sent as the model's id, and logged as both",
+    ms and ms.body.model == "claude-sonnet-5-5"
+        and (Mine.files["claude.log"] or ""):find("start: claude --model sonnet (model claude-sonnet-5-5,", 1, true),
+    ms and ms.body.model)
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig", "--model", "haiku")
+local mh = HTTP.requests[1]
+check("--model haiku: its own id", mh and mh.body.model == "claude-haiku-5-5", mh and mh.body.model)
+fresh({ "" })
 run("dig", "--steps")
 check("an option with no word after it: getopt's message, nothing sent",
     #HTTP.requests == 0 and Mine.logHas("claude: option '%-%-steps' requires an argument"))

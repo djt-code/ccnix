@@ -13,6 +13,9 @@
 --   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
 --   claude                      asks for the goal
 --
+--   --model id   the model: opus, sonnet or haiku (claude-opus-5-5,
+--                claude-sonnet-5-5, claude-haiku-5-5), or any model id as
+--                the API names it (default opus)
 --   --steps N    at most N tool calls per goal (default 60), then it's
 --                told to stop and sum up
 --   --cache 1h   keep the conversation cached for an hour with no call
@@ -167,6 +170,9 @@ local PROGRAMS = { mine = "turtle/mine", farm = "turtle/farm", mow = "turtle/mow
 -- that end them, and what's added when none of those is given (a ping
 -- left to run would hold the session for ever)
 local BOUNDED = { ping = { letters = { "c", "w" }, add = { "-c", "4" } } }
+-- The short names --model takes, and the model each stands for (any other
+-- name is sent to the API as it is)
+local MODEL_ALIASES = { opus = "claude-opus-5-5", sonnet = "claude-sonnet-5-5", haiku = "claude-haiku-5-5" }
 
 --------------------------------------------------------------------------
 -- Arguments
@@ -186,7 +192,7 @@ if opts.cache and not CACHE_TTLS[opts.cache] then
     return
 end
 local CONFIRM = opts.confirm == true
-local MODEL = opts.model or "claude-opus-5-5"
+local MODEL = opts.model and (MODEL_ALIASES[opts.model] or opts.model) or MODEL_ALIASES.opus
 local EFFORT = opts.effort or "medium"
 local MAX_STEPS = opts.steps and tonumber(opts.steps) or 60
 -- (5 minutes is the API's own default, so it isn't named)
