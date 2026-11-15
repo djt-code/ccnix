@@ -58,6 +58,11 @@
 -- what's new.  When a goal ends its tokens are printed: those read from
 -- the cache, written to it and new, and what came out.
 --
+-- What's new: claude keeps the ccnix version it last ran with in
+-- /claude/.version.  When ccnix has been updated since, the first goal
+-- tells the model what changed for it (help/claude-news.txt, from
+-- doc/claude-news.txt: the lines for each version since).
+--
 -- Keeping the player told: when claude.remindChat minutes (default 15, 0
 -- for never) pass with no chat message to the player (T.report, the chat
 -- tool), the model is reminded after the next tool results.
@@ -178,6 +183,8 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
+local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
+local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
 -- Old tool results cleared once the conversation is this long (tokens in),
@@ -1384,6 +1391,89 @@ local function runTool(name, input)
 end
 
 --------------------------------------------------------------------------
+-- What's new since the version the model last ran with
+--------------------------------------------------------------------------
+-- The ccnix version in use, as `ccnix version` tells it: what this boot
+-- read (ccnix.version: the updates' deploy/version, else the ROM's), else
+-- the first line of deploy/version where ccnix's files are; nil if none.
+local function ccnixVersion()
+    local v = ccnix and ccnix.version
+    if v == nil or v == "unversioned" then
+        local file = findFile("deploy/version")
+        v = file and text.trim((text.cut(fileio.read(file) or "", "\n")))
+    end
+    if v == nil or v == "" or v == "unversioned" then return nil end
+    return v
+end
+
+-- A version's numbers ("0.51.0" -> { 0, 51, 0 }; what isn't a number counts as 0)
+local function versionParts(v)
+    local parts = {}
+    for _, p in ipairs(text.split(v, ".")) do parts[#parts + 1] = convert.toInteger(p) or 0 end
+    return parts
+end
+
+-- Is version a later than version b?
+local function isLater(a, b)
+    local pa, pb = versionParts(a), versionParts(b)
+    for i = 1, math.max(#pa, #pb) do
+        local x, y = pa[i] or 0, pb[i] or 0
+        if x ~= y then return x > y end
+    end
+    return false
+end
+
+-- The news file's lines for the versions after `from` up to `to`, newest
+-- first.  The file has a "== 0.51.0" heading a version, newest first,
+-- and short lines under each; lines before the first heading, blank ones
+-- and ones starting "--" are for people.  With no `from` (the model's
+-- first run with this), only the newest version's lines up to `to`.
+local function newsLines(news, from, to)
+    local out, version, taken = {}, nil, 0
+    for _, line in ipairs(text.lines(news)) do
+        local l = text.trim(line)
+        local heading = text.stripPrefix(l, "== ")
+        if heading then
+            version = text.trim(heading)
+            local wanted = not isLater(version, to) and (from == nil and taken == 0 or from ~= nil and isLater(version, from))
+            if wanted then taken = taken + 1 else version = nil end
+        elseif version and l ~= "" and not text.startsWith(l, "--") then
+            out[#out + 1] = "- " .. l
+        end
+    end
+    return out
+end
+
+-- The version to write to VERSION_FILE once the model has had the news
+local newVersion
+
+-- The note on what changed since the version the model last ran with,
+-- or nil (the same version, no news, nothing in it for these versions).
+local function whatsNew()
+    local current = ccnixVersion()
+    if not current then return nil end
+    local last = fileio.read(VERSION_FILE)
+    last = last and text.trim((text.cut(last, "\n")))
+    if last == "" then last = nil end
+    if last == current then return nil end
+    newVersion = current
+    local file = findFile(NEWS)
+    local lines = newsLines(file and fileio.read(file) or "", last, current)
+    if #lines == 0 then return nil end
+    return string.format("ccnix was updated from %s to %s; what changed for you:\n%s", last or "an earlier version", current,
+        table.concat(lines, "\n"))
+end
+
+-- Keep the version the model has had the news for.
+local function keepVersion()
+    if not newVersion then return end
+    fs.makeDir(WRITE_DIR)
+    fileio.write(VERSION_FILE, newVersion .. "\n")
+    log("version: " .. newVersion .. " kept in /" .. VERSION_FILE)
+    newVersion = nil
+end
+
+--------------------------------------------------------------------------
 -- The API
 --------------------------------------------------------------------------
 local messages = {}
@@ -1694,6 +1784,7 @@ local function converse(goal)
         end
         count(reply, now() - started)
         startNotes = {}
+        keepVersion()
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
@@ -1791,6 +1882,12 @@ local function main()
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
+    local news = whatsNew()
+    if news then
+        say("yellow", (text.cut(news, ";")) .. ": Claude is told what changed.")
+        log("news: " .. news)
+        startNotes[#startNotes + 1] = news
+    end
     if goal == "" then
         goal = ask("Goal: ")
     end

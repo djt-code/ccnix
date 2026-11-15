@@ -30,6 +30,8 @@ Setup:
 
 What it costs: every round trip (one tool call) sends the whole conversation, so a long job is many calls; the conversation is cached (the API's prompt caching), so each call reads what came before from the cache, at a fraction of the price, and pays in full only for what's new.  When a goal ends its tokens are printed: those read from the cache, written to it and new, and what came out.
 
+What's new: claude keeps the ccnix version it last ran with in /claude/.version.  When ccnix has been updated since, the first goal tells the model what changed for it (help/claude-news.txt, from doc/claude-news.txt: the lines for each version since).
+
 Keeping the player told: when claude.remindChat minutes (default 15, 0 for never) pass with no chat message to the player (T.report, the chat tool), the model is reminded after the next tool results.
 
 The log, claude.log beside the program: each entry with its time (UTC); the options a session started with, the goals, the code and what it did, the thinking, each call's tokens and how long it took, retries, clears, and each goal's tokens in all.  A call that writes many tokens to the cache after a long gap is the cache having run out (--cache 1h). At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1, replacing the older copy, and a new claude.log starts: one old copy kept.

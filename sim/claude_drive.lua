@@ -1430,3 +1430,43 @@ run("not so high")
 Mine.files["claude/helpers.lua"] = nil
 check("...unless the helpers set it otherwise", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 20")
 end
+
+-- 35. what's new (ADR-0011 D9): claude keeps the ccnix version it last ran
+--     with in /claude/.version; when ccnix was updated since, the first
+--     goal carries the news file's lines for the versions after it, up to
+--     the one running, and the version is written once the model has had
+--     them
+do
+local NEWS35 = "for people\n\n== 0.52.0\nnot yet\n== 0.51.0\n-- a note for people\nT.digCell exists now: your digCell can go\n\nkeep() keeps helpers\n== 0.50.2\nT.up says why\n== 0.50.0\nold news\n"
+local function newsRun(files, queue)
+    fresh({ "" })
+    for k, v in pairs(files) do Mine.files[k] = v end
+    HTTP.queue = queue or { reply({ text("Done.") }, "end_turn") }
+    run("what's new")
+    local m = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+    return type(m) == "string" and m or ""
+end
+local n1 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.0\n" })
+check("updated: the first goal carries the lines for each version since, up to the running one, none for people",
+    n1 == "what's new\n\n[ccnix was updated from 0.50.0 to 0.51.0; what changed for you:\n- T.digCell exists now: your digCell can go\n- keep() keeps helpers\n- T.up says why]", n1)
+check("...the version kept once the model had them, and the screen and the log say so",
+    Mine.files["claude/.version"] == "0.51.0\n" and Mine.logHas("^ccnix was updated from 0%.50%.0 to 0%.51%.0: Claude is told what changed%.$")
+        and (Mine.files["claude.log"] or ""):find("version: 0.51.0 kept in /claude/.version", 1, true))
+local n2 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.51.0\n" })
+check("the same version: nothing said", n2 == "what's new", n2)
+local n3 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35 })
+check("no version kept yet and a news file: the newest version's lines up to the running one",
+    n3 == "what's new\n\n[ccnix was updated from an earlier version to 0.51.0; what changed for you:\n- T.digCell exists now: your digCell can go\n- keep() keeps helpers]"
+        and Mine.files["claude/.version"] == "0.51.0\n", n3)
+local n4 = newsRun({ ["deploy/version"] = "0.51.0\n" })
+check("no news file: nothing said, the version kept all the same", n4 == "what's new" and Mine.files["claude/.version"] == "0.51.0\n", n4)
+local n5 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.2\n" },
+    { { code = 400, body = { type = "error", error = { type = "invalid_request_error", message = "nope" } } } })
+check("a first goal that never reached the model: the version isn't kept, so the news comes again", Mine.files["claude/.version"] == "0.50.2\n",
+    tostring(Mine.files["claude/.version"]))
+local REAL_NEWS = repoFile("help/claude-news.txt")
+local n6 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = REAL_NEWS, ["claude/.version"] = "0.50.2\n" })
+check("the real news file reads: its 0.51.0 lines, the note for people left out",
+    n6:find("updated from 0.50.2 to 0.51.0; what changed for you:\n- ", 1, true) and n6:find("- The chat tool says something", 1, true)
+        and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
+end
