@@ -1084,59 +1084,83 @@ end
 
 --------------------------------------------------------------------------
 -- Low-level moves.  Each keeps T.pos in sync, cuts through T.diggable
--- blocks, attacks mobs, and returns false if blocked by anything else.
+-- blocks, attacks mobs, and returns false and why if blocked by anything else.
 --------------------------------------------------------------------------
-local function clearWay(inspect, dig)
-    local ok, data = inspect()
+-- The words for each move in a reason, and the side the turtle looks at for it
+local MOVE_WORD = { up = "up", down = "down", forward = "forward", back = "back" }
+local MOVE_SIDE = { up = "up", down = "down", forward = "front" }
+local MOVE_DIG = { up = "digUp", down = "digDown", forward = "dig" }
+
+-- Look at the cell a move goes into: true if the move may go on (nothing there, or a block T.diggable lists,
+-- dug), and the dig's reason if that dig failed; or false and why the block stops it.
+local function clearWay(move)
+    local side = MOVE_SIDE[move]
+    local ok, data = turtle[INSPECT_SIDE[side]]()
     if not ok then return true end
-    if T.diggable[data.name] then dig(); return true end
-    return false
+    local x, y, z = targetOf(side)
+    local at = data.name .. " at " .. x .. "," .. y .. "," .. z
+    if not T.diggable[data.name] then return false, "blocked by " .. at end
+    local dug, why = impl[MOVE_DIG[move]]()
+    if not dug and why then return true, "couldn't dig " .. at .. ": " .. tostring(why) end
+    return true
 end
 
--- Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way or T.cfg.maxHeight is reached.
+-- Why a move that was tried came to nothing: no fuel, the dig that failed, or what the turtle said.
+local function stuck(move, digWhy, why)
+    local level = turtle.getFuelLevel()
+    if level ~= "unlimited" and level < 1 then return "no fuel" end
+    if digWhy then return digWhy end
+    return "can't move " .. MOVE_WORD[move] .. ": " .. (why or "something is in the way")
+end
+
+-- One move with fuel first: look, dig what T.diggable lists, move, attacking what's in the way.
+local function step(move, attack)
+    T.ensureFuel()
+    local digWhy, why
+    for _ = 1, 5 do
+        local clear, said = clearWay(move)
+        if not clear then return false, said end
+        digWhy = said
+        local moved_, rawWhy = raw[move]()
+        if moved_ then moved(move); return true end
+        why = rawWhy
+        attack(); sleep(0.3)
+    end
+    return false, stuck(move, digWhy, why)
+end
+
+-- Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and
+-- why.  It stops at T.cfg.maxHeight, 16 above the start by default.
+--
+-- Why is "maxHeight 16 reached (T.cfg.maxHeight)" (set it higher to climb), "blocked by <block> at x,y,z",
+-- "couldn't dig ...", "can't move up: ..." or "no fuel".
 function T.up()
-    if T.pos.y >= T.cfg.maxHeight then return false end
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspectUp, impl.digUp) then return false end
-        if raw.up() then moved("up"); return true end
-        turtle.attackUp(); sleep(0.3)
-    end
-    return false
+    if T.pos.y >= T.cfg.maxHeight then return false, "maxHeight " .. T.cfg.maxHeight .. " reached (T.cfg.maxHeight)" end
+    return step("up", turtle.attackUp)
 end
 
--- Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way or T.cfg.maxDrop is reached.
+-- Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false
+-- and why.  It stops at T.cfg.maxDrop, 12 below the start by default.
+--
+-- Why is "maxDrop 12 reached (T.cfg.maxDrop)", "blocked by <block> at x,y,z" or the others T.up gives.
 function T.down()
-    if T.pos.y <= -T.cfg.maxDrop then return false end
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspectDown, impl.digDown) then return false end
-        if raw.down() then moved("down"); return true end
-        turtle.attackDown(); sleep(0.3)
-    end
-    return false
+    if T.pos.y <= -T.cfg.maxDrop then return false, "maxDrop " .. T.cfg.maxDrop .. " reached (T.cfg.maxDrop)" end
+    return step("down", turtle.attackDown)
 end
 
--- Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way.
+-- Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false
+-- and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
 function T.forward()
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspect, impl.dig) then return false end
-        if raw.forward() then moved("forward"); return true end
-        turtle.attack(); sleep(0.3)
-    end
-    return false
+    return step("forward", turtle.attack)
 end
 
 -- Back up a block without turning (saves turning round to go back the
--- way it came).  It can't see or dig behind it: false if anything is
--- there.
+-- way it came).  It can't see or dig behind it: false and why if anything is
+-- there ("can't move back: something is in the way").
 function T.back()
     T.ensureFuel()
-    if not raw.back() then return false end
+    local ok, why = raw.back()
+    if not ok then return false, stuck("back", nil, why) end
     moved("back")
     return true
 end

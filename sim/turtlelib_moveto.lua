@@ -198,6 +198,39 @@ check("a tank below T.cfg.lowFuel is topped up from the inventory first", ok and
 FUEL, S.inv = nil, {}
 
 --------------------------------------------------------------------------
+-- The one-block moves say why they refused
+--------------------------------------------------------------------------
+clearWorld(); home(0, 16, 0)
+ok, why = T.up()
+check("T.up at T.cfg.maxHeight: false, and the limit named", ok == false and why == "maxHeight 16 reached (T.cfg.maxHeight)" and at() == "(0,16,0)", tostring(why))
+home(0, -12, 0)
+ok, why = T.down()
+check("T.down at T.cfg.maxDrop: false, and the limit named", ok == false and why == "maxDrop 12 reached (T.cfg.maxDrop)", tostring(why))
+clearWorld(); home()
+set(0, 1, 0, block("minecraft:dirt")); set(0, 0, 1, block("minecraft:stone"))
+ok, why = T.up()
+check("T.up under a block it may not dig: \"blocked by <block> at <cell>\"", ok == false and why == "blocked by minecraft:dirt at 0,1,0", tostring(why))
+ok, why = T.forward()
+check("T.forward the same", ok == false and why == "blocked by minecraft:stone at 0,0,1" and at() == "(0,0,0)", tostring(why))
+set(0, 0, -1, block("minecraft:stone"))
+ok, why = T.back()
+check("T.back can't see behind it: false, \"can't move back: something is in the way\"", ok == false and why == "can't move back: something is in the way", tostring(why))
+clearWorld(); home()
+set(0, 0, 1, ENTITY)
+ok, why = T.forward()
+check("a mob in the way: \"can't move forward: something is in the way\"", ok == false and why == "can't move forward: something is in the way", tostring(why))
+clearWorld(); home()
+set(0, 0, 1, block("minecraft:stone"))
+T.diggable["minecraft:stone"] = true
+T.protect("castle", 0, 0, 1, 0, 0, 1)
+ok, why = T.forward()
+check("a block T.diggable lists in a protected area: the dig's reason", ok == false and why == "couldn't dig minecraft:stone at 0,0,1: protected: castle" and get(0, 0, 1), tostring(why))
+T.unprotect("castle")
+ok, why = T.forward()
+check("...and outside one it is dug and the move made: true alone", ok == true and why == nil and at() == "(0,0,1)", tostring(why))
+T.diggable = {}
+
+--------------------------------------------------------------------------
 -- A route finder
 --------------------------------------------------------------------------
 clearWorld(); home()

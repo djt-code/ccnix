@@ -181,16 +181,20 @@ T.withPeripheral(name, fn)
 == Low-level moves ==
 
 T.up()
-    Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxHeight is reached.
+    Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxHeight, 16 above the start by default.
+
+    Why is "maxHeight 16 reached (T.cfg.maxHeight)" (set it higher to climb), "blocked by <block> at x,y,z", "couldn't dig ...", "can't move up: ..." or "no fuel".
 
 T.down()
-    Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxDrop is reached.
+    Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxDrop, 12 below the start by default.
+
+    Why is "maxDrop 12 reached (T.cfg.maxDrop)", "blocked by <block> at x,y,z" or the others T.up gives.
 
 T.forward()
-    Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way.
+    Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
 
 T.back()
-    Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false if anything is there.
+    Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false and why if anything is there ("can't move back: something is in the way").
 
 T.settle()
     Sink until resting on something solid.

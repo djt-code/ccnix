@@ -43,10 +43,10 @@ Peripheral upgrades:
 T.equipPeripheral(name) - Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for it to show up. Returns the peripheral and a function that puts back what was there, or nil and why.
 T.withPeripheral(name, fn) - Run fn(peripheral) with the item `name` equipped as a peripheral, and put back what was on that side afterwards. Returns true and what fn returned, or nil and why it couldn't equip (see T.equipPeripheral).
 Low-level moves:
-T.up() - Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxHeight is reached.
-T.down() - Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxDrop is reached.
-T.forward() - Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way.
-T.back() - Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false if anything is there.
+T.up() - Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxHeight, 16 above the start by default.
+T.down() - Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxDrop, 12 below the start by default.
+T.forward() - Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
+T.back() - Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false and why if anything is there ("can't move back: something is in the way").
 T.settle() - Sink until resting on something solid.
 T.toY(y) - Climb or sink to height y in the current column.
 T.toStartHeight() - Return to y = 0.
