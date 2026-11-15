@@ -12,7 +12,8 @@
 --   * the world: T.setOrigin from the player, from GPS, and the facing from a scan, in each of the four ways the
 --     start can face; T.toWorld and T.toLocal;
 --   * the queries (get, top, find, count, heights, slice);
---   * the cap: the cubes unseen longest are dropped first, at the smaller of the setting and a quarter of the disk;
+--   * the cap: the cubes unseen longest are dropped first, at the smaller of the setting and a quarter of the disk; home's,
+--     a protected area's and a pinned box's cubes are kept, and a map over its cap with only those left says so;
 --   * T.inspectAt records a state; T.inspectAll goes nearest first; T.scanBox tiles scans.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -659,46 +660,83 @@ local function cubeCells(n) return n * 16, 0, 0 end     -- the cell at the start
 local function cubesOnDisk()
     local n = {}
     for k in pairs(S.files) do
-        if k:sub(1, 5) == ".map/" and k ~= ".map/frame" then n[#n + 1] = k:sub(6) end
+        if k:sub(1, 5) == ".map/" and k ~= ".map/frame" and k ~= ".map/pins" then n[#n + 1] = k:sub(6) end
     end
     table.sort(n)
     return table.concat(n, " ")
 end
+-- (the series of cubes starts at the second along x: the first holds home, which the cap keeps)
 T = fresh()
 tp(T, 0, 0, 0, 0)
 SETTINGS["map.maxBytes"] = 12900                         -- (three cubes of air: 4118 bytes each)
-for i = 0, 3 do
+for i = 1, 4 do
     CLOCK = 100 + i * 100
     T.map.set(i * 16, 0, 0, "minecraft:air")
     T.map.flush()
 end
-check("over the cap, the cube unseen longest is dropped: the first of four", cubesOnDisk() == "1_0_0 2_0_0 3_0_0", cubesOnDisk())
+check("over the cap, the cube unseen longest is dropped: the first of four", cubesOnDisk() == "2_0_0 3_0_0 4_0_0", cubesOnDisk())
 check("...stats: three cubes, under the cap", T.map.stats().cubes == 3 and T.map.stats().bytes <= 12900 and T.map.stats().cap == 12900,
     dump(T.map.stats()))
 CLOCK = 600
-T.map.set(32, 0, 0, "minecraft:stone")                    -- seen again, and changed
+T.map.set(48, 0, 0, "minecraft:stone")                    -- seen again, and changed
 T.map.flush()
 CLOCK = 700
-T.map.set(64, 0, 0, "minecraft:air")
+T.map.set(80, 0, 0, "minecraft:air")
 T.map.flush()
-check("a cube seen again outlives an older one: the next to go is the oldest of the rest", cubesOnDisk() == "2_0_0 3_0_0 4_0_0"
-    or cubesOnDisk() == "2_0_0 4_0_0 3_0_0", cubesOnDisk())
-check("...the dropped cube is gone from the map", T.map.get(16, 0, 0) == nil and T.map.get(32, 0, 0) == "minecraft:stone")
+check("a cube seen again outlives an older one: the next to go is the oldest of the rest", cubesOnDisk() == "3_0_0 4_0_0 5_0_0", cubesOnDisk())
+check("...the dropped cube is gone from the map", T.map.get(32, 0, 0) == nil and T.map.get(48, 0, 0) == "minecraft:stone")
 -- a quarter of the disk
 T = fresh()
 tp(T, 0, 0, 0, 0)
 SETTINGS["map.maxBytes"] = nil
 CAPACITY = 4 * 12900
-for i = 0, 3 do
+for i = 1, 4 do
     CLOCK = 100 + i * 100
     T.map.set(i * 16, 0, 0, "minecraft:air")
     T.map.flush()
 end
 check("the cap is a quarter of the disk when that is less than the setting", T.map.stats().cap == 12900 and T.map.stats().cubes == 3
-    and cubesOnDisk() == "1_0_0 2_0_0 3_0_0", dump(T.map.stats()))
+    and cubesOnDisk() == "2_0_0 3_0_0 4_0_0", dump(T.map.stats()))
 CAPACITY = 4000000
 T = reboot()
 check("the cap is the setting's 512 KB on a big disk", T.map.stats().cap == 524288, tostring(T.map.stats().cap))
+
+-- what the cap keeps (ADR-0011 D7.7): home's cube, a protected area's, a pinned box's
+T = fresh()
+tp(T, 0, 0, 0, 0)
+SETTINGS["map.maxBytes"] = 12900
+for i = 0, 3 do
+    CLOCK = 100 + i * 100
+    T.map.set(i * 16, 0, 0, "minecraft:air")
+    T.map.flush()
+end
+check("home's cube is kept though it is the oldest: the next oldest goes", cubesOnDisk() == "0_0_0 2_0_0 3_0_0", cubesOnDisk())
+T.protect("vault", 40, 0, 0, 41, 1, 1)                    -- in the third cube along x
+CLOCK = 600
+T.map.set(64, 0, 0, "minecraft:air"); T.map.flush()
+check("a protected area's cube is kept though older: the oldest of the rest goes", cubesOnDisk() == "0_0_0 2_0_0 4_0_0", cubesOnDisk())
+check("T.map.pin keeps a box's cubes", T.map.pin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/pins"] == "64 0 0 70 3 3\n",
+    (tostring(S.files[".map/pins"]):gsub("\n", "|")))
+local said = {}
+print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
+CLOCK = 700
+T.map.set(80, 0, 0, "minecraft:air")
+local flushed, over = T.map.flush()
+print = function() end
+check("...so when only kept cubes are left to drop, the map stays over its cap and says so (once, and in stats and flush)",
+    cubesOnDisk() == "0_0_0 2_0_0 4_0_0 5_0_0" and #said == 1 and said[1]:find("over its cap", 1, true) and flushed == true
+    and over == said[1] and T.map.stats().over == said[1] and T.map.stats().kept == 3 and T.map.stats().pins == 1, dump(said) .. " " .. cubesOnDisk())
+T = reboot()
+check("pins are read again after a restart", T.map.stats().pins == 1)
+check("T.map.unpin lets it go", T.map.unpin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/pins"] == nil and T.map.stats().pins == 0)
+CLOCK = 800
+T.map.set(96, 0, 0, "minecraft:air"); T.map.flush()
+check("...then the cap drops the oldest of the rest again (both the pinned one and the next), and stops saying it is over", cubesOnDisk() == "0_0_0 2_0_0 6_0_0"
+    and T.map.stats().over == nil, cubesOnDisk())
+local bad, why = T.map.unpin({ 1, 2, 3, 4, 5, 6 })
+check("unpinning a box never pinned: false and why", bad == false and why:find("no pinned box", 1, true), tostring(why))
+T.unprotect("vault")
+SETTINGS["map.maxBytes"] = nil
 
 --------------------------------------------------------------------------
 -- Inspecting: block states

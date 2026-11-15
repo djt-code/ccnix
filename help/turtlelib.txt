@@ -897,7 +897,7 @@ Loaded by turtlelib the first time one of these is used (T.scan, T.map, T.setOri
 
 Frames.  The turtle's frame isn't fixed: `--here`, T.setHomeHere, T.clearPos and a run with no saved position make wherever it stands (0,0,0) again.  So the map keeps a frame of its own, the one it was started in, and the transform (a shift and quarter turns) from the turtle's current frame to it.  Whenever turtlelib re-zeroes it tells this module where that spot was, and the transform is updated, so what the map holds stays where it is.  If the frame was lost without that (the saved position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder (.map/frame).
 
-The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
+The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first, except those the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in .map/pins in the map's frame) overlaps, and those holding home or the map's own origin; when only those are left the map says it is over its cap (T.map.stats().over, printed once) rather than growing without a word.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
 
 A cell's "when" is the time its cube was last seen, in seconds (os.epoch "utc").
 
@@ -963,11 +963,23 @@ T.map.slice(y, box)
 T.map.flush()
     Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
 
+    When the map is over its cap with only the cubes it keeps left (see T.map.pin), it is true and that, said.
+
 T.map.stats()
-    What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+    What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+
+    kept is how many cubes the cap never drops (protected areas, pinned boxes, home), pins how many boxes are pinned, and over, when the map is over its cap with only kept cubes left to drop, says so (nil otherwise).
+
+T.map.pin(box)
+    Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap. True, or nil and why.
+
+    The cap drops the cubes unseen longest; it never drops a pinned box's, a protected area's or home's. Pins are kept beside the map (.map/pins) in its own frame, so a re-zero doesn't move them; T.map.unpin lets one go.
+
+T.map.unpin(box)
+    Let a pinned box go (the same six numbers T.map.pin was given), or every pin with no box. True, or false and why.
 
 T.map.clear()
-    Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+    Throw the map away: every cube (and every pin) is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
 
 T.map.frame()
     The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).

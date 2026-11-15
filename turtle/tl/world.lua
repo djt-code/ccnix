@@ -21,7 +21,10 @@
 -- then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air,
 -- 2 and up for a name of the palette.  A cube is loaded when it's used and written when it
 -- changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting
--- map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first.  What the
+-- map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first, except those
+-- the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in .map/pins in the map's
+-- frame) overlaps, and those holding home or the map's own origin; when only those are left the map says
+-- it is over its cap (T.map.stats().over, printed once) rather than growing without a word.  What the
 -- turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells
 -- it covered, air where it lists no block.
 --
@@ -36,6 +39,7 @@ local fileio = require("fileio")
 local CUBE, CELLS = 16, 4096                  -- a cube is 16 cells each way
 local FORMAT = "ccnix-cube 1"                 -- the first line of a cube's file
 local FRAME_FILE = "frame"                    -- the frames, in the map's folder
+local PINS_FILE = "pins"                      -- the pinned boxes, in the map's folder
 local SCANNER = "advancedperipherals:geo_scanner"
 local MAX_RADIUS = 8                          -- the most a scan may be, unless forced (D3)
 local MAX_TILES = 27                          -- the most scans a scanBox makes, unless forced
@@ -186,6 +190,34 @@ local function loadFrame()
         end
     end
     return true
+end
+
+-- Read the pinned boxes (T.map.pin): a list of { x1, y1, z1, x2, y2, z2 } in the map's frame, low corner first.  A
+-- line of the file is the six numbers.
+local function loadPins()
+    S.pins = {}
+    local data = fileio.read(fs.combine(S.dir, PINS_FILE))
+    for _, line in ipairs(data and text.lines(data) or {}) do
+        local w = text.words(line)
+        local box, good = {}, #w == 6
+        for i = 1, 6 do
+            if good and scan.isInteger(w[i]) then box[i] = tonumber(w[i]) else good = false end
+        end
+        if good then S.pins[#S.pins + 1] = box end
+    end
+end
+
+-- Write the pinned boxes (or delete the file when there are none).  True, or nil and why.
+local function savePins()
+    local path = fs.combine(S.dir, PINS_FILE)
+    if #S.pins == 0 then
+        if fs.exists(path) then fs.delete(path) end
+        return true
+    end
+    if not fs.exists(S.dir) then fs.makeDir(S.dir) end
+    local lines = {}
+    for _, b in ipairs(S.pins) do lines[#lines + 1] = string.format("%d %d %d %d %d %d", b[1], b[2], b[3], b[4], b[5], b[6]) end
+    return fileio.write(path, table.concat(lines, "\n") .. "\n")
 end
 
 --------------------------------------------------------------------------
@@ -470,13 +502,42 @@ local function dropCube(name)
     S.index[name] = nil
 end
 
--- Delete the saved cube that was seen longest ago, except those in `keep` and any not yet written.
--- True if there was one.
+-- The cubes the cap keeps, by name, and how many: those a protected area or a pinned box overlaps, and those holding
+-- home (0,0,0 of the turtle's frame) or the map's own origin.
+local function keptCubes()
+    local boxes = { { 0, 0, 0, 0, 0, 0 } }
+    for _, p in ipairs(S.pins or {}) do boxes[#boxes + 1] = p end
+    if S.frame.aligned then
+        local hx, hy, hz = toMap(0, 0, 0)
+        boxes[#boxes + 1] = { hx, hy, hz, hx, hy, hz }
+        for _, a in ipairs(T.protections()) do
+            local ax, ay, az = toMap(a.x1, a.y1, a.z1)
+            local bx, by, bz = toMap(a.x2, a.y2, a.z2)
+            boxes[#boxes + 1] = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by), math.max(az, bz) }
+        end
+    end
+    local kept, n = {}, 0
+    for name, e in pairs(S.index) do
+        local x0, y0, z0 = e.cx * CUBE, e.cy * CUBE, e.cz * CUBE
+        for _, b in ipairs(boxes) do
+            if b[1] < x0 + CUBE and b[4] >= x0 and b[2] < y0 + CUBE and b[5] >= y0 and b[3] < z0 + CUBE and b[6] >= z0 then
+                kept[name] = true
+                n = n + 1
+                break
+            end
+        end
+    end
+    return kept, n
+end
+
+-- Delete the saved cube that was seen longest ago, except those in `keep`, those the cap keeps (keptCubes) and any not
+-- yet written.  True if there was one.
 local function dropOldest(keep)
+    local kept = keptCubes()
     local best, bestSeen
     for name, e in pairs(S.index) do
         local c = S.cache[name]
-        if e.saved and not (keep and keep[name]) and not (c and c.dirty) then
+        if e.saved and not (keep and keep[name]) and not kept[name] and not (c and c.dirty) then
             local seen = seenOf(name)
             if not best or seen < bestSeen or (seen == bestSeen and name < best) then best, bestSeen = name, seen end
         end
@@ -522,6 +583,15 @@ local function flush()
     if S.ndirty <= 0 then S.ndirty, S.firstDirty = 0, nil end
     local cap = capBytes()
     while S.bytes > cap and dropOldest(keep) do end
+    if S.bytes > cap then
+        local _, n = keptCubes()
+        local over = "the map is over its cap (" .. S.bytes .. " bytes of " .. cap .. "), and the " .. n .. " cubes left are kept "
+            .. "(protected areas, pinned boxes, home): T.map.unpin, or raise the setting map.maxBytes"
+        if not S.over then print(over) end
+        S.over = over
+    else
+        S.over = nil
+    end
     if failed then return false, failed end
     return true
 end
@@ -565,6 +635,7 @@ local function ensure()
         -- (nothing is made on disk until something is written: asking makes no map)
         S.onDisk = fs.exists(dir)
         loadFrame()
+        loadPins()
         for _, name in ipairs(S.onDisk and fs.list(dir) or {}) do
             local cx, cy, cz = parseName(name)
             if cx then
@@ -1148,28 +1219,83 @@ end
 --------------------------------------------------------------------------
 
 -- Write what has changed to disk now (it is written in batches as it goes).  True, or false and why.
+--
+-- When the map is over its cap with only the cubes it keeps left (see T.map.pin), it is true and that, said.
 function T.map.flush()
     ensure()
     local ok, why = flush()
     trim()
+    if ok and S.over then return true, S.over end
     return ok, why
 end
 
--- What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on
--- disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+-- What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take
+-- on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+--
+-- kept is how many cubes the cap never drops (protected areas, pinned boxes, home), pins how many boxes are pinned, and
+-- over, when the map is over its cap with only kept cubes left to drop, says so (nil otherwise).
 function T.map.stats()
     ensure()
-    return { cubes = S.count, bytes = S.bytes, cap = capBytes(), unsaved = S.ndirty, aligned = S.frame.aligned }
+    local _, kept = keptCubes()
+    return { cubes = S.count, bytes = S.bytes, cap = capBytes(), unsaved = S.ndirty, aligned = S.frame.aligned, kept = kept,
+             pins = #S.pins, over = S.over }
 end
 
--- Throw the map away: every cube is deleted.  An unaligned map becomes aligned again, with the turtle's
+-- Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap.  True,
+-- or nil and why.
+--
+-- The cap drops the cubes unseen longest; it never drops a pinned box's, a protected area's or home's.  Pins are kept
+-- beside the map (.map/pins) in its own frame, so a re-zero doesn't move them; T.map.unpin lets one go.
+function T.map.pin(box)
+    local ok, why = ready()
+    if not ok then return nil, why end
+    local x1, y1, z1, x2, y2, z2 = normBox(box)
+    if not x1 then return nil, y1 end
+    local mb = mapBox(x1, y1, z1, x2, y2, z2)
+    for _, p in ipairs(S.pins) do
+        if p[1] == mb[1] and p[2] == mb[2] and p[3] == mb[3] and p[4] == mb[4] and p[5] == mb[5] and p[6] == mb[6] then return true end
+    end
+    S.pins[#S.pins + 1] = mb
+    local saved, err = savePins()
+    if not saved then
+        S.pins[#S.pins] = nil
+        return nil, "couldn't save the pins: " .. tostring(err)
+    end
+    return true
+end
+
+-- Let a pinned box go (the same six numbers T.map.pin was given), or every pin with no box.  True, or false and why.
+function T.map.unpin(box)
+    local ok, why = ready()
+    if not ok then return false, why end
+    if box == nil then
+        S.pins = {}
+        if savePins() then return true end
+        return false, "couldn't save the pins"
+    end
+    local x1, y1, z1, x2, y2, z2 = normBox(box)
+    if not x1 then return false, y1 end
+    local mb = mapBox(x1, y1, z1, x2, y2, z2)
+    for i, p in ipairs(S.pins) do
+        if p[1] == mb[1] and p[2] == mb[2] and p[3] == mb[3] and p[4] == mb[4] and p[5] == mb[5] and p[6] == mb[6] then
+            table.remove(S.pins, i)
+            savePins()
+            return true
+        end
+    end
+    return false, "no pinned box " .. table.concat({ x1, y1, z1, x2, y2, z2 }, ",")
+end
+
+-- Throw the map away: every cube (and every pin) is deleted.  An unaligned map becomes aligned again, with the turtle's
 -- frame as its own (and the world origin is forgotten, as it was set against the old frame).
 function T.map.clear()
     ensure()
     local names = {}
     for name in pairs(S.index) do names[#names + 1] = name end
     for _, name in ipairs(names) do dropCube(name) end
-    S.cells, S.ndirty, S.firstDirty = 0, 0, nil
+    S.cells, S.ndirty, S.firstDirty, S.over = 0, 0, nil, nil
+    S.pins = {}
+    savePins()
     if not S.frame.aligned then
         S.frame, S.world = { t = 0, dx = 0, dy = 0, dz = 0, aligned = true }, nil
         saveFrame()

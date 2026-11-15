@@ -226,8 +226,10 @@ T.map.count(pattern, box) - How many cells inside the box (the whole map if none
 T.map.heights(box) - A height map of the box (17 by 17 about the turtle if none) as text: each column's highest solid y, "." where none is known.
 T.map.slice(y, box) - The layer at height y in the box (17 by 17 about the turtle if none) as text, a character a cell, with a legend of the symbols.
 T.map.flush() - Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
-T.map.stats() - What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
-T.map.clear() - Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+T.map.stats() - What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+T.map.pin(box) - Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap. True, or nil and why.
+T.map.unpin(box) - Let a pinned box go (the same six numbers T.map.pin was given), or every pin with no box. True, or false and why.
+T.map.clear() - Throw the map away: every cube (and every pin) is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
 T.map.frame() - The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).
 T.map.toMap(x, y, z) - A point of the turtle's frame in the map's: mx, my, mz (T.map.frame says how they relate).
 T.map.fromMap(mx, my, mz) - A point of the map's frame in the turtle's: x, y, z.
