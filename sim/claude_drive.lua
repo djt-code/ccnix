@@ -231,6 +231,19 @@ check("claude.log: the options as given, and what they came to",
     (Mine.files["claude.log"] or ""):find("start: claude --model claude-x --effort low (model claude-x, effort low, steps 60, cache 5m;", 1, true),
     (Mine.files["claude.log"] or ""):sub(1, 160))
 fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig", "--model", "sonnet")
+local ms = HTTP.requests[1]
+check("--model sonnet: the short name sent as the model's id, and logged as both",
+    ms and ms.body.model == "claude-sonnet-5-5"
+        and (Mine.files["claude.log"] or ""):find("start: claude --model sonnet (model claude-sonnet-5-5,", 1, true),
+    ms and ms.body.model)
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig", "--model", "haiku")
+local mh = HTTP.requests[1]
+check("--model haiku: its own id", mh and mh.body.model == "claude-haiku-5-5", mh and mh.body.model)
+fresh({ "" })
 run("dig", "--steps")
 check("an option with no word after it: getopt's message, nothing sent",
     #HTTP.requests == 0 and Mine.logHas("claude: option '%-%-steps' requires an argument"))
@@ -653,6 +666,49 @@ check("the quoting text block goes back with its citations",
     quoted and quoted.text == "A turtle takes a computer and a chest." and quoted.citations
         and quoted.citations[1].url == "https://wiki.example/turtle", w3 and textutils.serialiseJSON(w3))
 
+-- the same clear, reported on each call after it, is logged once; a new
+-- one is logged again
+fresh({ "" })
+local function cleared(n, tokens)
+    return { context_management = { applied_edits = { { type = "clear_tool_uses_20250919", cleared_tool_uses = n, cleared_input_tokens = tokens } } } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", cleared(4, 20000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", cleared(4, 20000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", cleared(4, 20000)),
+    reply({ text("Done.") }, "end_turn", cleared(9, 41000)),
+}
+run("clear a lot")
+local clog = Mine.files["claude.log"] or ""
+local _, sameClears = clog:gsub("context: 4 old tool results cleared %(20000 tokens%)", "")
+check("the same clear reported on three calls is logged once, a new one again",
+    sameClears == 1 and clog:find("context: 9 old tool results cleared (41000 tokens)", 1, true), sameClears)
+
+-- 19b. the rest of the sandbox (scenario 2 has the start of it): write
+--     and io.write come back a line at a time (print after a write
+--     finishes its line), printError too, and the plain Lua bits a helper
+--     wants (metatables, raw access, xpcall), keys and colours
+local savedColours, savedKeys = colours, keys
+colours, keys = { white = 1, red = 16384 }, { enter = 28 }
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+io.write("a", 1); write("b\nc"); print("d"); printError("oops"); write("tail")
+local t = setmetatable({}, { __index = function() return 7 end })
+return t.x, getmetatable(t) ~= nil, rawget(t, "x"), rawset(t, "y", 2).y, rawequal(t, t),
+    select(2, xpcall(function() error("boom", 0) end, function(e) return "caught " .. e end)),
+    keys ~= nil, colours.red, colors ~= nil]] }) }, "tool_use"),
+    reply({ text("Checked.") }, "end_turn"),
+}
+run("more of the sandbox")
+colours, keys = savedColours, savedKeys
+local sb = resultsIn(2).toolu_1
+check("write, io.write and printError come back with print's, a line at a time",
+    sb and tostring(sb.content):find("^a1b\ncd\noops\ntail\n") and sb.is_error == nil, sb and sb.content)
+check("setmetatable, getmetatable, rawget, rawset, rawequal, xpcall, keys, colours and colors are there",
+    sb and tostring(sb.content):find("\n%-> 7\n%-> true\n%-> nil\n%-> 2\n%-> true\n%-> caught boom\n%-> true\n%-> 16384\n%-> true$"),
+    sb and sb.content)
+
 -- 20. Text past ASCII: the model's UTF-8 goes back byte for byte (a
 --     thinking block after it is bound to it), CC's Latin-1 from a tool goes
 --     as UTF-8, and the screen shows what CC can ("×" as itself, "—" and "’"
@@ -716,6 +772,18 @@ check("the system prompt tells it to keep helpers in /claude/helpers.lua and of 
     HTTP.requests[1] and textutils.serialiseJSON(HTTP.requests[1].body.system):find("/claude/helpers.lua", 1, true)
         and textutils.serialiseJSON(HTTP.requests[1].body.system):find("T.takeInto", 1, true)
         and textutils.serialiseJSON(HTTP.requests[1].body.system):find("T.refuelFrom", 1, true))
+
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "print('helpers loading')\nfunction triple(n) return 3 * n end"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "print('hi'); return triple(2)" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("print from the helpers")
+local hp = HTTP.requests[1] and textutils.serialiseJSON(HTTP.requests[1].body.messages[1].content) or ""
+check("a print at the top of helpers.lua works: shown, the file loaded, the code's own print still comes back",
+    Mine.logHas("^helpers loading$") and not hp:find("failed to load", 1, true)
+        and resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "hi\n-> 6", hp)
 
 fresh({ "" })
 Mine.files["claude/helpers.lua"] = "function broken( end"
@@ -909,3 +977,44 @@ local st27 = resultsIn(3).toolu_2
 check("a status that fails goes back as a tool error saying why",
     st27 and st27.is_error == true and tostring(st27.content):find("status failed: disk on fire", 1, true), st27 and tostring(st27.content))
 check("...and the session carries on to the model's answer", #HTTP.queue == 0 and Mine.logHas("Status is broken%."))
+
+-- 28. what the prompt says of working (ADR-0011, phase 2): globals last the
+--     session and a local its call, a plan file and a check before a big
+--     job, caps on long loops, results checked before the player is told,
+--     memory kept pruned, the cache's TTL (the session's, so the prompt
+--     stays the same all session), and what the player wants
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("how should I work")
+local sys28 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua28 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("the prompt: a global persists for the session, a local ends with its call, clearing removes no definition",
+    sys28:find("a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call", 1, true)
+        and sys28:find("clearing old results never removes a definition", 1, true)
+        and not sys28:find("but not between sessions or after old results are cleared", 1, true))
+check("...and the lua tool says the same",
+    lua28:find("Globals persist for the session (clearing old results doesn't remove them); a local ends with its call.", 1, true)
+        and not lua28:find("Definitions persist", 1, true), lua28)
+check("...a plan in /claude/<job>.md and a check first (fuel, slots, materials, protections, route, liquids); T.job.clear()",
+    sys28:find("write its plan to /claude/<job>.md", 1, true) and sys28:find("fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig", 1, true)
+        and sys28:find("T.job.clear() ends a finished job", 1, true))
+check("...caps on long loops and a call kept to a few minutes; each result checked before the player is told; short summaries",
+    sys28:find("keep a call to a few minutes, and give every long loop caps on fuel, time and count", 1, true)
+        and sys28:find("Before telling the player something is done, check each result", 1, true)
+        and sys28:find("return short summaries", 1, true))
+check("...memory kept pruned, the old archived",
+    sys28:find("keep it pruned: what's current first, the old moved to an archive file", 1, true) ~= nil)
+check("...the cache's TTL as the session has it (5 minutes by default) and what a longer wait costs",
+    sys28:find("The cache keeps the conversation for 5 minutes with no call reading it", 1, true)
+        and sys28:find("has the whole conversation written to the cache again", 1, true) and not sys28:find("@CACHE@", 1, true))
+check("...the player: told in chat, honestly; their changes left alone; ask first; floors restored; built for a 2-tall player",
+    sys28:find("keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly", 1, true)
+        and sys28:find('Don\'t undo or "fix" their changes', 1, true)
+        and sys28:find("ask before replacing their things or digging big holes in shared spaces", 1, true)
+        and sys28:find("Restore a floor you dig through with the same block, and stow what isn't in use", 1, true)
+        and sys28:find("3 air above a stair's walking line", 1, true) and sys28:find("railings at drops of more than 3", 1, true))
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("how long is the cache", "--cache", "1h")
+local sys28h = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("with --cache 1h the prompt says an hour", sys28h:find("The cache keeps the conversation for an hour with no call reading it", 1, true) ~= nil)

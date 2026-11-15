@@ -13,6 +13,9 @@
 --   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
 --   claude                      asks for the goal
 --
+--   --model id   the model: opus, sonnet or haiku (claude-opus-5-5,
+--                claude-sonnet-5-5, claude-haiku-5-5), or any model id as
+--                the API names it (default opus)
 --   --steps N    at most N tool calls per goal (default 60), then it's
 --                told to stop and sum up
 --   --cache 1h   keep the conversation cached for an hour with no call
@@ -156,8 +159,9 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
--- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5)
-local CACHE_TTLS = { ["5m"] = true, ["1h"] = true }
+-- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
+-- the system prompt says it
+local CACHE_TTLS = { ["5m"] = "5 minutes", ["1h"] = "an hour" }
 -- The programs run_program may run: ccnix's turtle programs, and ip (the
 -- network's settings: it saves them itself) and ping to set up and check
 -- the network
@@ -167,6 +171,9 @@ local PROGRAMS = { mine = "turtle/mine", farm = "turtle/farm", mow = "turtle/mow
 -- that end them, and what's added when none of those is given (a ping
 -- left to run would hold the session for ever)
 local BOUNDED = { ping = { letters = { "c", "w" }, add = { "-c", "4" } } }
+-- The short names --model takes, and the model each stands for (any other
+-- name is sent to the API as it is)
+local MODEL_ALIASES = { opus = "claude-opus-5-5", sonnet = "claude-sonnet-5-5", haiku = "claude-haiku-5-5" }
 
 --------------------------------------------------------------------------
 -- Arguments
@@ -186,7 +193,7 @@ if opts.cache and not CACHE_TTLS[opts.cache] then
     return
 end
 local CONFIRM = opts.confirm == true
-local MODEL = opts.model or "claude-opus-5-5"
+local MODEL = opts.model and (MODEL_ALIASES[opts.model] or opts.model) or MODEL_ALIASES.opus
 local EFFORT = opts.effort or "medium"
 local MAX_STEPS = opts.steps and tonumber(opts.steps) or 60
 -- (5 minutes is the API's own default, so it isn't named)
@@ -246,11 +253,13 @@ Frames: coordinates are the turtle's own, dead-reckoned by the turtlelib library
 
 Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk.
 
-Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves.
+Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves. The cache keeps the conversation for @CACHE@ with no call reading it: a call or a wait (sleep, ask_user) longer than that has the whole conversation written to the cache again, at more than the call costs. So keep a call to a few minutes, and give every long loop caps on fuel, time and count.
 
 Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: put the calls in /claude/helpers.lua. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
 
-How to work: do several steps per call, check results in the code, and return or print what you learn, briefly. Variables and functions you define persist between calls, but not between sessions or after old results are cleared: keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write; it is loaded into the code's world at the start of every session, so what it defines is there in every lua call. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write; it is loaded into the code's world at the start of every session, so what it defines is there in every lua call. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+
+The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
 
 What you can call in turtlelib (T), one line a function, with what it does and returns (made from the code's own comments, so it is right). A line ending in a colon is a group heading, not a function.
 @INDEX@
@@ -272,15 +281,18 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it tidy. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
 Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
+-- (the session's TTL: the prompt stays the same for the whole session, so
+-- it stays cached)
+SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -570,11 +582,14 @@ local codeIo = {
 -- CC's http, the files as above and the plain Lua bits.  Not the shell.
 local API = {
     turtle = turtle, T = T, peripheral = peripheral, http = http, os = os, textutils = textutils,
-    math = math, string = string, table = table, sleep = sleep,
+    math = math, string = string, table = table, sleep = sleep, keys = keys,
+    colours = colours, colors = colors or colours,
     fs = codeFs, io = codeIo,
     pairs = pairs, ipairs = ipairs, next = next, select = select, type = type,
     tostring = tostring, tonumber = tonumber, unpack = unpack or table.unpack,
-    pcall = pcall, error = error, assert = assert,
+    pcall = pcall, xpcall = xpcall, error = error, assert = assert,
+    setmetatable = setmetatable, getmetatable = getmetatable,
+    rawget = rawget, rawset = rawset, rawequal = rawequal,
 }
 -- The code's globals: API's, and the running network stack as it is now
 -- (lib/net keeps it in _G.ccnet, and the code's libraries see env as _G)
@@ -588,6 +603,44 @@ local function codeLoadfile(path, mode, e)
 end
 API.loadfile = codeLoadfile
 API.dofile = function(path) return assert(codeLoadfile(path))() end
+
+-- What the code prints is shown and, while a call runs, kept in `printed`
+-- for the model (nil between calls: what helpers.lua prints as it loads is
+-- only shown).  It's the code's print from the start, so a print at the top
+-- of helpers.lua works too.  write and io.write go a line at a time: what
+-- they leave without a newline waits in `partial` for the rest of its line.
+local printed
+local partial = ""
+local function emit(line)
+    keepPrint(line)
+    if printed then printed[#printed + 1] = line end
+end
+local function capture(...)
+    local line = partial .. joined(...)
+    partial = ""
+    emit(line)
+end
+local function codeWrite(s)
+    local lines = text.split(partial .. s, "\n", true)
+    partial = table.remove(lines)
+    for _, l in ipairs(lines) do emit(l) end
+end
+-- what's left of a line when the code stops writing
+local function flushPartial()
+    if partial ~= "" then capture() end
+end
+API.print = capture
+API.write = function(s) codeWrite(tostring(s)) end
+codeIo.write = function(...)
+    for i = 1, select("#", ...) do codeWrite(tostring((select(i, ...)))) end
+end
+-- (red on a colour screen, as CC's own)
+API.printError = function(...)
+    local was = COLOUR and term.getTextColour()
+    if was then term.setTextColour(colours.red) end
+    capture(...)
+    if was then term.setTextColour(was) end
+end
 
 -- `require` in the code: CraftOS's cc.* modules, and ccnix's libraries
 -- for text, paths, conversions, the network and the world (lib/), and
@@ -662,6 +715,7 @@ local function loadHelpers()
     local ok = chunk ~= nil
     if chunk then
         ok, err = pcall(chunk)
+        flushPartial()
         if err == "Terminated" then error(err, 0) end
     end
     if ok then return nil end
@@ -673,12 +727,7 @@ end
 local function runLua(code)
     local out = {}
     local realPrint = print
-    local function capture(...)
-        local line = joined(...)
-        realPrint(line)
-        out[#out + 1] = line
-    end
-    env.print = capture
+    printed = out
     print = capture                    -- what turtlelib says, too
     local chunk, err = load(code, "=claude", "t", env)
     local ok, results
@@ -689,7 +738,8 @@ local function runLua(code)
         ok = results[1]
         if not ok then err = results[2] end
     end
-    print = realPrint
+    flushPartial()
+    print, printed = realPrint, nil
     if ok then
         for i = 2, results.n do out[#out + 1] = "-> " .. show(results[i]) end
     else
@@ -1314,6 +1364,7 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNote         -- what loading the helpers said, for the model's first goal
+local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
 local function converse(goal)
     local said = startNote and goal .. "\n\n[" .. startNote .. "]" or goal
     addUser(said, "Not run: the goal ended before this call was answered.")
@@ -1344,9 +1395,12 @@ local function converse(goal)
                 log(what)
             end
         end
+        -- (logged when it differs from the last one: a clear stays applied,
+        -- and is reported again, on every call until a bigger one)
         for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            log(string.format("context: %d old tool results cleared (%d tokens)",
-                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0))
+            local line = string.format("context: %d old tool results cleared (%d tokens)",
+                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0)
+            if line ~= lastCleared then log(line); lastCleared = line end
         end
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):

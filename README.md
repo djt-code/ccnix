@@ -1163,7 +1163,8 @@ Each tool call is one API round trip carrying the whole conversation, so a
 long job is many calls; the system prompt and tools are marked for prompt
 caching, and the token totals are printed when a goal ends. The defaults
 are `claude-opus-5-5` at `medium` effort and at most 60 tool calls per goal
-(it's then told to stop and sum up); `--confirm` shows each piece of code
+(it's then told to stop and sum up); `--model` takes `opus`, `sonnet` or
+`haiku` for the current ones, or any model id; `--confirm` shows each piece of code
 and asks before running it. A refusal by the model's safety classifiers is
 retried server-side on a fallback model (the API's `fallbacks: "default"`),
 so an odd phrasing doesn't end the job. Replies are streamed, with the

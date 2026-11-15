@@ -9,6 +9,8 @@ Usage:
   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
   claude                      asks for the goal
 
+  --model id
+      the model: opus, sonnet or haiku (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5), or any model id as the API names it (default opus)
   --steps N
       at most N tool calls per goal (default 60), then it's told to stop and sum up
   --cache 1h
