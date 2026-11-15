@@ -977,3 +977,44 @@ local st27 = resultsIn(3).toolu_2
 check("a status that fails goes back as a tool error saying why",
     st27 and st27.is_error == true and tostring(st27.content):find("status failed: disk on fire", 1, true), st27 and tostring(st27.content))
 check("...and the session carries on to the model's answer", #HTTP.queue == 0 and Mine.logHas("Status is broken%."))
+
+-- 28. what the prompt says of working (ADR-0011, phase 2): globals last the
+--     session and a local its call, a plan file and a check before a big
+--     job, caps on long loops, results checked before the player is told,
+--     memory kept pruned, the cache's TTL (the session's, so the prompt
+--     stays the same all session), and what the player wants
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("how should I work")
+local sys28 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua28 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("the prompt: a global persists for the session, a local ends with its call, clearing removes no definition",
+    sys28:find("a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call", 1, true)
+        and sys28:find("clearing old results never removes a definition", 1, true)
+        and not sys28:find("but not between sessions or after old results are cleared", 1, true))
+check("...and the lua tool says the same",
+    lua28:find("Globals persist for the session (clearing old results doesn't remove them); a local ends with its call.", 1, true)
+        and not lua28:find("Definitions persist", 1, true), lua28)
+check("...a plan in /claude/<job>.md and a check first (fuel, slots, materials, protections, route, liquids); T.job.clear()",
+    sys28:find("write its plan to /claude/<job>.md", 1, true) and sys28:find("fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig", 1, true)
+        and sys28:find("T.job.clear() ends a finished job", 1, true))
+check("...caps on long loops and a call kept to a few minutes; each result checked before the player is told; short summaries",
+    sys28:find("keep a call to a few minutes, and give every long loop caps on fuel, time and count", 1, true)
+        and sys28:find("Before telling the player something is done, check each result", 1, true)
+        and sys28:find("return short summaries", 1, true))
+check("...memory kept pruned, the old archived",
+    sys28:find("keep it pruned: what's current first, the old moved to an archive file", 1, true) ~= nil)
+check("...the cache's TTL as the session has it (5 minutes by default) and what a longer wait costs",
+    sys28:find("The cache keeps the conversation for 5 minutes with no call reading it", 1, true)
+        and sys28:find("has the whole conversation written to the cache again", 1, true) and not sys28:find("@CACHE@", 1, true))
+check("...the player: told in chat, honestly; their changes left alone; ask first; floors restored; built for a 2-tall player",
+    sys28:find("keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly", 1, true)
+        and sys28:find('Don\'t undo or "fix" their changes', 1, true)
+        and sys28:find("ask before replacing their things or digging big holes in shared spaces", 1, true)
+        and sys28:find("Restore a floor you dig through with the same block, and stow what isn't in use", 1, true)
+        and sys28:find("3 air above a stair's walking line", 1, true) and sys28:find("railings at drops of more than 3", 1, true))
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("how long is the cache", "--cache", "1h")
+local sys28h = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("with --cache 1h the prompt says an hour", sys28h:find("The cache keeps the conversation for an hour with no call reading it", 1, true) ~= nil)
