@@ -13,6 +13,10 @@
 --   * T.craftBatch: planks, sticks and torches in one go with one stash (the tools in the chest, nothing outside the grid
 --     at a craft, the table on and off once), the products left in the chest or taken aboard, a recipe that fails noted
 --     and the rest made, refusals with nothing touched;
+--   * T.craftPlan: torches down to logs, in order, with the base materials and what is short (coal or charcoal), what
+--     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
+--     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
+--     it and opts.take brings the targets aboard, a short plan refused;
 --   * blocks of nine built in both ways, every one the game has (the mock's own list): coal from coal blocks, a bone block
 --     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
@@ -513,6 +517,90 @@ do
         and chestLine() == chestBefore, tostring(why))
     ok, why = T.craftBatch({ { "minecraft:oak_planks", 0 } })
     check("...a count that is not one or more, or an empty list: refused", ok == nil and why:find("whole number", 1, true) and T.craftBatch({}) == nil, tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- T.craftPlan: the recipe tree against what there is, and T.craftBatch crafting it
+--------------------------------------------------------------------------
+-- A plan's steps as words: "oak_planks 4 (1), stick 4 (1), torch 16 (4)".
+local function stepsLine(plan)
+    local parts = {}
+    for i, s in ipairs(plan.steps) do parts[i] = s.name:sub(11) .. " " .. s.n .. " (" .. s.crafts .. ")" end
+    return table.concat(parts, ", ")
+end
+local function countsLine(counts)
+    local names = {}
+    for name in pairs(counts) do names[#names + 1] = name end
+    table.sort(names)
+    for i, name in ipairs(names) do names[i] = name:sub(11) .. " " .. counts[name] end
+    return table.concat(names, ", ")
+end
+do
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 2 }, [2] = { "minecraft:coal", 4 } })
+    W.give(1, TABLE, 1)
+    local plan, why = T.craftPlan({ ["minecraft:torch"] = 16 }, { chest = "front" })
+    check("a plan for 16 torches: logs into planks, planks into sticks, sticks and coal into torches, in that order", plan and plan.ok
+        and stepsLine(plan) == "oak_planks 4 (1), stick 4 (1), torch 16 (4)", plan and stepsLine(plan) or tostring(why))
+    check("...the base materials it takes: 1 log and 4 coal, nothing short", plan and countsLine(plan.base) == "coal 4, oak_log 1" and next(plan.short) == nil,
+        plan and countsLine(plan.base))
+    check("...and planning moves nothing", here() and chestHas("minecraft:oak_log") == 2)
+    local ok, info = T.craftBatch(plan, { take = true })
+    check("T.craftBatch(plan) crafts it with one stash, and opts.take brings the targets (only) aboard", ok == true and carrying("minecraft:torch") == 16
+        and carrying("minecraft:stick") == 0 and chestHas("minecraft:oak_planks") == 2 and chestHas("minecraft:oak_log") == 1 and info.crafted["minecraft:stick"] == 4,
+        tostring(ok) .. " " .. tostring(info) .. " / " .. inventory() .. " / " .. chestLine())
+
+    -- short: what is missing, and the batch refuses it
+    local short, swhy = T.craftPlan({ { "minecraft:torch", 8 } }, { stock = { oak_log = 1 } })
+    check("short of coal (or charcoal): the plan says so, and that it is not to be crafted; the rest of the tree still planned", short and short.ok == false
+        and short.short["coal or charcoal"] == 2 and swhy:find("short of coal or charcoal 2", 1, true) and stepsLine(short) == "oak_planks 4 (1), stick 4 (1), torch 8 (2)",
+        tostring(swhy) .. " / " .. (short and stepsLine(short) or ""))
+    local inv = inventory()
+    local nope, nwhy = T.craftBatch(short)
+    check("...and T.craftBatch refuses a short plan before anything moves", nope == nil and nwhy:find("short of coal or charcoal 2", 1, true) and inventory() == inv, tostring(nwhy))
+end
+
+do
+    fresh()
+    -- what there is is used first: sticks on hand are not made again
+    local plan = T.craftPlan({ ["minecraft:torch"] = 16 }, { stock = { stick = 10, coal = 4 } })
+    check("sticks there already are used, not made: one step, torches", stepsLine(plan) == "torch 16 (4)" and countsLine(plan.base) == "coal 4, stick 4",
+        stepsLine(plan))
+    -- the target itself is made, even with some there
+    plan = T.craftPlan({ ["minecraft:stick"] = 4 }, { stock = { stick = 64, oak_planks = 2 } })
+    check("a target is made even when there are some already (the batch makes what was asked)", stepsLine(plan) == "stick 4 (1)", stepsLine(plan))
+    -- any planks: the wood there is
+    plan = T.craftPlan({ ["minecraft:stick"] = 4 }, { stock = { birch_log = 1 } })
+    check("sticks take any planks: the plan makes birch planks from the birch log there is", plan.ok and stepsLine(plan) == "birch_planks 4 (1), stick 4 (1)",
+        stepsLine(plan))
+    -- a mixed recipe takes from several
+    plan = T.craftPlan({ ["minecraft:chest"] = 1 }, { stock = { oak_planks = 5, spruce_planks = 3 } })
+    check("a chest from mixed planks: 5 oak and 3 spruce, nothing made", plan.ok and stepsLine(plan) == "chest 1 (1)" and countsLine(plan.base) == "oak_planks 5, spruce_planks 3",
+        countsLine(plan.base))
+    -- blocks of nine are undone when that is what there is
+    plan = T.craftPlan({ ["minecraft:torch"] = 32 }, { stock = { coal_block = 1, stick = 8 } })
+    check("coal from a coal block when that is what there is (9 coal, 1 spare)", plan.ok and stepsLine(plan) == "coal 9 (1), torch 32 (8)", stepsLine(plan))
+    -- a loop in the tree (a coal block is nine coal, coal is a ninth of a block) ends
+    plan = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
+    check("a loop in the recipes ends: a coal block with no coal is short of 9 coal", plan.ok == false and countsLine(plan.short) == "coal 9", countsLine(plan.short))
+    -- two targets share what there is; a list form
+    plan = T.craftPlan({ { "minecraft:stick", 4 }, { "minecraft:crafting_table", 1 } }, { stock = { oak_log = 2 } })
+    check("two targets from 2 logs: planks for the sticks with 2 over, the table from those and 2 more", plan.ok
+        and stepsLine(plan) == "oak_planks 4 (1), stick 4 (1), oak_planks 4 (1), crafting_table 1 (1)" and countsLine(plan.base) == "oak_log 2", stepsLine(plan))
+    check("bad targets: nil and why", T.craftPlan("minecraft:torch") == nil and T.craftPlan({}) == nil and T.craftPlan({ { "minecraft:torch", 0 } }) == nil)
+end
+
+do
+    -- the chests T.catalogue has read are counted, with the inventory
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
+    W.give(2, "minecraft:coal", 1)
+    T.registry.addChest, T.registry.catalogue, T.registry.chests = "tl.store", "tl.store", "tl.store"
+    T.addChest(0, 0, 0, 0)
+    T.catalogue()
+    local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
+    check("with no chest named, the catalogue's chests and the inventory are what there is", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1",
+        plan and countsLine(plan.base) .. " / " .. countsLine(plan.short))
 end
 
 --------------------------------------------------------------------------

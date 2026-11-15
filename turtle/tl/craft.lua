@@ -1,7 +1,7 @@
 -- craft.lua -- crafting and smelting: recipes as data, T.craft, T.craftBatch, T.canCraft, T.smelt, what burns and smelts
 --
--- Loaded by turtlelib the first time one of its functions is used (T.craft, T.craftBatch, T.canCraft, T.recipe,
--- T.addRecipe, T.smelt, T.smeltAt, T.fuelTicks, T.smeltsTo).
+-- Loaded by turtlelib the first time one of its functions is used (T.craft, T.craftBatch, T.craftPlan, T.canCraft,
+-- T.recipe, T.addRecipe, T.smelt, T.smeltAt, T.fuelTicks, T.smeltsTo).
 --
 -- Recipes are written as the game's data packs write them: up to three rows of letters (a dot is an empty cell), what
 -- each letter stands for (a name, a list of names or a glob like "*_planks", minecraft: assumed), what comes out and
@@ -20,7 +20,9 @@
 -- inventory and the chest.  A craft does the recipe asked for; an ingredient that is itself crafted (planks from logs,
 -- sticks from planks) is made first with its own T.craft, or in the same T.craftBatch: that stashes the inventory once
 -- for a list of recipes, each product going back in the chest for the next to use, and puts the inventory back at the
--- end (T.craft is a batch of one that takes its product aboard).
+-- end (T.craft is a batch of one that takes its product aboard).  T.craftPlan works the whole tree out first (torches
+-- need sticks, sticks planks, planks logs) against the inventory and the chests: the steps, the base materials, what
+-- is short; T.craftBatch takes the plan.
 --
 -- T.smelt runs a furnace: a furnace takes fuel through its sides, the item through its top, and gives the result
 -- through its underside only.  It sets the furnace up in front of the turtle, one block up, so the cell under it is
@@ -652,6 +654,249 @@ function T.canCraft(name, n, opts)
 end
 
 --------------------------------------------------------------------------
+-- Planning: the recipe tree against what there is
+--------------------------------------------------------------------------
+
+-- Give the rest of the computer a turn when planning has run for a while (CC stops code that goes seven seconds without
+-- yielding).
+local lastYield = 0
+local function breathe()
+    local t = os.clock()
+    if t - lastYield > 0.4 then
+        lastYield = t
+        sleep(0)
+    end
+end
+
+-- Every item some recipe makes, by name, sorted (what a glob like "*_planks" may be made as).  Kept until a recipe is added.
+local outputs = { rows = -1 }
+local function allOutputs()
+    if outputs.rows == #rows then return outputs.list end
+    local seen = {}
+    for _, row in ipairs(rows) do
+        if row.map then
+            for result in pairs(row.map) do seen[result] = true end
+        elseif row.from then
+            for _, item in ipairs(row.from) do seen[text.replace(row.out, "{}", stem(item))] = true end
+        else
+            seen[row.out] = true
+        end
+    end
+    outputs.rows, outputs.list = #rows, tables.sortedKeys(seen)
+    return outputs.list
+end
+
+-- A plan's working state: left (what there is, by name), spare (made over what was asked, by name), base (taken from
+-- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order).
+local function newState(stock)
+    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {} }
+end
+
+local function copyState(st)
+    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {} }
+    for i, s in ipairs(st.steps) do out.steps[i] = { name = s.name, n = s.n, crafts = s.crafts } end
+    return out
+end
+
+local function shortTotal(st)
+    local n = 0
+    for _, k in pairs(st.short) do n = n + k end
+    return n
+end
+
+local resolve                                         -- (below: resolve and expand call each other)
+
+-- Of the names in `names` (what one letter of a recipe may be), the one to make n of: the first that can be made in
+-- full.  If none can, the letter is short, as `label` ("coal or charcoal", "*_planks"); if every one goes round in a
+-- loop, st.loop says so.  One name is simply made.  Changes st.
+local function makeOneOf(st, names, label, n, visiting)
+    if #names == 1 then return resolve(st, names[1], n, visiting) end
+    local before, loops = shortTotal(st), 0
+    for _, name in ipairs(names) do
+        local trial = copyState(st)
+        resolve(trial, name, n, visiting)
+        if trial.loop then
+            loops = loops + 1
+        elseif shortTotal(trial) == before then
+            for k, v in pairs(trial) do st[k] = v end
+            return
+        end
+    end
+    if #names > 0 and loops == #names then
+        st.loop = true
+        return
+    end
+    st.short[label] = (st.short[label] or 0) + n
+end
+
+-- The names a letter of a recipe may be, to make some of: its list, or the items some recipe makes that match it.
+local function makeable(row, letter)
+    local spec = row.key[letter]
+    if type(spec) == "table" then
+        local out = {}
+        for i, s in ipairs(spec) do out[i] = full(s) end
+        return out
+    end
+    if not glob.hasWildcards(full(spec)) then return { full(spec) } end
+    local test, out = testFor(row, letter), {}
+    for _, name in ipairs(allOutputs()) do
+        if test(name) then out[#out + 1] = name end
+    end
+    return out
+end
+
+-- The names in what there is that a letter may be, with some left: the most first.
+local function inStock(st, test)
+    local out = {}
+    for _, name in ipairs(tables.sortedKeys(st.left)) do
+        if st.left[name] > 0 and test(name) then out[#out + 1] = name end
+    end
+    table.sort(out, function(a, b)
+        if st.left[a] ~= st.left[b] then return st.left[a] > st.left[b] end
+        return a < b
+    end)
+    return out
+end
+
+-- n crafts' worth of a recipe's ingredients, then its step.  `cand` is a candidate from candidatesFor.
+local function expand(st, cand, name, n, visiting)
+    local row = cand.row
+    local crafts = math.ceil(n / row.count)
+    local count, order = {}, {}
+    for _, c in ipairs(cellsOf(row)) do
+        if not count[c.letter] then order[#order + 1] = c.letter; count[c.letter] = 0 end
+        count[c.letter] = count[c.letter] + 1
+    end
+    for _, letter in ipairs(order) do
+        local need = count[letter] * crafts
+        local item = cand.fixed[letter]
+        if item then
+            resolve(st, item, need, visiting)
+        else
+            local have = inStock(st, testFor(row, letter))
+            if row.mixed then                          -- (any mix: what there is of each, then the rest made)
+                for _, got in ipairs(have) do
+                    if need == 0 then break end
+                    local take = math.min(need, st.left[got])
+                    resolve(st, got, take, visiting)
+                    need = need - take
+                end
+                if need > 0 then makeOneOf(st, makeable(row, letter), labelOf(row.key[letter]), need, visiting) end
+            elseif have[1] then                        -- (one item all through: the one there is most of)
+                resolve(st, have[1], need, visiting)
+            else
+                makeOneOf(st, makeable(row, letter), labelOf(row.key[letter]), need, visiting)
+            end
+        end
+    end
+    local made = crafts * row.count
+    local last = st.steps[#st.steps]
+    if last and last.name == name then                -- (the same item again straight after: one step)
+        last.n, last.crafts = last.n + made, last.crafts + crafts
+    else
+        st.steps[#st.steps + 1] = { name = name, n = made, crafts = crafts }
+    end
+    st.spare[name] = (st.spare[name] or 0) + made - n
+end
+
+-- n of the item: what was made over before first, then what there is (unless `top`: a target is made), then made by
+-- the recipe that leaves the least short; what is left is short.  A recipe that needs the item it is making on the way
+-- (coal from a coal block from coal) is not one: st.loop says it went round.  Changes st.
+function resolve(st, name, n, visiting, top)
+    local spare = math.min(st.spare[name] or 0, n)
+    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
+    if not top then
+        local use = math.min(st.left[name] or 0, n)
+        if use > 0 then
+            st.left[name] = st.left[name] - use
+            st.base[name] = (st.base[name] or 0) + use
+            n = n - use
+        end
+    end
+    if n == 0 then return end
+    if visiting[name] then
+        st.loop = true
+        return
+    end
+    visiting[name] = true
+    local best, bestShort
+    local before = shortTotal(st)
+    for _, cand in ipairs(candidatesFor(name)) do
+        local trial = copyState(st)
+        expand(trial, cand, name, n, visiting)
+        local s = shortTotal(trial) - before
+        if not trial.loop and (not best or s < bestShort) then best, bestShort = trial, s end
+        if best and s == 0 then break end
+        breathe()
+    end
+    visiting[name] = nil
+    if not best then
+        st.short[name] = (st.short[name] or 0) + n
+        return
+    end
+    for k, v in pairs(best) do st[k] = v end
+end
+
+-- What there is to plan with: opts.stock (counts by name), else the inventory and the chest at opts.chest (a side), else
+-- the inventory and every chest T.catalogue has read.
+local function planStock(opts)
+    if type(opts.stock) == "table" then
+        local n = {}
+        for name, count in pairs(opts.stock) do n[full(name)] = count end
+        return n
+    end
+    if opts.chest ~= nil then return stockOf(chestSide(opts)) end
+    local n = stockOf(nil)
+    if fs.exists(T.dataPath(".chests")) then
+        local chests = T.need("chests")
+        for _, c in ipairs(chests and chests() or {}) do
+            for name, count in pairs(c.items) do n[name] = (n[name] or 0) + count end
+        end
+    end
+    return n
+end
+
+-- Counts by name as words, sorted: "coal 2, stick 1".
+local function countsText(counts)
+    local parts = {}
+    for _, name in ipairs(tables.sortedKeys(counts)) do parts[#parts + 1] = shortName(name) .. " " .. counts[name] end
+    return table.concat(parts, ", ")
+end
+
+-- Work out crafting { [name] = n } down the recipe tree (torches, sticks, planks, logs) against the inventory and the
+-- chests: the plan { steps, base, short, ok }, and why when short; nil, why.  T.craftBatch(plan) crafts it.
+--
+-- `targets` is { [name] = n } or { { name, n }, ... }.  The tree is followed down (torches need sticks and coal, sticks
+-- planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the
+-- inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is
+-- made, and what can't be made is short.  The targets themselves are made, not taken from what there is.  Smelting is
+-- not planned: charcoal or glass that isn't there is short.  The plan is { targets, steps = { { name, n, crafts } } in
+-- the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it),
+-- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok }.
+function T.craftPlan(targets, opts)
+    opts = opts or {}
+    if type(targets) ~= "table" then return nil, "T.craftPlan wants the items to make: { [name] = n } or { { name, n }, ... }" end
+    local want, order = {}, {}
+    local list = #targets > 0 and targets or {}
+    if #targets == 0 then
+        for _, name in ipairs(tables.sortedKeys(targets)) do list[#list + 1] = { name, targets[name] } end
+    end
+    for i, e in ipairs(list) do
+        local name, n = type(e) == "table" and (e.name or e[1]) or nil, type(e) == "table" and (e.n or e[2] or 1) or nil
+        if type(name) ~= "string" or not isCount(n) then return nil, "target " .. i .. " is not { name, n } with n a whole number of 1 or more" end
+        name = full(name)
+        if not want[name] then order[#order + 1] = name end
+        want[name] = (want[name] or 0) + n
+    end
+    if #order == 0 then return nil, "nothing to plan: no targets" end
+    local st = newState(planStock(opts))
+    for _, name in ipairs(order) do resolve(st, name, want[name], {}, true) end
+    local plan = { targets = want, steps = st.steps, base = st.base, short = st.short, ok = next(st.short) == nil }
+    if plan.ok then return plan end
+    return plan, "short of " .. countsText(st.short) .. " (not there, and not to be crafted from what is)"
+end
+
+--------------------------------------------------------------------------
 -- Crafting from a chest
 --------------------------------------------------------------------------
 
@@ -957,10 +1202,11 @@ local function batchAt(side, list, entries, opts)
     return true, info
 end
 
--- Craft a list { { name, n }, ... } in one go with one stash, the products left in the chest (opts.take: aboard):
--- true, info; false, why, info when some failed; nil, why (nothing was touched).
+-- Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take:
+-- aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
 --
--- The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts).  It works from a chest as T.craft does (the same opts.chest, and the junk
+-- The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts); a plan is its steps
+-- (one that is short is refused unless opts.partial).  It works from a chest as T.craft does (the same opts.chest, and the junk
 -- chest by default), but stashes the inventory only once: the tools go in too, the crafting table goes on, and each
 -- recipe's ingredients come from the chest into the grid, are crafted, and the product goes back in the chest, where
 -- the next recipe can use it (planks, then sticks, then torches).  At the end the inventory comes back as it was;
@@ -972,6 +1218,9 @@ function T.craftBatch(list, opts)
     opts = opts or {}
     local entries, why = entriesOf(list)
     if not entries then return nil, why end
+    if list.steps and list.ok == false and not opts.partial then
+        return nil, "the plan is short of " .. countsText(list.short or {}) .. " (opts.partial crafts what it can)"
+    end
     local side = chestSide(opts)
     if side then return batchAt(side, list, entries, opts) end
     local spot = chestSpot(opts)
