@@ -7,8 +7,10 @@
 -- each letter stands for (a name, a list of names or a glob like "*_planks", minecraft: assumed), what comes out and
 -- how many.  A family is one entry: "minecraft:{}_stairs" over a list of blocks makes every one's stairs, the {} being
 -- the block's name without its ending (oak_planks gives oak, stone_bricks gives stone_brick); a map entry gives the
--- block each result is made from (chiseled forms from their slabs).  T.addRecipe adds more, for modded items.  The
--- table is T.RECIPES (it exists once this module has loaded), the newest first.
+-- block each result is made from (chiseled forms from their slabs).  A block of nine (coal, iron, gold, copper,
+-- redstone, lapis, emerald, diamond, bone meal and the rest, nuggets into ingots) is made both ways: nine into the
+-- block, the block back into nine.  T.addRecipe adds more, for modded items.  The table is T.RECIPES (it exists once
+-- this module has loaded), the newest first.
 --
 -- A turtle crafts through the crafting table as a peripheral, and only when every slot outside the grid is empty.  So
 -- T.craft works from a chest: it checks the chest has room for the whole inventory, puts the crafting table on (through
@@ -128,6 +130,14 @@ local SQUARE_OF_4 = {
 local SQUARE_OF_1 = {
     sandstone = "sand", red_sandstone = "red_sand", bricks = "brick", nether_bricks = "nether_brick",
     quartz_block = "quartz", prismarine = "prismarine_shard", glowstone = "glowstone_dust",
+}
+-- Blocks of nine: block = the item nine of make it, and one block crafts back into the nine (a nugget's ingot too)
+local BLOCK_OF_NINE = {
+    coal_block = "coal", iron_block = "iron_ingot", gold_block = "gold_ingot", copper_block = "copper_ingot",
+    redstone_block = "redstone", lapis_block = "lapis_lazuli", emerald_block = "emerald", diamond_block = "diamond",
+    netherite_block = "netherite_ingot", raw_iron_block = "raw_iron", raw_gold_block = "raw_gold",
+    raw_copper_block = "raw_copper", bone_block = "bone_meal", slime_block = "slime_ball", hay_block = "wheat",
+    dried_kelp_block = "dried_kelp", iron_ingot = "iron_nugget", gold_ingot = "gold_nugget",
 }
 -- Chiseled and pillar forms: two of the slab, one over the other
 local CHISELED = {
@@ -366,12 +376,17 @@ define { out = "soul_torch", count = 4, shape = { "C", "S", "X" },
          key = { C = { "coal", "charcoal" }, S = "stick", X = { "soul_sand", "soul_soil" } } }
 define { out = "lantern", shape = { "NNN", "NTN", "NNN" }, key = { N = "iron_nugget", T = "torch" } }
 define { out = "soul_lantern", shape = { "NNN", "NTN", "NNN" }, key = { N = "iron_nugget", T = "soul_torch" } }
-define { out = "iron_nugget", count = 9, shape = { "I" }, key = { I = "iron_ingot" } }
 define { out = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" } }
 define { out = "iron_bars", count = 16, shape = { "III", "III" }, key = { I = "iron_ingot" } }
 define { out = "glass_pane", count = 16, shape = { "GGG", "GGG" }, key = { G = "glass" } }
 define { out = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" } }
 define { out = "nether_brick_fence", count = 6, shape = { "NIN", "NIN" }, key = { N = "nether_bricks", I = "nether_brick" } }
+-- Blocks of nine, each way (coal blocks into coal, bone meal into a bone block, nuggets into an ingot)
+for _, block in ipairs(tables.sortedKeys(BLOCK_OF_NINE)) do
+    local item = BLOCK_OF_NINE[block]
+    define { out = block, shape = { "XXX", "XXX", "XXX" }, key = { X = NS .. item } }
+    define { out = item, count = 9, shape = { "X" }, key = { X = NS .. block } }
+end
 
 -- (A map row's out is only a placeholder: what it makes is the map's keys.)
 T.RECIPES = rows

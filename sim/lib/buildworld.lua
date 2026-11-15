@@ -513,6 +513,18 @@ B.RECIPES = {
     { name = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" }, out = function() return "minecraft:chain", 1 end },
     { name = "boat", shape = { "P.P", "PPP" }, key = { P = "planks" }, out = function(i) return derive(i.P, "boat"), 1 end },
 }
+-- Blocks of nine, the game's list written out again here (the item: the block nine of it make), and each way
+B.NINE = { coal = "coal_block", iron_ingot = "iron_block", gold_ingot = "gold_block", copper_ingot = "copper_block",
+           redstone = "redstone_block", lapis_lazuli = "lapis_block", emerald = "emerald_block", diamond = "diamond_block",
+           netherite_ingot = "netherite_block", raw_iron = "raw_iron_block", raw_gold = "raw_gold_block",
+           raw_copper = "raw_copper_block", bone_meal = "bone_block", slime_ball = "slime_block", wheat = "hay_block",
+           dried_kelp = "dried_kelp_block", iron_nugget = "iron_ingot", gold_nugget = "gold_ingot" }
+local NINE_OF = {}
+for item, block in pairs(B.NINE) do NINE_OF[block] = item end
+B.RECIPES[#B.RECIPES + 1] = { name = "block of nine", shape = { "XXX", "XXX", "XXX" }, key = { X = function(n) return B.NINE[n] ~= nil end },
+    out = function(i) return "minecraft:" .. B.NINE[short(i.X)], 1 end }
+B.RECIPES[#B.RECIPES + 1] = { name = "nine of a block", shape = { "X" }, key = { X = function(n) return NINE_OF[n] ~= nil end },
+    out = function(i) return "minecraft:" .. NINE_OF[short(i.X)], 9 end }
 
 -- The recipe a 3x3 of names (grid[row][col], row 1..3 and col 1..3, nil empty) makes: name, count, recipe
 -- name -- or nil.

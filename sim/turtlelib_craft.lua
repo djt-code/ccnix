@@ -10,6 +10,8 @@
 --   * short materials reported before anything moves; room in the chest checked first; no table, no chest; the table
 --     taken from the chest and put back; the table already on; a chest to walk to; a partial craft;
 --   * T.addRecipe (checked, newest first, crafted); T.canCraft (inventory plus chest);
+--   * blocks of nine built in both ways, every one the game has (the mock's own list): coal from coal blocks, a bone block
+--     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
 --     one up, fuel from beside, the item from above, the results from below, taken back, the turtle home; the refusals,
 --     and a block in the way that makes it take the furnace back from the side.
@@ -380,6 +382,8 @@ do
         "minecraft:oak_door", "minecraft:dark_oak_door", "minecraft:birch_trapdoor", "minecraft:ladder", "minecraft:oak_fence_gate", "minecraft:oak_fence",
         "minecraft:stone_bricks", "minecraft:iron_bars", "minecraft:glass_pane", "minecraft:bucket", "minecraft:chain",
         "minecraft:cobbled_deepslate_wall", "minecraft:mud_brick_slab", "minecraft:bamboo_door",
+        "minecraft:coal_block", "minecraft:coal", "minecraft:iron_block", "minecraft:iron_ingot", "minecraft:iron_nugget",
+        "minecraft:bone_block", "minecraft:bone_meal", "minecraft:gold_nugget", "minecraft:lapis_block",
     }
     local compared, wrong, notKnown = 0, {}, {}
     for _, out in ipairs(outs) do
@@ -417,6 +421,42 @@ do
     fresh()
     fill(0, 0, 1, { [1] = { "minecraft:stone_bricks", 12 } })
     check("T.canCraft(item, n) first result is true when it can be made (what tl.blueprint keeps)", (T.canCraft("minecraft:stone_brick_stairs", 3)) == true)
+end
+
+--------------------------------------------------------------------------
+-- Blocks of nine, each way
+--------------------------------------------------------------------------
+do
+    fresh()
+    local wrong = {}
+    local items = {}
+    for item in pairs(B.NINE) do items[#items + 1] = item end
+    table.sort(items)
+    T.recipe("minecraft:chest")
+    -- (a row of the table: an ingot is made from its block and from nine nuggets, so not only the first recipe is looked at)
+    local function row(out, from, count, rows)
+        for _, r in ipairs(T.RECIPES) do
+            if r.out == out and r.key.X == from and r.count == count and #r.shape == rows then return true end
+        end
+        return false
+    end
+    for _, item in ipairs(items) do
+        local block = B.NINE[item]
+        if not row("minecraft:" .. block, "minecraft:" .. item, 1, 3) then wrong[#wrong + 1] = block .. " from nine " .. item end
+        if not row("minecraft:" .. item, "minecraft:" .. block, 9, 1) then wrong[#wrong + 1] = "nine " .. item .. " from " .. block end
+    end
+    check("every block of nine the game has is built in both ways: nine into the block, the block back into nine", #wrong == 0 and #items >= 18,
+        table.concat(wrong, "; "))
+    fill(0, 0, 1, { [1] = { "minecraft:coal_block", 2 }, [2] = { "minecraft:bone_meal", 20 } })
+    W.give(1, TABLE, 1)
+    local ok, made = T.craft("minecraft:coal", 18)
+    check("18 coal from 2 coal blocks, with no recipe added", ok == true and made == 18 and carrying("minecraft:coal") == 18 and chestHas("minecraft:coal_block") == 0,
+        tostring(ok) .. " " .. tostring(made) .. " / " .. inventory())
+    ok, made = T.craft("minecraft:bone_block", 2)
+    check("a bone block from nine bone meal, two of them: 18 used and 2 left", ok == true and made == 2 and carrying("minecraft:bone_block") == 2
+        and chestHas("minecraft:bone_meal") == 2, tostring(ok) .. " " .. tostring(made) .. " / " .. chestLine())
+    ok, made = T.craft("minecraft:bone_block", 1)
+    check("...and a third is short, saying of what", ok == nil and made == "short of bone_meal: need 9, have 2", tostring(made))
 end
 
 --------------------------------------------------------------------------
