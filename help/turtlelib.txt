@@ -266,13 +266,21 @@ T.liquidNear(x, y, z)
 T.isFalling(name)
     Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
 
+T.cellSet(spec)
+    The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
+
+    Each is "x,y,z" or { x, y, z } (fields or the three numbers in order); a set's keys are "x,y,z" too, and one cell { x =, y =, z = } on its own will do.
+
 T.moveTo(x, y, z, opts)
-    Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, avoid, inside, liquid, path.
+    Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. True (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid, path.
 
     It goes along the axes in the order opts.order names (default "yxz": up or down first, then x, then z). opts (all optional):
       dig     false (default), true, a glob, or a list or set of globs: the
               blocks it may dig on the way (a protected area, a chest or a
               computer is never dug)
+      digOnly a list or set of cells ("x,y,z" or { x, y, z }, see T.cellSet):
+              the only cells it may dig (whatever block is there, unless
+              opts.dig says which); any other block stops it
       avoid   a glob, a list or a set: blocks it stops at rather than enter
               (default: lava, fire and doors); {} avoids nothing
       inside  the name of a protected area the move may dig in (see T.inside)
@@ -282,6 +290,11 @@ T.moveTo(x, y, z, opts)
               blocked, ask a route finder (T.travel, from the path module, if
               there is one; or this function) to take it the rest of the way
     The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }. The warning, when a cell it dug has a falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it". The turtle stays wherever it got to. (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
+
+T.digCell(x, y, z, opts)
+    Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
+
+    It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs it anyway), checked before it goes and again when it is there. It stands in a cell beside it the map (or what the turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default { path = true, scan = false }; digging is turned off). The dig goes into the map as every dig does. The turtle stays beside the cell.
 
 T.turnsTo(d)
     Turns it takes to face direction d (none for up or down).
@@ -749,6 +762,7 @@ T.path(x, y, z, opts)
 
     It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
       dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+      digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
       avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
       inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
       liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
@@ -761,7 +775,7 @@ T.path(x, y, z, opts)
 T.travel(x, y, z, opts)
     Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 
-    Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too. opts are T.path's (dig, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
+    Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too. opts are T.path's (dig, digOnly, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
 
 tl.place: placing blocks the right way round: stairs, slabs, logs, torches, doors and the rest, and lighting a fire
 

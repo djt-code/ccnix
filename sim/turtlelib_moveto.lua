@@ -385,3 +385,23 @@ check("a dig under gravel: true, and a warning that it may fall", ok == true and
     and why == "warning: dug 1,0,0 under minecraft:gravel, which may fall into it", tostring(why))
 check("T.isFalling: sand, gravel, concrete powder; not stone", T.isFalling("minecraft:sand") and T.isFalling("minecraft:red_concrete_powder")
     and not T.isFalling("minecraft:stone"))
+
+--------------------------------------------------------------------------
+-- opts.digOnly: the only cells it may dig (ADR-0011 D7.1)
+--------------------------------------------------------------------------
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(2, 0, 0, block("minecraft:stone"))
+ok, why, name, cell = T.moveTo(3, 0, 0, { order = "x", digOnly = { "1,0,0" } })
+check("opts.digOnly: the cell it lists is dug (any block, with no opts.dig), the next one stops it and says why",
+    ok == false and why == "blocked by minecraft:stone at 2,0,0 (not a cell opts.digOnly lists)" and DIGS == 1 and get(1, 0, 0) == nil
+    and get(2, 0, 0) and at() == "(1,0,0)" and cell.x == 2, tostring(why))
+ok = T.moveTo(3, 0, 0, { order = "x", digOnly = { { x = 2, y = 0, z = 0 } } })
+check("...cells as { x, y, z } will do", ok == true and DIGS == 2 and at() == "(3,0,0)")
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(2, 0, 0, block("minecraft:dirt"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", digOnly = { ["1,0,0"] = true, ["2,0,0"] = true }, dig = "*stone" })
+check("...a set of keys, and opts.dig still says which blocks", ok == false and why == "blocked by minecraft:dirt at 2,0,0" and DIGS == 1, tostring(why))
+ok, why = T.moveTo(3, 0, 0, { order = "x", digOnly = { "2,0" } })
+check("...a cell that isn't one: false and why", ok == false and why:find("opts.digOnly: a cell is", 1, true), tostring(why))
+check("T.cellSet: a list, a set and one cell", T.cellSet({ "1,2,3", { 4, 5, 6 } })["4,5,6"] and T.cellSet({ ["1,2,3"] = true })["1,2,3"]
+    and T.cellSet({ x = 1, y = 2, z = 3 })["1,2,3"] and T.cellSet("1,2,3") == nil)

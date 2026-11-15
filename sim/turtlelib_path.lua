@@ -10,7 +10,9 @@
 --     there is no layer; an unexpected block is noted in the map and the route planned again, a bounded number of times;
 --     protected areas kept out of; T.moveTo's opts.path asks it;
 --   * liquids (ADR-0011 D1): a block to dig with lava or a water source beside it or over it is a wall unless
---     opts.liquid; travel digs beside a moat, not into it.
+--     opts.liquid; travel digs beside a moat, not into it;
+--   * T.digCell (ADR-0011 D7.1): one cell dug from beside it and nothing else, refusing lava beside it and protected
+--     cells; opts.digOnly in T.path and T.travel.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -358,6 +360,67 @@ tp(T, 0, 0, 0, 0)
 route = T.path(0, 0, 5, { dig = true, margin = 2, avoidCells = { { x = 0, y = 0, z = 4 } } })
 check("the planner knows what the turtle looked at too: no dig beside lava only it saw", route and not has(route, 0, 0, 3) and #route == 7,
     route and #route or "nil")
+
+--------------------------------------------------------------------------
+-- T.digCell and opts.digOnly (ADR-0011 D7.1)
+--------------------------------------------------------------------------
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 2, -2, 6, 2, 8, STONE)        -- a floor and a ceiling
+box(-6, 0, 3, 6, 1, 3, STONE)                                            -- a wall between
+learn(T, -6, -1, -2, 6, 2, 8)
+route, info = T.path(0, 0, 5, { digOnly = { "2,0,3" }, margin = 2 })
+check("T.path with opts.digOnly: the route digs that cell and no other", route and has(route, 2, 0, 3) and info.digs == 1 and connected(route, T.pos),
+    route and #route or tostring(info))
+route, why = T.path(0, 0, 5, { digOnly = { "2,0,3" }, margin = 0 })
+check("...with that cell out of the search's reach, no route: the wall in front isn't dug", route == nil and why:find("walled off", 1, true), tostring(why))
+watch(T)
+ok, why = T.travel(0, 0, 5, { digOnly = { "-3,1,3", "-3,0,3" }, scan = false, margin = 4 })
+check("T.travel with opts.digOnly digs only those", ok == true and at(T) == "(0,0,5)" and DIGS >= 1 and DIGS <= 2 and get(0, 0, 3) and get(2, 0, 3),
+    tostring(why) .. " " .. at(T) .. " " .. DIGS)
+
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 2, -2, 6, 2, 8, STONE)
+box(-6, 0, 3, 6, 1, 3, STONE)
+learn(T, -6, -1, -2, 6, 2, 8)
+watch(T)
+local was, warning
+ok, was, warning = T.digCell(2, 1, 3)
+check("T.digCell digs exactly that one cell, from a cell beside it it walks to, and says what it dug", ok == true and was == STONE and warning == nil
+    and get(2, 1, 3) == nil and DIGS == 1 and T.dist(T.pos, { x = 2, y = 1, z = 3 }) == 1, tostring(was) .. " " .. at(T))
+check("...the map has it as air now", T.map.get(2, 1, 3) == AIR)
+ok, was = T.digCell(2, 1, 3)
+check("...a second time: true, nothing there", ok == true and was == nil and DIGS == 1)
+ok, why = T.digCell(2, 0, 5)
+check("an empty cell far off: true, nil (looked at, nothing dug)", ok == true and why == nil and DIGS == 1)
+-- behind the wall, nothing beside it empty and reachable without digging
+tp(T, 0, 0, 0, 0)
+box(-6, 0, 5, 6, 1, 8, STONE); learn(T, -6, 0, 5, 6, 1, 8)
+ok, why = T.digCell(0, 0, 6, { move = { path = true, scan = false, margin = 2 } })
+check("a cell only reachable by digging: false, and nothing else dug", ok == false and why:find("couldn't get beside 0,0,6", 1, true) and DIGS == 1 and get(0, 0, 6),
+    tostring(why))
+-- lava beside: refused before it goes
+tp(T, 0, 0, 0, 0)
+put(-2, 1, 3, LAVA, true); T.map.set(-2, 1, 3, LAVA)
+local moves = S.moves
+ok, why = T.digCell(-2, 0, 3)
+check("lava over the cell: refused before going, the lava named", ok == false and why == "digging minecraft:stone at -2,0,3 would release lava at -2,1,3 (opts.liquid = true digs it anyway)"
+    and S.moves == moves and get(-2, 0, 3), tostring(why))
+ok, was = T.digCell(-2, 0, 3, { liquid = true })
+check("...opts.liquid digs it", ok == true and was == STONE and get(-2, 0, 3) == nil)
+-- protected
+T.protect("gate", -4, 0, 3, -4, 0, 3)
+ok, why = T.digCell(-4, 0, 3)
+check("a protected cell: refused", ok == false and why == "protected: gate (minecraft:stone at -4,0,3)" and get(-4, 0, 3), tostring(why))
+ok = T.digCell(-4, 0, 3, { inside = "gate" })
+check("...opts.inside digs it", ok == true and get(-4, 0, 3) == nil and T.cfg.inside == nil)
+T.unprotect("gate")
+-- falling block over it: a warning
+put(4, 1, 3, "minecraft:gravel"); T.map.set(4, 1, 3, "minecraft:gravel")
+ok, was, warning = T.digCell(4, 0, 3)
+check("a block under gravel: dug, with a warning", ok == true and was == STONE and warning == "warning: dug 4,0,3 under minecraft:gravel, which may fall into it",
+    tostring(warning))
+ok, why = T.digCell(1, 0.5, 3)
+check("a cell of whole numbers", ok == false and why:find("whole numbers", 1, true))
 
 --------------------------------------------------------------------------
 -- What was never seen

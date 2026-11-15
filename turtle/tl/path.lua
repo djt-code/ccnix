@@ -100,7 +100,8 @@ local function newWorld(opts, from, to)
         toS = function(x, y, z) return x, y, z end
         fromS = toS
     end
-    local mayDig = T.nameTest(opts.dig)
+    local only = opts.digOnly ~= nil and (T.cellSet(opts.digOnly) or {}) or nil
+    local mayDig = T.nameTest(opts.dig == nil and only and true or opts.dig)
     local avoid = T.nameTest(opts.avoid == nil and T.DEFAULT_AVOID or opts.avoid)
     local containers = T.cfg.digContainers
     local memo = {}
@@ -169,6 +170,11 @@ local function newWorld(opts, from, to)
         end
     end
     local w = { toS = toS, fromS = fromS, dig = opts.dig, boxes = boxes }
+    -- a cell of the map's frame as { x, y, z } of the turtle's
+    local function cellAt(mx, my, mz)
+        local x, y, z = fromS(mx, my, mz)
+        return { x = x, y = y, z = z }
+    end
     -- a block to dig that would let liquid in is a wall unless opts.liquid (the map frame's cell number: the liquid's
     -- name, or false)
     local wet = {}
@@ -202,7 +208,7 @@ local function newWorld(opts, from, to)
                 return WALL
             end
         end
-        if c == DIG and wetAt(mx, my, mz) then return WALL end
+        if c == DIG and (wetAt(mx, my, mz) or (only and not only[T.posKey(cellAt(mx, my, mz))])) then return WALL end
         return c
     end
     -- Why a cell is a wall, in words: the protected area, the cell banned, or the block.
@@ -214,6 +220,9 @@ local function newWorld(opts, from, to)
             end
         end
         local name = nameIn(mx, my, mz)
+        if name and only and baseClass(mx, my, mz) == DIG and not only[T.posKey(cellAt(mx, my, mz))] then
+            return name .. ", not a cell opts.digOnly lists"
+        end
         local liquid = name and wetAt(mx, my, mz)
         if liquid then return name .. " with " .. liquid .. " beside it, which a route doesn't dig (opts.liquid = true digs it)" end
         if name then return name .. ", which a route here may not enter" end
@@ -397,6 +406,7 @@ end
 -- overview of this module.  A second result gives { nodes, cost, digs, unknown }: how many cells the search
 -- looked at, the route's cost, and how many of its cells need a dig or were never seen.  Nothing moves.  opts (all optional):
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+--   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
 --   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
 --   inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
 --   liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
@@ -506,7 +516,7 @@ end
 -- layer, T.path's search.  Each stretch is walked with T.moveTo.  A block it did not expect stops a step: the block is
 -- noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans
 -- times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too.  opts are
--- T.path's (dig, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the
+-- T.path's (dig, digOnly, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the
 -- higher end a layer may be, default 8), scan, replans, and scanning's opts.move.  On failure the turtle stays where it got to.
 function T.travel(x, y, z, opts)
     opts = opts or {}
@@ -518,8 +528,9 @@ function T.travel(x, y, z, opts)
     local banned = {}
     for _, c in ipairs(opts.avoidCells or {}) do banned[#banned + 1] = c end
     local ruleOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, limit = opts.limit, margin = opts.margin,
-                       avoidCells = banned, liquid = opts.liquid }
-    local moveOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, liquid = opts.liquid, path = false }
+                       avoidCells = banned, liquid = opts.liquid, digOnly = opts.digOnly }
+    local moveOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, liquid = opts.liquid, digOnly = opts.digOnly,
+                       path = false }
     local here = T.here()
     -- the first route: a layer, scanning for it if the map doesn't know
     local route
