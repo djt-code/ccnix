@@ -595,11 +595,26 @@ function T.unprotect(name)
     return false, "no protected area called " .. tostring(name)
 end
 
+-- The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
+function T.areaSet(names)
+    local set = {}
+    if type(names) == "string" then
+        set[names] = true
+    elseif type(names) == "table" then
+        for _, n in ipairs(names) do set[n] = true end
+        for k, v in pairs(names) do
+            if type(k) == "string" and v then set[k] = true end
+        end
+    end
+    return set
+end
+
 -- The name of the first protected area that holds the cell, or nil.
--- `skip`, a name, leaves that area out (see T.guarded).
+-- `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 function T.protected(x, y, z, skip)
+    local left = skip ~= nil and T.areaSet(skip) or {}
     for _, a in ipairs(areas()) do
-        if a.name ~= skip and x >= a[1] and x <= a[4] and y >= a[2] and y <= a[5] and z >= a[3] and z <= a[6] then
+        if not left[a.name] and x >= a[1] and x <= a[4] and y >= a[2] and y <= a[5] and z >= a[3] and z <= a[6] then
             return a.name
         end
     end
@@ -616,23 +631,36 @@ function T.protections()
 end
 
 -- The name of the protected area that stops the current job from digging
--- the cell: T.protected, but not counting the area the job is working
+-- the cell: T.protected, but not counting the areas the job is working
 -- inside (T.cfg.inside, set by T.inside).  nil if none.
 function T.guarded(x, y, z)
     return T.protected(x, y, z, T.cfg.inside)
 end
 
--- Run fn(...) as a job that owns the protected area `name`: digging in it
--- is allowed meanwhile (other areas still hold).  Puts back what was set
--- before, even if fn errors (the error is re-thrown); returns what fn
--- returned.
-function T.inside(name, fn, ...)
+-- Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them
+-- is allowed meanwhile (other areas still hold).  Puts it back after, even if fn errors (the error goes on); returns fn's results.
+--
+-- A cell in two areas can be dug when the job owns both: T.inside({ "keep", "wall" }, fn).  Inside another
+-- T.inside the job owns the areas of both.
+function T.inside(names, fn, ...)
+    if type(names) ~= "string" and type(names) ~= "table" then error("T.inside wants an area's name or a list of names", 2) end
     local before = T.cfg.inside
-    T.cfg.inside = name
+    if before == nil then
+        T.cfg.inside = names
+    else
+        local both = T.areaSet(before)
+        for n in pairs(T.areaSet(names)) do both[n] = true end
+        T.cfg.inside = tables.sortedKeys(both)
+    end
     local res = table.pack(pcall(fn, ...))
     T.cfg.inside = before
     if not res[1] then error(res[2], 0) end
     return table.unpack(res, 2, res.n)
+end
+
+-- Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
+function T.withUnprotected(names, fn, ...)
+    return T.inside(names, fn, ...)
 end
 
 -- Is this block one the dig functions refuse (a container, spawner or
@@ -1540,7 +1568,8 @@ end
 --           opts.dig says which); any other block stops it
 --   avoid   a glob, a list or a set: blocks it stops at rather than enter
 --           (default: lava, fire and doors); {} avoids nothing
---   inside  the name of a protected area the move may dig in (see T.inside)
+--   inside  the name of a protected area the move may dig in, or a list of
+--           names (see T.inside)
 --   liquid  true: dig a cell even when lava or a water source is beside it
 --           or above it (T.liquidNear); by default that dig is refused
 --   path    true, or a function(x, y, z, opts): when a straight run is

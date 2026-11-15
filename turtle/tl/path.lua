@@ -154,9 +154,10 @@ local function newWorld(opts, from, to)
     end
     -- the protected areas, as boxes of this frame: their cells known to be empty are open, the rest walls
     local boxes = {}
-    local inside = opts.inside or T.cfg.inside
+    local owned = T.areaSet(T.cfg.inside)
+    for name in pairs(T.areaSet(opts.inside)) do owned[name] = true end
     for _, a in ipairs(T.protections()) do
-        if a.name ~= inside then
+        if not owned[a.name] then
             local ax, ay, az = toS(a.x1, a.y1, a.z1)
             local bx, by, bz = toS(a.x2, a.y2, a.z2)
             boxes[#boxes + 1] = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by),
@@ -402,7 +403,7 @@ end
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
 --   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
 --   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
---   inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
+--   inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
 --   liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
 --   avoidCells a list of { x, y, z } cells a route may not use
 --   limit      cells to search before giving up (default 20000)

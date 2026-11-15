@@ -9,7 +9,7 @@
 --     T.claim() is the copy the wrapped calls keep up to date;
 --   * a protected area refuses turtle.dig() called straight and T.digDir
 --     alike (and T.forward's own dig), the data file carries it to another
---     copy of the library, and T.inside lets a job work in its own area;
+--     copy of the library, and T.inside lets a job work in its own area (or areas: a list, ADR-0011 D7.2);
 --   * chests and ComputerCraft blocks are refused unless allowed;
 --   * T.onChange hears digs, placements and moves.
 local PROJ = ...
@@ -165,6 +165,30 @@ check("T.inside puts it back after an error, and passes the error on", not okErr
 check("T.guarded leaves out the job's area only: the others still hold",
     (function() T.cfg.inside = "castle"; local r = T.guarded(0, 1, 0); T.cfg.inside = nil; return r end)() == "garden")
 set(0, 0, 1, { name = "minecraft:stone" })
+
+-- a cell in two areas (ADR-0011 D7.2): a list of names owns both
+T.protect("hall", 0, 0, 1, 0, 0, 1)
+a, b = T.inside("castle", function() return turtle.dig() end)
+check("a cell in two areas: T.inside with one of them is still refused, by the other", a == false and b == "protected: hall" and get(0, 0, 1), tostring(b))
+digsBefore = DIGS
+a, b = T.inside({ "castle", "hall" }, function() return turtle.dig() end)
+check("T.inside with a list of both digs it", a == true and get(0, 0, 1) == nil and DIGS == digsBefore + 1 and T.cfg.inside == nil, tostring(b))
+set(0, 0, 1, { name = "minecraft:stone" })
+a, b = T.inside("castle", T.inside, "hall", function() return turtle.dig(), T.cfg.inside end)
+check("...so does a T.inside inside another: the job owns the areas of both", a == true and get(0, 0, 1) == nil and type(b) == "table" and #b == 2
+    and T.cfg.inside == nil, type(b) == "table" and table.concat(b, ",") or tostring(b))
+set(0, 0, 1, { name = "minecraft:stone" })
+a, b = T.withUnprotected({ "castle", "hall" }, function() return turtle.dig() end)
+check("T.withUnprotected is T.inside by another name", a == true and get(0, 0, 1) == nil and T.cfg.inside == nil, tostring(b))
+set(0, 0, 1, { name = "minecraft:stone" })
+okErr, err = pcall(T.inside, { "castle", "hall" }, function() error("boom", 0) end)
+check("...a list is put back after an error too", not okErr and err == "boom" and T.cfg.inside == nil)
+check("T.guarded and T.protected take a list of areas to leave out",
+    (function() T.cfg.inside = { "castle", "hall" }; local r = T.guarded(0, 0, 1); T.cfg.inside = nil; return r end)() == nil
+    and T.protected(0, 0, 1, { "castle" }) == "hall" and T.protected(0, 0, 1, { castle = true, hall = true }) == nil)
+okErr, err = pcall(T.inside, 7, function() end)
+check("T.inside wants a name or a list", not okErr and err:find("T.inside wants an area's name or a list of names", 1, true), tostring(err))
+T.unprotect("hall")
 
 check("T.protect asks for a name and whole corners",
     T.protect("", 0, 0, 0, 1, 1, 1) == nil and T.protect("x", 0, 0, 0, 1, 1) == nil and T.protect("x", 0, 0, 0, 1, 1.5, 1) == nil)

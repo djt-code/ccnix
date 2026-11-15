@@ -80,17 +80,25 @@ T.protect(name, x1, y1, z1, x2, y2, z2)
 T.unprotect(name)
     Remove the area called `name`. True, or false and why (none by that name).
 
+T.areaSet(names)
+    The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
+
 T.protected(x, y, z, skip)
-    The name of the first protected area that holds the cell, or nil. `skip`, a name, leaves that area out (see T.guarded).
+    The name of the first protected area that holds the cell, or nil. `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 
 T.protections()
     The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (copies: changing one changes nothing).
 
 T.guarded(x, y, z)
-    The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the area the job is working inside (T.cfg.inside, set by T.inside). nil if none.
+    The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
 
-T.inside(name, fn, ...)
-    Run fn(...) as a job that owns the protected area `name`: digging in it is allowed meanwhile (other areas still hold). Puts back what was set before, even if fn errors (the error is re-thrown); returns what fn returned.
+T.inside(names, fn, ...)
+    Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
+
+    A cell in two areas can be dug when the job owns both: T.inside({ "keep", "wall" }, fn). Inside another T.inside the job owns the areas of both.
+
+T.withUnprotected(names, fn, ...)
+    Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
 
 T.neverDig(name)
     Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
@@ -283,7 +291,8 @@ T.moveTo(x, y, z, opts)
               opts.dig says which); any other block stops it
       avoid   a glob, a list or a set: blocks it stops at rather than enter
               (default: lava, fire and doors); {} avoids nothing
-      inside  the name of a protected area the move may dig in (see T.inside)
+      inside  the name of a protected area the move may dig in, or a list of
+              names (see T.inside)
       liquid  true: dig a cell even when lava or a water source is beside it
               or above it (T.liquidNear); by default that dig is refused
       path    true, or a function(x, y, z, opts): when a straight run is
@@ -764,7 +773,7 @@ T.path(x, y, z, opts)
       dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
       digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
       avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
-      inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
+      inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
       liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
       avoidCells a list of { x, y, z } cells a route may not use
       limit      cells to search before giving up (default 20000)
