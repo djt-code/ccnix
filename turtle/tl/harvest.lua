@@ -223,8 +223,8 @@ local function tellJob(info, pattern)
     if not ok and err == "Terminated" then error(err, 0) end
 end
 
--- Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be.
--- Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+-- Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and
+-- ones holding up sand.  True, info; false, why, info when short; nil, why if it couldn't begin.
 --
 -- `pattern` is a glob of block names (the namespace may be left out).  `where` is a box in the turtle's frame (six numbers in a
 -- table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of

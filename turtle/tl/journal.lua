@@ -128,8 +128,8 @@ end
 -- Declared below with T.report; a step done or progress made counts toward T.report.every.
 local tick
 
--- Start a job: its goal and the steps of the plan (a list of texts, or none).  Replaces the job that was on.  True, or nil and
--- why.
+-- Start a job: its goal and the steps of the plan (a list of texts, or none).  Replaces the job that was on; it lasts until
+-- T.job.clear.  True, or nil and why.
 function T.job.start(goal, steps)
     if type(goal) ~= "string" or text.trim(goal) == "" then return nil, "a job needs a goal (a text)" end
     local job = { goal = goal, steps = {}, notes = {}, work = {}, keys = {} }
@@ -225,7 +225,7 @@ function T.job.status()
     return statusOf(job)
 end
 
--- Forget the job.  True.
+-- End the job: forget it and its file (a finished job, its last step done, stays until then, out of the reports).  True.
 function T.job.clear()
     local path = T.dataPath(JOB_FILE)
     if fs.exists(path) then fs.delete(path) end

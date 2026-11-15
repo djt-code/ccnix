@@ -555,8 +555,10 @@ end
 local function isWhole(n) return type(n) == "number" and n == math.floor(n) end
 
 -- Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`:
--- a dig into it returns false, "protected: <name>".  Replaces a box of the same name.  Returns true,
--- or nil and why.
+-- a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped).  True, or
+-- nil and why.
+--
+-- It replaces a box of the same name.
 function T.protect(name, x1, y1, z1, x2, y2, z2)
     if type(name) ~= "string" or name == "" or text.contains(name, "\n") then
         return nil, "an area needs a name (one line of text)"
@@ -2469,8 +2471,8 @@ function T.isEssential(name)
     return false
 end
 
--- Is the item `name` junk?  False for what's in T.keep (a set or a list, globs too), tools, fuel,
--- buckets, a crafting table, peripherals and what was crafted this job.
+-- Is the item `name` junk?  False for what's in T.keep (a set or a list of names, globs too: put the job's
+-- materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 function T.isJunk(name)
     return not (crafted[name] or T.isEssential(name) or listed(T.keep, name))
 end

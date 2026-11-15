@@ -73,7 +73,9 @@ T.onChange(fn)
     A listener's error is dropped (except Ctrl+T), so one can't stop the turtle. Listeners last until the computer restarts: remove yours when the program ends.
 
 T.protect(name, x1, y1, z1, x2, y2, z2)
-    Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>". Replaces a box of the same name. Returns true, or nil and why.
+    Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped). True, or nil and why.
+
+    It replaces a box of the same name.
 
 T.unprotect(name)
     Remove the area called `name`. True, or false and why (none by that name).
@@ -459,7 +461,7 @@ T.isEssential(name)
     Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
 
 T.isJunk(name)
-    Is the item `name` junk? False for what's in T.keep (a set or a list, globs too), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+    Is the item `name` junk? False for what's in T.keep (a set or a list of names, globs too: put the job's materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 
 T.dumpJunk()
     Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
@@ -623,7 +625,7 @@ T.fuelFor adds up what a route, a build and some scans will cost in fuel and say
 == Harvesting ==
 
 T.harvest(pattern, where, target, opts)
-    Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be. Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+    Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 
     `pattern` is a glob of block names (the namespace may be left out). `where` is a box in the turtle's frame (six numbers in a table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of T.scan, or a list of cells ({ x, y, z }, as T.map.find gives). `target`, if given, is how many blocks to dig before stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead). Each block is looked at before it is dug and left if the map was wrong. Left alone, and listed in info.skipped with why: a block with a falling block over it that is not to be dug too, one that lava touches (opts.lava digs those), one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers). A block with no free cell beside it is skipped unless opts.move lets it dig a way in. It stops when the inventory is full (T.cfg.autoDump keeps room), or the fuel is out. Info is { got, target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, lava, item.
 
@@ -659,7 +661,7 @@ T.report tells the player (the setting turtle.player, never in the code) through
 == The job journal ==
 
 T.job.start(goal, steps)
-    Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
+    Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on; it lasts until T.job.clear. True, or nil and why.
 
 T.job.done(step)
     Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step). The last step done finishes the job.
@@ -681,7 +683,7 @@ T.job.status()
     How the job stands in one line ("step 2 of 3: lay the floor; build keep: 40 of 300 cells"), or nil if there is none.
 
 T.job.clear()
-    Forget the job. True.
+    End the job: forget it and its file (a finished job, its last step done, stays until then, out of the reports). True.
 
 == Reports to the player ==
 
