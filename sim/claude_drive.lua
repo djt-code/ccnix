@@ -40,6 +40,18 @@ end
 local function thinking() return { type = "thinking", thinking = "", signature = "sig" } end
 
 -- The tool results in the user turn of request n: { [tool_use_id] = block }.
+-- A lua result's last line, the status line ("[at 0,0,2 facing 0, ...]"),
+-- is taken off its content and kept as the block's .status, so the checks
+-- on what the code said read it alone (scenario 30 checks the line).
+local function withoutStatus(b)
+    if type(b.content) ~= "string" then return b end
+    local cut = b.content:find("\n%[at %-?%d+,%-?%d+,%-?%d+ facing [^\n]*%]$") or b.content:find("\n%[status: [^\n]*%]$")
+    if not cut then return b end
+    local copy = {}
+    for k, v in pairs(b) do copy[k] = v end
+    copy.content, copy.status = b.content:sub(1, cut - 1), b.content:sub(cut + 1)
+    return copy
+end
 local function resultsIn(n)
     local req = HTTP.requests[n]
     if not req then return {}, { content = {} } end
@@ -48,7 +60,7 @@ local function resultsIn(n)
     local out = {}
     if type(last.content) == "table" then
         for _, b in ipairs(last.content) do
-            if b.type == "tool_result" then out[b.tool_use_id] = b end
+            if b.type == "tool_result" then out[b.tool_use_id] = withoutStatus(b) end
         end
     end
     return out, last
@@ -95,19 +107,24 @@ check("posted to the Messages API with the key and version headers",
         and r1.headers["anthropic-version"] ~= nil, r1 and tostring(r1.url))
 local toolNames = {}
 for i, t in ipairs(r1 and r1.body.tools or {}) do toolNames[i] = t.name .. (t.type and ("=" .. t.type) or "") end
-check("the request names the model, effort, cached system prompt and the tools: its own four, memory, web search and fetch",
+check("the request names the model, effort, cached system prompt and the tools: its own five, memory, web search and fetch",
     r1 and r1.body.model == "claude-opus-5-5" and r1.body.output_config.effort == "medium"
         and r1.body.system[1].cache_control.type == "ephemeral"
-        and table.concat(toolNames, " ") == "lua status run_program ask_user memory=memory_20250818 "
+        and table.concat(toolNames, " ") == "lua status run_program ask_user chat memory=memory_20250818 "
             .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
         and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
+local edits1 = r1 and r1.body.context_management.edits or {}
 check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
-    r1 and r1.body.context_management.edits[1].type == "clear_tool_uses_20250919"
-        and r1.body.context_management.edits[1].exclude_tools[1] == "memory"
-        and r1.body.context_management.edits[1].trigger.value == 100000
-        and r1.body.context_management.edits[1].clear_at_least.value == 30000
+    edits1[2] and edits1[2].type == "clear_tool_uses_20250919"
+        and edits1[2].exclude_tools[1] == "memory"
+        and edits1[2].trigger.value == 100000
+        and edits1[2].clear_at_least.value == 30000
         and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
         and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
+check("...the code of a cleared call goes with its result (clear_tool_inputs)", edits1[2] and edits1[2].clear_tool_inputs == true)
+check("...and old thinking is cleared, the last 3 turns' kept: that edit first, as the API wants",
+    #edits1 == 2 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep.type == "thinking_turns"
+        and edits1[1].keep.value == 3, textutils.serialiseJSON(edits1))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
     r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
         and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
@@ -185,6 +202,36 @@ HTTP.queue = {
 }
 run("anything")
 check("a 400 isn't retried and its message is shown", #HTTP.requests == 1 and Mine.logHas("HTTP 400.*bad request"))
+
+-- 3c. "prompt is too long": sent again at once with a harder clear (from
+--     50k tokens, 2 tool uses kept, whatever it frees), which then stays;
+--     a second one is reported as any other error
+fresh({ "" })
+local TOO_LONG = { code = 400, body = { type = "error", error = { type = "invalid_request_error",
+    message = "prompt is too long: 1000123 tokens > 1000000 maximum" } } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
+    TOO_LONG,
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("talk a lot")
+local function clearOf(n)
+    local req = HTTP.requests[n]
+    return req and req.body.context_management.edits[2] or {}
+end
+check("prompt too long: sent again at once (no wait) with the harder clear, the same conversation",
+    #HTTP.requests == 4 and clearOf(3).trigger.value == 50000 and clearOf(3).keep.value == 2
+        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger.value == 100000
+        and #HTTP.requests[3].body.messages == #HTTP.requests[2].body.messages
+        and Mine.logHas("too long; trying again with more of it cleared"), textutils.serialiseJSON(clearOf(3)))
+check("...the harder clear stays for the conversation's next calls", clearOf(4).trigger.value == 50000)
+check("...and the log says so", (Mine.files["claude.log"] or ""):find("prompt is too long: 1000123 tokens > 1000000 maximum; trying again with a harder clear (from 50000 tokens, the last 2 tool uses kept)", 1, true))
+fresh({ "" })
+HTTP.queue = { TOO_LONG, TOO_LONG }
+run("talk even more")
+check("too long again with the harder clear: reported as any error, nothing more sent",
+    #HTTP.requests == 2 and Mine.logHas("HTTP 400.*prompt is too long"))
 
 -- 4. the step budget: with --steps 2 the third tool call isn't run, and
 --    the model is told to stop
@@ -1018,3 +1065,408 @@ HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("how long is the cache", "--cache", "1h")
 local sys28h = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("with --cache 1h the prompt says an hour", sys28h:find("The cache keeps the conversation for an hour with no call reading it", 1, true) ~= nil)
+
+-- 29. /new at the prompt: the conversation emptied, the helpers loaded
+--     again, the model told it's a new conversation; the files stay
+fresh({ "/new", "dig again", "" })
+Mine.files["claude/helpers.lua"] = "HELPER_LOADS = (HELPER_LOADS or 0) + 1"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "fs.makeDir('/claude'); local f = fs.open('/claude/plan.md', 'w'); f.write('plan'); f.close(); return HELPER_LOADS" }) }, "tool_use"),
+    reply({ text("Dug.") }, "end_turn"),
+    reply({ toolUse("lua", { code = "return HELPER_LOADS, fs.exists('/claude/plan.md')" }) }, "tool_use"),
+    reply({ text("Dug again.") }, "end_turn"),
+}
+run("dig")
+Mine.files["claude/helpers.lua"] = nil
+local n3 = HTTP.requests[3] and HTTP.requests[3].body.messages
+check("/new: the next goal starts a conversation of its own, told that it is new",
+    n3 and #n3 == 1 and n3[1].content:find("^dig again\n\n%[This is a new conversation") ~= nil, n3 and n3[1].content)
+check("...the helpers loaded again, the files as they were", resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content == "-> 2\n-> true",
+    resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content)
+check("...and it says so, and logs it", Mine.logHas("^A new conversation") and (Mine.files["claude.log"] or ""):find("new conversation\n", 1, true))
+
+
+-- 30. each lua result ends with a status line (ADR-0011 D8): where the
+--     turtle is, its fuel and what the call used, the free slots, and lava
+--     or water beside it; an error result has it too, and a fault in it is
+--     said in its place
+do
+fresh({ "" })
+Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 0, 3, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 1, 2, { name = "minecraft:water", level = 0 })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.dig(); T.forward(); turtle.dig(); T.forward(); return 'two'" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "error('stuck', 0)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.getItemCount = function() error('no count', 0) end; return 1" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+local countWas = turtle.getItemCount
+run("look at the status line")
+turtle.getItemCount = countWas
+local s30 = resultsIn(2).toolu_1
+check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it",
+    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above]",
+    s30 and tostring(s30.status))
+local e30 = resultsIn(3).toolu_2
+check("...an error result too", e30 and e30.is_error == true and e30.content == "error: stuck"
+    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above]", e30 and tostring(e30.status))
+local f30 = resultsIn(4).toolu_3
+check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
+    f30 and tostring(f30.status))
+check("...the line is logged with the result, not shown on the screen",
+    (Mine.files["claude.log"] or ""):find("result:\n-> two\n[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
+fresh({ "" })
+Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("lava round it")
+local l30 = resultsIn(2).toolu_1
+check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
+    l30 and tostring(l30.status))
+end
+
+-- 31. helpers one to a file (ADR-0011 D6): /claude/helpers.lua first, then
+--     each file in /claude/helpers/ in name order, each on its own, the
+--     broken ones named; keep(name, code) compiles, runs and writes one,
+--     and writes nothing for code that doesn't compile or run; a local at
+--     the top of a call is noted as gone
+do
+fresh({ "" })
+Mine.dirs["claude/helpers"] = true
+Mine.files["claude/helpers.lua"] = "ORDER = 'file'"
+Mine.files["claude/helpers/b_bad.lua"] = "function broken( end"
+Mine.files["claude/helpers/a_err.lua"] = "error('a_err fails', 0)"
+Mine.files["claude/helpers/c_good.lua"] = "ORDER = ORDER .. ',c'; function quad(n) return 4 * n end"
+Mine.files["claude/helpers/notes.txt"] = "not a helper"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return ORDER, quad(2)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[local ok, file = keep("triple", "function triple(n) return 3 * n end"); return ok, file, triple(2)]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("bad", "function bad( end")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("boom", "error('it broke', 0)")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("../startup", "x = 1")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local function helper() return 1 end\nlocal two = function() return 2 end\nlocal helper = function() end\n  local function inner() end\nlocal a, b = 1, 2\nlocal text = require('text')\nreturn 1" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local x = function() return 5 end\nreturn x()" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local function y() end\nerror('no', 0)" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("keep things")
+local first31 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("helpers.lua, then the folder's files in name order, each on its own: the good ones loaded",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> file,c\n-> 8", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content)
+check("...the broken ones named to the model with its first goal, a syntax error and a runtime one",
+    first31:find("/claude/helpers/a_err.lua failed to load: a_err fails; /claude/helpers/b_bad.lua failed to load: ", 1, true)
+        and not first31:find("c_good", 1, true) and not first31:find("helpers.lua failed", 1, true), first31)
+local k2 = resultsIn(3).toolu_2
+check("keep: compiled, run (defined at once) and written to /claude/helpers/<name>.lua",
+    k2 and k2.content == "-> true\n-> /claude/helpers/triple.lua\n-> 6"
+        and Mine.files["claude/helpers/triple.lua"] == "function triple(n) return 3 * n end", k2 and k2.content)
+local k3, k4, k5 = resultsIn(4).toolu_3, resultsIn(5).toolu_4, resultsIn(6).toolu_5
+check("keep: code that doesn't compile is an error naming the helper, and nothing is written",
+    k3 and k3.is_error and k3.content:find("keep: bad doesn't compile, so nothing was kept: bad:1:", 1, true)
+        and Mine.files["claude/helpers/bad.lua"] == nil, k3 and k3.content)
+check("...nor code that fails as it runs",
+    k4 and k4.is_error and k4.content:find("keep: boom failed as it ran, so nothing was kept: it broke", 1, true)
+        and Mine.files["claude/helpers/boom.lua"] == nil, k4 and k4.content)
+check("...and the name is one word, so the file stays in the folder",
+    k5 and k5.is_error and k5.content:find("the name is one word", 1, true) and Mine.files["startup.lua"] == nil, k5 and k5.content)
+local l6, l7, l8 = resultsIn(7).toolu_6, resultsIn(8).toolu_7, resultsIn(9).toolu_8
+check("an unindented local function at the top of a call is noted as gone, each name once; an indented one, and other locals, not",
+    l6 and l6.content == "-> 1\nnote: helper, two were local to this call and are gone; make them global, or keep() them", l6 and l6.content)
+check("...one name in the singular", l7 and l7.content == "-> 5\nnote: x was local to this call and is gone; make it global, or keep() it", l7 and l7.content)
+check("...and nothing is noted when the call failed", l8 and l8.is_error and l8.content == "error: no", l8 and l8.content)
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("what do I keep")
+local sys31 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua31 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("the prompt and the lua tool tell of keep(name, code) and /claude/helpers/",
+    sys31:find("with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua", 1, true)
+        and sys31:find("/claude/helpers.lua, then each file in /claude/helpers/", 1, true)
+        and lua31:find("keep(name, code) runs a helper and keeps it", 1, true))
+end
+
+-- 32. the chat tool (ADR-0011 D4): says something through a chat box (the
+--     one aboard equipped for the moment), or asks and waits for an answer
+--     from the chat or the keyboard, whichever comes first; the chat box
+--     goes back whichever it was; the wait stops short of the cache's TTL
+--     unless the model asks for longer, and no answer is a normal result.
+--     (A chat box peripheral, AP's chat events, the settings, and CC's
+--     parallel over coroutines: each scripted event goes to the routines
+--     waiting for it, as CC's does; read() waits for a "sim_read" event.)
+do
+local CHAT = "advancedperipherals:chat_box"
+local CHATSENT = {}
+local chatBox = {
+    sendMessageToPlayer = function(m, p) CHATSENT[#CHATSENT + 1] = { message = m, player = p }; return true end,
+    sendMessage = function(m) CHATSENT[#CHATSENT + 1] = { message = m, everyone = true }; return true end,
+}
+local rawWrap, rawType = peripheral.wrap, peripheral.getType
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local SET32 = { ["turtle.player"] = "Steve" }
+settings = { define = function() end, get = function(n) return SET32[n] end }
+local SCRIPT = {}
+local inParallel = 0
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, readWas, timerWas = os.pullEvent, read, os.startTimer
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+os.startTimer = function() return 1 end
+-- (the goal's prompt, outside a wait, reads the scripted answers as before)
+read = function()
+    if inParallel == 0 then return readWas() end
+    local _, line = os.pullEvent("sim_read")
+    return line
+end
+local function timers(n) for _ = 1, n do SCRIPT[#SCRIPT + 1] = { "timer", 1 } end end
+
+local function chatFresh()
+    fresh({ "" })
+    Mine.inv[2] = { name = CHAT, count = 1 }
+    CHATSENT, SCRIPT = {}, {}
+end
+local function chatBack()
+    local aboard = 0
+    for s = 1, 16 do if Mine.inv[s] and Mine.inv[s].name == CHAT then aboard = aboard + Mine.inv[s].count end end
+    return EQ.left == nil and EQ.right == "minecraft:diamond_pickaxe" and aboard == 1
+end
+
+chatFresh()
+SCRIPT = { { "chat", "Alex", "claude no", "u-a", false }, { "chat", "Steve", "claude: the oak one", "u-s", false } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Starting the wall." }) }, "tool_use"),
+    reply({ toolUse("chat", { text = "Which stair?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("talk to the player")
+local c1, c2 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("chat: said to the player through the chat box aboard, equipped for the moment and put back",
+    c1 and c1.content == "said in chat" and c1.is_error == nil and CHATSENT[1] and CHATSENT[1].player == "Steve"
+        and CHATSENT[1].message == "Starting the wall." and chatBack(), c1 and c1.content)
+check("chat ask: the player's answer from the chat, after the prefix (another player's not taken)",
+    c2 and c2.content == "Steve answered in chat: the oak one" and c2.is_error == nil
+        and CHATSENT[2].message == 'Which stair? (answer in chat: "claude <your answer>")' and #SCRIPT == 0, c2 and c2.content)
+check("...the chat box put back though the keyboard was still waiting, and the answer shown",
+    chatBack() and Mine.logHas("^%(Steve answered in chat: the oak one%)$"))
+check("...and the tool is offered: lua status run_program ask_user chat, then the API's",
+    HTTP.requests[1].body.tools[5].name == "chat" and HTTP.requests[1].body.tools[5].input_schema.required[1] == "text"
+        and HTTP.requests[1].body.tools[5].description:find("stops short of the cache's 5 minutes", 1, true))
+
+chatFresh()
+SCRIPT = { { "timer", 1 }, { "sim_read", "go left" } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Which way?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask at the keyboard")
+local c3 = resultsIn(2).toolu_1
+check("chat ask: a line typed at the keyboard answers too, and the chat box goes back",
+    c3 and c3.content == "answered at the keyboard: go left" and chatBack(), c3 and c3.content)
+
+chatFresh()
+timers(270)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Anyone?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask nobody")
+local c4 = resultsIn(2).toolu_1
+check("no answer: the wait stops short of the cache's 5 minutes, a normal result saying so",
+    c4 and c4.is_error == nil and c4.content:find("^no answer in 270 s %(the wait stops short of the cache's 5 minutes; a longer timeout_s")
+        and #SCRIPT == 0 and chatBack(), c4 and c4.content)
+check("...the question said again every 2 minutes meanwhile", #CHATSENT == 3 and CHATSENT[2].message == "still waiting for an answer: Anyone?", #CHATSENT)
+
+chatFresh()
+timers(3)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Quick?", ask = true, timeout_s = 3 }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask quickly")
+local c5 = resultsIn(2).toolu_1
+check("timeout_s sets the wait", c5 and c5.content == "no answer in 3 s" and c5.is_error == nil, c5 and c5.content)
+
+chatFresh()
+timers(3)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Long?", ask = true, timeout_s = 3 }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+local timeWas = os.time
+local jump = 0
+os.time = function(t) if t ~= nil then return timeWas(t) end jump = jump + 400; return timeWas() + jump end
+run("ask for long")
+os.time = timeWas
+local c6 = resultsIn(2).toolu_1
+check("a wait longer than the cache keeps the conversation says what it costs",
+    c6 and c6.content:find("^no answer in 3 s %(that was longer than the cache keeps the conversation, 5 minutes: the next call writes it to the cache again%)$"),
+    c6 and c6.content)
+
+chatFresh()
+Mine.inv[2] = nil
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Hello?", ask = true }) }, "tool_use"),
+    reply({ toolUse("chat", { text = "Hello." }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("no chat box")
+local c7, c8 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("no chat box: an error result saying why, nothing waited for",
+    c7 and c7.is_error == true and c7.content:find("^couldn't ask in chat: .*chat_box") and c8 and c8.is_error == true
+        and c8.content:find("^not said in chat: "), c7 and c7.content)
+
+chatFresh()
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("what can I say")
+local sys32 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt tells of the chat tool and T.report.ask, and to ask in the game",
+    sys32:find("The chat tool says something in the game's chat without code", 1, true)
+        and sys32:find("T.report.ask(question, opts)", 1, true)
+        and sys32:find("the chat tool with ask = true reaches the player in the game, ask_user only the keyboard", 1, true))
+
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+os.pullEvent, read, os.startTimer = pullWas, readWas, timerWas
+parallel, settings = nil, nil
+
+-- 33. keeping the player told (ADR-0011 D5): after claude.remindChat
+--     minutes with no chat message (from the goal's start, the last message
+--     or the last reminder), a line after the tool results says so; a
+--     message told (here the chat tool's) starts the count again; 0 turns
+--     it off.  (Five minutes pass at each request.)
+local CLOCK33, postWas, timeWas33 = 0, HTTP.api.post, os.time
+HTTP.api.post = function(...) CLOCK33 = CLOCK33 + 300; return postWas(...) end
+local BASE33 = timeWas33()
+os.time = function(t) if t ~= nil then return timeWas33(t) end return BASE33 + CLOCK33 end
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local function remindRun(minutes)
+    SET32 = { ["turtle.player"] = "Steve", ["claude.remindChat"] = minutes }
+    settings = { define = function() end, get = function(n) return SET32[n] end }
+    chatFresh()
+    CLOCK33 = 0
+    -- (nothing told yet: scenario 32's clock ran ahead of this one)
+    if turtle._ccnixJournal then turtle._ccnixJournal.told = nil end
+    HTTP.queue = {}
+    for i = 1, 7 do
+        HTTP.queue[i] = reply({ i == 4 and toolUse("chat", { text = "Going well." }) or toolUse("lua", { code = "return " .. i }) }, "tool_use")
+    end
+    HTTP.queue[8] = reply({ text("Done.") }, "end_turn")
+    run("work quietly")
+    local notes = {}
+    for n = 2, 8 do
+        local _, turn = resultsIn(n)
+        for _, b in ipairs(turn.content) do
+            if b.type == "text" then notes[#notes + 1] = n .. ": " .. b.text end
+        end
+    end
+    return notes
+end
+local r33 = remindRun(15)
+check("15 minutes with nothing told: a line after the tool results; the chat tool's message starts the count again",
+    #r33 == 2 and r33[1] == "4: 15 minutes without a word to the player in chat: tell them how it is going (the chat tool, or T.report)."
+        and r33[2]:find("^8: 15 minutes without a word") ~= nil, table.concat(r33, " | "))
+check("...and the reminder is logged", (Mine.files["claude.log"] or ""):find("reminded: 15 minutes without a word", 1, true) ~= nil)
+local r33off = remindRun(0)
+check("claude.remindChat 0: no reminders", #r33off == 0, table.concat(r33off, " | "))
+HTTP.api.post, os.time = postWas, timeWas33
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+settings = nil
+end
+
+-- 34. the harness's own settings (ADR-0011 D10): T.cfg.maxHeight is 256 in a
+--     session, unless the helpers set it otherwise, and the prompt says so;
+--     a lua call with review = true is shown and asked about first, a no
+--     being a normal result
+do
+fresh({ "n", "y", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.dig(); return 'dug'", review = true }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.dig(); return 'dug'", review = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("climb high")
+local h1, v2, v3 = resultsIn(2).toolu_1, resultsIn(3).toolu_2, resultsIn(4).toolu_3
+check("T.cfg.maxHeight is 256 in a session", h1 and h1.content == "-> 256", h1 and h1.content)
+check("review = true: the code shown and asked about; a no is a normal result, nothing run",
+    v2 and v2.content == "not run: declined" and v2.is_error == nil and Mine.logHas("^Claude asks you to review this%. Run it%? %[y/N%]"), v2 and v2.content)
+check("...and a yes runs it", v3 and v3.content == "-> dug" and DIGS == 1, v3 and v3.content)
+local sys34 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua34 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].input_schema.properties.review
+check("the prompt tells of maxHeight 256 and review = true; the lua tool takes review",
+    sys34:find("In this session T.cfg.maxHeight is 256", 1, true) and sys34:find("A lua call with review = true shows its code", 1, true)
+        and lua34 and lua34.type == "boolean")
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "T.cfg.maxHeight = 20"
+HTTP.queue = { reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("not so high")
+Mine.files["claude/helpers.lua"] = nil
+check("...unless the helpers set it otherwise", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 20")
+end
+
+-- 35. what's new (ADR-0011 D9): claude keeps the ccnix version it last ran
+--     with in /claude/.version; when ccnix was updated since, the first
+--     goal carries the news file's lines for the versions after it, up to
+--     the one running, and the version is written once the model has had
+--     them
+do
+local NEWS35 = "for people\n\n== 0.52.0\nnot yet\n== 0.51.0\n-- a note for people\nT.digCell exists now: your digCell can go\n\nkeep() keeps helpers\n== 0.50.2\nT.up says why\n== 0.50.0\nold news\n"
+local function newsRun(files, queue)
+    fresh({ "" })
+    for k, v in pairs(files) do Mine.files[k] = v end
+    HTTP.queue = queue or { reply({ text("Done.") }, "end_turn") }
+    run("what's new")
+    local m = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+    return type(m) == "string" and m or ""
+end
+local n1 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.0\n" })
+check("updated: the first goal carries the lines for each version since, up to the running one, none for people",
+    n1 == "what's new\n\n[ccnix was updated from 0.50.0 to 0.51.0; what changed for you:\n- T.digCell exists now: your digCell can go\n- keep() keeps helpers\n- T.up says why]", n1)
+check("...the version kept once the model had them, and the screen and the log say so",
+    Mine.files["claude/.version"] == "0.51.0\n" and Mine.logHas("^ccnix was updated from 0%.50%.0 to 0%.51%.0: Claude is told what changed%.$")
+        and (Mine.files["claude.log"] or ""):find("version: 0.51.0 kept in /claude/.version", 1, true))
+local n2 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.51.0\n" })
+check("the same version: nothing said", n2 == "what's new", n2)
+local n3 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35 })
+check("no version kept yet and a news file: the newest version's lines up to the running one",
+    n3 == "what's new\n\n[ccnix was updated from an earlier version to 0.51.0; what changed for you:\n- T.digCell exists now: your digCell can go\n- keep() keeps helpers]"
+        and Mine.files["claude/.version"] == "0.51.0\n", n3)
+local n4 = newsRun({ ["deploy/version"] = "0.51.0\n" })
+check("no news file: nothing said, the version kept all the same", n4 == "what's new" and Mine.files["claude/.version"] == "0.51.0\n", n4)
+local n5 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.2\n" },
+    { { code = 400, body = { type = "error", error = { type = "invalid_request_error", message = "nope" } } } })
+check("a first goal that never reached the model: the version isn't kept, so the news comes again", Mine.files["claude/.version"] == "0.50.2\n",
+    tostring(Mine.files["claude/.version"]))
+local REAL_NEWS = repoFile("help/claude-news.txt")
+local n6 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = REAL_NEWS, ["claude/.version"] = "0.50.2\n" })
+check("the real news file reads: its 0.51.0 lines, the note for people left out",
+    n6:find("updated from 0.50.2 to 0.51.0; what changed for you:\n- ", 1, true) and n6:find("- The chat tool says something", 1, true)
+        and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
+end

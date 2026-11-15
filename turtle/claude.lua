@@ -22,11 +22,13 @@
 --                reading it, not 5 minutes (for long pauses between
 --                goals: writing it costs more, 2x the input price, not
 --                1.25x; reading it is cheap either way)
---   --confirm    show each piece of code and ask before running it
+--   --confirm    show each piece of code and ask before running it (the
+--                model can ask that for one piece: review = true)
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
--- or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run,
--- so the saved position stays right).
+-- /new to start a new conversation (its memory and files stay, and its
+-- helpers are loaded again), or press Enter on an empty line to quit.
+-- Ctrl+T stops it (under T.run, so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
 -- as vi does it (lib/syntax: keywords yellow, comments green, strings
@@ -56,6 +58,15 @@
 -- what's new.  When a goal ends its tokens are printed: those read from
 -- the cache, written to it and new, and what came out.
 --
+-- What's new: claude keeps the ccnix version it last ran with in
+-- /claude/.version.  When ccnix has been updated since, the first goal
+-- tells the model what changed for it (help/claude-news.txt, from
+-- doc/claude-news.txt: the lines for each version since).
+--
+-- Keeping the player told: when claude.remindChat minutes (default 15, 0
+-- for never) pass with no chat message to the player (T.report, the chat
+-- tool), the model is reminded after the next tool results.
+--
 -- The log, claude.log beside the program: each entry with its time (UTC);
 -- the options a session started with, the goals, the code and what it
 -- did, the thinking, each call's tokens and how long it took, retries,
@@ -64,11 +75,17 @@
 -- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
 -- replacing the older copy, and a new claude.log starts: one old copy kept.
 --
--- Its helpers: functions it wants again are kept in /claude/helpers.lua (it
--- can write there).  At the start of each session that file, if it's there,
--- is run in the code's own world, so what it defines is in scope for every
--- chunk the model runs.  A broken file is told to the model with its first
--- goal, and the session goes on without it.
+-- Its helpers: functions it wants again are kept one to a file, each
+-- with keep(name, code) in its code, which runs the code (so it's defined
+-- at once) and writes it to /claude/helpers/<name>.lua; code that doesn't
+-- compile or run is refused and nothing is written.  At the start of each
+-- session /claude/helpers.lua (an older single file, which it can still
+-- write) and then each file in /claude/helpers/, in name order, is run in
+-- the code's own world, each on its own, so what they define is in scope
+-- for every chunk the model runs.  The files that fail are told to the
+-- model with its first goal, and the session goes on without them.  A
+-- call whose code declares a `local` at its top level (an unindented
+-- `local` line) gets a note: that name is gone when the call ends.
 --
 -- What it can call: the system prompt carries turtlelib's index, one line a
 -- function (turtle/tl/index.txt, made from the comments above the functions
@@ -84,6 +101,10 @@
 -- but the API key, and write only under /claude/ (so it can't rewrite the
 -- programs or the startup).  No shell.
 --
+-- Each result of the code ends with a line saying where the turtle is, its
+-- fuel and what the call used, its free slots, and any lava or water
+-- beside it (the log has it too; the screen doesn't).
+--
 -- The other tools:
 --   status       where it is, fuel, what's around, what it carries, the
 --                tools equipped, what's attached, the protected areas
@@ -92,18 +113,27 @@
 --                home), or ip and ping for the network, with arguments,
 --                or reads its manual (help/)
 --   ask_user     asks you, at the prompt
+--   chat         says something in the game's chat (through a chat box, to
+--                the setting turtle.player, or everyone when it isn't set),
+--                or asks there and waits for an answer starting with
+--                "claude" from that player, or one typed at the prompt,
+--                whichever comes first (T.report.ask); the wait is kept
+--                under the cache's time unless the model asks for longer
 --   memory       its notes, kept between sessions in /claude/memories/
 --                (the API's memory tool: view, create, str_replace,
 --                insert, delete, rename, only under that folder)
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
--- Old tool results are cleared from the conversation once it's long (the
--- API's context editing), the memory tool's kept; a reply paused partway
--- through its web searches is carried on.
+-- Old tool calls (the code and its results) and old thinking are cleared
+-- from the conversation once it's long (the API's context editing), the
+-- memory tool's kept; when the API says the conversation is too long all
+-- the same, it's sent again with more of it cleared.  A reply paused
+-- partway through its web searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
--- facing +z.
+-- facing +z.  In a session T.cfg.maxHeight is 256 (programs keep 16), unless
+-- the helpers or the model set it otherwise.
 --
 -- Claude and Anthropic are trademarks of Anthropic.  This program calls
 -- the Claude API with your own API key, under Anthropic's terms; it isn't
@@ -140,7 +170,11 @@ local KEY_FILE = T.dataPath("claude.key")
 local LOG_FILE = T.dataPath("claude.log")
 local LOG_SIZE = tonumber(T.setting("claude.logSize", 262144,
     "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144
-local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session
+local REMIND_CHAT = tonumber(T.setting("claude.remindChat", 15,
+    "claude: minutes without a chat message to the player before the model is reminded to tell them (0: never)")) or 15
+local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
+local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
+local MAX_HEIGHT = 256          -- T.cfg.maxHeight in a session (blocks above the start; programs keep 16)
 local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
                                 -- thinking before it counts too
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
@@ -149,6 +183,8 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
+local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
+local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
 -- Old tool results cleared once the conversation is this long (tokens in),
@@ -157,11 +193,27 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 -- cache is written again from there: rarer and bigger clears cost less
 -- than many small ones.
 local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
+-- The harder clear once the API has said the prompt is too long: sooner,
+-- fewer results kept, and whatever it frees
+local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST = 50000, 2, 0
+-- The thinking of the last THINKING_TURNS assistant turns is kept; older
+-- thinking is cleared with the old tool results' code
+local THINKING_TURNS = 3
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
 -- the system prompt says it
 local CACHE_TTLS = { ["5m"] = "5 minutes", ["1h"] = "an hour" }
+-- The same in seconds, and how far under it the chat tool's wait for an
+-- answer stops unless the model asks for longer
+local CACHE_SECONDS = { ["5m"] = 300, ["1h"] = 3600 }
+local CACHE_MARGIN = 30
+-- The chat tool: the chat box it equips for a wait when none is attached,
+-- the word an answer in chat starts with, and how often the question is
+-- said again while it waits (seconds)
+local CHAT_BOX = "advancedperipherals:chat_box"
+local CHAT_PREFIX = "claude"
+local CHAT_REMIND = 120
 -- The programs run_program may run: ccnix's turtle programs, and ip (the
 -- network's settings: it saves them itself) and ping to set up and check
 -- the network
@@ -251,15 +303,15 @@ You are driving a ComputerCraft (CC:Tweaked) turtle in Minecraft, from inside th
 
 Frames: coordinates are the turtle's own, dead-reckoned by the turtlelib library `T`. It started at (0,0,0) facing +z (heading 0); +x is to its right (heading 1), -z is heading 2, -x is heading 3; y is up. T.pos = {x, y, z} and T.dir are where it thinks it is. turtlelib wraps the turtle API, so they stay right however a move is made: turtle.forward(), back(), up(), down(), turnLeft() and turnRight() called straight are counted, and so are digs and placements. T's own moves add fuel (T.ensureFuel), digging what T.diggable lists (empty to start; or set T.diggable["minecraft:stone"] = true) and attacking what's in the way. T.scan(r) does the Geo Scanner's work in this frame for you (see Building below); if you call scanBlocks yourself, its entries carry r, u and f (right, up and forward of the turtle, relative to its heading) as well as the world x, y and z: use r/u/f for cells in this frame. A program run with `--here` makes where the turtle stands its (0,0,0), and so yours; the map, the protected areas, the junk chest and the chests at home move with the frame, so they still name the same blocks.
 
-Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk.
+Safety: protected areas stop every dig through the turtle API, yours included: T.protect(name, x1, y1, z1, x2, y2, z2) protects a box (kept on disk, the same for every program on the turtle), and turtle.dig() or T.forward() into it returns false, "protected: <name>"; T.inside(name, fn) runs fn as a job that owns that area. Protect what you build and what you must not damage (the base, chests, a build you have finished). Digs at chests, barrels, shulker boxes, spawners and ComputerCraft blocks are refused too (unless T.cfg.digContainers = true, which you should not set unless asked): never dig or break those, hoppers or computers, and don't break blocks you weren't asked to. T.moveTo says why it stopped (blocked, protected, lava) and avoids lava, fire and doors by default. Nothing in turtlelib drops items on the ground or into lava: junk goes to a junk chest (T.setJunkChest, T.dumpJunk) or stays in the turtle; put the job's building materials in T.keep (a table of item names) first, since everything not kept is junk. In this session T.cfg.maxHeight is 256 (T.up and the other moves stop that far above where the turtle started; a program keeps 16): set it lower for a ceiling. A lua call with review = true shows its code to the person at the turtle and runs only on a yes: use it before something risky you can't undo.
 
-Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves. The cache keeps the conversation for @CACHE@ with no call reading it: a call or a wait (sleep, ask_user) longer than that has the whole conversation written to the cache again, at more than the call costs. So keep a call to a few minutes, and give every long loop caps on fuel, time and count.
+Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves. The cache keeps the conversation for @CACHE@ with no call reading it: a call or a wait (sleep, ask_user, a chat that asks) longer than that has the whole conversation written to the cache again, at more than the call costs. So keep a call to a few minutes, and give every long loop caps on fuel, time and count.
 
-Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: put the calls in /claude/helpers.lua. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
+Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: keep() the calls. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
 
-How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write; it is loaded into the code's world at the start of every session, so what it defines is there in every lua call. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep each reusable helper (a function you will want again) with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua (code that doesn't compile or run is refused, and nothing is written); at the start of every session /claude/helpers.lua, then each file in /claude/helpers/, is loaded into the code's world, each on its own, so what they define is there in every lua call. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
 
-The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
+The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. The chat tool says something in the game's chat without code, and with ask = true asks and waits for the answer, from the chat or the keyboard; T.report.ask(question, opts) asks from code. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
 
 What you can call in turtlelib (T), one line a function, with what it does and returns (made from the code's own comments, so it is right). A line ending in a colon is a group heading, not a function.
 @INDEX@
@@ -283,7 +335,7 @@ Programs: run_program runs ccnix's own turtle programs, tested and careful about
 
 Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
-Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, call ask_user. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
+Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, ask: the chat tool with ask = true reaches the player in the game, ask_user only the keyboard. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
 -- (the session's TTL: the prompt stays the same for the whole session, so
 -- it stays cached)
@@ -292,10 +344,13 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
-            properties = { code = { type = "string", description = "The Lua code to run." } },
+            properties = {
+                code = { type = "string", description = "The Lua code to run." },
+                review = { type = "boolean", description = "Show the code to the person at the turtle first, and run it only if they say yes." },
+            },
             required = { "code" },
         },
     },
@@ -324,6 +379,19 @@ local TOOLS = {
             type = "object",
             properties = { question = { type = "string" } },
             required = { "question" },
+        },
+    },
+    {
+        name = "chat",
+        description = "Say something to the player in the game's chat (through a chat box: the player in the setting turtle.player, or everyone when none is set). With ask = true it asks and waits for the answer: a chat message starting with \"claude\" from that player, or a line typed at the turtle's keyboard, whichever comes first. The wait stops short of the cache's " .. CACHE_TTLS[opts.cache or "5m"] .. " unless you give a longer timeout_s; no answer by then is a normal result, not an error.",
+        input_schema = {
+            type = "object",
+            properties = {
+                text = { type = "string", description = "What to say, or the question." },
+                ask = { type = "boolean", description = "Wait for an answer." },
+                timeout_s = { type = "number", description = "The longest wait for an answer, in seconds." },
+            },
+            required = { "text" },
         },
     },
     { type = "memory_20250818", name = "memory" },
@@ -706,12 +774,10 @@ end
 modWorld.require = ccRequire
 API.require = ccRequire
 
--- Run /claude/helpers.lua, if there is one, in the code's world, so what
--- it defines is there for the model's code.  Returns nil, or what went
--- wrong, as a sentence for the model.
-local function loadHelpers()
-    if not fs.exists(HELPERS_FILE) then return nil end
-    local chunk, err = codeLoadfile(HELPERS_FILE, "t", env)
+-- Run one helper file in the code's world: nil, or what went wrong, as a
+-- sentence for the model.
+local function loadHelperFile(file)
+    local chunk, err = codeLoadfile(file, "t", env)
     local ok = chunk ~= nil
     if chunk then
         ok, err = pcall(chunk)
@@ -719,9 +785,107 @@ local function loadHelpers()
         if err == "Terminated" then error(err, 0) end
     end
     if ok then return nil end
-    local note = "/claude/helpers.lua failed to load, so none of your kept helpers are defined (fix the file): " .. tostring(err)
+    return "/" .. file .. " failed to load: " .. tostring(err)
+end
+
+-- The helper files there are: /claude/helpers.lua first, then the .lua
+-- files in /claude/helpers/ in name order.
+local function helperFiles()
+    local files = {}
+    if fs.exists(HELPERS_FILE) and not fs.isDir(HELPERS_FILE) then files[1] = HELPERS_FILE end
+    if fs.isDir(HELPERS_DIR) then
+        local names = fs.list(HELPERS_DIR)
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local file = HELPERS_DIR .. "/" .. name
+            if text.endsWith(name, ".lua") and not fs.isDir(file) then files[#files + 1] = file end
+        end
+    end
+    return files
+end
+
+-- Run the helper files in the code's world, each on its own, so what they
+-- define is there for the model's code: one that fails costs only what it
+-- defines.  Returns nil, or the files that failed, as a sentence for the
+-- model.
+local function loadHelpers()
+    local failed = {}
+    for _, file in ipairs(helperFiles()) do
+        local why = loadHelperFile(file)
+        if why then failed[#failed + 1] = why end
+    end
+    if #failed == 0 then return nil end
+    local note = "Not all your kept helpers loaded, so what these define is missing (fix the file, or keep() it again): "
+        .. table.concat(failed, "; ")
     log(note)
     return note
+end
+
+-- keep(name, code) in the code: a helper kept for every session after.
+-- The code is compiled (its errors named after the helper) and run, so
+-- what it defines is there at once, then written to
+-- /claude/helpers/<name>.lua.  Code that doesn't compile or run is an
+-- error, and nothing is written.  Returns true and the file.
+API.keep = function(name, code)
+    if type(name) ~= "string" or not scan.isName(name) then
+        error("keep: the name is one word (letters, digits and _): it names the file", 2)
+    end
+    if type(code) ~= "string" then error("keep: the code is a string of Lua", 2) end
+    local chunk, err = load(code, "=" .. name, "t", env)
+    if not chunk then error("keep: " .. name .. " doesn't compile, so nothing was kept: " .. tostring(err), 2) end
+    local ok, why = pcall(chunk)
+    if not ok then
+        if why == "Terminated" then error(why, 0) end
+        error("keep: " .. name .. " failed as it ran, so nothing was kept: " .. tostring(why), 2)
+    end
+    local file = HELPERS_DIR .. "/" .. name .. ".lua"
+    fs.makeDir(HELPERS_DIR)
+    local saved, notSaved = fileio.write(file, code)
+    if not saved then error("keep: " .. tostring(notSaved), 2) end
+    return true, "/" .. file
+end
+
+-- The functions the code's unindented `local` lines declare ("local
+-- function f", "local f = function"), each once: a local at the top of a
+-- call ends with it, which the model may have forgotten.  Only functions:
+-- `local text = require("text")` or `local ok, why = T.up()` is meant to
+-- end with the call.  (A heuristic: a long string's line that starts with
+-- "local" counts too.)
+local function topLocals(code)
+    local names, seen = {}, {}
+    for _, line in ipairs(text.split(code, "\n", true)) do
+        local sc = scan.new(line)
+        local name
+        if sc:accept("local") and scan.isSpace(sc:peek()) then
+            sc:skipSpaces()
+            name = sc:readName()
+            if name == "function" then
+                sc:skipSpaces()
+                name = sc:readName()
+            else
+                -- local NAME = function
+                sc:skipSpaces()
+                local isFunction = false
+                if sc:accept("=") then
+                    sc:skipSpaces()
+                    isFunction = sc:readName() == "function"
+                end
+                if not isFunction then name = nil end
+            end
+        end
+        if name and not seen[name] then seen[name] = true; names[#names + 1] = name end
+    end
+    return names
+end
+
+-- The note for those names, or nil
+local function localsNote(code)
+    local names = topLocals(code)
+    if #names == 0 then return nil end
+    if #names == 1 then
+        return "note: " .. names[1] .. " was local to this call and is gone; make it global, or keep() it"
+    end
+    return "note: " .. table.concat(names, ", ") .. " were local to this call and are gone; make them global, or keep() them"
 end
 
 local function runLua(code)
@@ -748,7 +912,54 @@ local function runLua(code)
     end
     local all = table.concat(out, "\n")
     if all == "" then all = "(no output)" end
-    return clip(all), not ok
+    all = clip(all)
+    local note = ok and localsNote(code)
+    if note then all = all .. "\n" .. note end
+    return all, not ok
+end
+
+-- The liquids the status line names, by block, in the order it names them,
+-- and the sides it looks at, with the inspect for each
+local LIQUIDS = { ["minecraft:lava"] = "lava", ["minecraft:water"] = "water" }
+local LIQUID_ORDER = { "lava", "water" }
+local LOOKS = { { "below", "inspectDown" }, { "ahead", "inspect" }, { "above", "inspectUp" } }
+
+-- The line that ends each lua result: where the turtle is, its fuel and
+-- what the call used of it (fuelBefore: the level before), the free
+-- slots, and lava or water beside it:
+-- "[at 1,0,2 facing 1, fuel 997 (-3), 14 slots free; lava below/ahead]".
+-- A fault in it is said in its place; Ctrl+T still stops claude.
+local function statusLine(fuelBefore)
+    local ok, line = pcall(function()
+        local fuel = turtle.getFuelLevel()
+        local used = ""
+        if type(fuel) == "number" and type(fuelBefore) == "number" then
+            local d = fuel - fuelBefore
+            used = d > 0 and string.format(" (+%d)", d) or string.format(" (-%d)", -d)
+        end
+        local free = 0
+        for s = 1, 16 do
+            if turtle.getItemCount(s) == 0 then free = free + 1 end
+        end
+        local sides = {}                -- liquid -> the sides it is on
+        for _, look in ipairs(LOOKS) do
+            local seen, data = turtle[look[2]]()
+            local liquid = seen and type(data) == "table" and LIQUIDS[data.name]
+            if liquid then
+                sides[liquid] = sides[liquid] or {}
+                table.insert(sides[liquid], look[1])
+            end
+        end
+        local wet = {}
+        for _, liquid in ipairs(LIQUID_ORDER) do
+            if sides[liquid] then wet[#wet + 1] = liquid .. " " .. table.concat(sides[liquid], "/") end
+        end
+        return string.format("[at %d,%d,%d facing %d, fuel %s%s, %d slots free%s]", T.pos.x, T.pos.y, T.pos.z, T.dir,
+            tostring(fuel), used, free, #wet > 0 and "; " .. table.concat(wet, ", ") or "")
+    end)
+    if ok then return line end
+    if line == "Terminated" then error(line, 0) end
+    return "[status: " .. tostring(line) .. "]"
 end
 
 local function status()
@@ -825,6 +1036,64 @@ end
 local function askUser(question)
     say("yellow", "Claude asks: " .. convert.fromUTF8(tostring(question)))
     return ask("> "), false
+end
+
+-- The chat tool: say input.text in the game's chat (T.report.now), or
+-- with input.ask ask it there (T.report.ask) while the prompt waits for a
+-- line at the keyboard, and take whichever answer comes first.  The chat
+-- box is equipped for the whole wait, if it isn't attached, so a keyboard
+-- answer still puts back what it took off.  No answer in time is a
+-- normal result.
+local function chatTool(input)
+    local said = tostring(input.text or "")
+    if said == "" then return "Nothing to say: give the text.", true end
+    if not input.ask then
+        say("yellow", "Claude says in chat: " .. convert.fromUTF8(said))
+        log("chat: " .. said)
+        local ok, why = T.report.now(said, { plain = true })
+        if ok then return "said in chat" end
+        return "not said in chat: " .. tostring(why), true
+    end
+    local ttl = CACHE_SECONDS[opts.cache or "5m"]
+    local timeout = tonumber(input.timeout_s) or (ttl - CACHE_MARGIN)
+    say("yellow", "Claude asks in chat (or answer here): " .. convert.fromUTF8(said))
+    log("chat, asking: " .. said)
+    local answer, from, failed
+    local function byChat()
+        local a, who = T.report.ask(said, { prefix = CHAT_PREFIX, timeout = timeout, remind = CHAT_REMIND })
+        if a then answer, from = a, tostring(who) .. " answered in chat" else failed = who end
+    end
+    local function byKeyboard()
+        answer = ask("> ")
+        from = "answered at the keyboard"
+    end
+    local function wait()
+        if parallel then parallel.waitForAny(byChat, byKeyboard) else byChat() end
+    end
+    local started = now()
+    if require("mc").new().has.hears then
+        wait()
+    else
+        local ok, why = T.withPeripheral(CHAT_BOX, wait)
+        if not ok then failed = why end
+    end
+    local waited = now() - started
+    -- (past the cache's time, the next call writes the conversation to it again)
+    local cost = waited >= ttl and string.format(" (that was longer than the cache keeps the conversation, %s: the next call writes it to the cache again)",
+        CACHE_TTLS[opts.cache or "5m"]) or ""
+    if answer then
+        if from ~= "answered at the keyboard" then say("yellow", "(" .. from .. ": " .. convert.fromUTF8(answer) .. ")") end
+        log("chat, " .. from .. ": " .. answer)
+        return from .. ": " .. answer .. cost
+    end
+    if text.startsWith(tostring(failed), "no answer in") then
+        say("orange", "(" .. failed .. ")")
+        log("chat: " .. failed)
+        if tonumber(input.timeout_s) then return failed .. cost end
+        return string.format("%s (the wait stops short of the cache's %s; a longer timeout_s waits longer, and then the next call writes the conversation to the cache again)",
+            failed, CACHE_TTLS[opts.cache or "5m"])
+    end
+    return "couldn't ask in chat: " .. tostring(failed) .. " (ask_user asks at the keyboard alone)", true
 end
 
 --------------------------------------------------------------------------
@@ -1075,16 +1344,20 @@ local function runTool(name, input)
         say("lightBlue", "--- lua")
         showCode(code)
         log("lua:\n" .. code)
-        if CONFIRM then
-            local a = ask("Run it? [y/N] ")
+        -- (--confirm asks of every call; review = true, of the model's choosing, of this one)
+        if CONFIRM or input.review == true then
+            local a = ask(input.review == true and "Claude asks you to review this. Run it? [y/N] " or "Run it? [y/N] ")
             if not text.startsWith(a:lower(), "y") then
                 say("orange", "--- not run")
+                log("not run: declined")
+                if input.review == true then return "not run: declined" end
                 return "The user declined to run this code.", true
             end
         end
         say("lightBlue", "---")
         -- what the code prints, in grey, apart from what Claude says
         if COLOUR then term.setTextColour(colours.lightGrey) end
+        local fuelBefore = turtle.getFuelLevel()
         local ok, out, isErr = pcall(runLua, code)
         if COLOUR then term.setTextColour(colours.white) end
         if not ok then error(out, 0) end        -- Terminated
@@ -1093,6 +1366,8 @@ local function runTool(name, input)
             local from = text.find(out, "error: ")
             say("red", from and (text.cut(out:sub(from), "\n")) or out)
         end
+        -- (for the model and the log; the screen has seen it happen)
+        out = out .. "\n" .. statusLine(fuelBefore)
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
     elseif name == "status" then
@@ -1107,10 +1382,95 @@ local function runTool(name, input)
         return runProgram(input)
     elseif name == "ask_user" then
         return askUser(input.question)
+    elseif name == "chat" then
+        return chatTool(input)
     elseif name == "memory" then
         return memory(input)
     end
     return "No such tool: " .. tostring(name), true
+end
+
+--------------------------------------------------------------------------
+-- What's new since the version the model last ran with
+--------------------------------------------------------------------------
+-- The ccnix version in use, as `ccnix version` tells it: what this boot
+-- read (ccnix.version: the updates' deploy/version, else the ROM's), else
+-- the first line of deploy/version where ccnix's files are; nil if none.
+local function ccnixVersion()
+    local v = ccnix and ccnix.version
+    if v == nil or v == "unversioned" then
+        local file = findFile("deploy/version")
+        v = file and text.trim((text.cut(fileio.read(file) or "", "\n")))
+    end
+    if v == nil or v == "" or v == "unversioned" then return nil end
+    return v
+end
+
+-- A version's numbers ("0.51.0" -> { 0, 51, 0 }; what isn't a number counts as 0)
+local function versionParts(v)
+    local parts = {}
+    for _, p in ipairs(text.split(v, ".")) do parts[#parts + 1] = convert.toInteger(p) or 0 end
+    return parts
+end
+
+-- Is version a later than version b?
+local function isLater(a, b)
+    local pa, pb = versionParts(a), versionParts(b)
+    for i = 1, math.max(#pa, #pb) do
+        local x, y = pa[i] or 0, pb[i] or 0
+        if x ~= y then return x > y end
+    end
+    return false
+end
+
+-- The news file's lines for the versions after `from` up to `to`, newest
+-- first.  The file has a "== 0.51.0" heading a version, newest first,
+-- and short lines under each; lines before the first heading, blank ones
+-- and ones starting "--" are for people.  With no `from` (the model's
+-- first run with this), only the newest version's lines up to `to`.
+local function newsLines(news, from, to)
+    local out, version, taken = {}, nil, 0
+    for _, line in ipairs(text.lines(news)) do
+        local l = text.trim(line)
+        local heading = text.stripPrefix(l, "== ")
+        if heading then
+            version = text.trim(heading)
+            local wanted = not isLater(version, to) and (from == nil and taken == 0 or from ~= nil and isLater(version, from))
+            if wanted then taken = taken + 1 else version = nil end
+        elseif version and l ~= "" and not text.startsWith(l, "--") then
+            out[#out + 1] = "- " .. l
+        end
+    end
+    return out
+end
+
+-- The version to write to VERSION_FILE once the model has had the news
+local newVersion
+
+-- The note on what changed since the version the model last ran with,
+-- or nil (the same version, no news, nothing in it for these versions).
+local function whatsNew()
+    local current = ccnixVersion()
+    if not current then return nil end
+    local last = fileio.read(VERSION_FILE)
+    last = last and text.trim((text.cut(last, "\n")))
+    if last == "" then last = nil end
+    if last == current then return nil end
+    newVersion = current
+    local file = findFile(NEWS)
+    local lines = newsLines(file and fileio.read(file) or "", last, current)
+    if #lines == 0 then return nil end
+    return string.format("ccnix was updated from %s to %s; what changed for you:\n%s", last or "an earlier version", current,
+        table.concat(lines, "\n"))
+end
+
+-- Keep the version the model has had the news for.
+local function keepVersion()
+    if not newVersion then return end
+    fs.makeDir(WRITE_DIR)
+    fileio.write(VERSION_FILE, newVersion .. "\n")
+    log("version: " .. newVersion .. " kept in /" .. VERSION_FILE)
+    newVersion = nil
 end
 
 --------------------------------------------------------------------------
@@ -1134,6 +1494,29 @@ local function asUTF8(v)
         end
     end
     return v
+end
+
+-- Once the API has said the conversation is too long, the clear is the
+-- harder one for the rest of the conversation (/new starts it again)
+local hardClear = false
+
+-- The context edits: old thinking first (the API wants that edit listed
+-- before the others), then the old tool calls, their code and results
+-- both, the memory tool's kept.
+local function contextEdits()
+    local trigger, keep, atLeast = CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST
+    if hardClear then trigger, keep, atLeast = HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST end
+    return { edits = {
+        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = THINKING_TURNS } },
+        {
+            type = "clear_tool_uses_20250919",
+            trigger = { type = "input_tokens", value = trigger },
+            keep = { type = "tool_uses", value = keep },
+            clear_at_least = { type = "input_tokens", value = atLeast },
+            clear_tool_inputs = true,
+            exclude_tools = { "memory" },
+        },
+    } }
 end
 
 local function body()
@@ -1161,16 +1544,11 @@ local function body()
         -- a refusal by the safety classifiers is retried on a fallback
         -- model server-side (see the API docs: server-side fallback)
         fallbacks = "default",
-        -- a long session's old tool results are cleared server-side
-        -- (the newest kept, the memory tool's never), so each round trip
-        -- doesn't carry all of them (see the API docs: context editing)
-        context_management = { edits = { {
-            type = "clear_tool_uses_20250919",
-            trigger = { type = "input_tokens", value = CLEAR_TRIGGER },
-            keep = { type = "tool_uses", value = KEEP_TOOL_USES },
-            clear_at_least = { type = "input_tokens", value = CLEAR_AT_LEAST },
-            exclude_tools = { "memory" },
-        } } },
+        -- a long session's old tool calls and thinking are cleared
+        -- server-side (the newest kept, the memory tool's never), so each
+        -- round trip doesn't carry all of them (see the API docs: context
+        -- editing)
+        context_management = contextEdits(),
     }), { allow_repetitions = true, unicode_strings = true })
 end
 
@@ -1265,7 +1643,7 @@ local RETRY_ERRORS = { overloaded_error = true, api_error = true, rate_limit_err
 -- is a stream cut off by an overload.
 local function request()
     local wait = 2
-    for attempt = 1, RETRIES + 1 do
+    for attempt = 1, RETRIES + 2 do         -- (one more for the harder clear)
         local h, err, failed = http.post({ url = API_URL, headers = HEADERS, body = body(), timeout = HTTP_TIMEOUT })
         local code, got
         if h then
@@ -1275,7 +1653,7 @@ local function request()
             code, got = failed.getResponseCode(), failed.readAll()
             if failed.close then failed.close() end
         end
-        local detail, again
+        local detail, again, tooLong
         if code == 200 then
             local reply, e = fromEvents(got)
             if reply then return reply end
@@ -1287,18 +1665,28 @@ local function request()
             if got then
                 local e = textutils.unserialiseJSON(got)
                 detail = e and e.error and (e.error.type .. ": " .. tostring(e.error.message)) or got:sub(1, 200)
+                -- (the conversation has outgrown the model's context)
+                tooLong = code == 400 and e and e.error and e.error.type == "invalid_request_error"
+                    and text.contains(tostring(e.error.message), "prompt is too long")
             end
             again = (not code) or RETRY_CODES[code] == true
         end
-        if not again or attempt > RETRIES then
+        if tooLong and not hardClear then
+            -- once, at once: the same conversation with more of it cleared
+            hardClear = true
+            say("orange", "API: the conversation is too long; trying again with more of it cleared.")
+            log(string.format("API: %s; trying again with a harder clear (from %d tokens, the last %d tool uses kept)",
+                detail, HARD_TRIGGER, HARD_KEEP))
+        elseif not again or attempt > RETRIES then
             local failure = string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
             log(failure)
             return nil, failure
+        else
+            say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
+            log(string.format("API: %s; trying again in %ds", detail, wait))
+            sleep(wait)
+            wait = wait * 2
         end
-        say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
-        log(string.format("API: %s; trying again in %ds", detail, wait))
-        sleep(wait)
-        wait = wait * 2
     end
 end
 
@@ -1361,15 +1749,28 @@ local function addUser(said, why)
     end
 end
 
+-- A line for after the tool results when the player hasn't been told
+-- anything in chat (T.report, T.report.ask, the chat tool) for
+-- claude.remindChat minutes, counted from `since` (the goal's start, or
+-- the last reminder) or the last message, whichever is later; or nil.
+local function chatReminder(since)
+    if REMIND_CHAT <= 0 or now() - since < REMIND_CHAT * 60 then return nil end
+    local quiet = now() - math.max(since, T.report.lastTold() or 0)
+    if quiet < REMIND_CHAT * 60 then return nil end
+    return string.format("%d minutes without a word to the player in chat: tell them how it is going (the chat tool, or T.report).",
+        math.floor(quiet / 60))
+end
+
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
-local startNote         -- what loading the helpers said, for the model's first goal
+local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
 local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
 local function converse(goal)
-    local said = startNote and goal .. "\n\n[" .. startNote .. "]" or goal
+    local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
     addUser(said, "Not run: the goal ended before this call was answered.")
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
+    local quietSince = now()             -- (the goal's start, then each reminder: the player's last word is T.report's)
     while true do
         local started = now()
         local reply, err = request()
@@ -1382,7 +1783,8 @@ local function converse(goal)
             return false
         end
         count(reply, now() - started)
-        startNote = nil
+        startNotes = {}
+        keepVersion()
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
@@ -1425,6 +1827,12 @@ local function converse(goal)
                 results[#results + 1] = { type = "text",
                     text = string.format("That was tool call %d of the %d allowed for this goal: stop here and say what you did.", steps, MAX_STEPS) }
             end
+            local quiet = chatReminder(quietSince)
+            if quiet then
+                quietSince = now()
+                results[#results + 1] = { type = "text", text = quiet }
+                log("reminded: " .. quiet)
+            end
             messages[#messages + 1] = { role = "user", content = results }
         elseif reply.stop_reason == "max_tokens" and not cutOff then
             cutOff = true
@@ -1444,8 +1852,23 @@ end
 --------------------------------------------------------------------------
 -- Main
 --------------------------------------------------------------------------
+-- /new at the prompt: the conversation emptied, the helpers loaded again
+-- (what's on disk, the memory and the files, carries over)
+local NEW = "/new"
+local function newConversation()
+    for i = #messages, 1, -1 do messages[i] = nil end
+    hardClear, lastCleared, startNotes = false, nil, {}
+    startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
+    local failed = loadHelpers()
+    if failed then say("red", failed); startNotes[2] = failed end
+    say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    log("new conversation")
+end
+
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
+    -- (a session climbs further than a program: the helpers or the model may set it otherwise)
+    T.cfg.maxHeight = MAX_HEIGHT
     say("yellow", string.format("Claude at the controls (%s, effort %s). Turtle at %s facing %d, fuel %s.",
         MODEL, EFFORT, T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     -- the options as given, and what they came to
@@ -1457,18 +1880,29 @@ local function main()
     log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)",
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
-    startNote = loadHelpers()
-    if startNote then say("red", startNote) end
+    local failed = loadHelpers()
+    if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
+    local news = whatsNew()
+    if news then
+        say("yellow", (text.cut(news, ";")) .. ": Claude is told what changed.")
+        log("news: " .. news)
+        startNotes[#startNotes + 1] = news
+    end
     if goal == "" then
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        local before = tables.copy(usage)
-        converse(goal)
-        local line = tokenLine(before)
-        say("grey", line)
-        log("goal done: " .. line)
-        goal = ask("> ")
+        if text.trim(goal) == NEW then
+            newConversation()
+            goal = ask("Goal: ")
+        else
+            local before = tables.copy(usage)
+            converse(goal)
+            local line = tokenLine(before)
+            say("grey", line)
+            log("goal done: " .. line)
+            goal = ask("> ")
+        end
     end
 end
 

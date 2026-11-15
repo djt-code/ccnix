@@ -700,7 +700,7 @@ T.build and T.harvest write their progress there (T.job.progress) when a job is 
 
 The undo journal (T.cfg.undo = true) writes down each block the turtle digs or places, in the data file .undo: the block's name and its state for a dig (the dig looks first, so the state comes free), the item for a placement.  T.undo(n) puts the last n back: a dug block is placed again (through T.placeAt when it has a state, with the item on hand) and a placed one is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 
-T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
+T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).  T.report.ask asks the player in chat and waits for an answer starting with "claude"; T.report.lastTold says when the player was last told anything.
 
 == The job journal ==
 
@@ -740,6 +740,16 @@ T.report.now(said, opts)
 
 T.report.try(said, opts)
     T.report.now for a program's end or trouble: the same arguments, but it never raises. True, or nil and why (Ctrl+T goes on).
+
+T.report.ask(question, opts)
+    Ask the player `question` in chat and wait for the answer: the text (the prefix taken off), the player who gave it and when (seconds since 1970); or nil and why ("no answer in 300 s", no chat box).
+
+    The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back after. An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from that player only (anyone's with none set). opts.timeout is the longest wait in seconds (default 300); opts.remind says the question again every so many seconds (default never). Ctrl+T stops the wait.
+
+T.report.lastTold()
+    When the player was last told something through T.report, T.report.now or T.report.ask: seconds since 1970, or nil if nothing has been told since the computer started.
+
+    claude reminds the model to keep the player told by it (the setting claude.remindChat).
 
 T.report.every(n)
     Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.

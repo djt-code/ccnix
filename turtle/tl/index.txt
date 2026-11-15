@@ -182,6 +182,8 @@ T.job.clear() - End the job: forget it and its file (a finished job, its last st
 Reports to the player:
 T.report.now(said, opts) - Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 T.report.try(said, opts) - T.report.now for a program's end or trouble: the same arguments, but it never raises. True, or nil and why (Ctrl+T goes on).
+T.report.ask(question, opts) - Ask the player `question` in chat and wait for the answer: the text (the prefix taken off), the player who gave it and when (seconds since 1970); or nil and why ("no answer in 300 s", no chat box).
+T.report.lastTold() - When the player was last told something through T.report, T.report.now or T.report.ask: seconds since 1970, or nil if nothing has been told since the computer started.
 T.report.every(n) - Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.
 The undo journal:
 T.undoMark() - The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.

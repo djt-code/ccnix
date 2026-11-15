@@ -100,6 +100,7 @@ Setting up (deploy/setup.lua, or ccnix setup):
   setup: ccnix on a turtle or computer: put it there, choose what it runs, update it
 
 Topics:
+  claude-news: what changed for claude (the model driving a turtle), by version, newest first
   httpd-pages: Lua pages on the web server: forms, routes, templates, cookies
   irc-scripts: irc's scripts: Lua that changes what the IRC client does, as irssi's Perl scripts do.
   network: setting up a network lab (3 computers, 2 networks, a router)
