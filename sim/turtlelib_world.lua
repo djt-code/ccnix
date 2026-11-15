@@ -249,7 +249,7 @@ cells, why = T.scan(9)
 check("a radius over 8 is refused without force, before the scanner is asked", cells == nil and why:find("force", 1, true) and scanCalls == calls,
     tostring(why))
 cells, why = T.scan(9, { force = true })
-check("...and done with force = true", cells ~= nil and scanCalls == calls + 1, tostring(why))
+check("...and done with force = true", cells ~= nil and scanCalls == calls + 1, cells and "scanned" or tostring(why))
 cells, why = T.scan(0)
 check("a radius under 1 is refused", cells == nil and why, tostring(why))
 cells, why = T.scan(2.5)
@@ -768,7 +768,7 @@ put(1, 0, 0, STONE); put(18, 0, 3, GOLD); put(10, 4, 4, IRON)
 local report
 report, why = T.scanBox({ 0, 0, 0, 19, 4, 4 })
 check("T.scanBox tiles radius-8 scans over the box: two scans for 20 across", report and report.tiles == 2 and report.scanned == 2 and #report.failed == 0,
-    report and dump(report) or tostring(why))
+    report and ("tiles=" .. report.tiles .. " scanned=" .. report.scanned .. " failed=" .. #report.failed) or tostring(why))
 check("...and the whole box is in the map", T.map.get(1, 0, 0) == STONE and T.map.get(18, 0, 3) == GOLD and T.map.get(10, 4, 4) == IRON
     and T.map.get(19, 4, 4) == "minecraft:air", tostring(T.map.get(18, 0, 3)))
 report, why = T.scanBox({ 0, 0, 0, 600, 4, 4 })

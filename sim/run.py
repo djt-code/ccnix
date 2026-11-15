@@ -36,9 +36,23 @@ def lua():
     return LuaRuntime()
 
 
+# The wall clock, pinned so two runs print the same: os.time() starts at
+# 2026-01-01 00:00:00 UTC and steps a second each time it is asked (a loop
+# waiting for a time still ends), and os.date with no time uses it; and
+# math.random seeded the same.
+CLOCK = """
+local start, ticks, time, date = 1767225600, 0, os.time, os.date
+os.time = function(t) if t ~= nil then return time(t) end; ticks = ticks + 1; return start + ticks end
+os.date = function(f, t) return date(f, t == nil and os.time() or t) end
+math.randomseed(1)
+"""
+
+
 def run_one(path):
     src = open(path, encoding="utf-8").read()
-    runner = lua().eval("function(src, name, root) return assert(load(src, '@' .. name))(root) end")
+    rt = lua()
+    rt.execute(CLOCK)
+    runner = rt.eval("function(src, name, root) return assert(load(src, '@' .. name))(root) end")
     runner(src, os.path.basename(path), ROOT.replace("\\", "/"))
 
 
