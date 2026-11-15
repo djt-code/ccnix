@@ -1122,3 +1122,61 @@ run("lava round it")
 local l30 = resultsIn(2).toolu_1
 check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
     l30 and tostring(l30.status))
+
+-- 31. helpers one to a file (ADR-0011 D6): /claude/helpers.lua first, then
+--     each file in /claude/helpers/ in name order, each on its own, the
+--     broken ones named; keep(name, code) compiles, runs and writes one,
+--     and writes nothing for code that doesn't compile or run; a local at
+--     the top of a call is noted as gone
+fresh({ "" })
+Mine.dirs["claude/helpers"] = true
+Mine.files["claude/helpers.lua"] = "ORDER = 'file'"
+Mine.files["claude/helpers/b_bad.lua"] = "function broken( end"
+Mine.files["claude/helpers/a_err.lua"] = "error('a_err fails', 0)"
+Mine.files["claude/helpers/c_good.lua"] = "ORDER = ORDER .. ',c'; function quad(n) return 4 * n end"
+Mine.files["claude/helpers/notes.txt"] = "not a helper"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return ORDER, quad(2)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[local ok, file = keep("triple", "function triple(n) return 3 * n end"); return ok, file, triple(2)]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("bad", "function bad( end")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("boom", "error('it broke', 0)")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = [[return keep("../startup", "x = 1")]] }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local function helper() return 1 end\nlocal two = function() return 2 end\nlocal helper = function() end\n  local function inner() end\nlocal a, b = 1, 2\nlocal text = require('text')\nreturn 1" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local x = function() return 5 end\nreturn x()" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "local function y() end\nerror('no', 0)" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("keep things")
+local first31 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("helpers.lua, then the folder's files in name order, each on its own: the good ones loaded",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> file,c\n-> 8", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content)
+check("...the broken ones named to the model with its first goal, a syntax error and a runtime one",
+    first31:find("/claude/helpers/a_err.lua failed to load: a_err fails; /claude/helpers/b_bad.lua failed to load: ", 1, true)
+        and not first31:find("c_good", 1, true) and not first31:find("helpers.lua failed", 1, true), first31)
+local k2 = resultsIn(3).toolu_2
+check("keep: compiled, run (defined at once) and written to /claude/helpers/<name>.lua",
+    k2 and k2.content == "-> true\n-> /claude/helpers/triple.lua\n-> 6"
+        and Mine.files["claude/helpers/triple.lua"] == "function triple(n) return 3 * n end", k2 and k2.content)
+local k3, k4, k5 = resultsIn(4).toolu_3, resultsIn(5).toolu_4, resultsIn(6).toolu_5
+check("keep: code that doesn't compile is an error naming the helper, and nothing is written",
+    k3 and k3.is_error and k3.content:find("keep: bad doesn't compile, so nothing was kept: bad:1:", 1, true)
+        and Mine.files["claude/helpers/bad.lua"] == nil, k3 and k3.content)
+check("...nor code that fails as it runs",
+    k4 and k4.is_error and k4.content:find("keep: boom failed as it ran, so nothing was kept: it broke", 1, true)
+        and Mine.files["claude/helpers/boom.lua"] == nil, k4 and k4.content)
+check("...and the name is one word, so the file stays in the folder",
+    k5 and k5.is_error and k5.content:find("the name is one word", 1, true) and Mine.files["startup.lua"] == nil, k5 and k5.content)
+local l6, l7, l8 = resultsIn(7).toolu_6, resultsIn(8).toolu_7, resultsIn(9).toolu_8
+check("an unindented local function at the top of a call is noted as gone, each name once; an indented one, and other locals, not",
+    l6 and l6.content == "-> 1\nnote: helper, two were local to this call and are gone; make them global, or keep() them", l6 and l6.content)
+check("...one name in the singular", l7 and l7.content == "-> 5\nnote: x was local to this call and is gone; make it global, or keep() it", l7 and l7.content)
+check("...and nothing is noted when the call failed", l8 and l8.is_error and l8.content == "error: no", l8 and l8.content)
+fresh({ "" })
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("what do I keep")
+local sys31 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local lua31 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("the prompt and the lua tool tell of keep(name, code) and /claude/helpers/",
+    sys31:find("with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua", 1, true)
+        and sys31:find("/claude/helpers.lua, then each file in /claude/helpers/", 1, true)
+        and lua31:find("keep(name, code) runs a helper and keeps it", 1, true))

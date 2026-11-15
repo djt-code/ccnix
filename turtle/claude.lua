@@ -26,8 +26,8 @@
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
--- helpers are loaded again), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run,
--- so the saved position stays right).
+-- helpers are loaded again), or press Enter on an empty line to quit.
+-- Ctrl+T stops it (under T.run, so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
 -- as vi does it (lib/syntax: keywords yellow, comments green, strings
@@ -65,11 +65,17 @@
 -- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
 -- replacing the older copy, and a new claude.log starts: one old copy kept.
 --
--- Its helpers: functions it wants again are kept in /claude/helpers.lua (it
--- can write there).  At the start of each session that file, if it's there,
--- is run in the code's own world, so what it defines is in scope for every
--- chunk the model runs.  A broken file is told to the model with its first
--- goal, and the session goes on without it.
+-- Its helpers: functions it wants again are kept one to a file, each
+-- with keep(name, code) in its code, which runs the code (so it's defined
+-- at once) and writes it to /claude/helpers/<name>.lua; code that doesn't
+-- compile or run is refused and nothing is written.  At the start of each
+-- session /claude/helpers.lua (an older single file, which it can still
+-- write) and then each file in /claude/helpers/, in name order, is run in
+-- the code's own world, each on its own, so what they define is in scope
+-- for every chunk the model runs.  The files that fail are told to the
+-- model with its first goal, and the session goes on without them.  A
+-- call whose code declares a `local` at its top level (an unindented
+-- `local` line) gets a note: that name is gone when the call ends.
 --
 -- What it can call: the system prompt carries turtlelib's index, one line a
 -- function (turtle/tl/index.txt, made from the comments above the functions
@@ -147,7 +153,8 @@ local KEY_FILE = T.dataPath("claude.key")
 local LOG_FILE = T.dataPath("claude.log")
 local LOG_SIZE = tonumber(T.setting("claude.logSize", 262144,
     "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144
-local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session
+local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
+local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
 local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
                                 -- thinking before it counts too
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
@@ -268,9 +275,9 @@ Safety: protected areas stop every dig through the turtle API, yours included: T
 
 Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its radius (r=16 has cost thousands), so scan with r of 8 or less and check turtle.getFuelLevel() before and after. Keep an eye on fuel: T.refuelTo(n) burns fuel items from the inventory, T.refuelFrom(side, n) from a chest. Each tool call is a slow network round trip and the whole conversation is sent each time (cached, but it grows), so work in few calls with loops that check themselves. The cache keeps the conversation for @CACHE@ with no call reading it: a call or a wait (sleep, ask_user) longer than that has the whole conversation written to the cache again, at more than the call costs. So keep a call to a few minutes, and give every long loop caps on fuel, time and count.
 
-Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: put the calls in /claude/helpers.lua. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
+Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: keep() the calls. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
 
-How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep reusable helpers (functions you will want again) in /claude/helpers.lua, which you can write; it is loaded into the code's world at the start of every session, so what it defines is there in every lua call. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep each reusable helper (a function you will want again) with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua (code that doesn't compile or run is refused, and nothing is written); at the start of every session /claude/helpers.lua, then each file in /claude/helpers/, is loaded into the code's world, each on its own, so what they define is there in every lua call. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
 
 The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
 
@@ -305,7 +312,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -719,12 +726,10 @@ end
 modWorld.require = ccRequire
 API.require = ccRequire
 
--- Run /claude/helpers.lua, if there is one, in the code's world, so what
--- it defines is there for the model's code.  Returns nil, or what went
--- wrong, as a sentence for the model.
-local function loadHelpers()
-    if not fs.exists(HELPERS_FILE) then return nil end
-    local chunk, err = codeLoadfile(HELPERS_FILE, "t", env)
+-- Run one helper file in the code's world: nil, or what went wrong, as a
+-- sentence for the model.
+local function loadHelperFile(file)
+    local chunk, err = codeLoadfile(file, "t", env)
     local ok = chunk ~= nil
     if chunk then
         ok, err = pcall(chunk)
@@ -732,9 +737,107 @@ local function loadHelpers()
         if err == "Terminated" then error(err, 0) end
     end
     if ok then return nil end
-    local note = "/claude/helpers.lua failed to load, so none of your kept helpers are defined (fix the file): " .. tostring(err)
+    return "/" .. file .. " failed to load: " .. tostring(err)
+end
+
+-- The helper files there are: /claude/helpers.lua first, then the .lua
+-- files in /claude/helpers/ in name order.
+local function helperFiles()
+    local files = {}
+    if fs.exists(HELPERS_FILE) and not fs.isDir(HELPERS_FILE) then files[1] = HELPERS_FILE end
+    if fs.isDir(HELPERS_DIR) then
+        local names = fs.list(HELPERS_DIR)
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local file = HELPERS_DIR .. "/" .. name
+            if text.endsWith(name, ".lua") and not fs.isDir(file) then files[#files + 1] = file end
+        end
+    end
+    return files
+end
+
+-- Run the helper files in the code's world, each on its own, so what they
+-- define is there for the model's code: one that fails costs only what it
+-- defines.  Returns nil, or the files that failed, as a sentence for the
+-- model.
+local function loadHelpers()
+    local failed = {}
+    for _, file in ipairs(helperFiles()) do
+        local why = loadHelperFile(file)
+        if why then failed[#failed + 1] = why end
+    end
+    if #failed == 0 then return nil end
+    local note = "Not all your kept helpers loaded, so what these define is missing (fix the file, or keep() it again): "
+        .. table.concat(failed, "; ")
     log(note)
     return note
+end
+
+-- keep(name, code) in the code: a helper kept for every session after.
+-- The code is compiled (its errors named after the helper) and run, so
+-- what it defines is there at once, then written to
+-- /claude/helpers/<name>.lua.  Code that doesn't compile or run is an
+-- error, and nothing is written.  Returns true and the file.
+API.keep = function(name, code)
+    if type(name) ~= "string" or not scan.isName(name) then
+        error("keep: the name is one word (letters, digits and _): it names the file", 2)
+    end
+    if type(code) ~= "string" then error("keep: the code is a string of Lua", 2) end
+    local chunk, err = load(code, "=" .. name, "t", env)
+    if not chunk then error("keep: " .. name .. " doesn't compile, so nothing was kept: " .. tostring(err), 2) end
+    local ok, why = pcall(chunk)
+    if not ok then
+        if why == "Terminated" then error(why, 0) end
+        error("keep: " .. name .. " failed as it ran, so nothing was kept: " .. tostring(why), 2)
+    end
+    local file = HELPERS_DIR .. "/" .. name .. ".lua"
+    fs.makeDir(HELPERS_DIR)
+    local saved, notSaved = fileio.write(file, code)
+    if not saved then error("keep: " .. tostring(notSaved), 2) end
+    return true, "/" .. file
+end
+
+-- The functions the code's unindented `local` lines declare ("local
+-- function f", "local f = function"), each once: a local at the top of a
+-- call ends with it, which the model may have forgotten.  Only functions:
+-- `local text = require("text")` or `local ok, why = T.up()` is meant to
+-- end with the call.  (A heuristic: a long string's line that starts with
+-- "local" counts too.)
+local function topLocals(code)
+    local names, seen = {}, {}
+    for _, line in ipairs(text.split(code, "\n", true)) do
+        local sc = scan.new(line)
+        local name
+        if sc:accept("local") and scan.isSpace(sc:peek()) then
+            sc:skipSpaces()
+            name = sc:readName()
+            if name == "function" then
+                sc:skipSpaces()
+                name = sc:readName()
+            else
+                -- local NAME = function
+                sc:skipSpaces()
+                local isFunction = false
+                if sc:accept("=") then
+                    sc:skipSpaces()
+                    isFunction = sc:readName() == "function"
+                end
+                if not isFunction then name = nil end
+            end
+        end
+        if name and not seen[name] then seen[name] = true; names[#names + 1] = name end
+    end
+    return names
+end
+
+-- The note for those names, or nil
+local function localsNote(code)
+    local names = topLocals(code)
+    if #names == 0 then return nil end
+    if #names == 1 then
+        return "note: " .. names[1] .. " was local to this call and is gone; make it global, or keep() it"
+    end
+    return "note: " .. table.concat(names, ", ") .. " were local to this call and are gone; make them global, or keep() them"
 end
 
 local function runLua(code)
@@ -761,7 +864,10 @@ local function runLua(code)
     end
     local all = table.concat(out, "\n")
     if all == "" then all = "(no output)" end
-    return clip(all), not ok
+    all = clip(all)
+    local note = ok and localsNote(code)
+    if note then all = all .. "\n" .. note end
+    return all, not ok
 end
 
 -- The liquids the status line names, by block, in the order it names them,

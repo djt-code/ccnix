@@ -18,7 +18,7 @@ Usage:
   --confirm
       show each piece of code and ask before running it
 
-When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run, so the saved position stays right).
+When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit. Ctrl+T stops it (under T.run, so the saved position stays right).
 
 Colour (an advanced computer or turtle): the code it runs is highlighted as vi does it (lib/syntax: keywords yellow, comments green, strings red, numbers and nil/true/false magenta, library names cyan), what the code prints is grey, prompts and questions yellow, retries orange, errors red; Claude's own words are white.
 
@@ -32,7 +32,7 @@ What it costs: every round trip (one tool call) sends the whole conversation, so
 
 The log, claude.log beside the program: each entry with its time (UTC); the options a session started with, the goals, the code and what it did, the thinking, each call's tokens and how long it took, retries, clears, and each goal's tokens in all.  A call that writes many tokens to the cache after a long gap is the cache having run out (--cache 1h). At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1, replacing the older copy, and a new claude.log starts: one old copy kept.
 
-Its helpers: functions it wants again are kept in /claude/helpers.lua (it can write there).  At the start of each session that file, if it's there, is run in the code's own world, so what it defines is in scope for every chunk the model runs.  A broken file is told to the model with its first goal, and the session goes on without it.
+Its helpers: functions it wants again are kept one to a file, each with keep(name, code) in its code, which runs the code (so it's defined at once) and writes it to /claude/helpers/<name>.lua; code that doesn't compile or run is refused and nothing is written.  At the start of each session /claude/helpers.lua (an older single file, which it can still write) and then each file in /claude/helpers/, in name order, is run in the code's own world, each on its own, so what they define is in scope for every chunk the model runs.  The files that fail are told to the model with its first goal, and the session goes on without them.  A call whose code declares a `local` at its top level (an unindented `local` line) gets a note: that name is gone when the call ends.
 
 What it can call: the system prompt carries turtlelib's index, one line a function (turtle/tl/index.txt, made from the comments above the functions by sim/mkhelp.py), and says where help/turtlelib.txt, the full reference, is to read with fs.  The index is read when claude starts; if it isn't on the computer the prompt says so and sends the model to the source.
 
