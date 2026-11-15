@@ -1,7 +1,7 @@
 # ADR-0011: What the turtle learned building for days: turtlelib and claude, second pass
 
-**Status:** Proposed (2026-11-15): decisions D1 to D10 below are the
-user's to make
+**Status:** Accepted (2026-11-15): the user took every recommendation,
+D1 to D10
 **Date:** 2026-11-15
 **Deciders:** Dan Theisen
 
@@ -94,7 +94,7 @@ about three hours on 2026-11-15):
   top-level `print` in helpers.lua fails the whole file (`env.print`
   isn't set yet), and one error loses every helper.
 
-## Decision (proposed)
+## Decision
 
 1. Make failures loud and refusals explained, everywhere the model met
    a silent one (Phase 1, no decision needed).
@@ -289,7 +289,7 @@ known.
 12. [ ] `T.fetch`'s doubled suffix; `T.smelt` takes its own furnace back
     inside a protected area (it placed it); `T.setOrigin` warns of saved
     jobs (`mine.job`, `.build`) in the old frame.
-13. [ ] claude: `--model` takes `opus`, `sonnet`, `haiku`; `env.print`
+13. [x] claude (#23): `--model` takes `opus`, `sonnet`, `haiku`; `env.print`
     set before helpers.lua loads; the `context:`
     line logged only when it changes; `io.write`, `write`,
     `printError`, `setmetatable`, `getmetatable`, `rawget`, `rawset`,
@@ -299,7 +299,7 @@ known.
 
 1. [ ] index and help: `T.keep` is a set, `maxHeight` 16, `T.job.clear`,
    protection blocks digs (not placing), harvest skips protected areas.
-2. [ ] The prompt: globals persist and `local` doesn't; clearing doesn't
+2. [x] The prompt (#23): globals persist and `local` doesn't; clearing doesn't
    remove definitions; plan files before a big job; a pre-flight check
    (fuel, slots, materials, protections, route, liquids); caps on every
    long loop and a call of more than a few minutes; check each result
