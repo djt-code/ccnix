@@ -11,8 +11,9 @@
 --   a cell never seen    a move and a dig when digging everything is allowed; otherwise a move and a
 --                        penalty, so a route through the unseen is possible but the known is preferred
 --                        (it is checked as it is walked)
---   a wall               never: a protected area (except the one opts.inside names, and except the empty cells of an
---                        area the route starts or ends in), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says
+--   a wall               never: a cell of a protected area the map doesn't know to be empty (a block, or never seen:
+--                        nothing in an area is dug, except in the one opts.inside names; its known air and water are
+--                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says
 --                        otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
@@ -151,22 +152,15 @@ local function newWorld(opts, from, to)
             anyBanned = true
         end
     end
-    -- the protected areas, as boxes of this frame; one the route starts or ends in is open to empty cells
-    local sx, sy, sz = toS(from.x, from.y, from.z)
-    local gx, gy, gz = toS(to.x, to.y, to.z)
+    -- the protected areas, as boxes of this frame: their cells known to be empty are open, the rest walls
     local boxes = {}
     local inside = opts.inside or T.cfg.inside
     for _, a in ipairs(T.protections()) do
         if a.name ~= inside then
             local ax, ay, az = toS(a.x1, a.y1, a.z1)
             local bx, by, bz = toS(a.x2, a.y2, a.z2)
-            local box = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by),
-                          math.max(az, bz), name = a.name }
-            local function holds(x, y, z)
-                return x >= box[1] and x <= box[4] and y >= box[2] and y <= box[5] and z >= box[3] and z <= box[6]
-            end
-            box.open = holds(sx, sy, sz) or holds(gx, gy, gz)
-            boxes[#boxes + 1] = box
+            boxes[#boxes + 1] = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by),
+                                  math.max(az, bz), name = a.name }
         end
     end
     local w = { toS = toS, fromS = fromS, dig = opts.dig, boxes = boxes }
@@ -204,7 +198,7 @@ local function newWorld(opts, from, to)
         for i = 1, #boxes do
             local b = boxes[i]
             if mx >= b[1] and mx <= b[4] and my >= b[2] and my <= b[5] and mz >= b[3] and mz <= b[6] then
-                if b.open and c == PASS then return PASS end
+                if c == PASS then return PASS end
                 return WALL
             end
         end

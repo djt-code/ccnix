@@ -27,7 +27,8 @@
 --     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
 --     for block states; a re-zeroed frame (--here) keeps the map right
 --   * routes (tl.path, loaded when first used): T.path, A* over the map round
---     protected areas, lava, fire and doors, and T.travel, which walks one
+--     lava, fire and doors and through protected areas only where the map
+--     knows they are empty (nothing in one is dug), and T.travel, which walks one
 --     along a clear layer (or the search), planning again at a block it did
 --     not expect; T.moveTo's opts.path asks for it
 --   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab,
