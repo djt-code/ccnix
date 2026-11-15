@@ -161,6 +161,7 @@ T.recipe(name) - The first recipe that makes an item: { out, count, shape, key, 
 T.canCraft(name, n, opts) - Can the item be crafted: true, or false, why and the short list. Counts the inventory and the chest.
 Crafting from a chest:
 T.craft(name, n, opts) - Craft n of an item from a chest (stash the inventory, fill the grid, craft, put it all back): true and how many, or false/nil and why.
+T.craftBatch(list, opts) - Craft a list { { name, n }, ... } in one go with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
 Fuel and smelting:
 T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it smelts an item in 200), or nil if it is not a fuel.
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
