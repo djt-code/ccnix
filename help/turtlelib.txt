@@ -632,7 +632,7 @@ T.harvest(pattern, where, target, opts)
 T.refuelFromLava(target, opts)
     Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 
-    `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit the tank (1000 each), or when no lava source is left to reach. It needs an empty bucket aboard (a lava bucket aboard is burned first). The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over. opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
+    `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit the tank (1000 each), or when no lava source is left to reach. It needs an empty bucket aboard (a lava bucket aboard is burned first). The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over. Lava in a protected area is left (the area T.inside names is the job's), and so is lava in opts.exclude, a list of areas' names and boxes. opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
 
 == What a job costs in fuel ==
 
