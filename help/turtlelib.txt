@@ -606,7 +606,7 @@ T.smeltsTo(name)
 T.smelt(item, n, fuel, opts)
     Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
 
-    The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
+    The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back (in a protected area too: it is the turtle's own) and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
 
     Returns true, got; false, why, got (it did not all come out in time); or nil, why (nothing started): not smeltable, short of the item or the fuel, not a fuel, no furnace on board.
 
@@ -873,7 +873,7 @@ T.origin()
 T.setOrigin(x, y, z, facing)
     Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns true and T.origin()'s table, or nil and why.
 
-    Also n/e/s/w, or -z/+x/+z/-x. Called with no arguments it asks GPS for the cell and works out the facing from a geo scan; with x, y, z only, it finds the facing from a scan.
+    Also n/e/s/w, or -z/+x/+z/-x. Called with no arguments it asks GPS for the cell and works out the facing from a geo scan; with x, y, z only, it finds the facing from a scan. A third result is a note when jobs saved in the turtle's frame are on disk (mine.job, an unfinished T.build's .build): they are in the frame as it was when they were made, so if that has moved since (a re-zero, --here) their cells are wrong.
 
 T.toWorld(a, b, c)
     Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.

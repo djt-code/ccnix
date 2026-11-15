@@ -436,6 +436,14 @@ check("an origin told in a re-zeroed frame: T.setOrigin with where the turtle st
 local ahead2 = T.toWorld({ x = 0, y = 0, z = 2 })
 check("...two ahead of the turtle is the world cell the stone is in", ahead2 and ahead2.x == w5[1] and ahead2.y == w5[2] and ahead2.z == w5[3])
 check("...and the frame's +z points the way the turtle faces", T.origin().facing == COMPASS[(F0 + 1) % 4], T.origin().facing)
+local okSet, _, note = T.setOrigin(wx, wy, wz, COMPASS[(F0 + 1) % 4])
+check("no saved jobs: no note", okSet == true and note == nil, tostring(note))
+local f = fs.open(T.dataPath("mine.job"), "w"); f.write("x"); f.close()
+f = fs.open(T.dataPath(".build"), "w"); f.write("x"); f.close()
+okSet, _, note = T.setOrigin(wx, wy, wz, COMPASS[(F0 + 1) % 4])
+check("saved jobs in the turtle's frame (mine.job, .build): T.setOrigin says so in a note after the origin", okSet == true and note ~= nil
+    and note:find("mine.job, .build", 1, true) ~= nil, tostring(note))
+fs.delete(T.dataPath("mine.job")); fs.delete(T.dataPath(".build"))
 
 -- `reset --here` after the turtle was carried home by hand: the saved position is stale, home is home
 T = fresh()

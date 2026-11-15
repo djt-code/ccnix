@@ -49,6 +49,7 @@ local MAX_SIDE = 64                           -- the widest a heights or slice m
 local AIR, AIR_CODE = "minecraft:air", 1
 local SYMBOLS = "#%&=+*@$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 local NEIGHBOURS = { 0, 1, 2, 3, "up", "down" }
+local FRAMED_JOBS = { "mine.job", ".build" }          -- jobs kept in the turtle's frame, which a re-zero doesn't move
 local INSPECT_MOVE = { path = true, scan = false }    -- how T.inspectAt gets next to a cell, unless told
 
 -- Names that are air, and names that aren't a surface to stand on or build on
@@ -763,7 +764,9 @@ end
 -- true and T.origin()'s table, or nil and why.
 --
 -- Also n/e/s/w, or -z/+x/+z/-x.  Called with no arguments it asks GPS for the cell and works out the facing
--- from a geo scan; with x, y, z only, it finds the facing from a scan.
+-- from a geo scan; with x, y, z only, it finds the facing from a scan.  A third result is a note when jobs saved in the
+-- turtle's frame are on disk (mine.job, an unfinished T.build's .build): they are in the frame as it was when they were
+-- made, so if that has moved since (a re-zero, --here) their cells are wrong.
 function T.setOrigin(x, y, z, facing)
     ensure()
     if not S.frame.aligned then return nil, UNALIGNED end
@@ -789,7 +792,13 @@ function T.setOrigin(x, y, z, facing)
     S.world.ox, S.world.oy, S.world.oz = x - ax, y - ay, z - az
     local ok, why = saveFrame()
     if not ok then return nil, why end
-    return true, T.origin()
+    local saved = {}
+    for _, file in ipairs(FRAMED_JOBS) do
+        if fs.exists(T.dataPath(file)) then saved[#saved + 1] = file end
+    end
+    if #saved == 0 then return true, T.origin() end
+    return true, T.origin(), "saved jobs are in the turtle's frame as it was when they were made (" .. table.concat(saved, ", ")
+        .. "): if it has moved since (a re-zero, --here), finish or clear them"
 end
 
 -- Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table

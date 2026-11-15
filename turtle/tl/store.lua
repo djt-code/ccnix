@@ -522,7 +522,7 @@ function T.fetch(name, n, opts)
                 got = got + took
                 note(list, c, side)
                 if pullWhy and text.contains(pullWhy, "no room") then
-                    why = pullWhy
+                    why = "no room in the turtle for " .. name            -- (T.pull's own count is this chest's: the total is said below)
                     return
                 end
             else

@@ -352,6 +352,9 @@ do
     for s = 1, 16 do W.give(s, "minecraft:item_" .. s, 64) end
     got, why = T.fetch(COBBLE, 5)
     check("no room in the turtle: nothing, and it says", got == 0 and why:find("no room", 1, true) and here(), tostring(got) .. " " .. tostring(why))
+    local first = why:find("(got ", 1, true)
+    check("...saying how many it got once", first ~= nil and why:find("(got ", first + 1, true) == nil and why:find("(got 0 of 5)", 1, true) ~= nil,
+        tostring(why))
     -- a chest that is not there any more
     setUp()
     T.catalogue()
