@@ -63,18 +63,9 @@ end
 
 local function whole(n) return type(n) == "number" and n == math.floor(n) end
 
--- A test on block or item names from a glob; the namespace may be left out (a glob without one also matches the
--- short name).
-local function matcher(spec)
-    local test = glob.compile(spec)
-    local plain = not text.contains(spec, ":")
-    return function(name)
-        if test(name) then return true end
-        if not plain then return false end
-        local _, short = text.cut(name, ":")
-        return short ~= nil and test(short)
-    end
-end
+-- A test on block or item names from a glob, or a list or set of them; the namespace may be left out (a glob without
+-- one also matches the short name).  turtlelib's, as for every list of names.
+local matcher = T.nameTest
 
 -- The six numbers of a box, smallest corner first, or nil and why.  A box is { x1, y1, z1, x2, y2, z2 } or has the
 -- fields x1 to z2, the corners in any order.
@@ -232,8 +223,8 @@ local function tellJob(info, pattern)
     if not ok and err == "Terminated" then error(err, 0) end
 end
 
--- Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be.
--- Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+-- Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and
+-- ones holding up sand.  True, info; false, why, info when short; nil, why if it couldn't begin.
 --
 -- `pattern` is a glob of block names (the namespace may be left out).  `where` is a box in the turtle's frame (six numbers in a
 -- table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of
@@ -392,6 +383,29 @@ end
 -- Fuel from lava
 --------------------------------------------------------------------------
 
+-- A test for the cells opts.exclude leaves alone: a list of protected areas' names and boxes (six numbers, or x1 to z2
+-- fields).  The test, or nil and why for an entry that is neither.
+local function excluded(list)
+    local boxes = {}
+    for _, e in ipairs(list or {}) do
+        if type(e) == "string" then
+            for _, a in ipairs(T.protections()) do
+                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
+            end
+        else
+            local x1, y1, z1, x2, y2, z2 = boxOf(e)
+            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
+            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
+        end
+    end
+    return function(c)
+        for _, b in ipairs(boxes) do
+            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
+        end
+        return false
+    end
+end
+
 -- Burn one lava bucket from the inventory.  True if it burned.
 local function burnBucket()
     local before = turtle.getFuelLevel()
@@ -407,10 +421,14 @@ end
 -- `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit
 -- the tank (1000 each), or when no lava source is left to reach.  It needs an empty bucket aboard (a lava bucket aboard
 -- is burned first).  The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before
--- the bucket goes on it, and one that proves to be flowing, not a source, is passed over.  opts.tries (default 20) is
--- how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
+-- the bucket goes on it, and one that proves to be flowing, not a source, is passed over.  Lava in a protected area is
+-- left (the area T.inside names is the job's), and so is lava in opts.exclude, a list of areas' names and boxes.
+-- opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan =
+-- false }, never into lava).
 function T.refuelFromLava(target, opts)
     opts = opts or {}
+    local skip, badExclude = excluded(opts.exclude)
+    if not skip then return nil, badExclude end
     local level, limit = turtle.getFuelLevel(), turtle.getFuelLimit()
     if level == "unlimited" then return true, 0 end
     target = math.min(target or limit, limit)
@@ -428,10 +446,15 @@ function T.refuelFromLava(target, opts)
     local from, dir = T.here(), T.dir
     local found, why = T.map.find("minecraft:lava")
     if not found then return nil, "the map has no lava to look in: " .. tostring(why) end
-    local candidates = {}
+    local candidates, left = {}, 0
     for _, c in ipairs(found) do
         local _, state = T.map.get(c.x, c.y, c.z)
-        if not (state and state.level and tonumber(state.level) ~= 0) then candidates[#candidates + 1] = c end
+        if not (state and state.level and tonumber(state.level) ~= 0) then
+            if T.guarded(c.x, c.y, c.z) or skip(c) then left = left + 1 else candidates[#candidates + 1] = c end
+        end
+    end
+    if #candidates == 0 and left > 0 then
+        return false, "the lava sources the map knows are protected or excluded (" .. left .. " left alone)", gained()
     end
     if #candidates == 0 then return false, "the map knows no lava source", gained() end
     local tries, stopWhy = opts.tries or 20, nil

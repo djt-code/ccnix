@@ -521,6 +521,18 @@ do
 end
 
 do
+    -- inside a protected area: the furnace it put up is its own to take back
+    fresh(false)
+    W.give(1, FURNACE, 1); W.give(2, "minecraft:cobblestone", 2); W.give(3, "minecraft:coal", 2)
+    T.protect("keep", -3, -3, -3, 3, 3, 3)
+    local ok, got = T.smelt("minecraft:cobblestone", 2, "minecraft:coal")
+    check("smelting inside a protected area: the furnace is taken back all the same", ok == true and got == 2 and carrying(FURNACE) == 1
+        and W.get(0, 1, 1) == nil and here(), tostring(got) .. " " .. inventory())
+    check("...and the area still holds", T.protected(0, 1, 1) == "keep" and select(2, T.digDir(0)) ~= nil)
+    T.unprotect("keep")
+end
+
+do
     -- a block over the turtle: no room to set it up
     fresh(false)
     W.give(1, FURNACE, 1); W.give(2, "minecraft:cobblestone", 2); W.give(3, "minecraft:coal", 2)

@@ -887,7 +887,7 @@ end
 -- cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands
 -- and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo).  Fuel goes in from beside,
 -- the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time);
--- then the furnace is taken back and the turtle comes home, facing as before.  fuel is an item name (default: charcoal, coal,
+-- then the furnace is taken back (in a protected area too: it is the turtle's own) and the turtle comes home, facing as before.  fuel is an item name (default: charcoal, coal,
 -- then planks or logs, whichever there is enough of).  What it makes is marked as crafted.
 --
 -- Returns true, got; false, why, got (it did not all come out in time); or nil, why (nothing started): not smeltable,
@@ -936,18 +936,25 @@ function T.smelt(item, n, fuel, opts)
         end
         return true
     end
+    -- dig the furnace with `dig` (turtle.digUp or turtle.dig): it is the turtle's own, so a protected area round it doesn't
+    -- stop that (other areas still do)
+    local function digOwn(dig)
+        local area = T.guarded(furnace.x, furnace.y, furnace.z)
+        if area then return T.inside(area, dig) end
+        return dig()
+    end
     -- the furnace back and the turtle home; returns an extra sentence if something stayed behind
     local function cleanUp()
         local note = ""
         if placed then
             local ok, why = visit(routes[where] or {})
             if ok then
-                ok, why = turtle.digUp()
+                ok, why = digOwn(turtle.digUp)
             else                                          -- (the way under is shut: take it from the side)
                 local side = T.moveTo(stand.x, stand.y, stand.z, { order = "xzy", dig = opts.move and opts.move.dig })
                 if side then
                     T.face(heading)
-                    ok, why = turtle.dig()
+                    ok, why = digOwn(turtle.dig)
                 end
             end
             if not ok then

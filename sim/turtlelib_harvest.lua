@@ -394,6 +394,33 @@ do
 end
 
 do
+    -- the moat is the castle's: lava in a protected area is left, unless the job is inside it
+    lavaWorld()
+    T.protect("moat", 2, -1, 2, 4, -1, 4)
+    local ok, gained = T.refuelFromLava(1000)
+    check("lava in a protected area is passed over for the source farther off", ok == true and has(3, -1, 3, LAVA) and not has(-6, -1, 5) and here(),
+        tostring(ok) .. " " .. tostring(gained))
+    lavaWorld()                                         -- (a new world: the areas are gone with its disk)
+    T.protect("moat", 2, -1, 2, 4, -1, 4)
+    T.inside("moat", function() return T.refuelFromLava(1000) end)
+    check("...but taken inside the area a job owns (T.inside)", not has(3, -1, 3) and has(-6, -1, 5, LAVA))
+    lavaWorld()
+    ok = T.refuelFromLava(1000, { exclude = { { 2, -2, 2, 4, 0, 4 } } })
+    check("opts.exclude: a box left alone", ok == true and has(3, -1, 3, LAVA) and not has(-6, -1, 5))
+    lavaWorld()
+    T.protect("pool", -7, -1, 4, -5, -1, 6)
+    T.inside("pool", function()
+        ok = T.refuelFromLava(1000, { exclude = { "pool" } })
+    end)
+    check("...or an area by name, even one the job is inside", ok == true and has(-6, -1, 5, LAVA) and not has(3, -1, 3))
+    lavaWorld()
+    T.protect("moat", 2, -1, 2, 4, -1, 4)
+    local why
+    ok, why = T.refuelFromLava(1000, { exclude = { { -7, -1, 4, -5, -1, 6 } } })
+    check("every source left alone: false, and it says why", ok == false and why:find("protected or excluded", 1, true) ~= nil and here(), tostring(why))
+end
+
+do
     lavaWorld()
     FUEL = 100
     local ok, why, gained = T.refuelFromLava(2400)

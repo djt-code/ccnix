@@ -203,6 +203,29 @@ do
     local name, why = T.placeAt(0, 0, 3, TORCH, { facing = "north" })
     check("a torch with nothing to hang on: refused and the table says why", name == nil and why:find("no way to place", 1, true) ~= nil
         and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    check("...naming the approach that would do and what it lacks", why:find("sideways from 0,0,4 facing south: needs a block to hang it on "
+        .. "beyond the target, and the map has minecraft:air at 0,0,2", 1, true) ~= nil, tostring(why))
+end
+do
+    -- a stair with its top half wanted, a block under the target: from above gives the bottom half, from below can't stand
+    fresh(nil, { stone(0, 0, 3) })
+    knowAll()
+    W.give(1, ST, 4)
+    local name, why = T.placeAt(0, 1, 3, ST, { facing = "north", half = "top" })
+    check("no way to place a stair as asked: each approach says what it lacks", name == nil and why:find("no way to place", 1, true) ~= nil
+        and why:find("from above from 0,2,3 facing north: gives half=bottom", 1, true) ~= nil
+        and why:find("from below from 0,0,3: the map has minecraft:stone there", 1, true) ~= nil, tostring(why))
+    -- every approach tried and the game refused each: the message lists them
+    fresh(nil, {})
+    knowAll()
+    W.give(1, STONE, 4)
+    local rawPlace = T.placeDir
+    T.placeDir = function() return false, "Cannot place block here" end
+    name, why = T.placeAt(0, 0, 3, STONE)
+    T.placeDir = rawPlace
+    check("every approach tried and refused: it says which it tried and what each got", name == nil and why:find("^couldn't place stone at 0,0,3") ~= nil
+        and why:find("6 ways tried: sideways from 0,0,2: the game refused (Cannot place block here)", 1, true) ~= nil
+        and why:find("from above from 0,1,3: the game refused", 1, true) ~= nil, tostring(why))
 end
 do
     fresh(nil, { stone(0, 0, 4) })

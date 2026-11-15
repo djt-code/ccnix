@@ -73,7 +73,9 @@ T.onChange(fn)
     A listener's error is dropped (except Ctrl+T), so one can't stop the turtle. Listeners last until the computer restarts: remove yours when the program ends.
 
 T.protect(name, x1, y1, z1, x2, y2, z2)
-    Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>". Replaces a box of the same name. Returns true, or nil and why.
+    Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped). True, or nil and why.
+
+    It replaces a box of the same name.
 
 T.unprotect(name)
     Remove the area called `name`. True, or false and why (none by that name).
@@ -181,16 +183,20 @@ T.withPeripheral(name, fn)
 == Low-level moves ==
 
 T.up()
-    Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxHeight is reached.
+    Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxHeight, 16 above the start by default.
+
+    Why is "maxHeight 16 reached (T.cfg.maxHeight)" (set it higher to climb), "blocked by <block> at x,y,z", "couldn't dig ...", "can't move up: ..." or "no fuel".
 
 T.down()
-    Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxDrop is reached.
+    Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxDrop, 12 below the start by default.
+
+    Why is "maxDrop 12 reached (T.cfg.maxDrop)", "blocked by <block> at x,y,z" or the others T.up gives.
 
 T.forward()
-    Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way.
+    Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
 
 T.back()
-    Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false if anything is there.
+    Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false and why if anything is there ("can't move back: something is in the way").
 
 T.settle()
     Sink until resting on something solid.
@@ -254,10 +260,10 @@ T.moveTo(x, y, z, opts)
     Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true, or false, why, the block's name and cell where one stopped it. opts: order, dig, avoid, inside, path.
 
     It goes along the axes in the order opts.order names (default "yxz": up or down first, then x, then z). opts (all optional):
-      dig     false (default), true, a glob or a list of globs: the blocks it
-              may dig on the way (a protected area, a chest or a computer is
-              never dug)
-      avoid   a glob or a list: blocks it stops at rather than enter
+      dig     false (default), true, a glob, or a list or set of globs: the
+              blocks it may dig on the way (a protected area, a chest or a
+              computer is never dug)
+      avoid   a glob, a list or a set: blocks it stops at rather than enter
               (default: lava, fire and doors); {} avoids nothing
       inside  the name of a protected area the move may dig in (see T.inside)
       path    true, or a function(x, y, z, opts): when a straight run is
@@ -455,12 +461,12 @@ T.isEssential(name)
     Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
 
 T.isJunk(name)
-    Is the item `name` junk? False for what's in T.keep, tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+    Is the item `name` junk? False for what's in T.keep (a set or a list of names, globs too: put the job's materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 
 T.dumpJunk()
     Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
 
-    It looks at the chest first, and what doesn't fit stays aboard. With no junk on board it goes nowhere. The reasons for false: no junk chest set, no way there, no chest there.
+    It looks at the chest first, and what doesn't fit stays aboard. With no junk on board it goes nowhere. It goes along the axes, and round what is in the way with the path finder (T.travel, over the map), never digging. The reasons for false: no junk chest set, no way there, no chest there.
 
 T.refuelFrom(side, target)
     Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
@@ -602,7 +608,7 @@ T.smeltsTo(name)
 T.smelt(item, n, fuel, opts)
     Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
 
-    The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
+    The furnace goes up in front of the turtle, one block above it, so the cell under it is free to stand in. Five cells must be free: the two over the turtle, the one in front of it, and the two over that (where the furnace stands and above it); opts.move = { dig = true } lets it dig them (opts.move is for T.moveTo). Fuel goes in from beside, the item from above, and the results are sucked from below as they cook (ten seconds an item, at most 64 at a time); then the furnace is taken back (in a protected area too: it is the turtle's own) and the turtle comes home, facing as before. fuel is an item name (default: charcoal, coal, then planks or logs, whichever there is enough of). What it makes is marked as crafted.
 
     Returns true, got; false, why, got (it did not all come out in time); or nil, why (nothing started): not smeltable, short of the item or the fuel, not a fuel, no furnace on board.
 
@@ -619,7 +625,7 @@ T.fuelFor adds up what a route, a build and some scans will cost in fuel and say
 == Harvesting ==
 
 T.harvest(pattern, where, target, opts)
-    Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be. Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+    Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 
     `pattern` is a glob of block names (the namespace may be left out). `where` is a box in the turtle's frame (six numbers in a table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of T.scan, or a list of cells ({ x, y, z }, as T.map.find gives). `target`, if given, is how many blocks to dig before stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead). Each block is looked at before it is dug and left if the map was wrong. Left alone, and listed in info.skipped with why: a block with a falling block over it that is not to be dug too, one that lava touches (opts.lava digs those), one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers). A block with no free cell beside it is skipped unless opts.move lets it dig a way in. It stops when the inventory is full (T.cfg.autoDump keeps room), or the fuel is out. Info is { got, target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, lava, item.
 
@@ -628,7 +634,7 @@ T.harvest(pattern, where, target, opts)
 T.refuelFromLava(target, opts)
     Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 
-    `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit the tank (1000 each), or when no lava source is left to reach. It needs an empty bucket aboard (a lava bucket aboard is burned first). The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over. opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
+    `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit the tank (1000 each), or when no lava source is left to reach. It needs an empty bucket aboard (a lava bucket aboard is burned first). The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over. Lava in a protected area is left (the area T.inside names is the job's), and so is lava in opts.exclude, a list of areas' names and boxes. opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
 
 == What a job costs in fuel ==
 
@@ -650,17 +656,17 @@ T.build and T.harvest write their progress there (T.job.progress) when a job is 
 
 The undo journal (T.cfg.undo = true) writes down each block the turtle digs or places, in the data file .undo: the block's name and its state for a dig (the dig looks first, so the state comes free), the item for a placement.  T.undo(n) puts the last n back: a dug block is placed again (through T.placeAt when it has a state, with the item on hand) and a placed one is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 
-T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added.  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
+T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
 
 == The job journal ==
 
 T.job.start(goal, steps)
-    Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
+    Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on; it lasts until T.job.clear. True, or nil and why.
 
 T.job.done(step)
-    Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step).
+    Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step). The last step done finishes the job.
 
-    A step done twice is done. With T.report.every set, the player is told once in every n steps.
+    A step done twice is done. A job with no steps is finished by T.job.done(). A finished job is left out of what T.report adds (T.job.status still says how it ended); T.job.start begins the next, T.job.clear forgets it. With T.report.every set, the player is told once in every n steps.
 
 T.job.resume()
     The job as it stands: { goal, steps = { { text, done } }, step (the text of the step to do now), next (its number), done, total, finished, notes, work = { key = text }, every }; nil and why if there is none.
@@ -677,12 +683,12 @@ T.job.status()
     How the job stands in one line ("step 2 of 3: lay the floor; build keep: 40 of 300 cells"), or nil if there is none.
 
 T.job.clear()
-    Forget the job. True.
+    End the job: forget it and its file (a finished job, its last step done, stays until then, out of the reports). True.
 
 == Reports to the player ==
 
 T.report.now(said, opts)
-    Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+    Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 
     The player is the setting turtle.player (opts.player overrides it); with none, nothing is said. A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
 
@@ -720,7 +726,7 @@ T.path finds a route: A* in three dimensions over the map (tl.world), with a bin
       a move and a dig when digging everything is allowed; otherwise a move and a penalty, so a route through the unseen is possible but the known is preferred (it is checked as it is walked)
   a wall
       never: a protected area (except the one opts.inside names, and except the empty cells of an area the route starts or ends in), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
-The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so.
+The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
 
 T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits bastion ceilings): up, across, down.  If the map doesn't know enough it scans the route's box first; if there is no layer it uses the search.  Then it walks the route.  A block it didn't expect stops a step: it notes the block in the map and plans again from where it is, a few times.
 
@@ -730,8 +736,8 @@ T.path(x, y, z, opts)
     A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 
     It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
-      dig        false (default), true, a glob or a list of globs: what a route may dig (as for T.moveTo)
-      avoid      a glob or a list: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+      dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
       inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
       avoidCells a list of { x, y, z } cells a route may not use
       limit      cells to search before giving up (default 20000)
@@ -776,7 +782,7 @@ T.placeInfo(item)
 T.placeAt(x, y, z, item, opts)
     Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
 
-    It works out from the table which approaches (placing sideways, from above or from below, from each side) give the state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is wrong digs the block and tries the next approach, learning what the game actually gave (see the overview). opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever. Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may dig and walk in), tries (approaches to try, default 6). A cell that already holds the item as wanted comes back as it is; one holding anything else is not touched. Returns the block's name, its state, and { approach, from, heading, tries } (approach is front, down or up; from the cell the turtle stood in).
+    It works out from the table which approaches (placing sideways, from above or from below, from each side) give the state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is wrong digs the block and tries the next approach, learning what the game actually gave (see the overview). opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever. Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may dig and walk in), tries (approaches to try, default 6). A cell that already holds the item as wanted comes back as it is; one holding anything else is not touched. Returns the block's name, its state, and { approach, from, heading, tries } (approach is front, down or up; from the cell the turtle stood in). A failure's why names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 
 == Lighting a fire ==
 
@@ -791,34 +797,36 @@ Loaded by turtlelib the first time one of its functions is used (T.addChest, T.f
 
 A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known it takes the junk chest's trip instead (T.dumpJunk).
 
-The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds) and the lines "item count name" after it are what it held.  Fetching and stowing read the chest again as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
+A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at) is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which T.catalogue finds out from the halves' block states (by their facing when the world origin is known, else by two halves side by side holding the same).
+
+The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
 
 == The list of chests, in a data file ==
 
 T.addChest(x, y, z, side, bulk)
     Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
 
-    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again keeps what was written down of it. Kept in the data file .chests.
+    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again, from this stand or another, keeps the one record and what was written down of it. Kept in the data file .chests.
 
 T.forgetChest(x, y, z, side)
-    Forget the chest at this place (as T.addChest was given it). True, or false and why.
+    Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 
 T.chests()
-    The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never.
+    The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
 
 == Cataloguing ==
 
 T.catalogue(spots, opts)
     Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 
-    `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered (T.addChest); nil goes round the ones already known. opts.find, a box in the map (six numbers, as T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it. opts.move is T.moveTo's (default { path = true, scan = false }). The nearest comes next and the turtle ends where it began, facing as before. Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
+    `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered (T.addChest); nil goes round the ones already known. The two halves of a double chest become one chest as they are read (see the top of this module). opts.find, a box in the map (six numbers, as T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it. opts.move is T.moveTo's (default { path = true, scan = false }). The nearest comes next and the turtle ends where it began, facing as before. Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
 
 == Where an item is, and fetching it ==
 
 T.where(name)
-    Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk }, the nearest to the turtle first, and the total. Moves nothing.
+    Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
 
-    It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; nil and why when no chest is known.
+    It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds) and age how long ago that was, so an old count can be read again first. Nil and why when no chest is known.
 
 T.fetch(name, n, opts)
     Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
@@ -835,7 +843,7 @@ T.stow(opts)
 T.autoDump()
     Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
 
-    T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few, the turtle makes this trip and comes back where it was, facing as before. A dump that did nothing is not tried again until there is less room.
+    T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few (part stacks merged first), the turtle makes this trip and comes back where it was, facing as before. A trip that fails, or leaves no more room than that, is printed and noted in the job (T.job.note) and not tried again until there is less room; two in a row turn T.cfg.autoDump off.
 
 tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
 
@@ -867,7 +875,7 @@ T.origin()
 T.setOrigin(x, y, z, facing)
     Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns true and T.origin()'s table, or nil and why.
 
-    Also n/e/s/w, or -z/+x/+z/-x. Called with no arguments it asks GPS for the cell and works out the facing from a geo scan; with x, y, z only, it finds the facing from a scan.
+    Also n/e/s/w, or -z/+x/+z/-x. Called with no arguments it asks GPS for the cell and works out the facing from a geo scan; with x, y, z only, it finds the facing from a scan. A third result is a note when jobs saved in the turtle's frame are on disk (mine.job, an unfinished T.build's .build): they are in the frame as it was when they were made, so if that has moved since (a re-zero, --here) their cells are wrong.
 
 T.toWorld(a, b, c)
     Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
@@ -934,7 +942,7 @@ T.map.cube(cx, cy, cz)
 T.scan(r, opts)
     Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 
-    opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air). The info table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan. The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools down. The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading. A radius over 8 costs a lot of fuel (16 once cost about 5300), so it's refused unless forced.
+    opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air). The info table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan. The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools down. The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading. A radius over 8 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap), so it's refused unless forced.
 
 T.mergeScan(entries, r, opts)
     Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
@@ -944,14 +952,14 @@ T.mergeScan(entries, r, opts)
 T.scanBox(box, opts)
     Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 
-    It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less. Refuses a box that takes over 27 scans unless opts.force. failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+    It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less (over 8 is refused, as T.scan says why, unless opts.force: 8 or less is cheap). Refuses a box that takes over 27 scans unless opts.force. failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
 
 == Inspecting ==
 
 T.inspectAt(x, y, z, opts)
     Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 
-    The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on).
+    The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on); without it the turtle goes round what is in the way with the path finder ({ path = true, scan = false }).
 
 T.inspectAll(list, opts)
     T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.

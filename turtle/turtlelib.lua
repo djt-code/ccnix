@@ -118,7 +118,43 @@ T.FUEL_VALUE = {
 T.fuel = {}
 for name in pairs(T.FUEL_VALUE) do T.fuel[name] = true end
 
--- Items dumpDown never throws away by default: fuel and torches.
+-- Lists of names.  Wherever the library takes names of blocks or items to match (T.keep, T.diggable, moveTo's dig
+-- and avoid, ...), it takes a list ({ "minecraft:stone", "*_planks" }), a set ({ ["minecraft:stone"] = true }) or
+-- both in one table, and each name may be a glob; a name without a namespace ("stone") also matches the short name.
+local function nameTest(spec)
+    if spec == true then return function() return true end end
+    if type(spec) == "function" then return spec end
+    local globs = {}
+    if type(spec) == "string" then
+        globs[1] = spec
+    elseif type(spec) == "table" then
+        for _, g in ipairs(spec) do globs[#globs + 1] = g end
+        for k, v in pairs(spec) do
+            if type(k) == "string" and v then globs[#globs + 1] = k end
+        end
+    end
+    local tests, short = {}, false
+    for i, g in ipairs(globs) do
+        tests[i] = { glob.compile(tostring(g)), not text.contains(tostring(g), ":") }
+        short = short or tests[i][2]
+    end
+    return function(name)
+        local bare = short and select(2, text.cut(name, ":"))
+        for _, t in ipairs(tests) do
+            if t[1](name) or (t[2] and bare and t[1](bare)) then return true end
+        end
+        return false
+    end
+end
+
+-- Is the name in the list or set `spec` (as nameTest reads one)?  A set's own name is found at once.
+local function listed(spec, name)
+    if type(spec) == "table" and spec[name] then return true end
+    return nameTest(spec)(name)
+end
+
+-- Items dumpDown never throws away by default: fuel and torches.  A set; a list of names or globs
+-- ({ "minecraft:cobblestone", "*_planks" }) does as well.
 T.keep = { ["minecraft:torch"] = true }
 for name in pairs(T.fuel) do T.keep[name] = true end
 
@@ -519,8 +555,10 @@ end
 local function isWhole(n) return type(n) == "number" and n == math.floor(n) end
 
 -- Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`:
--- a dig into it returns false, "protected: <name>".  Replaces a box of the same name.  Returns true,
--- or nil and why.
+-- a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped).  True, or
+-- nil and why.
+--
+-- It replaces a box of the same name.
 function T.protect(name, x1, y1, z1, x2, y2, z2)
     if type(name) ~= "string" or name == "" or text.contains(name, "\n") then
         return nil, "an area needs a name (one line of text)"
@@ -1084,59 +1122,83 @@ end
 
 --------------------------------------------------------------------------
 -- Low-level moves.  Each keeps T.pos in sync, cuts through T.diggable
--- blocks, attacks mobs, and returns false if blocked by anything else.
+-- blocks, attacks mobs, and returns false and why if blocked by anything else.
 --------------------------------------------------------------------------
-local function clearWay(inspect, dig)
-    local ok, data = inspect()
+-- The words for each move in a reason, and the side the turtle looks at for it
+local MOVE_WORD = { up = "up", down = "down", forward = "forward", back = "back" }
+local MOVE_SIDE = { up = "up", down = "down", forward = "front" }
+local MOVE_DIG = { up = "digUp", down = "digDown", forward = "dig" }
+
+-- Look at the cell a move goes into: true if the move may go on (nothing there, or a block T.diggable lists,
+-- dug), and the dig's reason if that dig failed; or false and why the block stops it.
+local function clearWay(move)
+    local side = MOVE_SIDE[move]
+    local ok, data = turtle[INSPECT_SIDE[side]]()
     if not ok then return true end
-    if T.diggable[data.name] then dig(); return true end
-    return false
+    local x, y, z = targetOf(side)
+    local at = data.name .. " at " .. x .. "," .. y .. "," .. z
+    if not listed(T.diggable, data.name) then return false, "blocked by " .. at end
+    local dug, why = impl[MOVE_DIG[move]]()
+    if not dug and why then return true, "couldn't dig " .. at .. ": " .. tostring(why) end
+    return true
 end
 
--- Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way or T.cfg.maxHeight is reached.
+-- Why a move that was tried came to nothing: no fuel, the dig that failed, or what the turtle said.
+local function stuck(move, digWhy, why)
+    local level = turtle.getFuelLevel()
+    if level ~= "unlimited" and level < 1 then return "no fuel" end
+    if digWhy then return digWhy end
+    return "can't move " .. MOVE_WORD[move] .. ": " .. (why or "something is in the way")
+end
+
+-- One move with fuel first: look, dig what T.diggable lists, move, attacking what's in the way.
+local function step(move, attack)
+    T.ensureFuel()
+    local digWhy, why
+    for _ = 1, 5 do
+        local clear, said = clearWay(move)
+        if not clear then return false, said end
+        digWhy = said
+        local moved_, rawWhy = raw[move]()
+        if moved_ then moved(move); return true end
+        why = rawWhy
+        attack(); sleep(0.3)
+    end
+    return false, stuck(move, digWhy, why)
+end
+
+-- Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and
+-- why.  It stops at T.cfg.maxHeight, 16 above the start by default.
+--
+-- Why is "maxHeight 16 reached (T.cfg.maxHeight)" (set it higher to climb), "blocked by <block> at x,y,z",
+-- "couldn't dig ...", "can't move up: ..." or "no fuel".
 function T.up()
-    if T.pos.y >= T.cfg.maxHeight then return false end
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspectUp, impl.digUp) then return false end
-        if raw.up() then moved("up"); return true end
-        turtle.attackUp(); sleep(0.3)
-    end
-    return false
+    if T.pos.y >= T.cfg.maxHeight then return false, "maxHeight " .. T.cfg.maxHeight .. " reached (T.cfg.maxHeight)" end
+    return step("up", turtle.attackUp)
 end
 
--- Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way or T.cfg.maxDrop is reached.
+-- Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false
+-- and why.  It stops at T.cfg.maxDrop, 12 below the start by default.
+--
+-- Why is "maxDrop 12 reached (T.cfg.maxDrop)", "blocked by <block> at x,y,z" or the others T.up gives.
 function T.down()
-    if T.pos.y <= -T.cfg.maxDrop then return false end
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspectDown, impl.digDown) then return false end
-        if raw.down() then moved("down"); return true end
-        turtle.attackDown(); sleep(0.3)
-    end
-    return false
+    if T.pos.y <= -T.cfg.maxDrop then return false, "maxDrop " .. T.cfg.maxDrop .. " reached (T.cfg.maxDrop)" end
+    return step("down", turtle.attackDown)
 end
 
--- Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first).
--- True, or false if anything else is in the way.
+-- Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false
+-- and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
 function T.forward()
-    T.ensureFuel()
-    for _ = 1, 5 do
-        if not clearWay(turtle.inspect, impl.dig) then return false end
-        if raw.forward() then moved("forward"); return true end
-        turtle.attack(); sleep(0.3)
-    end
-    return false
+    return step("forward", turtle.attack)
 end
 
 -- Back up a block without turning (saves turning round to go back the
--- way it came).  It can't see or dig behind it: false if anything is
--- there.
+-- way it came).  It can't see or dig behind it: false and why if anything is
+-- there ("can't move back: something is in the way").
 function T.back()
     T.ensureFuel()
-    if not raw.back() then return false end
+    local ok, why = raw.back()
+    if not ok then return false, stuck("back", nil, why) end
     moved("back")
     return true
 end
@@ -1284,20 +1346,6 @@ local FLUID = {
     ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true,
 }
 
--- A test on a block name, from a spec: true (every name), a glob, or a
--- list of globs; anything else (nil, false) matches none.
-local function nameTest(spec)
-    if spec == true then return function() return true end end
-    local globs = type(spec) == "string" and { spec } or type(spec) == "table" and spec or {}
-    local tests = {}
-    for i, g in ipairs(globs) do tests[i] = glob.compile(g) end
-    return function(name)
-        for _, test in ipairs(tests) do
-            if test(name) then return true end
-        end
-        return false
-    end
-end
 T.nameTest = nameTest                     -- (tl.path reads opts.dig and opts.avoid the same way)
 
 -- One step in direction d for moveTo: look at what's there; refuse what's
@@ -1341,10 +1389,10 @@ end
 --
 -- It goes along the axes in the order opts.order names (default "yxz": up or
 -- down first, then x, then z).  opts (all optional):
---   dig     false (default), true, a glob or a list of globs: the blocks it
---           may dig on the way (a protected area, a chest or a computer is
---           never dug)
---   avoid   a glob or a list: blocks it stops at rather than enter
+--   dig     false (default), true, a glob, or a list or set of globs: the
+--           blocks it may dig on the way (a protected area, a chest or a
+--           computer is never dug)
+--   avoid   a glob, a list or a set: blocks it stops at rather than enter
 --           (default: lava, fire and doors); {} avoids nothing
 --   inside  the name of a protected area the move may dig in (see T.inside)
 --   path    true, or a function(x, y, z, opts): when a straight run is
@@ -1857,6 +1905,7 @@ function T.containerBelow() return T.containerOn("bottom") end
 -- none of others).
 local function dumpPlan(keepCount)
     local plan, kept = {}, {}
+    local keeps = nameTest(T.keep)
     for slot = 1, 16 do
         local it = turtle.getItemDetail(slot)
         if it then
@@ -1866,7 +1915,7 @@ local function dumpPlan(keepCount)
             elseif keepCount then
                 keep = keepCount(it, kept[it.name] or 0)
             else
-                keep = T.keep[it.name] and it.count or 0
+                keep = keeps(it.name) and it.count or 0
             end
             kept[it.name] = (kept[it.name] or 0) + math.min(keep, it.count)
             if it.count > keep then plan[#plan + 1] = { slot = slot, n = it.count - keep } end
@@ -2422,17 +2471,18 @@ function T.isEssential(name)
     return false
 end
 
--- Is the item `name` junk?  False for what's in T.keep, tools, fuel,
--- buckets, a crafting table, peripherals and what was crafted this job.
+-- Is the item `name` junk?  False for what's in T.keep (a set or a list of names, globs too: put the job's
+-- materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 function T.isJunk(name)
-    return not (T.keep[name] or crafted[name] or T.isEssential(name))
+    return not (crafted[name] or T.isEssential(name) or listed(T.keep, name))
 end
 
 -- Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped
 -- unless a chest is there.  Returns true, items dropped, items left; or false and why.
 --
 -- It looks at the chest first, and what doesn't fit stays aboard.  With no junk on board it goes
--- nowhere.  The reasons for false: no junk chest set, no way there, no chest there.
+-- nowhere.  It goes along the axes, and round what is in the way with the path finder (T.travel, over
+-- the map), never digging.  The reasons for false: no junk chest set, no way there, no chest there.
 function T.dumpJunk()
     local spot = T.junkChest()
     if not spot then return false, "no junk chest set (T.setJunkChest)" end
@@ -2443,9 +2493,9 @@ function T.dumpJunk()
     end
     if #plan == 0 then return true, 0, 0 end
     local from, dir, sel = T.here(), T.dir, turtle.getSelectedSlot()
-    -- (a second try along the axes the other way round)
+    -- (round what is in the way with the path finder, then a second try along the axes the other way round)
     local function go(p)
-        if T.moveTo(p.x, p.y, p.z) then return true end
+        if T.moveTo(p.x, p.y, p.z, { path = true, scan = false }) then return true end
         return T.moveTo(p.x, p.y, p.z, { order = "xzy" })
     end
     local ok, why = go(spot)

@@ -17,7 +17,7 @@
 -- newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 --
 -- T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its
--- fuel and the job's progress added.  A chat box that is not attached is equipped for the moment through T.withPeripheral;
+-- fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral;
 -- the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps
 -- (a step is a T.job.done, or a progress line from a build or a harvest).
 
@@ -55,8 +55,8 @@ local function oneLine(s) return text.replace(tostring(s), "\n", " ") end
 --------------------------------------------------------------------------
 T.job = {}
 
--- The job as the file has it: { goal, every, steps = { { text, done } }, notes = { text }, work = { key = text }, keys = { key } },
--- or nil if there is none.
+-- The job as the file has it: { goal, every, finished, steps = { { text, done } }, notes = { text }, work = { key = text },
+-- keys = { key } }, or nil if there is none.
 local function loadJob()
     local data = fileio.read(T.dataPath(JOB_FILE))
     if not data then return nil end
@@ -68,6 +68,8 @@ local function loadJob()
             job.goal = rest
         elseif word == "every" then
             job.every = convert.toInteger(rest)
+        elseif word == "finished" then
+            job.finished = true
         elseif word == "step" then
             local state, said = text.cut(rest, " ")
             job.steps[#job.steps + 1] = { text = said or "", done = state == "done" }
@@ -87,6 +89,7 @@ end
 local function saveJob(job)
     local out = { "goal " .. oneLine(job.goal) }
     if job.every and job.every > 0 then out[#out + 1] = "every " .. job.every end
+    if job.finished then out[#out + 1] = "finished" end
     for _, s in ipairs(job.steps) do out[#out + 1] = "step " .. (s.done and "done " or "todo ") .. oneLine(s.text) end
     for _, key in ipairs(job.keys) do
         if job.work[key] then out[#out + 1] = "work " .. key .. " " .. oneLine(job.work[key]) end
@@ -100,6 +103,11 @@ local function nextStep(job)
     for i, s in ipairs(job.steps) do
         if not s.done then return i end
     end
+end
+
+-- Is the job over: its last step done, or (a job with no steps) T.job.done said so?
+local function isFinished(job)
+    return job.finished == true or (#job.steps > 0 and nextStep(job) == nil)
 end
 
 -- How the job stands, in one line: "step 2 of 3: lay the floor; build keep: 40 of 300 cells".
@@ -120,8 +128,8 @@ end
 -- Declared below with T.report; a step done or progress made counts toward T.report.every.
 local tick
 
--- Start a job: its goal and the steps of the plan (a list of texts, or none).  Replaces the job that was on.  True, or nil and
--- why.
+-- Start a job: its goal and the steps of the plan (a list of texts, or none).  Replaces the job that was on; it lasts until
+-- T.job.clear.  True, or nil and why.
 function T.job.start(goal, steps)
     if type(goal) ~= "string" or text.trim(goal) == "" then return nil, "a job needs a goal (a text)" end
     local job = { goal = goal, steps = {}, notes = {}, work = {}, keys = {} }
@@ -134,16 +142,25 @@ function T.job.start(goal, steps)
 end
 
 -- Mark a step done: its number, its text, or nothing for the next one not done.  Returns true and how many steps are left, or
--- nil and why (no job, no such step).
+-- nil and why (no job, no such step).  The last step done finishes the job.
 --
--- A step done twice is done.  With T.report.every set, the player is told once in every n steps.
+-- A step done twice is done.  A job with no steps is finished by T.job.done().  A finished job is left out of what T.report
+-- adds (T.job.status still says how it ended); T.job.start begins the next, T.job.clear forgets it.  With T.report.every
+-- set, the player is told once in every n steps.
 function T.job.done(step)
     local job = loadJob()
     if not job then return nil, "no job is on: T.job.start(goal, steps)" end
     local at
     if step == nil then
         at = nextStep(job)
-        if not at then return nil, "every step is done already" end
+        if not at and #job.steps == 0 and not job.finished then
+            job.finished = true
+            local ok, why = saveJob(job)
+            if not ok then return nil, why end
+            tick(job, "done")
+            return true, 0
+        end
+        if not at then return nil, "every step is done already: the job is finished (T.job.start begins another)" end
     elseif type(step) == "number" then
         at = job.steps[step] and step or nil
     else
@@ -153,10 +170,11 @@ function T.job.done(step)
     end
     if not at then return nil, "the job has no step " .. tostring(step) end
     job.steps[at].done = true
-    local ok, why = saveJob(job)
-    if not ok then return nil, why end
     local left = 0
     for _, s in ipairs(job.steps) do if not s.done then left = left + 1 end end
+    if left == 0 then job.finished = true end
+    local ok, why = saveJob(job)
+    if not ok then return nil, why end
     tick(job, "done: " .. job.steps[at].text)
     return true, left
 end
@@ -173,7 +191,7 @@ function T.job.resume()
     for _, s in ipairs(job.steps) do if s.done then done = done + 1 end end
     job.next, job.step = at, at and job.steps[at].text or nil
     job.done, job.total = done, #job.steps
-    job.finished = #job.steps > 0 and at == nil
+    job.finished = isFinished(job)
     job.keys = nil
     return job
 end
@@ -207,7 +225,7 @@ function T.job.status()
     return statusOf(job)
 end
 
--- Forget the job.  True.
+-- End the job: forget it and its file (a finished job, its last step done, stays until then, out of the reports).  True.
 function T.job.clear()
     local path = T.dataPath(JOB_FILE)
     if fs.exists(path) then fs.delete(path) end
@@ -256,7 +274,7 @@ local function sendReport(said, opts, who)
         local fuel = turtle.getFuelLevel()
         local parts = { whereText(), "fuel " .. tostring(fuel) }
         local job = loadJob()
-        if job then parts[#parts + 1] = "job: " .. statusOf(job) end
+        if job and not isFinished(job) then parts[#parts + 1] = "job: " .. statusOf(job) end
         message = said .. " [" .. table.concat(parts, "; ") .. "]"
     end
     local tries, wait = opts.tries or 5, opts.wait or 1
@@ -267,7 +285,8 @@ local function sendReport(said, opts, who)
     return a, b
 end
 
--- Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+-- Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil
+-- and why.
 --
 -- The player is the setting turtle.player (opts.player overrides it); with none, nothing is said.  A chat box on a side is used
 -- as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side.  The

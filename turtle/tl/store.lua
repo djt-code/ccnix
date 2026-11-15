@@ -11,9 +11,15 @@
 -- slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known
 -- it takes the junk chest's trip instead (T.dumpJunk).
 --
+-- A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at)
+-- is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which
+-- T.catalogue finds out from the halves' block states (by their facing when the world origin is known, else by two
+-- halves side by side holding the same).
+--
 -- The chests and what they held when last looked at are in the data file .chests, so every program on the turtle
 -- shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was
--- read, in seconds) and the lines "item count name" after it are what it held.  Fetching and stowing read the chest again
+-- read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name"
+-- are what it held.  Fetching and stowing read the chest again
 -- as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
 
 local T = require("turtlelib")
@@ -21,12 +27,15 @@ local text = require("text")
 local convert = require("convert")
 local fileio = require("fileio")
 local tables = require("tables")
-local glob = require("glob")
 
 local FILE = ".chests"
 local NS = "minecraft:"
 -- The words for the side a chest is on, as the file keeps them: a heading (T.dir's 0 to 3), up or down
 local SIDES = { up = "up", top = "up", down = "down", bottom = "down", [0] = 0, [1] = 1, [2] = 2, [3] = 3 }
+-- The compass in the turtle's headings' order, and which way a double chest's half has its other half: a left half's
+-- is clockwise from the way it faces, a right half's anticlockwise (Minecraft's ChestBlock)
+local COMPASS_AT = { north = 0, east = 1, south = 2, west = 3 }
+local HALF_TURN = { left = 1, right = 3 }
 -- Where to go by default: along the map when something is in the way, and no scanning
 local MOVE = { path = true, scan = false }
 -- The free slots a dump is wanted at when T.cfg.autoDump is just true
@@ -59,18 +68,9 @@ local function full(name)
     return NS .. name
 end
 
--- A test on item names from a name or a glob; the namespace may be left out (a glob without one also matches the
--- short name).
-local function matcher(spec)
-    local test = glob.compile(spec)
-    local plain = not text.contains(spec, ":")
-    return function(name)
-        if test(name) then return true end
-        if not plain then return false end
-        local _, short = text.cut(name, ":")
-        return short ~= nil and test(short)
-    end
-end
+-- A test on item names from a name, a glob, or a list or set of them; the namespace may be left out (a glob without
+-- one also matches the short name).  turtlelib's, as for every list of names.
+local matcher = T.nameTest
 
 --------------------------------------------------------------------------
 -- The list of chests, in a data file
@@ -88,7 +88,30 @@ end
 -- The key of a chest in a table: "x,y,z,side".
 local function keyOf(c) return c.x .. "," .. c.y .. "," .. c.z .. "," .. tostring(c.side) end
 
--- The chests as the file has them: a list of { x, y, z, side, bulk, seen, items = { name = count } }.
+-- The cell the chest itself is in: the stand, one step toward the side.
+local function cellOf(c)
+    local v = T.DELTA[c.side]
+    return { x = c.x + v[1], y = c.y + v[2], z = c.z + v[3] }
+end
+
+-- Is the chest record c the chest in this cell (the cell it points at, or its other half's)?
+local function holds(c, cell)
+    local own = cellOf(c)
+    if own.x == cell.x and own.y == cell.y and own.z == cell.z then return true end
+    local o = c.other
+    return o ~= nil and o.x == cell.x and o.y == cell.y and o.z == cell.z
+end
+
+-- The chest in the list that is the chest in this cell, and its index; nil if none.
+local function chestAt(list, cell)
+    for i, q in ipairs(list) do
+        if holds(q, cell) then return q, i end
+    end
+    return nil
+end
+
+-- The chests as the file has them: a list of { x, y, z, side, bulk, seen, other, items = { name = count } }.  Two records of
+-- one chest (from an older file) are one: the first, the bulk chest if either was.
 local function load()
     local list, cur = {}, nil
     for _, line in ipairs(text.lines(fileio.read(T.dataPath(FILE)) or "")) do
@@ -105,6 +128,19 @@ local function load()
         elseif w[1] == "item" and cur then
             local n = convert.toInteger(w[2] or "")
             if n and w[3] then cur.items[w[3]] = n end
+        elseif w[1] == "other" and cur then
+            local x, y, z = convert.toInteger(w[2] or ""), convert.toInteger(w[3] or ""), convert.toInteger(w[4] or "")
+            if x and y and z then cur.other = { x = x, y = y, z = z } end
+        end
+    end
+    for i = #list, 2, -1 do
+        local c = list[i]
+        for j = 1, i - 1 do
+            if holds(list[j], cellOf(c)) or (c.other and holds(list[j], c.other)) then
+                list[j].bulk = list[j].bulk or c.bulk
+                table.remove(list, i)
+                break
+            end
         end
     end
     return list
@@ -115,6 +151,7 @@ local function save(list)
     local out = {}
     for _, c in ipairs(list) do
         out[#out + 1] = string.format("chest %d %d %d %s %s %d", c.x, c.y, c.z, tostring(c.side), c.bulk and "bulk" or "plain", c.seen or 0)
+        if c.other then out[#out + 1] = string.format("other %d %d %d", c.other.x, c.other.y, c.other.z) end
         for _, name in ipairs(tables.sortedKeys(c.items)) do
             if c.items[name] > 0 then out[#out + 1] = "item " .. c.items[name] .. " " .. name end
         end
@@ -132,13 +169,15 @@ T.reframeChests = function(move, turns)
     for _, c in ipairs(list) do
         c.x, c.y, c.z = move(c.x, c.y, c.z)
         if type(c.side) == "number" then c.side = (c.side + turns) % 4 end
+        if c.other then c.other.x, c.other.y, c.other.z = move(c.other.x, c.other.y, c.other.z) end
     end
     return save(list)
 end
 
 -- A copy of a chest record.
 local function copyOf(c)
-    return { x = c.x, y = c.y, z = c.z, side = c.side, bulk = c.bulk, seen = c.seen, items = tables.copy(c.items) }
+    return { x = c.x, y = c.y, z = c.z, side = c.side, bulk = c.bulk, seen = c.seen, items = tables.copy(c.items),
+             other = c.other and { x = c.other.x, y = c.other.y, z = c.other.z } or nil }
 end
 
 -- The chest in the list with this place, or nil.
@@ -155,7 +194,7 @@ end
 --
 -- Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
 -- puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again).  Adding a chest
--- again keeps what was written down of it.  Kept in the data file .chests.
+-- again, from this stand or another, keeps the one record and what was written down of it.  Kept in the data file .chests.
 function T.addChest(x, y, z, side, bulk)
     for _, n in ipairs({ x, y, z }) do
         if not whole(n) then return nil, "a chest's place is x, y, z: whole numbers" end
@@ -164,7 +203,7 @@ function T.addChest(x, y, z, side, bulk)
     if d == nil then return nil, "a chest's side is \"up\", \"down\" or a heading 0 to 3, not " .. tostring(side) end
     local list = load()
     local want = { x = x, y = y, z = z, side = d }
-    local c = find(list, want)
+    local c = find(list, want) or chestAt(list, cellOf(want))
     if not c then
         c = { x = x, y = y, z = z, side = d, items = {} }
         list[#list + 1] = c
@@ -176,12 +215,13 @@ function T.addChest(x, y, z, side, bulk)
     return save(list)
 end
 
--- Forget the chest at this place (as T.addChest was given it).  True, or false and why.
+-- Forget the chest at this place (as T.addChest was given it, or another stand for the same chest).  True, or false and why.
 function T.forgetChest(x, y, z, side)
     local d = sideOf(side)
     local list = load()
-    for i, c in ipairs(list) do
-        if d ~= nil and keyOf(c) == keyOf({ x = x, y = y, z = z, side = d }) then
+    if d ~= nil then
+        local _, i = chestAt(list, cellOf({ x = x, y = y, z = z, side = d }))
+        if i then
             table.remove(list, i)
             return save(list)
         end
@@ -189,8 +229,8 @@ function T.forgetChest(x, y, z, side)
     return false, "no chest is known at " .. tostring(x) .. "," .. tostring(y) .. "," .. tostring(z) .. " on the " .. tostring(side)
 end
 
--- The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, items = { name = count } }; seen is when
--- the chest was last read (seconds, the clock T.catalogue uses), 0 if never.
+-- The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when
+-- the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
 function T.chests()
     local list = load()
     for i, c in ipairs(list) do
@@ -280,6 +320,65 @@ end
 -- Cataloguing
 --------------------------------------------------------------------------
 
+-- The cell of a double chest's other half, from the half's state, or nil when it can't be told (a single chest, or no
+-- world origin to turn the compass into the turtle's headings).
+local function otherHalf(cell, state)
+    local turn, facing = HALF_TURN[state.type], COMPASS_AT[state.facing]
+    if not (turn and facing) then return nil end
+    local origin = T.need("origin")
+    local o = origin and origin()
+    local base = o and COMPASS_AT[o.facing]
+    if base == nil then return nil end
+    local v = T.DELTA[(facing + turn - base) % 4]
+    return { x = cell.x + v[1], y = cell.y, z = cell.z + v[3] }
+end
+
+-- Do two counts of items ({ name = count }) say the same?
+local function sameCounts(a, b)
+    for k, n in pairs(a) do
+        if b[k] ~= n then return false end
+    end
+    for k, n in pairs(b) do
+        if a[k] ~= n then return false end
+    end
+    return true
+end
+
+-- Is the chest q the other half of c, a half of a double chest just read (its state given)?  By the cell its facing
+-- points to (other) when the origin is known; else a half read this time beside it, facing the same way, the other
+-- type, holding the same.
+local function isOtherHalf(q, c, state, other, read)
+    if q == c then return false end
+    local qc, cell = cellOf(q), cellOf(c)
+    if other then return qc.x == other.x and qc.y == other.y and qc.z == other.z end
+    return read[q] == true and q.half ~= nil and q.half.facing == state.facing and q.half.type ~= state.type and qc.y == cell.y
+        and math.abs(qc.x - cell.x) + math.abs(qc.z - cell.z) == 1 and sameCounts(q.items, c.items)
+end
+
+-- The chest c was just read from `side`: if it is half of a double chest and the other half is in the list too, the two
+-- are one chest.  The other half's record goes (from the list and from what is still to visit), and c keeps the other
+-- half's cell, so a stand for that half is this chest from now on.
+local function pairUp(list, todo, read, c, side)
+    local seen, data = T.inspectSide(side)
+    local state = seen and type(data) == "table" and data.state
+    if not (type(state) == "table" and HALF_TURN[state.type]) then return end
+    c.half = state
+    local other = otherHalf(cellOf(c), state)
+    if other then c.other = other end
+    for i, q in ipairs(list) do
+        if isOtherHalf(q, c, state, other, read) then
+            table.remove(list, i)
+            for j, t in ipairs(todo) do
+                if t == q then table.remove(todo, j); break end
+            end
+            read[q] = nil
+            c.other, c.bulk = cellOf(q), c.bulk or q.bulk
+            break
+        end
+    end
+    if c.other then save(list) end
+end
+
 -- A stand for a chest the map knows at cell p: a free cell next to it and the side the chest is on from there, or
 -- nil.
 local function standFor(p)
@@ -301,7 +400,8 @@ end
 -- read; nil, why when there is nothing to do.
 --
 -- `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered
--- (T.addChest); nil goes round the ones already known.  opts.find, a box in the map (six numbers, as T.map.find
+-- (T.addChest); nil goes round the ones already known.  The two halves of a double chest become one chest as they are
+-- read (see the top of this module).  opts.find, a box in the map (six numbers, as T.map.find
 -- takes), adds the chests and barrels the map shows in it, each from a free cell beside it.  opts.move is T.moveTo's
 -- (default { path = true, scan = false }).  The nearest comes next and the turtle ends where it began, facing as
 -- before.  Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
@@ -330,7 +430,7 @@ function T.catalogue(spots, opts)
     end
     local list = load()
     if #list == 0 and #info.failed == 0 then return nil, "no chests to go round: T.addChest, or give T.catalogue the places" end
-    local kinds = {}
+    local read = {}
     local ok, why = round(move, function()
         local todo = {}
         for i, c in ipairs(list) do todo[i] = c end
@@ -342,17 +442,24 @@ function T.catalogue(spots, opts)
             local c = table.remove(todo, best)
             local side, reason = arrive(c, move)
             if side and note(list, c, side) then
-                info.chests = info.chests + 1
-                for name, n in pairs(c.items) do
-                    kinds[name] = true
-                    info.items = info.items + n
-                end
+                read[c] = true
+                pairUp(list, todo, read, c, side)
             else
                 info.failed[#info.failed + 1] = { x = c.x, y = c.y, z = c.z, side = c.side, why = reason or "can't read what it holds" }
             end
         end
         return true
     end)
+    local kinds = {}
+    for _, c in ipairs(list) do
+        if read[c] then
+            info.chests = info.chests + 1
+            for name, n in pairs(c.items) do
+                kinds[name] = true
+                info.items = info.items + n
+            end
+        end
+    end
     for _ in pairs(kinds) do info.kinds = info.kinds + 1 end
     if ok == false then return false, why, info end
     if #info.failed > 0 then
@@ -366,9 +473,10 @@ end
 --------------------------------------------------------------------------
 
 -- Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list
--- of { x, y, z, side, count, bulk }, the nearest to the turtle first, and the total.  Moves nothing.
+-- of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total.  Moves nothing.
 --
--- It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; nil and why when no chest is known.
+-- It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds)
+-- and age how long ago that was, so an old count can be read again first.  Nil and why when no chest is known.
 function T.where(name)
     local list = load()
     if #list == 0 then return nil, "no chests are known: T.addChest, then T.catalogue" end
@@ -380,7 +488,8 @@ function T.where(name)
             if test(item) then n = n + count end
         end
         if n > 0 then
-            found[#found + 1] = { x = c.x, y = c.y, z = c.z, side = c.side, count = n, bulk = c.bulk }
+            found[#found + 1] = { x = c.x, y = c.y, z = c.z, side = c.side, count = n, bulk = c.bulk, seen = c.seen or 0,
+                                  age = c.seen and c.seen > 0 and clock() - c.seen or nil }
             total = total + n
         end
     end
@@ -413,7 +522,7 @@ function T.fetch(name, n, opts)
                 got = got + took
                 note(list, c, side)
                 if pullWhy and text.contains(pullWhy, "no room") then
-                    why = pullWhy
+                    why = "no room in the turtle for " .. name            -- (T.pull's own count is this chest's: the total is said below)
                     return
                 end
             else
@@ -534,8 +643,9 @@ end
 -- Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it
 -- when the inventory is nearly full.  The results are those of the one it ran; nil and why if neither is set up.
 --
--- T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few, the turtle makes this trip and
--- comes back where it was, facing as before.  A dump that did nothing is not tried again until there is less room.
+-- T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few (part stacks merged first), the
+-- turtle makes this trip and comes back where it was, facing as before.  A trip that fails, or leaves no more room than that, is
+-- printed and noted in the job (T.job.note) and not tried again until there is less room; two in a row turn T.cfg.autoDump off.
 function T.autoDump()
     if #load() > 0 then return T.stow() end
     if T.junkChest() then return T.dumpJunk() end
@@ -546,21 +656,49 @@ end
 -- Dumping when the inventory fills
 --------------------------------------------------------------------------
 
--- Hear a dig: with T.cfg.autoDump on and the room run down, make room.  Not again until there is less room than when
--- it could do nothing.
+-- Say a failed dump: printed, and noted in the job if one is on.
+local function tellFailure(said)
+    print(said)
+    if fs.exists(T.dataPath(".job")) then
+        local ok, err = pcall(T.job.note, said)
+        if not ok and err == "Terminated" then error(err, 0) end
+    end
+end
+
+-- Hear a dig: with T.cfg.autoDump on and the room run down, merge part stacks, and if that isn't room enough, make room.
+-- A trip that failed, or left no more than the limit free, is a failure: said, and not tried again until there is less
+-- room than it left; the second in a row turns T.cfg.autoDump off.
 local function heard(e)
     if e.kind ~= "dig" or S.busy then return end
     local at = T.cfg.autoDump
     if not at then return end
     at = type(at) == "number" and at or DUMP_AT
+    if T.freeSlots() > at then return end
+    S.busy = true
+    local sel = turtle.getSelectedSlot()
+    local tidied, terr = pcall(T.tidyInventory)
+    turtle.select(sel)
+    S.busy = false
+    if not tidied and terr == "Terminated" then error(terr, 0) end
     local before = T.freeSlots()
     if before > at or before >= (S.failedAt or math.huge) then return end
     S.busy = true
-    local ok, err = pcall(T.autoDump)
+    local ok, done, why = pcall(T.autoDump)
     S.busy = false
-    if not ok and err == "Terminated" then error(err, 0) end
+    if not ok and done == "Terminated" then error(done, 0) end
     local after = T.freeSlots()
-    S.failedAt = (not ok or after <= before) and after or nil
+    if ok and done and after > at then
+        S.failedAt, S.failures = nil, 0
+        return
+    end
+    if not ok then why = tostring(done)
+    elseif done then why = "made no room: " .. after .. " slots free, and the rest aboard is kept (T.keep, tools, fuel)"
+    else why = tostring(why) end
+    S.failedAt, S.failures = after, (S.failures or 0) + 1
+    if S.failures < 2 then return tellFailure("autoDump: " .. why) end
+    T.cfg.autoDump = false
+    S.failedAt, S.failures = nil, 0
+    tellFailure("autoDump is off after two failures in a row: " .. why .. " (set T.cfg.autoDump again once that is put right)")
 end
 
 -- One listener for the turtle, which every program's copy of this module shares: it hands each event to the copy

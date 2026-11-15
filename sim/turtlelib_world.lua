@@ -436,6 +436,14 @@ check("an origin told in a re-zeroed frame: T.setOrigin with where the turtle st
 local ahead2 = T.toWorld({ x = 0, y = 0, z = 2 })
 check("...two ahead of the turtle is the world cell the stone is in", ahead2 and ahead2.x == w5[1] and ahead2.y == w5[2] and ahead2.z == w5[3])
 check("...and the frame's +z points the way the turtle faces", T.origin().facing == COMPASS[(F0 + 1) % 4], T.origin().facing)
+local okSet, _, note = T.setOrigin(wx, wy, wz, COMPASS[(F0 + 1) % 4])
+check("no saved jobs: no note", okSet == true and note == nil, tostring(note))
+local f = fs.open(T.dataPath("mine.job"), "w"); f.write("x"); f.close()
+f = fs.open(T.dataPath(".build"), "w"); f.write("x"); f.close()
+okSet, _, note = T.setOrigin(wx, wy, wz, COMPASS[(F0 + 1) % 4])
+check("saved jobs in the turtle's frame (mine.job, .build): T.setOrigin says so in a note after the origin", okSet == true and note ~= nil
+    and note:find("mine.job, .build", 1, true) ~= nil, tostring(note))
+fs.delete(T.dataPath("mine.job")); fs.delete(T.dataPath(".build"))
 
 -- `reset --here` after the turtle was carried home by hand: the saved position is stale, home is home
 T = fresh()
@@ -717,6 +725,19 @@ put(10, 0, 10, "minecraft:oak_stairs", { facing = "west", half = "bottom" })
 T.inspectAt(10, 0, 10)
 gname, gstate = T.map.get(10, 0, 10)
 check("inspecting again replaces the state", gstate and gstate.facing == "west" and gstate.half == "bottom" and gstate.shape == nil)
+-- a wall that no straight run gets past: with no opts.move it goes round with the path finder
+for y = -3, 3 do for z = -3, 3 do put(52, y, z, STONE) end end
+put(55, 0, 0, "minecraft:oak_stairs", { facing = "south" })
+for x = 49, 57 do for y = -4, 4 do for z = -5, 5 do
+    local b = get(x, y, z)
+    T.map.set(x, y, z, b and b.name or "minecraft:air")
+end end end
+tp(T, 50, 0, 0, 0)
+name, st = T.inspectAt(55, 0, 0)
+check("a wall between the turtle and the cell: T.inspectAt goes round it (the path finder by default)", name == "minecraft:oak_stairs"
+    and st and st.facing == "south" and T.dist(T.pos, { x = 55, y = 0, z = 0 }) == 1, tostring(name) .. " " .. tostring(st and st.facing))
+for y = -3, 3 do for z = -3, 3 do put(52, y, z, nil) end end
+put(55, 0, 0, nil)
 -- a cell shut in
 for _, v in ipairs({ { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }) do
     put(30 + v[1], 5 + v[2], 30 + v[3], STONE)
@@ -775,6 +796,12 @@ report, why = T.scanBox({ 0, 0, 0, 600, 4, 4 })
 check("a box that takes over 27 scans is refused", report == nil and why:find("27", 1, true), tostring(why))
 report, why = T.scanBox({ 0, 0, 0, 5 })
 check("...a box is six numbers", report == nil and why)
+report, why = T.scanBox({ 0, 0, 0, 19, 4, 4 }, { radius = 12 })
+check("a radius over 8 is refused with its cost, as T.scan says it, and that 8 is cheap", report == nil
+    and why == "a scan of radius 12 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it", tostring(why))
+report, why = T.scan(12)
+check("...T.scan's refusal says the same", report == nil
+    and why == "a scan of radius 12 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it", tostring(why))
 T = fresh()
 tp(T, 0, 0, 0, 0)
 put(8, 2, 2, STONE); put(1, 0, 0, STONE)               -- the first centre is solid

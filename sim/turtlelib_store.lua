@@ -240,6 +240,50 @@ do
     check("...and the turtle ends where it began", here())
 end
 
+do
+    -- one record per chest: two stands for the same chest, and the two halves of a double chest (each half is a peripheral
+    -- listing the whole of it), are one chest
+    local BRICKS = "minecraft:bricks"
+    local function double(x1, x2, items)
+        W.set(x1, 0, 1, "minecraft:chest", { facing = "south", type = "right" })
+        W.set(x2, 0, 1, "minecraft:chest", { facing = "south", type = "left" })
+        W.get(x2, 0, 1).inv = W.get(x1, 0, 1).inv
+        fill(x1, 0, 1, items)
+    end
+    fresh()
+    double(3, 4, { [1] = { BRICKS, 64 }, [2] = { BRICKS, 64 } })
+    T.addChest(3, 0, 0, 0); T.addChest(4, 0, 0, 0)
+    local ok, info = T.catalogue()
+    local found, total = T.where(BRICKS)
+    check("a double chest whose halves were both added is one chest: its bricks counted once", ok == true and #T.chests() == 1
+        and total == 128 and #found == 1, tostring(#T.chests()) .. " chests, " .. tostring(total) .. " bricks")
+    check("...and the catalogue says one chest", info.chests == 1, tostring(info and info.chests))
+    T.addChest(3, 1, 1, "down")
+    check("a second stand for a chest already known is the same chest", #T.chests() == 1 and select(2, T.where(BRICKS)) == 128,
+        tostring(#T.chests()))
+    T.addChest(3, 1, 1, "down", true)
+    check("...and naming it the bulk chest from there marks the one record", #T.chests() == 1 and T.chests()[1].bulk == true)
+    check("...and forgetting it from there forgets it", T.forgetChest(3, 1, 1, "down") == true and #T.chests() == 0)
+    local f = fs.open(T.dataPath(".chests"), "w")
+    f.write("chest 3 0 0 0 plain 0\nitem 5 minecraft:dirt\nchest 3 1 1 down bulk 0\nitem 5 minecraft:dirt\n")
+    f.close()
+    check("a file from before with two stands for one chest reads as one, the bulk chest if either was", #T.chests() == 1
+        and T.chests()[1].bulk == true and select(2, T.where(DIRT)) == 5)
+
+    -- with the world origin known, the halves are told by their facing: two double chests side by side, both empty, stay two
+    fresh()
+    T.setOrigin(0, 0, 0, "north")
+    double(3, 4, {})
+    double(5, 6, {})
+    for x = 3, 6 do T.addChest(x, 0, 0, 0) end
+    T.catalogue()
+    local cells = {}
+    for _, c in ipairs(T.chests()) do cells[#cells + 1] = c.x end
+    table.sort(cells)
+    check("...two double chests side by side, empty, are two chests, not one or three", #cells == 2 and cells[1] == 3 and cells[2] == 5,
+        table.concat(cells, " "))
+end
+
 --------------------------------------------------------------------------
 -- T.where
 --------------------------------------------------------------------------
@@ -257,6 +301,12 @@ do
     check("the namespace may be left out", total == 45)
     found, total = T.where("*planks")
     check("a glob", total == 45 and #found == 2)
+    local readAt = CLOCK
+    CLOCK = CLOCK + 60
+    found = T.where(PLANKS)
+    check("each count says when it was read, and how long ago (seen, age)", found[1].seen == readAt and found[1].age == 60,
+        tostring(found[1].seen) .. " " .. tostring(found[1].age))
+    CLOCK = readAt
     found, total = T.where("minecraft:*")
     check("a glob over everything", total == 64 + 40 + 10 + 5 + 30 + 7 and #found == 4, tostring(total))
     found, total = T.where("minecraft:diamond")
@@ -302,6 +352,9 @@ do
     for s = 1, 16 do W.give(s, "minecraft:item_" .. s, 64) end
     got, why = T.fetch(COBBLE, 5)
     check("no room in the turtle: nothing, and it says", got == 0 and why:find("no room", 1, true) and here(), tostring(got) .. " " .. tostring(why))
+    local first = why:find("(got ", 1, true)
+    check("...saying how many it got once", first ~= nil and why:find("(got ", first + 1, true) == nil and why:find("(got 0 of 5)", 1, true) ~= nil,
+        tostring(why))
     -- a chest that is not there any more
     setUp()
     T.catalogue()
@@ -533,6 +586,52 @@ do
     moves = W.S.moves
     turtle.dig()
     check("turned off: nothing happens", W.S.moves == moves)
+end
+
+do
+    -- part stacks are merged before the free slots are counted: a tidy that makes the room makes no trip
+    setUp()
+    T.catalogue()
+    T.cfg.autoDump = true
+    for s = 1, 10 do W.give(s, "minecraft:item_" .. s, 64) end
+    W.give(11, COBBLE, 10); W.give(12, COBBLE, 10); W.give(13, PLANKS, 5); W.give(14, PLANKS, 5)
+    W.set(0, 0, 1, "minecraft:dirt")
+    local moves = W.S.moves
+    turtle.dig()
+    check("a dig at the limit with part stacks aboard: merged first, room enough, no trip", W.S.moves == moves and T.freeSlots() == 3
+        and carrying(COBBLE) == 20 and carrying(DIRT) == 1, W.S.moves - moves .. " moves, " .. T.freeSlots() .. " free")
+    T.cfg.autoDump = false
+    for s = 1, 16 do W.give(s, nil) end
+
+    -- a dump that fails is said and noted in the job; two in a row turn autoDump off
+    local said = {}
+    local quiet = print
+    print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
+    T.job.start("dig the cellar", { "dig" })
+    T.cfg.autoDump = true
+    local calls = 0
+    local rawDump = T.autoDump
+    T.autoDump = function() calls = calls + 1; return false, "the chests are full" end
+    for s = 1, 13 do W.give(s, "minecraft:item_" .. s, 64) end
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    local notes = T.job.resume().notes
+    check("a failed dump: said, and noted in the job", calls == 1 and said[1] == "autoDump: the chests are full"
+        and notes[#notes] == "autoDump: the chests are full" and T.cfg.autoDump == true, tostring(said[1]) .. " / " .. tostring(notes[#notes]))
+    W.give(15, "minecraft:item_15", 64)
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    notes = T.job.resume().notes
+    check("...a second in a row turns it off, and says so", calls == 2 and T.cfg.autoDump == false
+        and said[2] == "autoDump is off after two failures in a row: the chests are full (set T.cfg.autoDump again once that is put right)"
+        and notes[#notes] == said[2], tostring(said[2]))
+    W.give(15, nil)
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    check("...and then it is not tried", calls == 2)
+    T.autoDump = rawDump
+    print = quiet
+    T.job.clear()
 end
 
 do

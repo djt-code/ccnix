@@ -87,6 +87,26 @@ T.clearCrafted()
 check("...T.clearCrafted starts a new job", T.isJunk(BRICKS))
 T.markCrafted(BRICKS)
 
+-- T.keep may be a set, a list or both, and its names globs
+do
+    local was = T.keep
+    T.keep = { COBBLE, "*_planks" }
+    check("T.keep as a list: its items are not junk", not T.isJunk(COBBLE) and not T.isJunk("minecraft:oak_planks") and T.isJunk(DIRT))
+    T.keep = { ["*netherrack"] = true, [GRAVEL] = true, [DIRT] = false }
+    check("...a set: its globs and names are kept, a name set to false is not", not T.isJunk("minecraft:netherrack") and not T.isJunk(GRAVEL)
+        and T.isJunk(DIRT))
+    T.keep = { "cobblestone" }
+    check("...a name without its namespace is minecraft's", not T.isJunk(COBBLE))
+    S.inv, S.sel = {}, 1
+    put(1, COBBLE, 64); put(2, "minecraft:spruce_planks", 10)
+    T.keep = { COBBLE, "*_planks" }
+    check("...and the dump plan reads it the same way (a list keeps what it names)", T.wouldDump() == false)
+    put(3, DIRT, 5)
+    check("...while what it doesn't name is dumped", T.wouldDump() == true)
+    S.inv = {}
+    T.keep = was
+end
+
 --------------------------------------------------------------------------
 -- The junk chest's place
 --------------------------------------------------------------------------
@@ -189,3 +209,15 @@ stock(); home(0, 0, 0, 3); GROUND = 0
 ok, dropped = T.dumpJunk()
 check("a chest in front (side = a heading): turns to it, drops, and turns back",
     ok and dropped == 84 and inChest(CH["1,0,0"], DIRT) == 64 and GROUND == 0 and at() == "(0,0,0) facing 3", at())
+
+-- a wall between the turtle and the chest that neither order of axes gets past: the path finder goes round it
+CH = { ["3,1,0"] = {} }
+T.setJunkChest(3, 0, 0, "up")
+W = { [M.key(1, 0, 0)] = { name = "minecraft:stone" }, [M.key(1, 1, 0)] = { name = "minecraft:stone" },
+      [M.key(1, -1, 0)] = { name = "minecraft:stone" } }
+T.map.clear()                            -- (the walls of the test before are gone from the world: from the map too)
+stock(); home(0, 0, 0, 0); GROUND = 0
+ok, dropped = T.dumpJunk()
+check("a wall in the way: T.dumpJunk walks round it with the path finder, drops, and comes back",
+    ok == true and dropped == 84 and inChest(CH["3,1,0"], DIRT) == 64 and GROUND == 0 and at() == "(0,0,0) facing 0", tostring(dropped) .. " " .. at())
+W = {}

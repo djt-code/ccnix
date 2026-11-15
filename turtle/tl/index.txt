@@ -9,7 +9,7 @@ The turtle API, wrapped once:
 T.claim() - Make this module the one the wrapped turtle functions keep up to date. Loading turtlelib does it already; call it when another program's module may have loaded since (claude, after run_program).
 T.owns() - Is this copy of turtlelib the one the wrapped turtle functions keep up to date (the last loaded, or the last to T.claim)? A module's listener that acts for its program (the undo journal, autoDump) acts only while its copy owns the turtle.
 T.onChange(fn) - Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "change", "place" or "move", with x, y, z. Returns a function that removes the listener.
-T.protect(name, x1, y1, z1, x2, y2, z2) - Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>". Replaces a box of the same name. Returns true, or nil and why.
+T.protect(name, x1, y1, z1, x2, y2, z2) - Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped). True, or nil and why.
 T.unprotect(name) - Remove the area called `name`. True, or false and why (none by that name).
 T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name, leaves that area out (see T.guarded).
 T.protections() - The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (copies: changing one changes nothing).
@@ -43,10 +43,10 @@ Peripheral upgrades:
 T.equipPeripheral(name) - Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for it to show up. Returns the peripheral and a function that puts back what was there, or nil and why.
 T.withPeripheral(name, fn) - Run fn(peripheral) with the item `name` equipped as a peripheral, and put back what was on that side afterwards. Returns true and what fn returned, or nil and why it couldn't equip (see T.equipPeripheral).
 Low-level moves:
-T.up() - Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxHeight is reached.
-T.down() - Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way or T.cfg.maxDrop is reached.
-T.forward() - Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first). True, or false if anything else is in the way.
-T.back() - Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false if anything is there.
+T.up() - Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxHeight, 16 above the start by default.
+T.down() - Move down one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxDrop, 12 below the start by default.
+T.forward() - Move forward one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why ("blocked by <block> at x,y,z", "couldn't dig ...", "can't move forward: ..." or "no fuel").
+T.back() - Back up a block without turning (saves turning round to go back the way it came). It can't see or dig behind it: false and why if anything is there ("can't move back: something is in the way").
 T.settle() - Sink until resting on something solid.
 T.toY(y) - Climb or sink to height y in the current column.
 T.toStartHeight() - Return to y = 0.
@@ -125,7 +125,7 @@ T.junkChest() - Where the junk chest is, as { x, y, z, side } (side a heading 0 
 T.markCrafted(name) - The craft module calls this for each item it makes, so it is never junk for the rest of the job (until the computer restarts, or T.clearCrafted()).
 T.clearCrafted() - Forget what T.markCrafted named: the end of a job.
 T.isEssential(name) - Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
-T.isJunk(name) - Is the item `name` junk? False for what's in T.keep, tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+T.isJunk(name) - Is the item `name` junk? False for what's in T.keep (a set or a list of names, globs too: put the job's materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
@@ -158,21 +158,21 @@ T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
 T.smelt(item, n, fuel, opts) - Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
 Harvesting:
-T.harvest(pattern, where, target, opts) - Dig the blocks in a place whose name matches a glob, nearest first and top down: how many, and what could not be. Returns true, info; false, why, info when it stopped short; nil, why when it couldn't begin.
+T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 Fuel from lava:
 T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 What a job costs in fuel:
 T.fuelFor(plan, opts) - What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
 The job journal:
-T.job.start(goal, steps) - Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
-T.job.done(step) - Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step).
+T.job.start(goal, steps) - Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on; it lasts until T.job.clear. True, or nil and why.
+T.job.done(step) - Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step). The last step done finishes the job.
 T.job.resume() - The job as it stands: { goal, steps = { { text, done } }, step (the text of the step to do now), next (its number), done, total, finished, notes, work = { key = text }, every }; nil and why if there is none.
 T.job.note(said) - Add a note to the job (the newest 40 are kept). True, or nil and why.
 T.job.progress(key, said) - Set the progress line for a key such as "build" or "harvest" (text nil takes it away). T.build and T.harvest call this when a job is on. True, or nil and why.
 T.job.status() - How the job stands in one line ("step 2 of 3: lay the floor; build keep: 40 of 300 cells"), or nil if there is none.
-T.job.clear() - Forget the job. True.
+T.job.clear() - End the job: forget it and its file (a finished job, its last step done, stays until then, out of the reports). True.
 Reports to the player:
-T.report.now(said, opts) - Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+T.report.now(said, opts) - Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 T.report.try(said, opts) - T.report.now for a program's end or trouble: the same arguments, but it never raises. True, or nil and why (Ctrl+T goes on).
 T.report.every(n) - Make the job tell the player once in every n steps (a T.job.done, or a progress line from a build or a harvest); 0 or nil turns it off. It is kept in the job, so it needs one (T.job.start) and lasts a restart. True, or nil and why.
 The undo journal:
@@ -192,12 +192,12 @@ Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 The list of chests, in a data file:
 T.addChest(x, y, z, side, bulk) - Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
-T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it). True, or false and why.
-T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never.
+T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
+T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
 Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 Where an item is, and fetching it:
-T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk }, the nearest to the turtle first, and the total. Moves nothing.
+T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
 T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
 Putting away:
 T.stow(opts) - Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.

@@ -32,7 +32,6 @@ local text = require("text")
 local scan = require("scan")
 local convert = require("convert")
 local fileio = require("fileio")
-local glob = require("glob")
 
 local CUBE, CELLS = 16, 4096                  -- a cube is 16 cells each way
 local FORMAT = "ccnix-cube 1"                 -- the first line of a cube's file
@@ -50,6 +49,8 @@ local MAX_SIDE = 64                           -- the widest a heights or slice m
 local AIR, AIR_CODE = "minecraft:air", 1
 local SYMBOLS = "#%&=+*@$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 local NEIGHBOURS = { 0, 1, 2, 3, "up", "down" }
+local FRAMED_JOBS = { "mine.job", ".build" }          -- jobs kept in the turtle's frame, which a re-zero doesn't move
+local INSPECT_MOVE = { path = true, scan = false }    -- how T.inspectAt gets next to a cell, unless told
 
 -- Names that are air, and names that aren't a surface to stand on or build on
 local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true }
@@ -763,7 +764,9 @@ end
 -- true and T.origin()'s table, or nil and why.
 --
 -- Also n/e/s/w, or -z/+x/+z/-x.  Called with no arguments it asks GPS for the cell and works out the facing
--- from a geo scan; with x, y, z only, it finds the facing from a scan.
+-- from a geo scan; with x, y, z only, it finds the facing from a scan.  A third result is a note when jobs saved in the
+-- turtle's frame are on disk (mine.job, an unfinished T.build's .build): they are in the frame as it was when they were
+-- made, so if that has moved since (a re-zero, --here) their cells are wrong.
 function T.setOrigin(x, y, z, facing)
     ensure()
     if not S.frame.aligned then return nil, UNALIGNED end
@@ -789,7 +792,13 @@ function T.setOrigin(x, y, z, facing)
     S.world.ox, S.world.oy, S.world.oz = x - ax, y - ay, z - az
     local ok, why = saveFrame()
     if not ok then return nil, why end
-    return true, T.origin()
+    local saved = {}
+    for _, file in ipairs(FRAMED_JOBS) do
+        if fs.exists(T.dataPath(file)) then saved[#saved + 1] = file end
+    end
+    if #saved == 0 then return true, T.origin() end
+    return true, T.origin(), "saved jobs are in the turtle's frame as it was when they were made (" .. table.concat(saved, ", ")
+        .. "): if it has moved since (a re-zero, --here), finish or clear them"
 end
 
 -- Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table
@@ -877,15 +886,9 @@ local function eachCube(mb, fn)
     end
 end
 
--- A test on a block name from a glob; a pattern with no ":" also matches the name without its namespace.
-local function nameTest(pattern)
-    local test = glob.compile(pattern)
-    if text.contains(pattern, ":") then return test end
-    return function(name)
-        local _, short = text.cut(name, ":")
-        return test(name) or (short ~= nil and test(short))
-    end
-end
+-- A test on a block name from a glob (or a list or set of them); a pattern with no ":" also matches the name without
+-- its namespace.  turtlelib's, as for every list of names.
+local nameTest = T.nameTest
 
 -- Call visit(code, mx, my, mz) for each cell of cube c inside the box mb (map frame; nil for all of it).
 local function eachCell(c, mb, visit)
@@ -1256,18 +1259,23 @@ local function mergeNamed(named, r, px, py, pz, air)
     settle(true)
 end
 
+-- Why a scan of radius r over 8 is refused: what it costs.
+local function costly(r)
+    return "a scan of radius " .. r .. " costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it"
+end
+
 -- Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 --
 -- opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air).  The info
 -- table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan.  The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools
 -- down.  The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading.  A
--- radius over 8 costs a lot of fuel (16 once cost about 5300), so it's refused unless forced.
+-- radius over 8 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap), so it's refused unless forced.
 function T.scan(r, opts)
     opts = opts or {}
     r = r or MAX_RADIUS
     if not (whole(r) and r >= 1) then return nil, "the radius of a scan is a whole number from 1" end
     if r > MAX_RADIUS and not opts.force then
-        return nil, "a scan of radius " .. r .. " costs a lot of fuel (16 once cost about 5300); pass { force = true } to do it"
+        return nil, costly(r)
     end
     ensure()
     local fuel0 = turtle.getFuelLevel and turtle.getFuelLevel()
@@ -1320,8 +1328,8 @@ end
 
 -- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 --
--- It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less.  Refuses a box that takes
--- over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+-- It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less (over 8 is refused, as
+-- T.scan says why, unless opts.force: 8 or less is cheap).  Refuses a box that takes over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
 function T.scanBox(box, opts)
     opts = opts or {}
     local x1, y1, z1, x2, y2, z2 = normBox(box)
@@ -1329,7 +1337,7 @@ function T.scanBox(box, opts)
     local r = opts.radius or MAX_RADIUS
     if not (whole(r) and r >= 1) then return nil, "the radius of a scan is a whole number from 1" end
     if r > MAX_RADIUS and not opts.force then
-        return nil, "a scan of radius " .. r .. " costs a lot of fuel; pass { force = true } to do it"
+        return nil, costly(r)
     end
     local tiles = {}
     for _, cx in ipairs(centres(x1, x2, r)) do
@@ -1386,9 +1394,11 @@ end
 
 -- Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 --
--- The state (a stair's facing, a slab's half) is what a scan can't give.  opts.move is passed to T.moveTo (dig and so on).
+-- The state (a stair's facing, a slab's half) is what a scan can't give.  opts.move is passed to T.moveTo (dig and so on);
+-- without it the turtle goes round what is in the way with the path finder ({ path = true, scan = false }).
 function T.inspectAt(x, y, z, opts)
     opts = opts or {}
+    local move = opts.move or INSPECT_MOVE
     if not (whole(x) and whole(y) and whole(z)) then return nil, "inspectAt wants a cell of whole numbers" end
     ensure()
     local mapped = S.frame.aligned
@@ -1412,7 +1422,7 @@ function T.inspectAt(x, y, z, opts)
     local why = "every neighbour of " .. x .. "," .. y .. "," .. z .. " is solid in the map"
     for _, c in ipairs(options) do
         local ok, reason, name, cell = true, nil, nil, nil
-        if not T.at(c) then ok, reason, name, cell = T.moveTo(c.x, c.y, c.z, opts.move) end
+        if not T.at(c) then ok, reason, name, cell = T.moveTo(c.x, c.y, c.z, move) end
         if ok then
             local found, state = lookAt(x, y, z, c.d)
             settle(false)
