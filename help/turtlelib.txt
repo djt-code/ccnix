@@ -305,6 +305,16 @@ T.digCell(x, y, z, opts)
 
     It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs it anyway), checked before it goes and again when it is there. It stands in a cell beside it the map (or what the turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default { path = true, scan = false }; digging is turned off). The dig goes into the map as every dig does. The turtle stays beside the cell.
 
+T.trail()
+    The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
+
+    Every move through turtlelib or the turtle API adds to it, by any program; T.retrace walks it back. It lives in memory (a reboot starts it again) and moves with the frame when the turtle re-zeroes.
+
+T.retrace(n, opts)
+    Walk back along the trail over the last n cells (default all of it), skipping loops. True and the moves made, or false, why and the moves made.
+
+    Each hop is a T.moveTo to the cell before, with opts (T.moveTo's: dig, avoid, path, ...; default none, so it goes only where it went before). A cell the trail passed through twice is a loop: from the later visit it goes straight on from the earlier one. The cells walked back are taken off the trail, so a second T.retrace goes further back, not forward.
+
 T.turnsTo(d)
     Turns it takes to face direction d (none for up or down).
 

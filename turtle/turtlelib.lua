@@ -281,6 +281,17 @@ local reframers = {}
 -- are not moved: they belong to the frame they were made in.)
 local REFRAMED_FILES = { [".chests"] = "reframeChests" }
 
+-- The breadcrumb trail (T.trail, T.retrace): the cells the turtle moved through lately, oldest first, kept on the
+-- turtle table so every copy of the library adds to the same one.  Up to TRAIL_MOST cells, in memory only (the
+-- position file is written every move; the trail would make that write 200 times bigger).
+local TRAIL_MOST = 200
+local trailHolder = turtle or {}
+local trail = trailHolder._ccnixTrail
+if not trail then
+    trail = { cells = {} }
+    trailHolder._ccnixTrail = trail
+end
+
 -- (x, z) turned by k quarter turns to the right, as tl.world turns its frames
 local TURN_XZ = { [0] = { 1, 0, 0, 1 }, { 0, 1, -1, 0 }, { -1, 0, 0, -1 }, { 0, -1, 1, 0 } }
 
@@ -305,6 +316,8 @@ local function frameMoved(old)
                 if f then f(move, turns) end
             end
         end
+    else
+        trail.cells = {}               -- (nobody knows where the trail's cells are now)
     end
     if not fs.exists(T.dataPath(T.MAP_DIR)) then return end
     local changed = T.need("frameChanged")
@@ -481,11 +494,24 @@ local function targetOf(side)
     return T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3]
 end
 
--- A successful move: T.pos follows, the listeners hear, it's saved.
+-- Add the cell the turtle moved into to the trail, after the one it left if the trail doesn't end there (its first move,
+-- or the position was set by hand).  Kept to the last TRAIL_MOST cells.
+local function crumb(fx, fy, fz)
+    if trail.paused then return end
+    local cells = trail.cells
+    local last = cells[#cells]
+    if not (last and last.x == fx and last.y == fy and last.z == fz) then cells[#cells + 1] = { x = fx, y = fy, z = fz } end
+    cells[#cells + 1] = { x = T.pos.x, y = T.pos.y, z = T.pos.z }
+    if #cells > 2 * TRAIL_MOST then trail.cells = { table.unpack(cells, #cells - TRAIL_MOST + 1) } end
+end
+
+-- A successful move: T.pos follows, the trail and the listeners hear, it's saved.
 local function moved(name)
     local dx, dy, dz = MOVE_STEP[name]()
     local from = W and W.listeners[1] and T.here()
+    local fx, fy, fz = T.pos.x, T.pos.y, T.pos.z
     T.pos.x, T.pos.y, T.pos.z = T.pos.x + dx, T.pos.y + dy, T.pos.z + dz
+    crumb(fx, fy, fz)
     if from then tell({ kind = "move", x = T.pos.x, y = T.pos.y, z = T.pos.z, from = from }) end
     T.savePos()
 end
@@ -700,6 +726,9 @@ end
 local function forgetSeen(x, y, z) seen.cells[x .. "," .. y .. "," .. z] = nil end
 
 reframers[#reframers + 1] = function() seen.cells, seen.n = {}, 0 end
+reframers[#reframers + 1] = function(move)
+    for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
+end
 
 -- The wrapped digs: refuse what's protected, look at what's there (the
 -- listeners are told it), then dig (with the tool side the caller named,
@@ -1702,6 +1731,67 @@ function T.digCell(x, y, z, opts)
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()
+end
+
+-- The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where
+-- it moved to last.
+--
+-- Every move through turtlelib or the turtle API adds to it, by any program; T.retrace walks it back.  It lives in memory
+-- (a reboot starts it again) and moves with the frame when the turtle re-zeroes.
+function T.trail()
+    local cells, out = trail.cells, {}
+    for i = math.max(1, #cells - TRAIL_MOST + 1), #cells do
+        local c = cells[i]
+        out[#out + 1] = { x = c.x, y = c.y, z = c.z }
+    end
+    return out
+end
+
+-- Walk back along the trail over the last n cells (default all of it), skipping loops.  True and the moves made, or false,
+-- why and the moves made.
+--
+-- Each hop is a T.moveTo to the cell before, with opts (T.moveTo's: dig, avoid, path, ...; default none, so it goes only
+-- where it went before).  A cell the trail passed through twice is a loop: from the later visit it goes straight on from
+-- the earlier one.  The cells walked back are taken off the trail, so a second T.retrace goes further back, not forward.
+function T.retrace(n, opts)
+    opts = opts or {}
+    local cells = trail.cells
+    if #cells > TRAIL_MOST then
+        trail.cells = { table.unpack(cells, #cells - TRAIL_MOST + 1) }
+        cells = trail.cells
+    end
+    local last = cells[#cells]
+    if last and not T.at(last) then cells[#cells + 1] = T.here() end      -- (it was put somewhere by hand)
+    local i = #cells
+    if i == 0 then return true, 0 end
+    if n == nil then n = i - 1 end
+    if not (isWhole(n) and n >= 0) then return false, "retrace wants a whole number of cells from 0", 0 end
+    local stop = math.max(1, i - n)
+    local first = {}
+    for j = stop, i do
+        local k = T.posKey(cells[j])
+        if not first[k] then first[k] = j end
+    end
+    local hops = 0
+    local function back()
+        while i > 0 do
+            i = first[T.posKey(cells[i])]                 -- (a loop through this cell is skipped)
+            for j = #cells, i + 1, -1 do cells[j] = nil end
+            if i <= stop then return true end
+            local c = cells[i - 1]
+            local ok, why = T.moveTo(c.x, c.y, c.z, opts)
+            if not ok then return false, "retrace stopped short of " .. T.posKey(c) .. ": " .. tostring(why) end
+            hops = hops + 1
+            i = i - 1
+        end
+        return true
+    end
+    trail.paused = true
+    local res = table.pack(pcall(back))
+    trail.paused = false
+    if not res[1] then error(res[2], 0) end
+    if res[2] then return true, hops end
+    return false, res[3], hops
 end
 
 -- Turns it takes to face direction d (none for up or down).
