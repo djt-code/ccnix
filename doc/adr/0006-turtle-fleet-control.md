@@ -164,3 +164,9 @@ modem.
 
 8. [ ] The `/turtles` page.
 9. [ ] The modem transport, if D1 wants it.
+10. [ ] turtled tells the game's chat about the turtles (`lib/mc`: a job
+    done, stuck, out of fuel), and, optionally, `ircd`'s `#minecraft` or
+    a channel of its own. One chat box at the base speaks for the fleet;
+    the turtles needn't carry one. (Noted 2026-11-15: a chat box doesn't
+    hear another chat box, so a turtle's own `T.report` never reaches
+    IRC.)

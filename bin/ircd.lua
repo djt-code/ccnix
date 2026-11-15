@@ -22,7 +22,10 @@
 -- Peripherals Chat Box (chat both ways), Player Detector (who's on,
 -- joins and leaves) and Environment Detector (weather); a command
 -- computer can speak and list players without them.  The world's clock
--- needs nothing.
+-- needs nothing.  A chat box hears players (their chat and /say), not
+-- what another chat box sends: a turtle's T.report or another
+-- computer's messages don't come back to #minecraft.  That is how
+-- Advanced Peripherals is made.
 --
 -- As a service (init keeps it running, and starts it again if it ends):
 --   setup ircd                      all of it at once: the files, the network
