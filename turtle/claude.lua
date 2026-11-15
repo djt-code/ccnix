@@ -1327,6 +1327,7 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNote         -- what loading the helpers said, for the model's first goal
+local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
 local function converse(goal)
     local said = startNote and goal .. "\n\n[" .. startNote .. "]" or goal
     addUser(said, "Not run: the goal ended before this call was answered.")
@@ -1357,9 +1358,12 @@ local function converse(goal)
                 log(what)
             end
         end
+        -- (logged when it differs from the last one: a clear stays applied,
+        -- and is reported again, on every call until a bigger one)
         for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            log(string.format("context: %d old tool results cleared (%d tokens)",
-                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0))
+            local line = string.format("context: %d old tool results cleared (%d tokens)",
+                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0)
+            if line ~= lastCleared then log(line); lastCleared = line end
         end
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):

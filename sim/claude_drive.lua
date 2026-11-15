@@ -666,6 +666,24 @@ check("the quoting text block goes back with its citations",
     quoted and quoted.text == "A turtle takes a computer and a chest." and quoted.citations
         and quoted.citations[1].url == "https://wiki.example/turtle", w3 and textutils.serialiseJSON(w3))
 
+-- the same clear, reported on each call after it, is logged once; a new
+-- one is logged again
+fresh({ "" })
+local function cleared(n, tokens)
+    return { context_management = { applied_edits = { { type = "clear_tool_uses_20250919", cleared_tool_uses = n, cleared_input_tokens = tokens } } } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", cleared(4, 20000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", cleared(4, 20000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", cleared(4, 20000)),
+    reply({ text("Done.") }, "end_turn", cleared(9, 41000)),
+}
+run("clear a lot")
+local clog = Mine.files["claude.log"] or ""
+local _, sameClears = clog:gsub("context: 4 old tool results cleared %(20000 tokens%)", "")
+check("the same clear reported on three calls is logged once, a new one again",
+    sameClears == 1 and clog:find("context: 9 old tool results cleared (41000 tokens)", 1, true), sameClears)
+
 -- 20. Text past ASCII: the model's UTF-8 goes back byte for byte (a
 --     thinking block after it is bound to it), CC's Latin-1 from a tool goes
 --     as UTF-8, and the screen shows what CC can ("×" as itself, "—" and "’"
