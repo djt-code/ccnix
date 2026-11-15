@@ -595,7 +595,6 @@ do
     fresh()
     fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
     W.give(2, "minecraft:coal", 1)
-    T.registry.addChest, T.registry.catalogue, T.registry.chests = "tl.store", "tl.store", "tl.store"
     T.addChest(0, 0, 0, 0)
     T.catalogue()
     local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
