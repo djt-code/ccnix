@@ -569,3 +569,79 @@ do
     T.report("new")
     check("a new job rides again", SENT[#SENT].message == "new [at 100,64,-20; fuel 200; job: step 1 of 1: a]", tostring(SENT[#SENT].message))
 end
+
+-- T.report.ask (ADR-0011 D4): the question told through the chat box, the answer read from its chat events (AP's two
+-- layouts), only from the player and only after the prefix; a timer a second counts the wait, flushes the cooldown and
+-- reminds; T.report.lastTold says when the player was last told anything
+do
+    local EVENTS = {}
+    os.startTimer = function() return 1 end
+    os.pullEvent = function()
+        local e = table.remove(EVENTS, 1)
+        if not e then error("os.pullEvent with no event scripted") end
+        return table.unpack(e)
+    end
+    local function timers(n) for _ = 1, n do EVENTS[#EVENTS + 1] = { "timer", 1 } end end
+
+    fresh()
+    check("T.report.lastTold: nil before anything is told", T.report.lastTold() == nil)
+    local text, who, at = T.report.ask("which stair?")
+    check("no chat box anywhere: nil and why, nothing sent", text == nil and contains(who, "chat_box") and #SENT == 0, tostring(who))
+    W.give(1, CHAT, 1)
+    text, who = T.report.ask("")
+    check("an empty question is refused", text == nil and contains(who, "nothing to ask"), tostring(who))
+
+    EVENTS = { { "timer", 1 }, { "chat", "Alex", "claude no", "uuid-a", false }, { "chat", "Steve", "hello there", "uuid-s", false },
+        { "chat", "Steve", "claudette yes", "uuid-s", false }, { "chat", "Steve", "$claude hidden", "uuid-s", true },
+        { "chat", "0f00-11aa", "Steve", "Claude: the oak one", false } }
+    local swaps = SWAPS
+    text, who, at = T.report.ask("which stair?")
+    check("the answer: the text after the prefix (any case, its colon off), the player and when",
+        text == "the oak one" and who == "Steve" and at == 1000, tostring(text) .. " / " .. tostring(who) .. " / " .. tostring(at))
+    check("...not another player's, nor a message without the prefix as a word of its own, nor a hidden one", #EVENTS == 0)
+    check("the question went to the player with how to answer", #SENT == 1 and SENT[1].player == "Steve"
+        and SENT[1].message == 'which stair? (answer in chat: "claude <your answer>")', tostring(SENT[1] and SENT[1].message))
+    check("the chat box aboard was equipped for the wait and put back", SWAPS - swaps == 2 and EQ.left == PICK and EQ.right == nil
+        and carrying(CHAT) == 1, SWAPS - swaps)
+    check("T.report.lastTold: when the question went", T.report.lastTold() == 1000)
+
+    SENT = {}
+    timers(5)
+    text, who = T.report.ask("still there?", { timeout = 5, remind = 2 })
+    check("no answer in opts.timeout seconds: nil and why", text == nil and who == "no answer in 5 s" and #EVENTS == 0, tostring(who))
+    check("...reminded every opts.remind seconds", #SENT == 3 and SENT[2].message == "still waiting for an answer: still there?"
+        and SENT[3].message == SENT[2].message, #SENT)
+    check("...and the chat box put back", EQ.right == nil and carrying(CHAT) == 1)
+
+    SENT, BUSY = {}, 1
+    EVENTS = { { "timer", 1 }, { "chat", "Steve", "claude go", "uuid-s", false } }
+    text = T.report.ask("busy box?")
+    check("a question the cooldown held back goes at the next second (the chat box flushed)", text == "go" and #SENT == 1
+        and SENT[1].message == 'busy box? (answer in chat: "claude <your answer>")', #SENT)
+
+    SENT = {}
+    EVENTS = { { "chat", "Steve", "turtle: up", "uuid-s", false } }
+    text = T.report.ask("prefix?", { prefix = "turtle", player = "Steve" })
+    check("opts.prefix names another prefix", text == "up" and SENT[1].message == 'prefix? (answer in chat: "turtle <your answer>")')
+
+    SENT = {}
+    SETTINGS["turtle.player"] = ""
+    EVENTS = { { "chat", "Alex", "claude yes", "uuid-a", false } }
+    text, who = T.report.ask("anyone?")
+    check("no player set: asked of everyone, and anyone's answer taken", text == "yes" and who == "Alex" and SENT[1].everyone == true,
+        tostring(who))
+    SETTINGS["turtle.player"] = "Steve"
+
+    fresh()
+    EQ.right = CHAT
+    local swaps2 = SWAPS
+    EVENTS = { { "chat", "Steve", "claude fine", "uuid-s", false } }
+    text = T.report.ask("attached?")
+    check("a chat box on a side is used as it is, nothing swapped", text == "fine" and SWAPS == swaps2 and EQ.right == CHAT)
+
+    fresh()
+    W.give(1, CHAT, 1)
+    T.report("the walls are up")
+    check("T.report stamps T.report.lastTold too", T.report.lastTold() == 1000)
+    os.pullEvent, os.startTimer = nil, nil
+end

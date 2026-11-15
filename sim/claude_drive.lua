@@ -107,10 +107,10 @@ check("posted to the Messages API with the key and version headers",
         and r1.headers["anthropic-version"] ~= nil, r1 and tostring(r1.url))
 local toolNames = {}
 for i, t in ipairs(r1 and r1.body.tools or {}) do toolNames[i] = t.name .. (t.type and ("=" .. t.type) or "") end
-check("the request names the model, effort, cached system prompt and the tools: its own four, memory, web search and fetch",
+check("the request names the model, effort, cached system prompt and the tools: its own five, memory, web search and fetch",
     r1 and r1.body.model == "claude-opus-5-5" and r1.body.output_config.effort == "medium"
         and r1.body.system[1].cache_control.type == "ephemeral"
-        and table.concat(toolNames, " ") == "lua status run_program ask_user memory=memory_20250818 "
+        and table.concat(toolNames, " ") == "lua status run_program ask_user chat memory=memory_20250818 "
             .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
         and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
 local edits1 = r1 and r1.body.context_management.edits or {}
@@ -1180,3 +1180,166 @@ check("the prompt and the lua tool tell of keep(name, code) and /claude/helpers/
     sys31:find("with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua", 1, true)
         and sys31:find("/claude/helpers.lua, then each file in /claude/helpers/", 1, true)
         and lua31:find("keep(name, code) runs a helper and keeps it", 1, true))
+
+-- 32. the chat tool (ADR-0011 D4): says something through a chat box (the
+--     one aboard equipped for the moment), or asks and waits for an answer
+--     from the chat or the keyboard, whichever comes first; the chat box
+--     goes back whichever it was; the wait stops short of the cache's TTL
+--     unless the model asks for longer, and no answer is a normal result.
+--     (A chat box peripheral, AP's chat events, the settings, and CC's
+--     parallel over coroutines: each scripted event goes to the routines
+--     waiting for it, as CC's does; read() waits for a "sim_read" event.)
+local CHAT = "advancedperipherals:chat_box"
+local CHATSENT = {}
+local chatBox = {
+    sendMessageToPlayer = function(m, p) CHATSENT[#CHATSENT + 1] = { message = m, player = p }; return true end,
+    sendMessage = function(m) CHATSENT[#CHATSENT + 1] = { message = m, everyone = true }; return true end,
+}
+local rawWrap, rawType = peripheral.wrap, peripheral.getType
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local SET32 = { ["turtle.player"] = "Steve" }
+settings = { define = function() end, get = function(n) return SET32[n] end }
+local SCRIPT = {}
+local inParallel = 0
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, readWas, timerWas = os.pullEvent, read, os.startTimer
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+os.startTimer = function() return 1 end
+-- (the goal's prompt, outside a wait, reads the scripted answers as before)
+read = function()
+    if inParallel == 0 then return readWas() end
+    local _, line = os.pullEvent("sim_read")
+    return line
+end
+local function timers(n) for _ = 1, n do SCRIPT[#SCRIPT + 1] = { "timer", 1 } end end
+
+local function chatFresh()
+    fresh({ "" })
+    Mine.inv[2] = { name = CHAT, count = 1 }
+    CHATSENT, SCRIPT = {}, {}
+end
+local function chatBack()
+    local aboard = 0
+    for s = 1, 16 do if Mine.inv[s] and Mine.inv[s].name == CHAT then aboard = aboard + Mine.inv[s].count end end
+    return EQ.left == nil and EQ.right == "minecraft:diamond_pickaxe" and aboard == 1
+end
+
+chatFresh()
+SCRIPT = { { "chat", "Alex", "claude no", "u-a", false }, { "chat", "Steve", "claude: the oak one", "u-s", false } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Starting the wall." }) }, "tool_use"),
+    reply({ toolUse("chat", { text = "Which stair?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("talk to the player")
+local c1, c2 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("chat: said to the player through the chat box aboard, equipped for the moment and put back",
+    c1 and c1.content == "said in chat" and c1.is_error == nil and CHATSENT[1] and CHATSENT[1].player == "Steve"
+        and CHATSENT[1].message == "Starting the wall." and chatBack(), c1 and c1.content)
+check("chat ask: the player's answer from the chat, after the prefix (another player's not taken)",
+    c2 and c2.content == "Steve answered in chat: the oak one" and c2.is_error == nil
+        and CHATSENT[2].message == 'Which stair? (answer in chat: "claude <your answer>")' and #SCRIPT == 0, c2 and c2.content)
+check("...the chat box put back though the keyboard was still waiting, and the answer shown",
+    chatBack() and Mine.logHas("^%(Steve answered in chat: the oak one%)$"))
+check("...and the tool is offered: lua status run_program ask_user chat, then the API's",
+    HTTP.requests[1].body.tools[5].name == "chat" and HTTP.requests[1].body.tools[5].input_schema.required[1] == "text"
+        and HTTP.requests[1].body.tools[5].description:find("stops short of the cache's 5 minutes", 1, true))
+
+chatFresh()
+SCRIPT = { { "timer", 1 }, { "sim_read", "go left" } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Which way?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask at the keyboard")
+local c3 = resultsIn(2).toolu_1
+check("chat ask: a line typed at the keyboard answers too, and the chat box goes back",
+    c3 and c3.content == "answered at the keyboard: go left" and chatBack(), c3 and c3.content)
+
+chatFresh()
+timers(270)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Anyone?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask nobody")
+local c4 = resultsIn(2).toolu_1
+check("no answer: the wait stops short of the cache's 5 minutes, a normal result saying so",
+    c4 and c4.is_error == nil and c4.content:find("^no answer in 270 s %(the wait stops short of the cache's 5 minutes; a longer timeout_s")
+        and #SCRIPT == 0 and chatBack(), c4 and c4.content)
+check("...the question said again every 2 minutes meanwhile", #CHATSENT == 3 and CHATSENT[2].message == "still waiting for an answer: Anyone?", #CHATSENT)
+
+chatFresh()
+timers(3)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Quick?", ask = true, timeout_s = 3 }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask quickly")
+local c5 = resultsIn(2).toolu_1
+check("timeout_s sets the wait", c5 and c5.content == "no answer in 3 s" and c5.is_error == nil, c5 and c5.content)
+
+chatFresh()
+timers(3)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Long?", ask = true, timeout_s = 3 }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+local timeWas = os.time
+local jump = 0
+os.time = function(t) if t ~= nil then return timeWas(t) end jump = jump + 400; return timeWas() + jump end
+run("ask for long")
+os.time = timeWas
+local c6 = resultsIn(2).toolu_1
+check("a wait longer than the cache keeps the conversation says what it costs",
+    c6 and c6.content:find("^no answer in 3 s %(that was longer than the cache keeps the conversation, 5 minutes: the next call writes it to the cache again%)$"),
+    c6 and c6.content)
+
+chatFresh()
+Mine.inv[2] = nil
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Hello?", ask = true }) }, "tool_use"),
+    reply({ toolUse("chat", { text = "Hello." }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("no chat box")
+local c7, c8 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("no chat box: an error result saying why, nothing waited for",
+    c7 and c7.is_error == true and c7.content:find("^couldn't ask in chat: .*chat_box") and c8 and c8.is_error == true
+        and c8.content:find("^not said in chat: "), c7 and c7.content)
+
+chatFresh()
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+run("what can I say")
+local sys32 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt tells of the chat tool and T.report.ask, and to ask in the game",
+    sys32:find("The chat tool says something in the game's chat without code", 1, true)
+        and sys32:find("T.report.ask(question, opts)", 1, true)
+        and sys32:find("the chat tool with ask = true reaches the player in the game, ask_user only the keyboard", 1, true))
+
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+os.pullEvent, read, os.startTimer = pullWas, readWas, timerWas
+parallel, settings = nil, nil

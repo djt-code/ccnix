@@ -19,13 +19,15 @@
 -- T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its
 -- fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral;
 -- the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps
--- (a step is a T.job.done, or a progress line from a build or a harvest).
+-- (a step is a T.job.done, or a progress line from a build or a harvest).  T.report.ask asks the player in chat and waits for
+-- an answer starting with "claude"; T.report.lastTold says when the player was last told anything.
 
 local T = require("turtlelib")
 local text = require("text")
 local convert = require("convert")
 local fileio = require("fileio")
 local tables = require("tables")
+local scan = require("scan")
 
 local JOB_FILE = ".job"
 local UNDO_FILE = ".undo"
@@ -238,6 +240,11 @@ end
 --------------------------------------------------------------------------
 T.report = {}
 
+-- Seconds since 1970 (CC's os.epoch is in ms; plain Lua has os.time): when a message went, as claude counts time too.
+local function nowSeconds()
+    return os.epoch and math.floor(os.epoch("utc") / 1000) or os.time()
+end
+
 -- Where the turtle is, for a report: the world cell when the origin is known, else the turtle's own frame.
 local function whereText()
     if T.origin and T.origin() then
@@ -309,6 +316,7 @@ function T.report.now(said, opts)
     local ok, sent, why = pcall(sendReport, said, opts, who)
     if borrowed and T.selectItem(CHAT_BOX) then T.dropSide(opts.from, 1); turtle.select(1) end
     if not ok then error(sent, 0) end
+    if sent then S.told = nowSeconds() end
     return sent, why
 end
 
@@ -318,6 +326,84 @@ function T.report.try(said, opts)
     if not ok and sent == "Terminated" then error(sent, 0) end
     if not ok then return nil, tostring(sent) end
     return sent, why
+end
+
+-- What may stand between the prefix and the answer: "claude: yes", "claude, yes", "claude yes".
+local AFTER_PREFIX = scan.oneOf(" ,:;\t")
+
+-- The answer in a chat message: what follows the prefix (in any case, and a word of its own: "claudette" is not "claude"),
+-- or nil if it doesn't start with it.
+local function answerIn(said, prefix)
+    if type(said) ~= "string" or #said < #prefix or not text.equalFold(said:sub(1, #prefix), prefix) then return nil end
+    local sc = scan.new(said, #prefix + 1)
+    if scan.isNameChar(sc:peek()) then return nil end
+    sc:readWhile(AFTER_PREFIX)
+    return text.trim(sc:rest())
+end
+
+-- Ask with `chat` (lib/mc, one that hears) and wait: the question told (to `who`, or everyone when nil), then the chat
+-- events read until an answer comes from `who` (anyone's when nil).  A timer each second counts the wait, sends what
+-- the chat box's cooldown held back and says the question again every opts.remind seconds.
+local function waitForAnswer(chat, question, opts, who)
+    local prefix = opts.prefix or "claude"
+    local timeout = math.ceil(opts.timeout or 300)
+    local remind = math.floor(opts.remind or 0)
+    local label = os.getComputerLabel and os.getComputerLabel() or "turtle"
+    local function tell(said)
+        if who then return chat.tell(who, said, label) end
+        return chat.say(said, label)
+    end
+    local ok, why = tell(question .. ' (answer in chat: "' .. prefix .. ' <your answer>")')
+    if not ok then return nil, why end
+    S.told = nowSeconds()
+    local waited, timer = 0, os.startTimer(1)
+    while true do
+        local ev = table.pack(os.pullEvent())
+        if ev[1] == "timer" and ev[2] == timer then
+            waited = waited + 1
+            chat.flush()
+            if waited >= timeout then return nil, "no answer in " .. timeout .. " s" end
+            if remind > 0 and waited % remind == 0 then tell("still waiting for an answer: " .. question) end
+            timer = os.startTimer(1)
+        else
+            local e = chat.event(table.unpack(ev, 1, ev.n))
+            if e and e.kind == "chat" and (who == nil or text.equalFold(tostring(e.player), who)) then
+                local answer = answerIn(e.text, prefix)
+                if answer then return answer, e.player, nowSeconds() end
+            end
+        end
+    end
+end
+
+-- Ask the player `question` in chat and wait for the answer: the text (the prefix taken off), the player who gave it and
+-- when (seconds since 1970); or nil and why ("no answer in 300 s", no chat box).
+--
+-- The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat
+-- box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back
+-- after.  An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from
+-- that player only (anyone's with none set).  opts.timeout is the longest wait in seconds (default 300); opts.remind
+-- says the question again every so many seconds (default never).  Ctrl+T stops the wait.
+function T.report.ask(question, opts)
+    opts = opts or {}
+    if type(question) ~= "string" or question == "" then return nil, "nothing to ask: give the question" end
+    local who = opts.player or playerName()
+    if type(who) ~= "string" or who == "" then who = nil end
+    local mc = require("mc")
+    local here = mc.new()
+    if here.has.hears then return waitForAnswer(here, question, opts, who) end
+    local ok, answer, from, at = T.withPeripheral(CHAT_BOX, function(box)
+        return waitForAnswer(mc.new({ chatBox = box }), question, opts, who)
+    end)
+    if not ok then return nil, answer end
+    return answer, from, at
+end
+
+-- When the player was last told something through T.report, T.report.now or T.report.ask: seconds since 1970, or nil if
+-- nothing has been told since the computer started.
+--
+-- claude reminds the model to keep the player told by it (the setting claude.remindChat).
+function T.report.lastTold()
+    return S.told
 end
 
 setmetatable(T.report, { __call = function(_, said, opts) return T.report.now(said, opts) end })

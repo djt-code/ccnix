@@ -47,6 +47,8 @@ The other tools:
       runs one of ccnix's turtle programs (mine, farm, mow, home), or ip and ping for the network, with arguments, or reads its manual (help/)
   ask_user
       asks you, at the prompt
+  chat
+      says something in the game's chat (through a chat box, to the setting turtle.player, or everyone when it isn't set), or asks there and waits for an answer starting with "claude" from that player, or one typed at the prompt, whichever comes first (T.report.ask); the wait is kept under the cache's time unless the model asks for longer
   memory
       its notes, kept between sessions in /claude/memories/ (the API's memory tool: view, create, str_replace, insert, delete, rename, only under that folder)
   web_search, web_fetch
