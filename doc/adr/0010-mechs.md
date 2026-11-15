@@ -305,8 +305,9 @@ CC: Sable's business, and out of scope here.
    does `chest.pushItems("turtle_N", 1)` fill the turtle? **Yes**
    (2026-11-15): it returned 1 and the item was in the turtle. Across two
    separate wired networks the same call fails ("Target does not exist").
-   The turtle peripheral has no `list` or `getItemDetail`. Still to try:
-   `chest.pullItems("turtle_N", slot)`, taking an item back out.
+   The turtle peripheral has no `list` or `getItemDetail`. Taking it back
+   works too: `chest.pullItems("turtle_N", 1)` returned 1 and the item
+   was back in the chest, so the hold can empty an arm without armd.
 
 ### Phase 1: ccnix (pull request first; lockstep)
 
