@@ -12,7 +12,7 @@ Services come with it (lib/ircserv), as users:
       REGISTER #chan keeps a channel's founder, topic and auto-ops (OP, DEOP, AOP)
   MC
       the game: PLAYERS, TIME, WEATHER, TELL <player> <text>
-MC sits in the bridge channel, #minecraft: what's said there goes into the game's chat, and the game's chat (and joins, leaves, deaths) comes back.  It uses what's attached to this computer: an Advanced Peripherals Chat Box (chat both ways), Player Detector (who's on, joins and leaves) and Environment Detector (weather); a command computer can speak and list players without them.  The world's clock needs nothing.
+MC sits in the bridge channel, #minecraft: what's said there goes into the game's chat, and the game's chat (and joins, leaves, deaths) comes back.  It uses what's attached to this computer: an Advanced Peripherals Chat Box (chat both ways), Player Detector (who's on, joins and leaves) and Environment Detector (weather); a command computer can speak and list players without them.  The world's clock needs nothing.  A chat box hears players (their chat and /say), not what another chat box sends: a turtle's T.report or another computer's messages don't come back to #minecraft.  That is how Advanced Peripherals is made.
 
 As a service (init keeps it running, and starts it again if it ends):
   setup ircd                      all of it at once: the files, the network

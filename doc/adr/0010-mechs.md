@@ -1,7 +1,7 @@
 # ADR-0010: Mechs: a computer drives a glued body, and turtles are its arms
 
-**Status:** Proposed (2026-11-15): decisions D1 to D9 below are the user's
-to make
+**Status:** On hold (2026-11-15), after Phase 0: decisions D1 to D8
+below are the user's to make when it's picked up again
 **Date:** 2026-11-15
 **Deciders:** Dan Theisen
 

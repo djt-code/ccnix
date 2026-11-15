@@ -1578,6 +1578,14 @@ nothing. Both of AP's ways of calling the chat box (0.7's arguments,
 0.8's options table) and both names for its peripherals are tried, and a
 chat box's cooldown just makes messages wait their turn.
 
+A chat box hears players (their chat and `/say`), not what another chat
+box sends. So a turtle's `T.report`, or any other computer's chat box,
+reaches the players in the game but never `#minecraft`. That's how
+Advanced Peripherals is made: its chat box sends its messages straight
+to the players, past the chat event the other boxes listen to. Turtles
+are to reach chat and IRC through the fleet controller
+([ADR-0006](doc/adr/0006-turtle-fleet-control.md)) instead.
+
 Running it as a service, so it's up at every boot and comes back if it
 stops:
 
