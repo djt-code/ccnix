@@ -4,6 +4,13 @@ When a turtle's ccnix is updated, claude tells the model, with its first goal, t
 
 == 0.51.0
 -- more lines from the other ADR-0011 work go here
+Route digs (moveTo/travel with dig=) refuse a cell with lava or a water source beside or above it: "digging X at c would release lava at c'". Pass liquid = true to dig anyway; T.liquidNear(x,y,z) tells you first. A dig under gravel returns a warning as the second result.
+T.digCell(x,y,z) digs exactly one cell from beside it, refusing liquid or protected cells: your helpers.lua digCell can go. moveTo{digOnly={"x,y,z",...}} limits a route's digs to those cells.
+Routes cross protected areas through air the map knows (doorways, halls); they never dig there. Don't raise limit for a "no route" through an area: read what it says walled it in.
+T.inside({"keep","wall"}, fn) owns several areas, so a cell in two overlapping areas can be dug; nested T.inside calls add up. T.withUnprotected is the same.
+T.trail() lists the last 200 cells you moved through; T.retrace(n) walks back n of them, skipping loops: your helpers.lua retrace can go.
+The map no longer forgets cubes in protected areas or round home; T.map.pin(box) keeps other places; T.map.stats().over says when it can't shrink further.
+T.harvest(..., {maxFuel=, timeout=, exclude={...}}) caps a dig job (info.spent is the fuel used); T.fuelFor counts scans of radius 8 or less as free.
 The chat tool says something in the game's chat, or with ask = true asks there and waits for an answer from the chat or the keyboard; T.report.ask(question, opts) does it from code: replace your askPlayer with them.
 You are reminded when 15 minutes pass without a word to the player in chat (the setting claude.remindChat).
 keep(name, code) runs a helper and keeps it in /claude/helpers/<name>.lua, one file a helper, each loaded on its own: move what /claude/helpers.lua holds there, a helper at a time.
