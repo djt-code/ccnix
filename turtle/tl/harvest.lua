@@ -16,7 +16,8 @@
 -- fuel and goes back where it began.
 --
 -- T.fuelFor adds up what a route, a build and some scans will cost in fuel and says whether the tank and the fuel on board
--- will do.  The cost of a scan is an estimate (set T.cfg.scanFuel = { [8] = cost } from what T.scan reports in info.fuel).
+-- will do.  A scan of radius 8 or less costs nothing (the Geo Scanner's free radius by default); a wider one is an
+-- estimate (set T.cfg.scanFuel = { [12] = cost } from what T.scan reports in info.fuel).
 
 local T = require("turtlelib")
 local text = require("text")
@@ -31,6 +32,7 @@ local FLUIDS = { ["minecraft:water"] = true, ["minecraft:flowing_water"] = true,
 -- Where to go by default: along the map when something is in the way, and no scanning
 local MOVE = { path = true, scan = false }
 local SCAN_FUEL_R16 = 5300                    -- what a radius-16 scan once cost
+local FREE_RADIUS = 8                         -- a scan this wide or less costs nothing (Advanced Peripherals' default)
 local DETOUR = 1.25                           -- a route is this much longer than the straight way
 
 local S = { lastYield = 0 }
@@ -141,6 +143,30 @@ end
 -- Harvesting
 --------------------------------------------------------------------------
 
+-- A test for the cells opts.exclude leaves alone: a list of protected areas' names and boxes (six numbers, or x1 to z2
+-- fields).  The test, or nil and why for an entry that is neither.
+local function excluded(list)
+    local boxes = {}
+    for _, e in ipairs(list or {}) do
+        if type(e) == "string" then
+            for _, a in ipairs(T.protections()) do
+                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
+            end
+        else
+            local x1, y1, z1, x2, y2, z2 = boxOf(e)
+            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
+            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
+        end
+    end
+    return function(c)
+        for _, b in ipairs(boxes) do
+            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
+        end
+        return false
+    end
+end
+
+
 -- The cells of `where` whose block matches the test, as { x, y, z, name }, and true if cut to `limit`.  Scans a box the map
 -- does not fully know unless opts.scan is false (true: always).  Nil and why if it can't.
 local function cellsOf(pattern, test, where, opts, info)
@@ -216,10 +242,12 @@ end
 -- falling block over it that is not to be dug too, one that lava or a water source touches beside it or over it (T.liquidNear;
 -- opts.liquid, or opts.lava as before, digs those), one in a protected area
 -- (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  A block with no free cell
--- beside it is skipped unless opts.move lets it dig a way in.  It stops when the inventory is full (T.cfg.autoDump
--- keeps room), or the fuel is out.  Info is { got, target, items = { name = count aboard now that were not before },
--- seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }.  opts: scan, limit (cells
--- at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, liquid, item.
+-- beside it is skipped unless opts.move lets it dig a way in, and so is one in opts.exclude (protected areas' names and boxes,
+-- as T.refuelFromLava takes).  It stops when the inventory is full (T.cfg.autoDump keeps room), the fuel is out, it has
+-- spent opts.maxFuel fuel (scanning included) or run opts.timeout seconds.  Info is { got, target, items = { name = count
+-- aboard now that were not before }, seen, gone, skipped, failed, more, scanned, spent, stopped }, the lists of { x, y, z,
+-- name, why }, spent the fuel it used.  opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default
+-- { path = true, scan = false }), inside, liquid, item, exclude, maxFuel, timeout.
 function T.harvest(pattern, where, target, opts)
     opts = opts or {}
     if opts.inside then
@@ -229,11 +257,26 @@ function T.harvest(pattern, where, target, opts)
     end
     if type(pattern) ~= "string" or pattern == "" then return nil, "harvest wants a glob of block names to dig" end
     if target ~= nil and not (whole(target) and target >= 1) then return nil, "the target is a whole number of blocks from 1" end
+    for _, o in ipairs({ "maxFuel", "timeout" }) do
+        if opts[o] ~= nil and not (type(opts[o]) == "number" and opts[o] >= 0) then return nil, "opts." .. o .. " is a number from 0" end
+    end
+    local outside, badExclude = excluded(opts.exclude)
+    if not outside then return nil, badExclude end
+    -- the fuel spent so far (what the tank lost; a refuel on the way isn't taken off) and the clock
+    local began, spent, lastLevel = os.clock(), 0, turtle.getFuelLevel()
+    local function spend()
+        local level = turtle.getFuelLevel()
+        if level == "unlimited" then return 0 end
+        if level < lastLevel then spent = spent + lastLevel - level end
+        lastLevel = level
+        return spent
+    end
     local test = matcher(pattern)
     local itemTest = opts.item and matcher(opts.item)
     local info = { got = 0, target = target, items = {}, gone = 0, skipped = {}, failed = {}, more = false }
     local cells, cut = cellsOf(pattern, test, where, opts, info)
     if not cells then return nil, cut end
+    info.spent = spend()
     info.seen, info.more = #cells, cut == true
     local move = opts.move or MOVE
     local tunnel = move.dig and true or false
@@ -258,6 +301,7 @@ function T.harvest(pattern, where, target, opts)
         for _, c in ipairs(col) do
             local guard = T.guarded(c.x, c.y, c.z)
             if guard then skip(c, "protected: " .. guard)
+            elseif outside(c) then skip(c, "in opts.exclude")
             elseif c.name and T.neverDig(c.name) and not T.cfg.digContainers then skip(c, "won't dig " .. c.name .. " (a container or a computer)")
             else
                 local wet = not (opts.liquid or opts.lava) and liquidTouches(c)
@@ -322,6 +366,14 @@ function T.harvest(pattern, where, target, opts)
 
     local function loop()
         while not (target and have() >= target) and not info.stopped do
+            if opts.maxFuel and spend() >= opts.maxFuel then
+                info.stopped = "spent " .. spent .. " fuel (opts.maxFuel " .. opts.maxFuel .. ")"
+                break
+            end
+            if opts.timeout and os.clock() - began >= opts.timeout then
+                info.stopped = "ran " .. opts.timeout .. " s (opts.timeout)"
+                break
+            end
             -- the nearest cell at the head of a column
             local best, bestKey, bestAt
             for key, col in pairs(columns) do
@@ -345,6 +397,7 @@ function T.harvest(pattern, where, target, opts)
         end
     end
     loop()
+    info.spent = spend()
     tellJob(info, pattern)
 
     local after = inventory()
@@ -367,29 +420,6 @@ end
 --------------------------------------------------------------------------
 -- Fuel from lava
 --------------------------------------------------------------------------
-
--- A test for the cells opts.exclude leaves alone: a list of protected areas' names and boxes (six numbers, or x1 to z2
--- fields).  The test, or nil and why for an entry that is neither.
-local function excluded(list)
-    local boxes = {}
-    for _, e in ipairs(list or {}) do
-        if type(e) == "string" then
-            for _, a in ipairs(T.protections()) do
-                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
-            end
-        else
-            local x1, y1, z1, x2, y2, z2 = boxOf(e)
-            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
-            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
-        end
-    end
-    return function(c)
-        for _, b in ipairs(boxes) do
-            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
-        end
-        return false
-    end
-end
 
 -- Burn one lava bucket from the inventory.  True if it burned.
 local function burnBucket()
@@ -486,10 +516,12 @@ end
 -- What a job costs in fuel
 --------------------------------------------------------------------------
 
--- What a scan of radius r costs in fuel: T.cfg.scanFuel[r] if given, else the one measured cost scaled by volume.
+-- What a scan of radius r costs in fuel: T.cfg.scanFuel[r] if given, nothing up to the free radius, else the one measured
+-- cost scaled by volume.
 local function scanCost(r)
     local given = type(T.cfg.scanFuel) == "table" and T.cfg.scanFuel[r]
     if given then return given end
+    if r <= FREE_RADIUS then return 0 end
     return math.ceil(SCAN_FUEL_R16 * (r / 16) ^ 3)
 end
 
