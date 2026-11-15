@@ -57,8 +57,10 @@ server's pack):
     air through `aero`. It can't move the ship.
   - **What can move a ship.** Create: Propulsion makes its thrusters,
     vector thrusters and tilt adapters CC peripherals.
-  - **Untested:** a turtle on a ship most likely digs and places into
-    the ship's plot, not the world.
+  - **Tried in game (2026-11-15):** a turtle on a ship can't reach the
+    world. Facing an obsidian pillar beside the ship, `turtle.inspect()`
+    gave "No block to inspect" as soon as the ship was assembled: the
+    turtle sees the ship's own plot, not the world.
 - **What ccnix has to build on:**
   - claude drives a turtle (turtle/claude.lua).
   - turtlelib's map, paths, protected areas and blueprints (ADR-0008)
@@ -219,7 +221,7 @@ an op). If the server wants mechs off, a setting turns the drive off.
 
 ### D9. Aeronautics ships
 
-**Experiment first, build later.** Phase 0 tries a ship in game: a
+**Experiment first, build later.** Phase 0 tried a ship in game: a
 computer on it, a Propulsion thruster driven from it, and a turtle on it
 digging.
 
@@ -227,6 +229,12 @@ digging.
   tools for flying could follow, with no mod code.
 - **If it digs the ship's own plot:** ships stay for travel, the arms
   don't work there, and the grid mech is the one that works the world.
+
+**Result (2026-11-15): the ship's own plot.** The turtle saw nothing
+beside it once the ship was assembled. So arms work only on the grid
+mech (D1 C). A computer on a ship does see Propulsion's thrusters as
+peripherals (`creative_thruster`), so a flying pilot (`lib/aero`) remains
+possible for travel. It would be its own ADR, if it's wanted.
 
 Teaching CC turtles on Sable ships to reach the world is Sable's or
 CC: Sable's business, and out of scope here.
@@ -278,8 +286,12 @@ CC: Sable's business, and out of scope here.
    - does the computer keep running through a flight?
    - what does `sublevel.getLogicalPose()` give?
    - does the turtle's `dig()` reach a world block next to the ship?
+     **No** (2026-11-15): `turtle.inspect()` gave "No block to inspect"
+     facing a pillar beside the assembled ship.
 2. A Propulsion thruster on the ship, driven from the computer
-   (`peripheral.getMethods`).
+   (`peripheral.getMethods`). **Seen** (2026-11-15): two Creative
+   Thrusters showed up as `creative_thruster` peripherals; their methods
+   weren't listed yet.
 3. Two turtles touching one full-block wired modem, and a chest on it:
    does `chest.pushItems("turtle_N", 1)` fill the turtle?
 
