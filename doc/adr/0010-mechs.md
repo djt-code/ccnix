@@ -200,6 +200,15 @@ keep their facing in their saved data.
   the arm moving. Each arm also adds its own 16 slots and its two upgrade
   sides (pickaxe, chat box, scanner...): a mech with four arms has four
   tools and 64 more slots.
+- **One network.** All the hold's chests and every arm must be on one
+  wired network: `pushItems` finds its target only on the source chest's
+  own network ("Target ... does not exist" across two, even when the
+  pilot sees both). The drive's `mech.blocks()` can warn when the body's
+  inventories are split.
+- **What's in an arm.** Over the modem a turtle shows only its computer
+  methods (`getID`, `turnOn`, `isOn`...), not `list` or `getItemDetail`,
+  so the pilot can push into an arm but can't see inside it. Each arm
+  reports its own slots (`turtle.getItemDetail`) through armd.
 
 ### D7. Fluids
 
@@ -293,7 +302,11 @@ CC: Sable's business, and out of scope here.
    Thrusters showed up as `creative_thruster` peripherals; their methods
    weren't listed yet.
 3. Two turtles touching one full-block wired modem, and a chest on it:
-   does `chest.pushItems("turtle_N", 1)` fill the turtle?
+   does `chest.pushItems("turtle_N", 1)` fill the turtle? **Yes**
+   (2026-11-15): it returned 1 and the item was in the turtle. Across two
+   separate wired networks the same call fails ("Target does not exist").
+   The turtle peripheral has no `list` or `getItemDetail`. Still to try:
+   `chest.pullItems("turtle_N", slot)`, taking an item back out.
 
 ### Phase 1: ccnix (pull request first; lockstep)
 
