@@ -7,8 +7,7 @@ section.
 
 ## The mod's icon (ccnix-mod 0.26.10)
 
-- **The mod list**: Mods → ccnix shows the icon (a gold computer with a green `#!_`), sharp, not blurred; the
-  page's links go to the repo and its issues.
+- **The mod list**: the page's links go to the repo and its issues.
 
 ## A turtle with no map yet (ccnix 0.50.2)
 
@@ -721,6 +720,15 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-14 — ccnix-mod 0.27.0, on the dma.space pack's client:
+  - The client joins the pack's own server, which has no ccnix, with no mod error.
+  - On the dev server, the Network Gateway and the Network Configurator are in
+    ComputerCraft's creative tab, after the wired modems.
+  - JEI shows an Information page for each.
+  - The Mods screen's search finds mods with the list scrolled (the mixin for
+    neoforged/NeoForge#3655).
+  - ccnix's icon is in the Mods list and on mezz's config screen, sharp.
 
 - 2026-11-13 — ccnix-mod 0.26.11: a paste of 547 characters into claude
   on a turtle no longer kicks the player; the computer gets the first 512.
