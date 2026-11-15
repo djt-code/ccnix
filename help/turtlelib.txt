@@ -654,7 +654,7 @@ T.build and T.harvest write their progress there (T.job.progress) when a job is 
 
 The undo journal (T.cfg.undo = true) writes down each block the turtle digs or places, in the data file .undo: the block's name and its state for a dig (the dig looks first, so the state comes free), the item for a placement.  T.undo(n) puts the last n back: a dug block is placed again (through T.placeAt when it has a state, with the item on hand) and a placed one is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 
-T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added.  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
+T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).
 
 == The job journal ==
 
@@ -662,9 +662,9 @@ T.job.start(goal, steps)
     Start a job: its goal and the steps of the plan (a list of texts, or none). Replaces the job that was on. True, or nil and why.
 
 T.job.done(step)
-    Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step).
+    Mark a step done: its number, its text, or nothing for the next one not done. Returns true and how many steps are left, or nil and why (no job, no such step). The last step done finishes the job.
 
-    A step done twice is done. With T.report.every set, the player is told once in every n steps.
+    A step done twice is done. A job with no steps is finished by T.job.done(). A finished job is left out of what T.report adds (T.job.status still says how it ended); T.job.start begins the next, T.job.clear forgets it. With T.report.every set, the player is told once in every n steps.
 
 T.job.resume()
     The job as it stands: { goal, steps = { { text, done } }, step (the text of the step to do now), next (its number), done, total, finished, notes, work = { key = text }, every }; nil and why if there is none.
@@ -686,7 +686,7 @@ T.job.clear()
 == Reports to the player ==
 
 T.report.now(said, opts)
-    Tell the player `said`, with where the turtle is, its fuel and the job's progress added: true, or nil and why.
+    Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 
     The player is the setting turtle.player (opts.player overrides it); with none, nothing is said. A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
 
