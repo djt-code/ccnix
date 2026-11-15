@@ -940,7 +940,7 @@ T.map.cube(cx, cy, cz)
 T.scan(r, opts)
     Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 
-    opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air). The info table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan. The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools down. The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading. A radius over 8 costs a lot of fuel (16 once cost about 5300), so it's refused unless forced.
+    opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air). The info table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan. The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools down. The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading. A radius over 8 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap), so it's refused unless forced.
 
 T.mergeScan(entries, r, opts)
     Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
@@ -950,7 +950,7 @@ T.mergeScan(entries, r, opts)
 T.scanBox(box, opts)
     Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 
-    It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less. Refuses a box that takes over 27 scans unless opts.force. failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+    It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less (over 8 is refused, as T.scan says why, unless opts.force: 8 or less is cheap). Refuses a box that takes over 27 scans unless opts.force. failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
 
 == Inspecting ==
 

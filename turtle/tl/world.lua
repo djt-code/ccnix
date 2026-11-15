@@ -1250,18 +1250,23 @@ local function mergeNamed(named, r, px, py, pz, air)
     settle(true)
 end
 
+-- Why a scan of radius r over 8 is refused: what it costs.
+local function costly(r)
+    return "a scan of radius " .. r .. " costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it"
+end
+
 -- Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 --
 -- opts: force; map = false (leave the map alone); air = false (don't note the cells the scan lists no block for as air).  The info
 -- table is { radius, blocks, fuel (paid), merged, why (if not merged) }; nil and why if it can't scan.  The scanner is put on for the scan (T.withPeripheral: the chunk controller stays on) and asked again while it cools
 -- down.  The cells come from each entry's r, u and f (right, up and forward of the turtle) and the turtle's heading.  A
--- radius over 8 costs a lot of fuel (16 once cost about 5300), so it's refused unless forced.
+-- radius over 8 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap), so it's refused unless forced.
 function T.scan(r, opts)
     opts = opts or {}
     r = r or MAX_RADIUS
     if not (whole(r) and r >= 1) then return nil, "the radius of a scan is a whole number from 1" end
     if r > MAX_RADIUS and not opts.force then
-        return nil, "a scan of radius " .. r .. " costs a lot of fuel (16 once cost about 5300); pass { force = true } to do it"
+        return nil, costly(r)
     end
     ensure()
     local fuel0 = turtle.getFuelLevel and turtle.getFuelLevel()
@@ -1314,8 +1319,8 @@ end
 
 -- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 --
--- It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less.  Refuses a box that takes
--- over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+-- It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less (over 8 is refused, as
+-- T.scan says why, unless opts.force: 8 or less is cheap).  Refuses a box that takes over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
 function T.scanBox(box, opts)
     opts = opts or {}
     local x1, y1, z1, x2, y2, z2 = normBox(box)
@@ -1323,7 +1328,7 @@ function T.scanBox(box, opts)
     local r = opts.radius or MAX_RADIUS
     if not (whole(r) and r >= 1) then return nil, "the radius of a scan is a whole number from 1" end
     if r > MAX_RADIUS and not opts.force then
-        return nil, "a scan of radius " .. r .. " costs a lot of fuel; pass { force = true } to do it"
+        return nil, costly(r)
     end
     local tiles = {}
     for _, cx in ipairs(centres(x1, x2, r)) do

@@ -788,6 +788,12 @@ report, why = T.scanBox({ 0, 0, 0, 600, 4, 4 })
 check("a box that takes over 27 scans is refused", report == nil and why:find("27", 1, true), tostring(why))
 report, why = T.scanBox({ 0, 0, 0, 5 })
 check("...a box is six numbers", report == nil and why)
+report, why = T.scanBox({ 0, 0, 0, 19, 4, 4 }, { radius = 12 })
+check("a radius over 8 is refused with its cost, as T.scan says it, and that 8 is cheap", report == nil
+    and why == "a scan of radius 12 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it", tostring(why))
+report, why = T.scan(12)
+check("...T.scan's refusal says the same", report == nil
+    and why == "a scan of radius 12 costs a lot of fuel (16 once cost about 5300; 8 or less is cheap); pass { force = true } to do it", tostring(why))
 T = fresh()
 tp(T, 0, 0, 0, 0)
 put(8, 2, 2, STONE); put(1, 0, 0, STONE)               -- the first centre is solid
