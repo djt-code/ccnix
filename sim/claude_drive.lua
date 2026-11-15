@@ -684,6 +684,31 @@ local _, sameClears = clog:gsub("context: 4 old tool results cleared %(20000 tok
 check("the same clear reported on three calls is logged once, a new one again",
     sameClears == 1 and clog:find("context: 9 old tool results cleared (41000 tokens)", 1, true), sameClears)
 
+-- 19b. the rest of the sandbox (scenario 2 has the start of it): write
+--     and io.write come back a line at a time (print after a write
+--     finishes its line), printError too, and the plain Lua bits a helper
+--     wants (metatables, raw access, xpcall), keys and colours
+local savedColours, savedKeys = colours, keys
+colours, keys = { white = 1, red = 16384 }, { enter = 28 }
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+io.write("a", 1); write("b\nc"); print("d"); printError("oops"); write("tail")
+local t = setmetatable({}, { __index = function() return 7 end })
+return t.x, getmetatable(t) ~= nil, rawget(t, "x"), rawset(t, "y", 2).y, rawequal(t, t),
+    select(2, xpcall(function() error("boom", 0) end, function(e) return "caught " .. e end)),
+    keys ~= nil, colours.red, colors ~= nil]] }) }, "tool_use"),
+    reply({ text("Checked.") }, "end_turn"),
+}
+run("more of the sandbox")
+colours, keys = savedColours, savedKeys
+local sb = resultsIn(2).toolu_1
+check("write, io.write and printError come back with print's, a line at a time",
+    sb and tostring(sb.content):find("^a1b\ncd\noops\ntail\n") and sb.is_error == nil, sb and sb.content)
+check("setmetatable, getmetatable, rawget, rawset, rawequal, xpcall, keys, colours and colors are there",
+    sb and tostring(sb.content):find("\n%-> 7\n%-> true\n%-> nil\n%-> 2\n%-> true\n%-> caught boom\n%-> true\n%-> 16384\n%-> true$"),
+    sb and sb.content)
+
 -- 20. Text past ASCII: the model's UTF-8 goes back byte for byte (a
 --     thinking block after it is bound to it), CC's Latin-1 from a tool goes
 --     as UTF-8, and the screen shows what CC can ("×" as itself, "—" and "’"

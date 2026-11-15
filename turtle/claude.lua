@@ -286,7 +286,7 @@ SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", IND
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; print output and return values come back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Definitions persist between calls.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -576,11 +576,14 @@ local codeIo = {
 -- CC's http, the files as above and the plain Lua bits.  Not the shell.
 local API = {
     turtle = turtle, T = T, peripheral = peripheral, http = http, os = os, textutils = textutils,
-    math = math, string = string, table = table, sleep = sleep,
+    math = math, string = string, table = table, sleep = sleep, keys = keys,
+    colours = colours, colors = colors or colours,
     fs = codeFs, io = codeIo,
     pairs = pairs, ipairs = ipairs, next = next, select = select, type = type,
     tostring = tostring, tonumber = tonumber, unpack = unpack or table.unpack,
-    pcall = pcall, error = error, assert = assert,
+    pcall = pcall, xpcall = xpcall, error = error, assert = assert,
+    setmetatable = setmetatable, getmetatable = getmetatable,
+    rawget = rawget, rawset = rawset, rawequal = rawequal,
 }
 -- The code's globals: API's, and the running network stack as it is now
 -- (lib/net keeps it in _G.ccnet, and the code's libraries see env as _G)
@@ -598,14 +601,40 @@ API.dofile = function(path) return assert(codeLoadfile(path))() end
 -- What the code prints is shown and, while a call runs, kept in `printed`
 -- for the model (nil between calls: what helpers.lua prints as it loads is
 -- only shown).  It's the code's print from the start, so a print at the top
--- of helpers.lua works too.
+-- of helpers.lua works too.  write and io.write go a line at a time: what
+-- they leave without a newline waits in `partial` for the rest of its line.
 local printed
-local function capture(...)
-    local line = joined(...)
+local partial = ""
+local function emit(line)
     keepPrint(line)
     if printed then printed[#printed + 1] = line end
 end
+local function capture(...)
+    local line = partial .. joined(...)
+    partial = ""
+    emit(line)
+end
+local function codeWrite(s)
+    local lines = text.split(partial .. s, "\n", true)
+    partial = table.remove(lines)
+    for _, l in ipairs(lines) do emit(l) end
+end
+-- what's left of a line when the code stops writing
+local function flushPartial()
+    if partial ~= "" then capture() end
+end
 API.print = capture
+API.write = function(s) codeWrite(tostring(s)) end
+codeIo.write = function(...)
+    for i = 1, select("#", ...) do codeWrite(tostring((select(i, ...)))) end
+end
+-- (red on a colour screen, as CC's own)
+API.printError = function(...)
+    local was = COLOUR and term.getTextColour()
+    if was then term.setTextColour(colours.red) end
+    capture(...)
+    if was then term.setTextColour(was) end
+end
 
 -- `require` in the code: CraftOS's cc.* modules, and ccnix's libraries
 -- for text, paths, conversions, the network and the world (lib/), and
@@ -680,6 +709,7 @@ local function loadHelpers()
     local ok = chunk ~= nil
     if chunk then
         ok, err = pcall(chunk)
+        flushPartial()
         if err == "Terminated" then error(err, 0) end
     end
     if ok then return nil end
@@ -702,6 +732,7 @@ local function runLua(code)
         ok = results[1]
         if not ok then err = results[2] end
     end
+    flushPartial()
     print, printed = realPrint, nil
     if ok then
         for i = 2, results.n do out[#out + 1] = "-> " .. show(results[i]) end
