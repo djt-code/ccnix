@@ -327,8 +327,8 @@ end
 -- It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere).  The costs and the walls are in the
 -- overview of this module.  A second result gives { nodes, cost, digs, unknown }: how many cells the search
 -- looked at, the route's cost, and how many of its cells need a dig or were never seen.  Nothing moves.  opts (all optional):
---   dig        false (default), true, a glob or a list of globs: what a route may dig (as for T.moveTo)
---   avoid      a glob or a list: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+--   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+--   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
 --   inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
 --   avoidCells a list of { x, y, z } cells a route may not use
 --   limit      cells to search before giving up (default 20000)

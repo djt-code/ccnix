@@ -104,6 +104,25 @@ check("dig = a glob that doesn't match: blocked", ok == false and why == "blocke
 ok = T.moveTo(3, 0, 0, { order = "x", dig = { "minecraft:*_ore", "minecraft:st*" } })
 check("a list of globs, one matching: dug", ok and DIGS == 1 and at() == "(3,0,0)", at())
 
+clearWorld(); home(); DIGS = 0
+set(1, 0, 0, block("minecraft:stone")); set(2, 0, 0, block("minecraft:netherrack"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = { ["minecraft:stone"] = true, ["*netherrack"] = true } })
+check("dig as a set of names and globs digs what it names", ok and DIGS == 2 and at() == "(3,0,0)", tostring(why))
+clearWorld(); home(); DIGS = 0
+set(1, 0, 0, block("minecraft:stone"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = { "stone" } })
+check("...and a name without its namespace is matched by its short name", ok and DIGS == 1, tostring(why))
+clearWorld(); home(); DIGS = 0
+set(1, 0, 0, block("minecraft:stone"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = { ["minecraft:stone"] = false } })
+check("...but not one set to false", ok == false and DIGS == 0, tostring(why))
+clearWorld(); home(); DIGS = 0
+set(0, 0, 1, block("minecraft:stone"))
+T.diggable = { "minecraft:st*" }
+ok = T.forward()
+check("T.diggable as a list of globs: T.forward digs what it names", ok and DIGS == 1 and at() == "(0,0,1)", at())
+T.diggable = {}
+
 -- up and down, and the cell is the one in that direction
 clearWorld(); home(); DIGS = 0
 set(0, 1, 0, block("minecraft:dirt")); set(0, -1, 5, block("minecraft:gravel"))

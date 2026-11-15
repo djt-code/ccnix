@@ -32,7 +32,6 @@ local text = require("text")
 local scan = require("scan")
 local convert = require("convert")
 local fileio = require("fileio")
-local glob = require("glob")
 
 local CUBE, CELLS = 16, 4096                  -- a cube is 16 cells each way
 local FORMAT = "ccnix-cube 1"                 -- the first line of a cube's file
@@ -877,15 +876,9 @@ local function eachCube(mb, fn)
     end
 end
 
--- A test on a block name from a glob; a pattern with no ":" also matches the name without its namespace.
-local function nameTest(pattern)
-    local test = glob.compile(pattern)
-    if text.contains(pattern, ":") then return test end
-    return function(name)
-        local _, short = text.cut(name, ":")
-        return test(name) or (short ~= nil and test(short))
-    end
-end
+-- A test on a block name from a glob (or a list or set of them); a pattern with no ":" also matches the name without
+-- its namespace.  turtlelib's, as for every list of names.
+local nameTest = T.nameTest
 
 -- Call visit(code, mx, my, mz) for each cell of cube c inside the box mb (map frame; nil for all of it).
 local function eachCell(c, mb, visit)

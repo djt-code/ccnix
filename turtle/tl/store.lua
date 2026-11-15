@@ -21,7 +21,6 @@ local text = require("text")
 local convert = require("convert")
 local fileio = require("fileio")
 local tables = require("tables")
-local glob = require("glob")
 
 local FILE = ".chests"
 local NS = "minecraft:"
@@ -59,18 +58,9 @@ local function full(name)
     return NS .. name
 end
 
--- A test on item names from a name or a glob; the namespace may be left out (a glob without one also matches the
--- short name).
-local function matcher(spec)
-    local test = glob.compile(spec)
-    local plain = not text.contains(spec, ":")
-    return function(name)
-        if test(name) then return true end
-        if not plain then return false end
-        local _, short = text.cut(name, ":")
-        return short ~= nil and test(short)
-    end
-end
+-- A test on item names from a name, a glob, or a list or set of them; the namespace may be left out (a glob without
+-- one also matches the short name).  turtlelib's, as for every list of names.
+local matcher = T.nameTest
 
 --------------------------------------------------------------------------
 -- The list of chests, in a data file

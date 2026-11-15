@@ -118,7 +118,43 @@ T.FUEL_VALUE = {
 T.fuel = {}
 for name in pairs(T.FUEL_VALUE) do T.fuel[name] = true end
 
--- Items dumpDown never throws away by default: fuel and torches.
+-- Lists of names.  Wherever the library takes names of blocks or items to match (T.keep, T.diggable, moveTo's dig
+-- and avoid, ...), it takes a list ({ "minecraft:stone", "*_planks" }), a set ({ ["minecraft:stone"] = true }) or
+-- both in one table, and each name may be a glob; a name without a namespace ("stone") also matches the short name.
+local function nameTest(spec)
+    if spec == true then return function() return true end end
+    if type(spec) == "function" then return spec end
+    local globs = {}
+    if type(spec) == "string" then
+        globs[1] = spec
+    elseif type(spec) == "table" then
+        for _, g in ipairs(spec) do globs[#globs + 1] = g end
+        for k, v in pairs(spec) do
+            if type(k) == "string" and v then globs[#globs + 1] = k end
+        end
+    end
+    local tests, short = {}, false
+    for i, g in ipairs(globs) do
+        tests[i] = { glob.compile(tostring(g)), not text.contains(tostring(g), ":") }
+        short = short or tests[i][2]
+    end
+    return function(name)
+        local bare = short and select(2, text.cut(name, ":"))
+        for _, t in ipairs(tests) do
+            if t[1](name) or (t[2] and bare and t[1](bare)) then return true end
+        end
+        return false
+    end
+end
+
+-- Is the name in the list or set `spec` (as nameTest reads one)?  A set's own name is found at once.
+local function listed(spec, name)
+    if type(spec) == "table" and spec[name] then return true end
+    return nameTest(spec)(name)
+end
+
+-- Items dumpDown never throws away by default: fuel and torches.  A set; a list of names or globs
+-- ({ "minecraft:cobblestone", "*_planks" }) does as well.
 T.keep = { ["minecraft:torch"] = true }
 for name in pairs(T.fuel) do T.keep[name] = true end
 
@@ -1099,7 +1135,7 @@ local function clearWay(move)
     if not ok then return true end
     local x, y, z = targetOf(side)
     local at = data.name .. " at " .. x .. "," .. y .. "," .. z
-    if not T.diggable[data.name] then return false, "blocked by " .. at end
+    if not listed(T.diggable, data.name) then return false, "blocked by " .. at end
     local dug, why = impl[MOVE_DIG[move]]()
     if not dug and why then return true, "couldn't dig " .. at .. ": " .. tostring(why) end
     return true
@@ -1308,20 +1344,6 @@ local FLUID = {
     ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true,
 }
 
--- A test on a block name, from a spec: true (every name), a glob, or a
--- list of globs; anything else (nil, false) matches none.
-local function nameTest(spec)
-    if spec == true then return function() return true end end
-    local globs = type(spec) == "string" and { spec } or type(spec) == "table" and spec or {}
-    local tests = {}
-    for i, g in ipairs(globs) do tests[i] = glob.compile(g) end
-    return function(name)
-        for _, test in ipairs(tests) do
-            if test(name) then return true end
-        end
-        return false
-    end
-end
 T.nameTest = nameTest                     -- (tl.path reads opts.dig and opts.avoid the same way)
 
 -- One step in direction d for moveTo: look at what's there; refuse what's
@@ -1365,10 +1387,10 @@ end
 --
 -- It goes along the axes in the order opts.order names (default "yxz": up or
 -- down first, then x, then z).  opts (all optional):
---   dig     false (default), true, a glob or a list of globs: the blocks it
---           may dig on the way (a protected area, a chest or a computer is
---           never dug)
---   avoid   a glob or a list: blocks it stops at rather than enter
+--   dig     false (default), true, a glob, or a list or set of globs: the
+--           blocks it may dig on the way (a protected area, a chest or a
+--           computer is never dug)
+--   avoid   a glob, a list or a set: blocks it stops at rather than enter
 --           (default: lava, fire and doors); {} avoids nothing
 --   inside  the name of a protected area the move may dig in (see T.inside)
 --   path    true, or a function(x, y, z, opts): when a straight run is
@@ -1881,6 +1903,7 @@ function T.containerBelow() return T.containerOn("bottom") end
 -- none of others).
 local function dumpPlan(keepCount)
     local plan, kept = {}, {}
+    local keeps = nameTest(T.keep)
     for slot = 1, 16 do
         local it = turtle.getItemDetail(slot)
         if it then
@@ -1890,7 +1913,7 @@ local function dumpPlan(keepCount)
             elseif keepCount then
                 keep = keepCount(it, kept[it.name] or 0)
             else
-                keep = T.keep[it.name] and it.count or 0
+                keep = keeps(it.name) and it.count or 0
             end
             kept[it.name] = (kept[it.name] or 0) + math.min(keep, it.count)
             if it.count > keep then plan[#plan + 1] = { slot = slot, n = it.count - keep } end
@@ -2446,10 +2469,10 @@ function T.isEssential(name)
     return false
 end
 
--- Is the item `name` junk?  False for what's in T.keep, tools, fuel,
+-- Is the item `name` junk?  False for what's in T.keep (a set or a list, globs too), tools, fuel,
 -- buckets, a crafting table, peripherals and what was crafted this job.
 function T.isJunk(name)
-    return not (T.keep[name] or crafted[name] or T.isEssential(name))
+    return not (crafted[name] or T.isEssential(name) or listed(T.keep, name))
 end
 
 -- Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped

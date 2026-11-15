@@ -258,10 +258,10 @@ T.moveTo(x, y, z, opts)
     Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true, or false, why, the block's name and cell where one stopped it. opts: order, dig, avoid, inside, path.
 
     It goes along the axes in the order opts.order names (default "yxz": up or down first, then x, then z). opts (all optional):
-      dig     false (default), true, a glob or a list of globs: the blocks it
-              may dig on the way (a protected area, a chest or a computer is
-              never dug)
-      avoid   a glob or a list: blocks it stops at rather than enter
+      dig     false (default), true, a glob, or a list or set of globs: the
+              blocks it may dig on the way (a protected area, a chest or a
+              computer is never dug)
+      avoid   a glob, a list or a set: blocks it stops at rather than enter
               (default: lava, fire and doors); {} avoids nothing
       inside  the name of a protected area the move may dig in (see T.inside)
       path    true, or a function(x, y, z, opts): when a straight run is
@@ -459,7 +459,7 @@ T.isEssential(name)
     Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
 
 T.isJunk(name)
-    Is the item `name` junk? False for what's in T.keep, tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+    Is the item `name` junk? False for what's in T.keep (a set or a list, globs too), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 
 T.dumpJunk()
     Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
@@ -734,8 +734,8 @@ T.path(x, y, z, opts)
     A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 
     It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
-      dig        false (default), true, a glob or a list of globs: what a route may dig (as for T.moveTo)
-      avoid      a glob or a list: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+      dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
       inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
       avoidCells a list of { x, y, z } cells a route may not use
       limit      cells to search before giving up (default 20000)

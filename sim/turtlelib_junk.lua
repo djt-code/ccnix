@@ -87,6 +87,26 @@ T.clearCrafted()
 check("...T.clearCrafted starts a new job", T.isJunk(BRICKS))
 T.markCrafted(BRICKS)
 
+-- T.keep may be a set, a list or both, and its names globs
+do
+    local was = T.keep
+    T.keep = { COBBLE, "*_planks" }
+    check("T.keep as a list: its items are not junk", not T.isJunk(COBBLE) and not T.isJunk("minecraft:oak_planks") and T.isJunk(DIRT))
+    T.keep = { ["*netherrack"] = true, [GRAVEL] = true, [DIRT] = false }
+    check("...a set: its globs and names are kept, a name set to false is not", not T.isJunk("minecraft:netherrack") and not T.isJunk(GRAVEL)
+        and T.isJunk(DIRT))
+    T.keep = { "cobblestone" }
+    check("...a name without its namespace is minecraft's", not T.isJunk(COBBLE))
+    S.inv, S.sel = {}, 1
+    put(1, COBBLE, 64); put(2, "minecraft:spruce_planks", 10)
+    T.keep = { COBBLE, "*_planks" }
+    check("...and the dump plan reads it the same way (a list keeps what it names)", T.wouldDump() == false)
+    put(3, DIRT, 5)
+    check("...while what it doesn't name is dumped", T.wouldDump() == true)
+    S.inv = {}
+    T.keep = was
+end
+
 --------------------------------------------------------------------------
 -- The junk chest's place
 --------------------------------------------------------------------------

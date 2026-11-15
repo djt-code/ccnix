@@ -63,18 +63,9 @@ end
 
 local function whole(n) return type(n) == "number" and n == math.floor(n) end
 
--- A test on block or item names from a glob; the namespace may be left out (a glob without one also matches the
--- short name).
-local function matcher(spec)
-    local test = glob.compile(spec)
-    local plain = not text.contains(spec, ":")
-    return function(name)
-        if test(name) then return true end
-        if not plain then return false end
-        local _, short = text.cut(name, ":")
-        return short ~= nil and test(short)
-    end
-end
+-- A test on block or item names from a glob, or a list or set of them; the namespace may be left out (a glob without
+-- one also matches the short name).  turtlelib's, as for every list of names.
+local matcher = T.nameTest
 
 -- The six numbers of a box, smallest corner first, or nil and why.  A box is { x1, y1, z1, x2, y2, z2 } or has the
 -- fields x1 to z2, the corners in any order.

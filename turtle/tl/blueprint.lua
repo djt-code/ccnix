@@ -1003,13 +1003,7 @@ function T.replace(box, pattern, item, opts)
     end
     local found, cut = T.map.find(pattern, box, opts.limit or 1000)
     if not found then return nil, cut end
-    local base = T.nameTest(pattern)
-    local function test(blockName)       -- (as T.map.find: a glob with no namespace also matches the short name)
-        if base(blockName) then return true end
-        if text.contains(pattern, ":") then return false end
-        local _, short = text.cut(blockName, ":")
-        return short ~= nil and base(short)
-    end
+    local test = T.nameTest(pattern)     -- (as T.map.find: a glob with no namespace also matches the short name)
     local todo, info = {}, { replaced = 0, same = 0, trapped = {}, failed = {}, gone = 0, more = cut == true }
     for _, c in ipairs(found) do
         local _, now = T.map.get(c.x, c.y, c.z)
