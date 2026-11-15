@@ -717,6 +717,19 @@ put(10, 0, 10, "minecraft:oak_stairs", { facing = "west", half = "bottom" })
 T.inspectAt(10, 0, 10)
 gname, gstate = T.map.get(10, 0, 10)
 check("inspecting again replaces the state", gstate and gstate.facing == "west" and gstate.half == "bottom" and gstate.shape == nil)
+-- a wall that no straight run gets past: with no opts.move it goes round with the path finder
+for y = -3, 3 do for z = -3, 3 do put(52, y, z, STONE) end end
+put(55, 0, 0, "minecraft:oak_stairs", { facing = "south" })
+for x = 49, 57 do for y = -4, 4 do for z = -5, 5 do
+    local b = get(x, y, z)
+    T.map.set(x, y, z, b and b.name or "minecraft:air")
+end end end
+tp(T, 50, 0, 0, 0)
+name, st = T.inspectAt(55, 0, 0)
+check("a wall between the turtle and the cell: T.inspectAt goes round it (the path finder by default)", name == "minecraft:oak_stairs"
+    and st and st.facing == "south" and T.dist(T.pos, { x = 55, y = 0, z = 0 }) == 1, tostring(name) .. " " .. tostring(st and st.facing))
+for y = -3, 3 do for z = -3, 3 do put(52, y, z, nil) end end
+put(55, 0, 0, nil)
 -- a cell shut in
 for _, v in ipairs({ { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }) do
     put(30 + v[1], 5 + v[2], 30 + v[3], STONE)

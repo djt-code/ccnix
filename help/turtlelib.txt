@@ -957,7 +957,7 @@ T.scanBox(box, opts)
 T.inspectAt(x, y, z, opts)
     Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 
-    The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on).
+    The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on); without it the turtle goes round what is in the way with the path finder ({ path = true, scan = false }).
 
 T.inspectAll(list, opts)
     T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.

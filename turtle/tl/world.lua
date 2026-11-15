@@ -49,6 +49,7 @@ local MAX_SIDE = 64                           -- the widest a heights or slice m
 local AIR, AIR_CODE = "minecraft:air", 1
 local SYMBOLS = "#%&=+*@$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 local NEIGHBOURS = { 0, 1, 2, 3, "up", "down" }
+local INSPECT_MOVE = { path = true, scan = false }    -- how T.inspectAt gets next to a cell, unless told
 
 -- Names that are air, and names that aren't a surface to stand on or build on
 local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true }
@@ -1379,9 +1380,11 @@ end
 
 -- Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 --
--- The state (a stair's facing, a slab's half) is what a scan can't give.  opts.move is passed to T.moveTo (dig and so on).
+-- The state (a stair's facing, a slab's half) is what a scan can't give.  opts.move is passed to T.moveTo (dig and so on);
+-- without it the turtle goes round what is in the way with the path finder ({ path = true, scan = false }).
 function T.inspectAt(x, y, z, opts)
     opts = opts or {}
+    local move = opts.move or INSPECT_MOVE
     if not (whole(x) and whole(y) and whole(z)) then return nil, "inspectAt wants a cell of whole numbers" end
     ensure()
     local mapped = S.frame.aligned
@@ -1405,7 +1408,7 @@ function T.inspectAt(x, y, z, opts)
     local why = "every neighbour of " .. x .. "," .. y .. "," .. z .. " is solid in the map"
     for _, c in ipairs(options) do
         local ok, reason, name, cell = true, nil, nil, nil
-        if not T.at(c) then ok, reason, name, cell = T.moveTo(c.x, c.y, c.z, opts.move) end
+        if not T.at(c) then ok, reason, name, cell = T.moveTo(c.x, c.y, c.z, move) end
         if ok then
             local found, state = lookAt(x, y, z, c.d)
             settle(false)
