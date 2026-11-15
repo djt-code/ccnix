@@ -74,8 +74,6 @@ local function fresh(chest)
     if chest ~= false then W.set(0, 0, 1, "minecraft:chest") end
     for _, name in ipairs(MODS) do package.loaded[name] = nil end
     T = require("turtlelib")
-    -- (the functions ADR-0011 added, named here until turtlelib's registry names them)
-    for _, name in ipairs({ "craftBatch", "smeltAt", "craftPlan" }) do T.registry[name] = T.registry[name] or "tl.craft" end
     return W, T
 end
 -- What a chest holds: slot by slot.

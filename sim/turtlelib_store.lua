@@ -59,8 +59,6 @@ local function fresh(skipChests)
     end
     for _, name in ipairs(MODS) do package.loaded[name] = nil end
     T = require("turtlelib")
-    -- (the functions ADR-0011 added, named here until turtlelib's registry names them)
-    for _, name in ipairs({ "inventoryReport", "prepare" }) do T.registry[name] = T.registry[name] or "tl.store" end
     return W, T
 end
 local A = { x = 3, y = 0, z = 0, side = 0 }
