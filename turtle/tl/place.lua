@@ -428,6 +428,108 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
     return apps
 end
 
+-- Words for an approach and for where the block it needs is, in a message
+local KIND_WORDS = { front = "sideways", down = "from above", up = "from below" }
+local FACT_WORDS = {
+    front = { beyond = "beyond the target", floor = "under the target" },
+    down = { beyond = "under the target" },
+    up = { beyond = "above the target" },
+}
+local SHOWN = 6                              -- approaches a message names, at most
+
+-- An approach to the target in words: "sideways from 0,0,2", with the way the turtle faces when that matters ("...
+-- facing north").
+local function approachWords(kind, h, tx, ty, tz, base, headingMatters)
+    local sx, sy, sz = standFor(kind, h, tx, ty, tz)
+    local words = KIND_WORDS[kind] .. " from " .. sx .. "," .. sy .. "," .. sz
+    if headingMatters then words = words .. " facing " .. (base and COMPASS[(base + h) % 4] or ("heading " .. h)) end
+    return words
+end
+
+-- The state keys that follow the way the turtle faces
+local TURNING = { facing = true, axis = true }
+
+-- What a row gives of the keys wanted, where it differs: "half=bottom", and true if a key that follows the heading
+-- (facing, axis) is among them.
+local function givesWords(learned, famName, kind, row, want, h, base)
+    local set, parts, keys, turned = specOf(learned, famName, kind, row), {}, {}, false
+    for key in pairs(want) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local got = set[key] and valueOf(set[key], h, base)
+        if got ~= want[key] then
+            parts[#parts + 1] = key .. "=" .. tostring(got or "none")
+            turned = turned or TURNING[key] == true
+        end
+    end
+    return table.concat(parts, " "), turned
+end
+
+-- Why one approach can't give `want`, in words, or nil if the table says it can (or may: a fact the map doesn't know).
+-- The stand is taken; or the row that would give it needs a block the map says isn't there; or it lands on a row that
+-- gives something else.  An approach that only faces the wrong way is nil too: the one facing the right way says more.
+-- A second result is true when the stand is what is wrong, whichever way the turtle would face.
+local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+    local sx, sy, sz = standFor(kind, h, tx, ty, tz)
+    local stand = nameAt(sx, sy, sz)
+    if stand and clickable(stand) and not dig then return "the map has " .. stand .. " there", true end
+    local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
+    local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz } }
+    local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz) }
+    local facts = { beyond = fact(names.beyond) }
+    if kind == "front" then facts.floor = fact(names.floor) end
+    local needed
+    for _, row in ipairs(fam[kind]) do
+        local f = row.when == "always" or facts[row.when]
+        if gives(learned, famName, kind, row, want, h, base) then
+            if f ~= false then return nil end
+            needed = needed or row.when
+        elseif f == true then
+            if needed then break end
+            local words, turned = givesWords(learned, famName, kind, row, want, h, base)
+            if turned then return nil end
+            return "gives " .. words
+        end
+    end
+    if not needed then return nil end
+    local c = cells[needed]
+    return "needs " .. (fam.hang and "a block to hang it on " or "a block ") .. FACT_WORDS[kind][needed] .. ", and the map has "
+        .. tostring(names[needed] or "nothing it knows") .. " at " .. c[1] .. "," .. c[2] .. "," .. c[3]
+end
+
+-- Why the approaches the table rules out can't give `want` at the target: a list of "<approach>: <why>", in the order
+-- plan goes through them, each said once.
+local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
+    local out, said = {}, {}
+    local function fact(name)
+        if famName == "slab" and name == item then return nil end
+        return factAbout(fam, name)
+    end
+    local headingMatters = want.facing ~= nil or want.axis ~= nil
+    for _, kind in ipairs({ "front", "down", "up" }) do
+        for h = 0, 3 do
+            if (kind == "front" or headingMatters or h == T.dir) and #fam[kind] > 0 then
+                local why, standing = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+                local line = why and approachWords(kind, h, tx, ty, tz, base, headingMatters and not standing) .. ": " .. why
+                if line and not said[line] then
+                    said[line] = true
+                    out[#out + 1] = line
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- A list in a message: the first SHOWN, joined with "; ", and how many more.
+local function listed(list)
+    local shown = {}
+    for i = 1, math.min(#list, SHOWN) do shown[i] = list[i] end
+    local s = table.concat(shown, "; ")
+    if #list > SHOWN then s = s .. "; and " .. (#list - SHOWN) .. " more" end
+    return s
+end
+
 -- The state keys asked for in opts, as { stateKey = value }, or nil and why.
 local function wantsOf(item, famName, fam, opts)
     local keys, want = keysOf(fam), {}
@@ -606,7 +708,9 @@ end
 -- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6).  A cell that already holds the item as wanted comes back
 -- as it is; one holding anything else is not touched.  Returns the block's name, its state, and { approach, from,
--- heading, tries } (approach is front, down or up; from the cell the turtle stood in).
+-- heading, tries } (approach is front, down or up; from the cell the turtle stood in).  A failure's why names the
+-- approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above the target,
+-- and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 function T.placeAt(x, y, z, item, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -634,15 +738,18 @@ function T.placeAt(x, y, z, item, opts)
     for k, v in pairs(opts.move or { path = true, scan = false }) do move[k] = v end
     local function run()
         local learned, tried, lastWhy = loadLearned(), {}, nil
+        local attempts = {}
         local tries = opts.tries or TRIES
         for attempt = 1, tries do
             local apps = plan(famName, fam, item, learned, want, x, y, z, base, tried, move.dig)
             local app = apps[1]
             if not app then break end
             tried[app.key] = true
+            local words = KIND_WORDS[app.kind] .. " from " .. app.sx .. "," .. app.sy .. "," .. app.sz
             local ok, reason = T.moveTo(app.sx, app.sy, app.sz, move)
             if not ok then
                 lastWhy = "couldn't get to " .. app.sx .. "," .. app.sy .. "," .. app.sz .. ": " .. tostring(reason)
+                attempts[#attempts + 1] = words .. ": couldn't get there (" .. tostring(reason) .. ")"
             else
                 T.face(app.h)
                 local was, wasState = lookAtTarget(app.kind, app.h)
@@ -657,10 +764,12 @@ function T.placeAt(x, y, z, item, opts)
                 if not placed then
                     lastWhy = "the game would not place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," ..
                         app.sz .. " (" .. app.kind .. "): " .. tostring(placeWhy)
+                    attempts[#attempts + 1] = words .. ": the game refused (" .. tostring(placeWhy) .. ")"
                 else
                     local name, state = lookAtTarget(app.kind, app.h)
                     if not name then
                         lastWhy = "placed " .. shortName(item) .. " but nothing is there to inspect"
+                        attempts[#attempts + 1] = words .. ": nothing there after"
                     else
                         noteInMap(x, y, z, name, state)
                         if app.certain and learnFrom(learned, famName, app.kind, app.row, app.h, base, item, name, state) then
@@ -672,6 +781,7 @@ function T.placeAt(x, y, z, item, opts)
                         end
                         lastWhy = "got " .. describe(name, state) .. " from " .. app.sx .. "," .. app.sy .. "," ..
                             app.sz .. " (" .. app.kind .. ")"
+                        attempts[#attempts + 1] = words .. ": got " .. describe(name, state)
                         local dug, digWhy = takeBack(app.kind, app.h, x, y, z)
                         if not dug then
                             return nil, lastWhy .. ", and couldn't dig it out: " .. tostring(digWhy)
@@ -685,8 +795,16 @@ function T.placeAt(x, y, z, item, opts)
         table.sort(asked)
         local what = shortName(item) .. (#asked > 0 and (" with " .. table.concat(asked, " ")) or "") ..
             " at " .. x .. "," .. y .. "," .. z
-        if lastWhy then return nil, "couldn't place " .. what .. ": " .. lastWhy end
-        return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it"
+        local others = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
+        local rest = #others > 0 and (" (the rest: " .. listed(others) .. ")") or ""
+        if lastWhy then
+            return nil, "couldn't place " .. what .. ": " .. lastWhy .. " (" .. #attempts .. (#attempts == 1 and " way" or " ways")
+                .. " tried: " .. listed(attempts) .. ")" .. rest
+        end
+        if #others == 0 then
+            return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it"
+        end
+        return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it (" .. listed(others) .. ")"
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()
