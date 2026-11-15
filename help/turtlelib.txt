@@ -464,7 +464,7 @@ T.isJunk(name)
 T.dumpJunk()
     Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
 
-    It looks at the chest first, and what doesn't fit stays aboard. With no junk on board it goes nowhere. The reasons for false: no junk chest set, no way there, no chest there.
+    It looks at the chest first, and what doesn't fit stays aboard. With no junk on board it goes nowhere. It goes along the axes, and round what is in the way with the path finder (T.travel, over the map), never digging. The reasons for false: no junk chest set, no way there, no chest there.
 
 T.refuelFrom(side, target)
     Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
@@ -839,7 +839,7 @@ T.stow(opts)
 T.autoDump()
     Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
 
-    T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few, the turtle makes this trip and comes back where it was, facing as before. A dump that did nothing is not tried again until there is less room.
+    T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few (part stacks merged first), the turtle makes this trip and comes back where it was, facing as before. A trip that fails, or leaves no more room than that, is printed and noted in the job (T.job.note) and not tried again until there is less room; two in a row turn T.cfg.autoDump off.
 
 tl.world: the map and the frames: what the turtle has seen, dug and placed, and where that is in the world
 

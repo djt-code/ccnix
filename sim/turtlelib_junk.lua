@@ -209,3 +209,15 @@ stock(); home(0, 0, 0, 3); GROUND = 0
 ok, dropped = T.dumpJunk()
 check("a chest in front (side = a heading): turns to it, drops, and turns back",
     ok and dropped == 84 and inChest(CH["1,0,0"], DIRT) == 64 and GROUND == 0 and at() == "(0,0,0) facing 3", at())
+
+-- a wall between the turtle and the chest that neither order of axes gets past: the path finder goes round it
+CH = { ["3,1,0"] = {} }
+T.setJunkChest(3, 0, 0, "up")
+W = { [M.key(1, 0, 0)] = { name = "minecraft:stone" }, [M.key(1, 1, 0)] = { name = "minecraft:stone" },
+      [M.key(1, -1, 0)] = { name = "minecraft:stone" } }
+T.map.clear()                            -- (the walls of the test before are gone from the world: from the map too)
+stock(); home(0, 0, 0, 0); GROUND = 0
+ok, dropped = T.dumpJunk()
+check("a wall in the way: T.dumpJunk walks round it with the path finder, drops, and comes back",
+    ok == true and dropped == 84 and inChest(CH["3,1,0"], DIRT) == 64 and GROUND == 0 and at() == "(0,0,0) facing 0", tostring(dropped) .. " " .. at())
+W = {}

@@ -2479,7 +2479,8 @@ end
 -- unless a chest is there.  Returns true, items dropped, items left; or false and why.
 --
 -- It looks at the chest first, and what doesn't fit stays aboard.  With no junk on board it goes
--- nowhere.  The reasons for false: no junk chest set, no way there, no chest there.
+-- nowhere.  It goes along the axes, and round what is in the way with the path finder (T.travel, over
+-- the map), never digging.  The reasons for false: no junk chest set, no way there, no chest there.
 function T.dumpJunk()
     local spot = T.junkChest()
     if not spot then return false, "no junk chest set (T.setJunkChest)" end
@@ -2490,9 +2491,9 @@ function T.dumpJunk()
     end
     if #plan == 0 then return true, 0, 0 end
     local from, dir, sel = T.here(), T.dir, turtle.getSelectedSlot()
-    -- (a second try along the axes the other way round)
+    -- (round what is in the way with the path finder, then a second try along the axes the other way round)
     local function go(p)
-        if T.moveTo(p.x, p.y, p.z) then return true end
+        if T.moveTo(p.x, p.y, p.z, { path = true, scan = false }) then return true end
         return T.moveTo(p.x, p.y, p.z, { order = "xzy" })
     end
     local ok, why = go(spot)

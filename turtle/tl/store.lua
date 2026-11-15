@@ -524,8 +524,9 @@ end
 -- Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it
 -- when the inventory is nearly full.  The results are those of the one it ran; nil and why if neither is set up.
 --
--- T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few, the turtle makes this trip and
--- comes back where it was, facing as before.  A dump that did nothing is not tried again until there is less room.
+-- T.cfg.autoDump is true or a number of free slots (2 for true): after a dig that leaves that few (part stacks merged first), the
+-- turtle makes this trip and comes back where it was, facing as before.  A trip that fails, or leaves no more room than that, is
+-- printed and noted in the job (T.job.note) and not tried again until there is less room; two in a row turn T.cfg.autoDump off.
 function T.autoDump()
     if #load() > 0 then return T.stow() end
     if T.junkChest() then return T.dumpJunk() end
@@ -536,21 +537,49 @@ end
 -- Dumping when the inventory fills
 --------------------------------------------------------------------------
 
--- Hear a dig: with T.cfg.autoDump on and the room run down, make room.  Not again until there is less room than when
--- it could do nothing.
+-- Say a failed dump: printed, and noted in the job if one is on.
+local function tellFailure(said)
+    print(said)
+    if fs.exists(T.dataPath(".job")) then
+        local ok, err = pcall(T.job.note, said)
+        if not ok and err == "Terminated" then error(err, 0) end
+    end
+end
+
+-- Hear a dig: with T.cfg.autoDump on and the room run down, merge part stacks, and if that isn't room enough, make room.
+-- A trip that failed, or left no more than the limit free, is a failure: said, and not tried again until there is less
+-- room than it left; the second in a row turns T.cfg.autoDump off.
 local function heard(e)
     if e.kind ~= "dig" or S.busy then return end
     local at = T.cfg.autoDump
     if not at then return end
     at = type(at) == "number" and at or DUMP_AT
+    if T.freeSlots() > at then return end
+    S.busy = true
+    local sel = turtle.getSelectedSlot()
+    local tidied, terr = pcall(T.tidyInventory)
+    turtle.select(sel)
+    S.busy = false
+    if not tidied and terr == "Terminated" then error(terr, 0) end
     local before = T.freeSlots()
     if before > at or before >= (S.failedAt or math.huge) then return end
     S.busy = true
-    local ok, err = pcall(T.autoDump)
+    local ok, done, why = pcall(T.autoDump)
     S.busy = false
-    if not ok and err == "Terminated" then error(err, 0) end
+    if not ok and done == "Terminated" then error(done, 0) end
     local after = T.freeSlots()
-    S.failedAt = (not ok or after <= before) and after or nil
+    if ok and done and after > at then
+        S.failedAt, S.failures = nil, 0
+        return
+    end
+    if not ok then why = tostring(done)
+    elseif done then why = "made no room: " .. after .. " slots free, and the rest aboard is kept (T.keep, tools, fuel)"
+    else why = tostring(why) end
+    S.failedAt, S.failures = after, (S.failures or 0) + 1
+    if S.failures < 2 then return tellFailure("autoDump: " .. why) end
+    T.cfg.autoDump = false
+    S.failedAt, S.failures = nil, 0
+    tellFailure("autoDump is off after two failures in a row: " .. why .. " (set T.cfg.autoDump again once that is put right)")
 end
 
 -- One listener for the turtle, which every program's copy of this module shares: it hands each event to the copy

@@ -536,6 +536,52 @@ do
 end
 
 do
+    -- part stacks are merged before the free slots are counted: a tidy that makes the room makes no trip
+    setUp()
+    T.catalogue()
+    T.cfg.autoDump = true
+    for s = 1, 10 do W.give(s, "minecraft:item_" .. s, 64) end
+    W.give(11, COBBLE, 10); W.give(12, COBBLE, 10); W.give(13, PLANKS, 5); W.give(14, PLANKS, 5)
+    W.set(0, 0, 1, "minecraft:dirt")
+    local moves = W.S.moves
+    turtle.dig()
+    check("a dig at the limit with part stacks aboard: merged first, room enough, no trip", W.S.moves == moves and T.freeSlots() == 3
+        and carrying(COBBLE) == 20 and carrying(DIRT) == 1, W.S.moves - moves .. " moves, " .. T.freeSlots() .. " free")
+    T.cfg.autoDump = false
+    for s = 1, 16 do W.give(s, nil) end
+
+    -- a dump that fails is said and noted in the job; two in a row turn autoDump off
+    local said = {}
+    local quiet = print
+    print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
+    T.job.start("dig the cellar", { "dig" })
+    T.cfg.autoDump = true
+    local calls = 0
+    local rawDump = T.autoDump
+    T.autoDump = function() calls = calls + 1; return false, "the chests are full" end
+    for s = 1, 13 do W.give(s, "minecraft:item_" .. s, 64) end
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    local notes = T.job.resume().notes
+    check("a failed dump: said, and noted in the job", calls == 1 and said[1] == "autoDump: the chests are full"
+        and notes[#notes] == "autoDump: the chests are full" and T.cfg.autoDump == true, tostring(said[1]) .. " / " .. tostring(notes[#notes]))
+    W.give(15, "minecraft:item_15", 64)
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    notes = T.job.resume().notes
+    check("...a second in a row turns it off, and says so", calls == 2 and T.cfg.autoDump == false
+        and said[2] == "autoDump is off after two failures in a row: the chests are full (set T.cfg.autoDump again once that is put right)"
+        and notes[#notes] == said[2], tostring(said[2]))
+    W.give(15, nil)
+    W.set(0, 0, 1, "minecraft:dirt")
+    turtle.dig()
+    check("...and then it is not tried", calls == 2)
+    T.autoDump = rawDump
+    print = quiet
+    T.job.clear()
+end
+
+do
     -- no chests: the junk chest's trip
     fresh()
     W.set(3, 0, 1, "minecraft:chest")
