@@ -101,13 +101,18 @@ check("the request names the model, effort, cached system prompt and the tools: 
         and table.concat(toolNames, " ") == "lua status run_program ask_user memory=memory_20250818 "
             .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
         and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
+local edits1 = r1 and r1.body.context_management.edits or {}
 check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
-    r1 and r1.body.context_management.edits[1].type == "clear_tool_uses_20250919"
-        and r1.body.context_management.edits[1].exclude_tools[1] == "memory"
-        and r1.body.context_management.edits[1].trigger.value == 100000
-        and r1.body.context_management.edits[1].clear_at_least.value == 30000
+    edits1[2] and edits1[2].type == "clear_tool_uses_20250919"
+        and edits1[2].exclude_tools[1] == "memory"
+        and edits1[2].trigger.value == 100000
+        and edits1[2].clear_at_least.value == 30000
         and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
         and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
+check("...the code of a cleared call goes with its result (clear_tool_inputs)", edits1[2] and edits1[2].clear_tool_inputs == true)
+check("...and old thinking is cleared, the last 3 turns' kept: that edit first, as the API wants",
+    #edits1 == 2 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep.type == "thinking_turns"
+        and edits1[1].keep.value == 3, textutils.serialiseJSON(edits1))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
     r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
         and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
@@ -185,6 +190,36 @@ HTTP.queue = {
 }
 run("anything")
 check("a 400 isn't retried and its message is shown", #HTTP.requests == 1 and Mine.logHas("HTTP 400.*bad request"))
+
+-- 3c. "prompt is too long": sent again at once with a harder clear (from
+--     50k tokens, 2 tool uses kept, whatever it frees), which then stays;
+--     a second one is reported as any other error
+fresh({ "" })
+local TOO_LONG = { code = 400, body = { type = "error", error = { type = "invalid_request_error",
+    message = "prompt is too long: 1000123 tokens > 1000000 maximum" } } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
+    TOO_LONG,
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("talk a lot")
+local function clearOf(n)
+    local req = HTTP.requests[n]
+    return req and req.body.context_management.edits[2] or {}
+end
+check("prompt too long: sent again at once (no wait) with the harder clear, the same conversation",
+    #HTTP.requests == 4 and clearOf(3).trigger.value == 50000 and clearOf(3).keep.value == 2
+        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger.value == 100000
+        and #HTTP.requests[3].body.messages == #HTTP.requests[2].body.messages
+        and Mine.logHas("too long; trying again with more of it cleared"), textutils.serialiseJSON(clearOf(3)))
+check("...the harder clear stays for the conversation's next calls", clearOf(4).trigger.value == 50000)
+check("...and the log says so", (Mine.files["claude.log"] or ""):find("prompt is too long: 1000123 tokens > 1000000 maximum; trying again with a harder clear (from 50000 tokens, the last 2 tool uses kept)", 1, true))
+fresh({ "" })
+HTTP.queue = { TOO_LONG, TOO_LONG }
+run("talk even more")
+check("too long again with the harder clear: reported as any error, nothing more sent",
+    #HTTP.requests == 2 and Mine.logHas("HTTP 400.*prompt is too long"))
 
 -- 4. the step budget: with --steps 2 the third tool call isn't run, and
 --    the model is told to stop
@@ -1018,3 +1053,22 @@ HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("how long is the cache", "--cache", "1h")
 local sys28h = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("with --cache 1h the prompt says an hour", sys28h:find("The cache keeps the conversation for an hour with no call reading it", 1, true) ~= nil)
+
+-- 29. /new at the prompt: the conversation emptied, the helpers loaded
+--     again, the model told it's a new conversation; the files stay
+fresh({ "/new", "dig again", "" })
+Mine.files["claude/helpers.lua"] = "HELPER_LOADS = (HELPER_LOADS or 0) + 1"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "fs.makeDir('/claude'); local f = fs.open('/claude/plan.md', 'w'); f.write('plan'); f.close(); return HELPER_LOADS" }) }, "tool_use"),
+    reply({ text("Dug.") }, "end_turn"),
+    reply({ toolUse("lua", { code = "return HELPER_LOADS, fs.exists('/claude/plan.md')" }) }, "tool_use"),
+    reply({ text("Dug again.") }, "end_turn"),
+}
+run("dig")
+Mine.files["claude/helpers.lua"] = nil
+local n3 = HTTP.requests[3] and HTTP.requests[3].body.messages
+check("/new: the next goal starts a conversation of its own, told that it is new",
+    n3 and #n3 == 1 and n3[1].content:find("^dig again\n\n%[This is a new conversation") ~= nil, n3 and n3[1].content)
+check("...the helpers loaded again, the files as they were", resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content == "-> 2\n-> true",
+    resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content)
+check("...and it says so, and logs it", Mine.logHas("^A new conversation") and (Mine.files["claude.log"] or ""):find("new conversation\n", 1, true))

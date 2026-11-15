@@ -18,7 +18,7 @@ Usage:
   --confirm
       show each piece of code and ask before running it
 
-When it stops, type the next thing to do (it keeps the conversation), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run, so the saved position stays right).
+When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run, so the saved position stays right).
 
 Colour (an advanced computer or turtle): the code it runs is highlighted as vi does it (lib/syntax: keywords yellow, comments green, strings red, numbers and nil/true/false magenta, library names cyan), what the code prints is grey, prompts and questions yellow, retries orange, errors red; Claude's own words are white.
 
@@ -49,7 +49,7 @@ The other tools:
       its notes, kept between sessions in /claude/memories/ (the API's memory tool: view, create, str_replace, insert, delete, rename, only under that folder)
   web_search, web_fetch
       run on Anthropic's side, not the turtle's (each costs a little; at most a few a reply)
-Old tool results are cleared from the conversation once it's long (the API's context editing), the memory tool's kept; a reply paused partway through its web searches is carried on.
+Old tool calls (the code and its results) and old thinking are cleared from the conversation once it's long (the API's context editing), the memory tool's kept; when the API says the conversation is too long all the same, it's sent again with more of it cleared.  A reply paused partway through its web searches is carried on.
 
 Position: it picks up turtlelib's saved position (.turtlepos) if there is one, so `home` still works afterwards; otherwise here is (0,0,0) facing +z.
 

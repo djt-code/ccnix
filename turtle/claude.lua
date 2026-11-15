@@ -25,7 +25,8 @@
 --   --confirm    show each piece of code and ask before running it
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
--- or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run,
+-- /new to start a new conversation (its memory and files stay, and its
+-- helpers are loaded again), or press Enter on an empty line to quit.  Ctrl+T stops it (under T.run,
 -- so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
@@ -97,9 +98,11 @@
 --                insert, delete, rename, only under that folder)
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
--- Old tool results are cleared from the conversation once it's long (the
--- API's context editing), the memory tool's kept; a reply paused partway
--- through its web searches is carried on.
+-- Old tool calls (the code and its results) and old thinking are cleared
+-- from the conversation once it's long (the API's context editing), the
+-- memory tool's kept; when the API says the conversation is too long all
+-- the same, it's sent again with more of it cleared.  A reply paused
+-- partway through its web searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
@@ -157,6 +160,12 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 -- cache is written again from there: rarer and bigger clears cost less
 -- than many small ones.
 local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
+-- The harder clear once the API has said the prompt is too long: sooner,
+-- fewer results kept, and whatever it frees
+local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST = 50000, 2, 0
+-- The thinking of the last THINKING_TURNS assistant turns is kept; older
+-- thinking is cleared with the old tool results' code
+local THINKING_TURNS = 3
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
@@ -1136,6 +1145,29 @@ local function asUTF8(v)
     return v
 end
 
+-- Once the API has said the conversation is too long, the clear is the
+-- harder one for the rest of the conversation (/new starts it again)
+local hardClear = false
+
+-- The context edits: old thinking first (the API wants that edit listed
+-- before the others), then the old tool calls, their code and results
+-- both, the memory tool's kept.
+local function contextEdits()
+    local trigger, keep, atLeast = CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST
+    if hardClear then trigger, keep, atLeast = HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST end
+    return { edits = {
+        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = THINKING_TURNS } },
+        {
+            type = "clear_tool_uses_20250919",
+            trigger = { type = "input_tokens", value = trigger },
+            keep = { type = "tool_uses", value = keep },
+            clear_at_least = { type = "input_tokens", value = atLeast },
+            clear_tool_inputs = true,
+            exclude_tools = { "memory" },
+        },
+    } }
+end
+
 local function body()
     -- (unicode_strings: without it each byte past ASCII is sent as a
     -- character of its own, and the API reads its "×" back as "Ã—")
@@ -1161,16 +1193,11 @@ local function body()
         -- a refusal by the safety classifiers is retried on a fallback
         -- model server-side (see the API docs: server-side fallback)
         fallbacks = "default",
-        -- a long session's old tool results are cleared server-side
-        -- (the newest kept, the memory tool's never), so each round trip
-        -- doesn't carry all of them (see the API docs: context editing)
-        context_management = { edits = { {
-            type = "clear_tool_uses_20250919",
-            trigger = { type = "input_tokens", value = CLEAR_TRIGGER },
-            keep = { type = "tool_uses", value = KEEP_TOOL_USES },
-            clear_at_least = { type = "input_tokens", value = CLEAR_AT_LEAST },
-            exclude_tools = { "memory" },
-        } } },
+        -- a long session's old tool calls and thinking are cleared
+        -- server-side (the newest kept, the memory tool's never), so each
+        -- round trip doesn't carry all of them (see the API docs: context
+        -- editing)
+        context_management = contextEdits(),
     }), { allow_repetitions = true, unicode_strings = true })
 end
 
@@ -1265,7 +1292,7 @@ local RETRY_ERRORS = { overloaded_error = true, api_error = true, rate_limit_err
 -- is a stream cut off by an overload.
 local function request()
     local wait = 2
-    for attempt = 1, RETRIES + 1 do
+    for attempt = 1, RETRIES + 2 do         -- (one more for the harder clear)
         local h, err, failed = http.post({ url = API_URL, headers = HEADERS, body = body(), timeout = HTTP_TIMEOUT })
         local code, got
         if h then
@@ -1275,7 +1302,7 @@ local function request()
             code, got = failed.getResponseCode(), failed.readAll()
             if failed.close then failed.close() end
         end
-        local detail, again
+        local detail, again, tooLong
         if code == 200 then
             local reply, e = fromEvents(got)
             if reply then return reply end
@@ -1287,18 +1314,28 @@ local function request()
             if got then
                 local e = textutils.unserialiseJSON(got)
                 detail = e and e.error and (e.error.type .. ": " .. tostring(e.error.message)) or got:sub(1, 200)
+                -- (the conversation has outgrown the model's context)
+                tooLong = code == 400 and e and e.error and e.error.type == "invalid_request_error"
+                    and text.contains(tostring(e.error.message), "prompt is too long")
             end
             again = (not code) or RETRY_CODES[code] == true
         end
-        if not again or attempt > RETRIES then
+        if tooLong and not hardClear then
+            -- once, at once: the same conversation with more of it cleared
+            hardClear = true
+            say("orange", "API: the conversation is too long; trying again with more of it cleared.")
+            log(string.format("API: %s; trying again with a harder clear (from %d tokens, the last %d tool uses kept)",
+                detail, HARD_TRIGGER, HARD_KEEP))
+        elseif not again or attempt > RETRIES then
             local failure = string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
             log(failure)
             return nil, failure
+        else
+            say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
+            log(string.format("API: %s; trying again in %ds", detail, wait))
+            sleep(wait)
+            wait = wait * 2
         end
-        say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
-        log(string.format("API: %s; trying again in %ds", detail, wait))
-        sleep(wait)
-        wait = wait * 2
     end
 end
 
@@ -1363,10 +1400,10 @@ end
 
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
-local startNote         -- what loading the helpers said, for the model's first goal
+local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
 local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
 local function converse(goal)
-    local said = startNote and goal .. "\n\n[" .. startNote .. "]" or goal
+    local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
     addUser(said, "Not run: the goal ended before this call was answered.")
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
@@ -1382,7 +1419,7 @@ local function converse(goal)
             return false
         end
         count(reply, now() - started)
-        startNote = nil
+        startNotes = {}
         messages[#messages + 1] = { role = "assistant", content = reply.content }
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
@@ -1444,6 +1481,19 @@ end
 --------------------------------------------------------------------------
 -- Main
 --------------------------------------------------------------------------
+-- /new at the prompt: the conversation emptied, the helpers loaded again
+-- (what's on disk, the memory and the files, carries over)
+local NEW = "/new"
+local function newConversation()
+    for i = #messages, 1, -1 do messages[i] = nil end
+    hardClear, lastCleared, startNotes = false, nil, {}
+    startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
+    local failed = loadHelpers()
+    if failed then say("red", failed); startNotes[2] = failed end
+    say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    log("new conversation")
+end
+
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
     say("yellow", string.format("Claude at the controls (%s, effort %s). Turtle at %s facing %d, fuel %s.",
@@ -1457,18 +1507,23 @@ local function main()
     log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)",
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
-    startNote = loadHelpers()
-    if startNote then say("red", startNote) end
+    local failed = loadHelpers()
+    if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
     if goal == "" then
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        local before = tables.copy(usage)
-        converse(goal)
-        local line = tokenLine(before)
-        say("grey", line)
-        log("goal done: " .. line)
-        goal = ask("> ")
+        if text.trim(goal) == NEW then
+            newConversation()
+            goal = ask("Goal: ")
+        else
+            local before = tables.copy(usage)
+            converse(goal)
+            local line = tokenLine(before)
+            say("grey", line)
+            log("goal done: " .. line)
+            goal = ask("> ")
+        end
     end
 end
 
