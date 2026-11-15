@@ -342,6 +342,19 @@ route, why = T.path(18, 0, 18, { limit = 10 })
 check("the node limit: nil, and the reason says how many cells were searched", route == nil and why:find("gave up after searching 10 cells", 1, true), tostring(why))
 route = T.path(18, 0, 18)
 check("...the default limit is enough for this", route and #route == 36)
+-- what walls a goal in is named: a protected area and a door, not just a count of cells
+T = fresh()
+learn(T, -2, 0, -2, 6, 0, 6)
+put(4, 0, 3, DOOR); learn(T, 4, 0, 3, 4, 0, 3)
+T.protect("keep", 3, 0, 4, 3, 0, 4)
+route, why = T.path(4, 0, 4, { margin = 0 })
+check("walled off by a protected area and a door: the reason names them", route == nil and why:find("walled off", 1, true)
+    and why:find("what walls it in: the protected area keep, minecraft:oak_door", 1, true), tostring(why))
+tp(T, 2, 0, 4)
+route, why = T.path(4, 0, 4, { limit = 2 })
+check("...and a search that gives up says what it met, so a bigger limit isn't the obvious fix", route == nil
+    and why:find("gave up after searching 2 cells", 1, true) and why:find("it met the protected area keep", 1, true), tostring(why))
+T.unprotect("keep")
 
 --------------------------------------------------------------------------
 -- Yielding

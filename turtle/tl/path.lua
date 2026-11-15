@@ -16,7 +16,8 @@
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
 -- memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds
--- without yielding), and gives up past a limit of cells searched, saying so.
+-- without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled
+-- off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
 --
 -- T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be
 -- empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits
@@ -167,6 +168,15 @@ local function newWorld(opts, from, to)
         end
     end
     local w = { toS = toS, fromS = fromS, dig = opts.dig, boxes = boxes }
+    -- the block the map holds in a cell (air, or nil if never seen)
+    local function nameIn(mx, my, mz)
+        if not aligned then return nil end
+        local cx, cy, cz = floor(mx / CUBE), floor(my / CUBE), floor(mz / CUBE)
+        local c = cubeAt(cx, cy, cz)
+        if not c then return nil end
+        local code = byte(c.data, ((my - cy * CUBE) * CUBE + (mz - cz * CUBE)) * CUBE + (mx - cx * CUBE) + 1)
+        return code == 1 and AIR or c.pal[code - 1]
+    end
     -- A cell's class: unknown, pass, dig or wall.
     function w.cls(mx, my, mz)
         if anyBanned and banned[idOf(mx, my, mz)] then return WALL end
@@ -188,16 +198,22 @@ local function newWorld(opts, from, to)
                 return "inside the protected area " .. b.name
             end
         end
-        if aligned then
-            local cx, cy, cz = floor(mx / CUBE), floor(my / CUBE), floor(mz / CUBE)
-            local c = cubeAt(cx, cy, cz)
-            if c then
-                local code = byte(c.data, ((my - cy * CUBE) * CUBE + (mz - cz * CUBE)) * CUBE + (mx - cx * CUBE) + 1)
-                local name = code == 1 and AIR or c.pal[code - 1]
-                if name then return name .. ", which a route here may not enter" end
+        local name = nameIn(mx, my, mz)
+        if name then return name .. ", which a route here may not enter" end
+        return "a cell it may not enter"
+    end
+    -- What walls a cell off that searching longer won't get past, in words, and 1 for a protected area or 2 for a
+    -- block the rules avoid: "the protected area keep", 1; "minecraft:oak_door", 2; nil for anything else (stone that
+    -- may not be dug, the cells banned).
+    function w.wall(mx, my, mz)
+        for _, b in ipairs(boxes) do
+            if mx >= b[1] and mx <= b[4] and my >= b[2] and my <= b[5] and mz >= b[3] and mz <= b[6] then
+                return "the protected area " .. b.name, 1
             end
         end
-        return "a cell it may not enter"
+        local name = nameIn(mx, my, mz)
+        if name and avoid(name) then return name, 2 end
+        return nil
     end
     return w
 end
@@ -214,8 +230,36 @@ end
 -- The search
 --------------------------------------------------------------------------
 
+-- What the search met that walls a route off for good (the protected areas and the blocks it avoids, doors and lava),
+-- in words, from the cells it searched: "the protected area keep, minecraft:oak_door", or nil if nothing.
+local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
+    local seen, n = {}, 0
+    for id in pairs(closed) do
+        local x, y, z = cellOf(id)
+        for i = 1, 6 do
+            local d = STEP_XYZ[i]
+            local nx, ny, nz = x + d[1], y + d[2], z + d[3]
+            if nx >= x1 and nx <= x2 and ny >= y1 and ny <= y2 and nz >= z1 and nz <= z2 and w.cls(nx, ny, nz) == WALL then
+                local what, rank = w.wall(nx, ny, nz)
+                if what then seen[what] = rank end
+            end
+        end
+        n = n + 1
+        if n % 256 == 0 then breathe() end
+    end
+    local list = {}
+    for what in pairs(seen) do list[#list + 1] = what end
+    if #list == 0 then return nil end
+    table.sort(list, function(a, b)                       -- (the areas first, then the blocks)
+        if seen[a] ~= seen[b] then return seen[a] < seen[b] end
+        return a < b
+    end)
+    return table.concat(list, ", ")
+end
+
 -- A* from (sx, sy, sz) to (gx, gy, gz) in the world's frame: the route as a list of cells after the first, up to and
--- including the last, and an info table { nodes, cost, digs, unknown }; or nil and why.
+-- including the last, and an info table { nodes, cost, digs, unknown }; or nil and why.  The why of a search that gave
+-- up or was walled off names the protected areas and avoided blocks it met.
 local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin)
     local cls = w.cls
     local sid, gid = idOf(sx, sy, sz), idOf(gx, gy, gz)
@@ -278,7 +322,10 @@ local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin)
             end
             nodes = nodes + 1
             if nodes > limit then
+                local met = wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
                 return nil, "no route: gave up after searching " .. limit .. " cells without reaching it (opts.limit raises that)"
+                    .. (met and ("; it met " .. met .. ", which no route goes through (opts.inside opens a protected area to a job), "
+                        .. "so a bigger limit may not help") or "")
             end
             if nodes % 32 == 0 then breathe() end
             local x, y, z = cellOf(id)
@@ -301,7 +348,9 @@ local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin)
             end
         end
     end
+    local met = wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
     return nil, "no route: every way is walled off (searched " .. nodes .. " cells within " .. margin .. " of the two ends)"
+        .. (met and ("; what walls it in: " .. met) or "")
 end
 
 -- The route from `from` to `to` (turtle frame cells), planned: list, info | nil, why.  `from` is where the turtle is
