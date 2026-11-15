@@ -595,6 +595,18 @@ end
 API.loadfile = codeLoadfile
 API.dofile = function(path) return assert(codeLoadfile(path))() end
 
+-- What the code prints is shown and, while a call runs, kept in `printed`
+-- for the model (nil between calls: what helpers.lua prints as it loads is
+-- only shown).  It's the code's print from the start, so a print at the top
+-- of helpers.lua works too.
+local printed
+local function capture(...)
+    local line = joined(...)
+    keepPrint(line)
+    if printed then printed[#printed + 1] = line end
+end
+API.print = capture
+
 -- `require` in the code: CraftOS's cc.* modules, and ccnix's libraries
 -- for text, paths, conversions, the network and the world (lib/), and
 -- only those.
@@ -679,12 +691,7 @@ end
 local function runLua(code)
     local out = {}
     local realPrint = print
-    local function capture(...)
-        local line = joined(...)
-        realPrint(line)
-        out[#out + 1] = line
-    end
-    env.print = capture
+    printed = out
     print = capture                    -- what turtlelib says, too
     local chunk, err = load(code, "=claude", "t", env)
     local ok, results
@@ -695,7 +702,7 @@ local function runLua(code)
         ok = results[1]
         if not ok then err = results[2] end
     end
-    print = realPrint
+    print, printed = realPrint, nil
     if ok then
         for i = 2, results.n do out[#out + 1] = "-> " .. show(results[i]) end
     else

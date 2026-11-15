@@ -731,6 +731,18 @@ check("the system prompt tells it to keep helpers in /claude/helpers.lua and of 
         and textutils.serialiseJSON(HTTP.requests[1].body.system):find("T.refuelFrom", 1, true))
 
 fresh({ "" })
+Mine.files["claude/helpers.lua"] = "print('helpers loading')\nfunction triple(n) return 3 * n end"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "print('hi'); return triple(2)" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("print from the helpers")
+local hp = HTTP.requests[1] and textutils.serialiseJSON(HTTP.requests[1].body.messages[1].content) or ""
+check("a print at the top of helpers.lua works: shown, the file loaded, the code's own print still comes back",
+    Mine.logHas("^helpers loading$") and not hp:find("failed to load", 1, true)
+        and resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "hi\n-> 6", hp)
+
+fresh({ "" })
 Mine.files["claude/helpers.lua"] = "function broken( end"
 HTTP.queue = { reply({ toolUse("lua", { code = "return 1 + 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("go on")
