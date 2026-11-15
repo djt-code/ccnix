@@ -1,7 +1,7 @@
 -- craft.lua -- crafting and smelting: recipes as data, T.craft, T.craftBatch, T.canCraft, T.smelt, what burns and smelts
 --
 -- Loaded by turtlelib the first time one of its functions is used (T.craft, T.craftBatch, T.canCraft, T.recipe,
--- T.addRecipe, T.smelt, T.fuelTicks, T.smeltsTo).
+-- T.addRecipe, T.smelt, T.smeltAt, T.fuelTicks, T.smeltsTo).
 --
 -- Recipes are written as the game's data packs write them: up to three rows of letters (a dot is an empty cell), what
 -- each letter stands for (a name, a list of names or a glob like "*_planks", minecraft: assumed), what comes out and
@@ -25,7 +25,8 @@
 -- T.smelt runs a furnace: a furnace takes fuel through its sides, the item through its top, and gives the result
 -- through its underside only.  It sets the furnace up in front of the turtle, one block up, so the cell under it is
 -- free to stand in, drops the fuel from beside, the item from above, sucks the results from below as they cook (ten
--- seconds an item), and takes the furnace back.  What burns and how long (T.fuelTicks; the nether's woods do not) and
+-- seconds an item), and takes the furnace back.  T.smeltAt does the same at a furnace standing in the world (fuel from a
+-- side, the item from the top, the results from below), and need not wait for it.  What burns and how long (T.fuelTicks; the nether's woods do not) and
 -- what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and T.SMELTS.
 
 local T = require("turtlelib")
@@ -1026,6 +1027,57 @@ local function noFuelWhy(name)
     return name .. " is not a furnace fuel (T.FURNACE_FUEL lists them)"
 end
 
+-- The fuel to smelt n of the item with, and how many of it: `fuel` is a name, or nil for the first of FUEL_PREFER there
+-- is enough of.  Nil and why if there is none, it doesn't burn, or there is too little of it.
+local function fuelToBurn(item, n, fuel)
+    if fuel == nil then
+        fuel = chooseFuel(item, n)
+        if not fuel then return nil, "no fuel on the turtle to smelt " .. n .. " with (charcoal, coal, planks or logs)" end
+    else
+        fuel = full(fuel)
+    end
+    local ticks = FURNACE_FUEL[fuel]
+    if not ticks then return nil, noFuelWhy(fuel) end
+    local fuelCount = math.ceil(n * SMELT_TICKS / ticks)
+    local haveFuel = T.countItem(fuel) - (fuel == item and n or 0)
+    if haveFuel < fuelCount then
+        return nil, "short of " .. fuel .. " to burn: " .. n .. " items need " .. fuelCount .. ", have " .. math.max(haveFuel, 0)
+    end
+    return fuel, fuelCount
+end
+
+-- Drop `count` of the item `name` with how(n) (turtle.drop, dropDown, dropUp), from every slot that holds it, as far as
+-- it takes: a stack split over slots goes in whole.  Returns how many went.
+local function dropAll(name, count, how)
+    local before = T.countItem(name)
+    for slot = 1, 16 do
+        local gone = before - T.countItem(name)
+        if gone >= count then break end
+        local it = turtle.getItemDetail(slot)
+        if it and it.name == name then
+            turtle.select(slot)
+            if not how(math.min(count - gone, it.count)) then break end
+        end
+    end
+    return before - T.countItem(name)
+end
+
+-- Take the results out of the furnace above as they cook, until n have come or the time is up (ten seconds an item and
+-- thirty over).  Returns how many came, and the seconds waited.
+local function collect(result, n)
+    local got, waited = 0, 0
+    local limit = n * (SMELT_TICKS / 20) + 30
+    while got < n and waited <= limit do
+        local before = T.countItem(result)
+        turtle.suckUp()
+        got = got + T.countItem(result) - before
+        if got >= n then break end
+        sleep(5)
+        waited = waited + 5
+    end
+    return got, waited
+end
+
 -- Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and
 -- why.
 --
@@ -1048,19 +1100,9 @@ function T.smelt(item, n, fuel, opts)
     if not result then return nil, item .. " does not smelt into anything (T.SMELTS lists what does)" end
     if T.countItem(item) < n then return nil, "short of " .. item .. ": need " .. n .. ", have " .. T.countItem(item) end
     if T.countItem(FURNACE) < 1 then return nil, "no furnace on the turtle (T.craft makes one from 8 cobblestone)" end
-    if fuel == nil then
-        fuel = chooseFuel(item, n)
-        if not fuel then return nil, "no fuel on the turtle to smelt " .. n .. " with (charcoal, coal, planks or logs)" end
-    else
-        fuel = full(fuel)
-    end
-    local ticks = FURNACE_FUEL[fuel]
-    if not ticks then return nil, noFuelWhy(fuel) end
-    local fuelCount = math.ceil(n * SMELT_TICKS / ticks)
-    local haveFuel = T.countItem(fuel) - (fuel == item and n or 0)
-    if haveFuel < fuelCount then
-        return nil, "short of " .. fuel .. " to burn: " .. n .. " items need " .. fuelCount .. ", have " .. math.max(haveFuel, 0)
-    end
+    local fuelCount
+    fuel, fuelCount = fuelToBurn(item, n, fuel)
+    if not fuel then return nil, fuelCount end
     local start, heading = T.here(), T.dir
     local v = T.DELTA[heading]
     local stand = { x = start.x, y = start.y + 1, z = start.z }                           -- beside the furnace
@@ -1112,20 +1154,6 @@ function T.smelt(item, n, fuel, opts)
         if not home then note = note .. " (and can't get home: " .. tostring(homeWhy) .. ")" end
         return note
     end
-    -- (from every slot that holds it, as far as it takes: a stack split over slots goes in whole)
-    local function dropAll(name, count, how)
-        local before = T.countItem(name)
-        for slot = 1, 16 do
-            local gone = before - T.countItem(name)
-            if gone >= count then break end
-            local it = turtle.getItemDetail(slot)
-            if it and it.name == name then
-                turtle.select(slot)
-                if not how(math.min(count - gone, it.count)) then break end
-            end
-        end
-        return before - T.countItem(name)
-    end
     -- the steps, each returning nil and why when it cannot go on
     local function steps()
         local ok, why = go(stand)
@@ -1150,22 +1178,167 @@ function T.smelt(item, n, fuel, opts)
     end
     local ok, why = steps()
     local got, waited = 0, 0
-    if ok then
-        local limit = n * (SMELT_TICKS / 20) + 30
-        while got < n and waited <= limit do
-            local before = T.countItem(result)
-            turtle.suckUp()
-            got = got + T.countItem(result) - before
-            if got >= n then break end
-            sleep(5)
-            waited = waited + 5
-        end
-    end
+    if ok then got, waited = collect(result, n) end
     local note = cleanUp()
     if got > 0 then T.markCrafted(result) end
     if not ok then return nil, tostring(why) .. note end
     if got < n then
         return false, "got " .. got .. " of " .. n .. " " .. result .. " in " .. waited .. " seconds (out of fuel, or the furnace was slow)" .. note, got
+    end
+    if note ~= "" then return false, "smelted " .. got .. " but" .. note, got end
+    return true, got
+end
+
+-- What a furnace standing in the world may be (they all take fuel through the sides and the underside, the item through
+-- the top, and give the result through the underside)
+local FURNACES = T.nameTest({ FURNACE, "minecraft:blast_furnace", "minecraft:smoker" })
+local AIRS = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true }
+local WALK = { path = true, scan = false }
+
+-- A cell from { x, y, z } or { x =, y =, z = }, or nil.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local x, y, z = c.x or c[1], c.y or c[2], c.z or c[3]
+    if not (isWhole(x) and isWhole(y) and isWhole(z)) then return nil end
+    return { x = x, y = y, z = z }
+end
+
+-- Go to the cell p, and the other way round the axes if that is blocked.  True, or false and why.
+local function goTo(p, move)
+    local ok, why = T.moveTo(p.x, p.y, p.z, move)
+    if ok then return true end
+    local other = copyOf(move)
+    other.order = "xzy"
+    if T.moveTo(p.x, p.y, p.z, other) then return true end
+    return false, why
+end
+
+-- Is it a furnace the turtle faces in direction d?  True, or false and what is there instead.
+local function furnaceThere(d)
+    local seen, data = T.look(d)
+    local name = seen and type(data) == "table" and data.name or "nothing"
+    if seen and FURNACES(name) then return true end
+    return false, name
+end
+
+-- The cells beside the furnace to drop the fuel in from, as the map knows them: air first, then never seen (not a
+-- block it has seen), the nearest first.
+local function sideStands(cell)
+    local out = {}
+    for d = 0, 3 do
+        local v = T.DELTA[d]
+        local s = { x = cell.x - v[1], y = cell.y, z = cell.z - v[3], d = d }        -- (from there the furnace is in direction d)
+        local name = T.map.get(s.x, s.y, s.z)
+        s.rank = name == nil and 2 or AIRS[name] and 1 or nil
+        if s.rank then
+            s.dist = T.dist(T.pos, s)
+            out[#out + 1] = s
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.rank ~= b.rank then return a.rank < b.rank end
+        if a.dist ~= b.dist then return a.dist < b.dist end
+        return a.d < b.d
+    end)
+    return out
+end
+
+-- Smelt n at a furnace standing at cell {x, y, z}: fuel in from a side, the item from the top, the results from below.
+-- True, got (true, 0, info with opts.wait = false: n = 0 fetches them later); false, why, got; nil, why.
+--
+-- `cell` is the furnace's { x, y, z }.  The fuel goes in from a side (from below if no side can be reached), the item
+-- from the top, and the results are taken from below, so the cells over and under it must be free.  n is how many (1
+-- to 64), or 0 to only take out what has cooked.  It waits for them (ten seconds an item) unless opts.wait = false: then
+-- it loads the furnace and returns at once (info.ready is the seconds it takes), and T.smeltAt(cell, item, 0) fetches
+-- them later.  opts: fuel (a name, as T.smelt's; false: put none in, it has some), stay (don't go back to where it
+-- began), move (for T.moveTo; default { path = true, scan = false }).  What comes out is marked as crafted.
+function T.smeltAt(cell, item, n, opts)
+    opts = opts or {}
+    local at = cellOf(cell)
+    if not at then return nil, "T.smeltAt wants the furnace's cell: { x, y, z }, whole numbers" end
+    if type(item) ~= "string" then return nil, "T.smeltAt wants an item name, like minecraft:raw_iron" end
+    item = full(item)
+    n = n == nil and 1 or n
+    if not (isWhole(n) and n >= 0 and n <= STACK) then return nil, "how many to smelt is a whole number from 0 to " .. STACK end
+    local result = SMELTS[item]
+    if not result then return nil, item .. " does not smelt into anything (T.SMELTS lists what does)" end
+    if T.countItem(item) < n then return nil, "short of " .. item .. ": need " .. n .. ", have " .. T.countItem(item) end
+    local fuel, fuelCount
+    if n > 0 and opts.fuel ~= false then
+        fuel, fuelCount = fuelToBurn(item, n, opts.fuel)
+        if not fuel then return nil, fuelCount end
+    end
+    local over, under = { x = at.x, y = at.y + 1, z = at.z }, { x = at.x, y = at.y - 1, z = at.z }
+    local below = T.map.get(under.x, under.y, under.z)
+    if below and not AIRS[below] then
+        return nil, "the furnace at " .. T.posKey(at) .. " has " .. below .. " under it: the results come out only from below, " ..
+            "so that cell must be free"
+    end
+    local move = opts.move or WALK
+    local start, heading = T.here(), T.dir
+    local checked = false
+    -- the steps, each returning nil (nothing went in) or false (something did) and why when it cannot go on; true once
+    -- the turtle is under the furnace with it loaded
+    local function load()
+        if fuel then
+            for _, s in ipairs(sideStands(at)) do
+                if goTo(s, move) then
+                    local isFurnace, found = furnaceThere(s.d)
+                    if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+                    checked = true
+                    local took = dropAll(fuel, fuelCount, turtle.drop)
+                    if took < fuelCount then return false, "the furnace took only " .. took .. " of the " .. fuelCount .. " " .. fuel end
+                    fuel = nil
+                    break
+                end
+            end
+        end
+        if n > 0 then
+            local ok, why = goTo(over, move)
+            if not ok then return false, "can't get above the furnace at " .. T.posKey(at) .. ": " .. tostring(why) end
+            local isFurnace, found = furnaceThere("down")
+            if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+            checked = true
+            local took = dropAll(item, n, turtle.dropDown)
+            if took < n then return false, "the furnace took only " .. took .. " of the " .. n .. " " .. item .. " (is something else in it?)" end
+        end
+        local ok, why = goTo(under, move)
+        if not ok then return false, "can't get under the furnace at " .. T.posKey(at) .. " for the results: " .. tostring(why) end
+        if not checked then
+            local isFurnace, found = furnaceThere("up")
+            if not isFurnace then return nil, "no furnace at " .. T.posKey(at) .. " (" .. found .. " is there)" end
+        end
+        if fuel then                                    -- (no side to reach: the underside takes fuel too)
+            local took = dropAll(fuel, fuelCount, turtle.dropUp)
+            if took < fuelCount then return false, "the furnace took only " .. took .. " of the " .. fuelCount .. " " .. fuel end
+        end
+        return true
+    end
+    local ok, why = load()
+    local got, waited, info = 0, 0, nil
+    if ok then
+        if n == 0 then
+            local before = T.countItem(result)
+            while turtle.suckUp() do end
+            got = T.countItem(result) - before
+        elseif opts.wait == false then
+            info = { put = n, ready = n * SMELT_TICKS / 20 }
+        else
+            got, waited = collect(result, n)
+        end
+    end
+    local note = ""
+    if not opts.stay then
+        local home, homeWhy = goTo(start, move)
+        T.face(heading)
+        if not home then note = " (and can't get back to " .. T.posKey(start) .. ": " .. tostring(homeWhy) .. ")" end
+    end
+    if got > 0 then T.markCrafted(result) end
+    if not ok then return ok, tostring(why) .. note, got end
+    if info then return true, 0, info end
+    if got < n then
+        return false, "got " .. got .. " of " .. n .. " " .. result .. " in " .. waited .. " seconds (out of fuel, or the furnace " ..
+            "was slow): T.smeltAt(cell, item, 0) takes out the rest later" .. note, got
     end
     if note ~= "" then return false, "smelted " .. got .. " but" .. note, got end
     return true, got

@@ -17,7 +17,10 @@
 --     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
 --     one up, fuel from beside, the item from above, the results from below, taken back, the turtle home; the refusals,
---     and a block in the way that makes it take the furnace back from the side.
+--     and a block in the way that makes it take the furnace back from the side;
+--   * T.smeltAt at a furnace standing in the world: fuel from a side (from below when no side is free), the item from the
+--     top, the results from below; loaded and left (opts.wait = false) and fetched later with n = 0; opts.fuel = false and
+--     opts.stay; a block under it, no furnace, the refusals.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -712,6 +715,89 @@ do
     ok, why = T.smelt("minecraft:sand", 3, "minecraft:coal")
     check("facing east: the furnace is set up that way, glass out, the turtle faces east again", ok == true and carrying("minecraft:glass") == 3 and T.dir == 1 and W.S.P.d == 1
         and W.S.P.x == 0 and W.S.P.z == 0 and W.get(1, 1, 0) == nil, tostring(why) .. " / " .. inventory())
+end
+
+--------------------------------------------------------------------------
+-- T.smeltAt: a furnace standing in the world
+--------------------------------------------------------------------------
+-- Which way the turtle put things in: drops forward (from a side), down (from the top) and up (from below), by item.
+local PUT = {}
+local function watchPuts()
+    PUT = { front = {}, down = {}, up = {} }
+    for way, fn in pairs({ front = "drop", down = "dropDown", up = "dropUp" }) do
+        local raw = turtle[fn]
+        turtle[fn] = function(n)
+            local it = W.S.inv[W.S.sel]
+            if it then PUT[way][it.name] = (PUT[way][it.name] or 0) + math.min(n or it.count, it.count) end
+            return raw(n)
+        end
+    end
+end
+local OVEN = { 0, 2, 3 }                    -- a furnace hung in the air, as the turtle's courtyard ones
+do
+    fresh(false)
+    W.set(0, 2, 3, FURNACE)
+    W.give(2, "minecraft:raw_iron", 3); W.give(3, "minecraft:coal", 2)
+    watchPuts()
+    local t0 = W.time
+    local ok, got = T.smeltAt(OVEN, "minecraft:raw_iron", 3, { fuel = "minecraft:coal" })
+    check("smeltAt a furnace standing in the world: 3 raw iron in, 3 ingots out, a furnace's time (30 s)", ok == true and got == 3
+        and carrying("minecraft:iron_ingot") == 3 and carrying("minecraft:raw_iron") == 0 and W.time - t0 >= 30, tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+    check("...the coal in from a side, the iron from the top, the ingots out of the underside", PUT.front["minecraft:coal"] == 1 and PUT.down["minecraft:raw_iron"] == 3
+        and not PUT.up["minecraft:coal"] and carrying("minecraft:coal") == 1, tostring(PUT.front["minecraft:coal"]) .. " " .. tostring(PUT.down["minecraft:raw_iron"]))
+    check("...the furnace left standing, the turtle back where it began facing as before, the ingots not junk",
+        W.get(0, 2, 3) and W.get(0, 2, 3).name == FURNACE and here() and T.isJunk("minecraft:iron_ingot") == false)
+
+    -- loaded and left to cook, then fetched
+    W.give(4, "minecraft:sand", 4)
+    t0 = W.time
+    local info
+    ok, got, info = T.smeltAt(OVEN, "minecraft:sand", 4, { wait = false })
+    check("opts.wait = false: it loads the furnace and returns at once, saying when it will be ready", ok == true and got == 0 and info and info.ready == 40
+        and W.time - t0 < 10 and carrying("minecraft:sand") == 0 and here(), tostring(ok) .. " " .. tostring(got) .. " t=" .. (W.time - t0))
+    W.advance(45)
+    ok, got = T.smeltAt(OVEN, "minecraft:sand", 0)
+    check("...and smeltAt(cell, item, 0) comes back and takes out the 4 glass, adding nothing", ok == true and got == 4 and carrying("minecraft:glass") == 4 and here(),
+        tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+
+    -- a furnace with fuel in it already, and staying put
+    W.get(0, 2, 3).inv[2] = { name = "minecraft:coal", count = 1 }
+    W.give(5, "minecraft:cobblestone", 2); W.give(6, "minecraft:coal", 3)
+    watchPuts()
+    ok, got = T.smeltAt(OVEN, "minecraft:cobblestone", 2, { fuel = false, stay = true })
+    check("opts.fuel = false puts no fuel in (the furnace has some), opts.stay leaves the turtle under it", ok == true and got == 2 and carrying("minecraft:stone") == 2
+        and next(PUT.front) == nil and next(PUT.up) == nil and carrying("minecraft:coal") == 3 and W.S.P.x == 0 and W.S.P.y == 1 and W.S.P.z == 3, tostring(ok) .. " " .. tostring(got))
+end
+
+do
+    -- a furnace set in a wall: no side to stand at, the fuel goes in from below
+    fresh(false)
+    W.set(0, 2, 3, FURNACE)
+    for _, c in ipairs({ { -1, 2, 3 }, { 1, 2, 3 }, { 0, 2, 2 }, { 0, 2, 4 } }) do W.set(c[1], c[2], c[3], "minecraft:stone") end
+    for _, c in ipairs({ { -1, 2, 3 }, { 1, 2, 3 }, { 0, 2, 2 }, { 0, 2, 4 } }) do T.map.set(c[1], c[2], c[3], "minecraft:stone") end
+    W.give(2, "minecraft:raw_gold", 2); W.give(3, "minecraft:charcoal", 1)
+    watchPuts()
+    local ok, got = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("a furnace in a wall, no side free: the fuel (charcoal, chosen) goes in from below, the gold comes out", ok == true and got == 2
+        and carrying("minecraft:gold_ingot") == 2 and PUT.up["minecraft:charcoal"] == 1 and here(), tostring(ok) .. " " .. tostring(got) .. " / " .. inventory())
+
+    -- refusals
+    T.map.set(0, 1, 3, "minecraft:stone")
+    W.set(0, 1, 3, "minecraft:stone")
+    W.give(2, "minecraft:raw_gold", 2); W.give(3, "minecraft:charcoal", 1)
+    local moves = W.S.moves
+    local why
+    ok, why = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("the map shows a block under the furnace: refused before it moves, saying the results come out only from below", ok == nil
+        and why:find("under it", 1, true) and W.S.moves == moves and carrying("minecraft:raw_gold") == 2, tostring(why))
+    W.set(0, 1, 3, nil); T.map.set(0, 1, 3, "minecraft:air")
+    W.set(0, 2, 3, "minecraft:stone")
+    ok, why = T.smeltAt(OVEN, "minecraft:raw_gold", 2)
+    check("no furnace there: nil, what is there instead, and back home with the gold and the fuel", ok == nil and why:find("no furnace at 0,2,3 (minecraft:stone", 1, true)
+        and carrying("minecraft:raw_gold") == 2 and carrying("minecraft:charcoal") == 1 and here(), tostring(why))
+    ok, why = T.smeltAt(OVEN, "minecraft:dirt", 1)
+    check("...an item that does not smelt, a bad cell, too many: refused", ok == nil and why:find("does not smelt", 1, true)
+        and T.smeltAt({ 0, 2 }, "minecraft:raw_gold", 1) == nil and T.smeltAt(OVEN, "minecraft:raw_gold", 65) == nil)
 end
 
 --------------------------------------------------------------------------
