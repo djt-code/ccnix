@@ -8,7 +8,9 @@
 --   * the search reads cubes as strings (no T.map.get), and gives the computer a turn on a clock;
 --   * T.travel: over a wall under a roof along a clear layer, scanning first when the map doesn't know, a search when
 --     there is no layer; an unexpected block is noted in the map and the route planned again, a bounded number of times;
---     protected areas kept out of; T.moveTo's opts.path asks it.
+--     protected areas kept out of; T.moveTo's opts.path asks it;
+--   * liquids (ADR-0011 D1): a block to dig with lava or a water source beside it or over it is a wall unless
+--     opts.liquid; travel digs beside a moat, not into it.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -309,6 +311,53 @@ check("a dig costs more than a step: a one-block wall is gone round rather than 
 put(1, 0, 3, STONE); T.map.set(1, 0, 3, STONE); put(-1, 0, 3, STONE); T.map.set(-1, 0, 3, STONE)
 route, info = T.path(0, 0, 5, { dig = true })
 check("...a three-block wall is dug: the detour round it costs more", route and #route == 5 and info.digs == 1, route and #route or "nil")
+
+--------------------------------------------------------------------------
+-- Liquids beside a cell to dig (ADR-0011 D1)
+--------------------------------------------------------------------------
+T = fresh()
+box(-6, -1, -1, 6, -1, 8, STONE); box(-6, 2, -1, 6, 2, 8, STONE)       -- a floor and a ceiling
+box(-6, 0, 3, 6, 1, 3, STONE)                                            -- a wall between
+put(0, 1, 3, LAVA, true)                                                 -- lava in the wall, over the straight way's dig
+learn(T, -6, -1, -1, 6, 2, 8)
+route, info = T.path(0, 0, 5, { dig = true, margin = 2 })
+check("a block to dig with lava over it (the map knows) is a wall: the route digs beside it instead",
+    route and not has(route, 0, 0, 3) and info.digs == 1 and #route == 7 and connected(route, T.pos), route and #route or tostring(info))
+route, info = T.path(0, 0, 5, { dig = true, margin = 2, liquid = true })
+check("...opts.liquid = true digs it", route and has(route, 0, 0, 3) and #route == 5 and info.digs == 1)
+ok, why = T.moveTo(0, 0, 5, { dig = true })
+check("T.moveTo refuses that dig too, from the map alone", ok == false and why == "digging minecraft:stone at 0,0,3 would release lava at 0,1,3 (opts.liquid = true digs it anyway)"
+    and get(0, 0, 3) and at(T) == "(0,0,2)", tostring(why))
+tp(T, 0, 0, 0, 0)
+box(-6, 1, 3, 6, 1, 3, LAVA, true)
+learn(T, -6, 1, 3, 6, 1, 3)
+route, why = T.path(0, 0, 5, { dig = true, margin = 0 })
+check("lava over the whole wall: no route, and the reason says the liquid is why", route == nil
+    and why:find("blocks beside lava or water, which no route digs (opts.liquid = true digs them)", 1, true), tostring(why))
+route, why = T.path(0, 0, 3, { dig = true, margin = 0 })
+check("...a goal that is such a block says so", route == nil and why:find("goal 0,0,3 is minecraft:stone with minecraft:lava beside it", 1, true), tostring(why))
+-- travel: lava in the wall beside the straight way's dig (a moat's edge); the dig beside it is planned round
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 3, -2, 6, 3, 8, STONE)        -- a floor and a roof
+box(-6, 0, 3, 6, 2, 3, STONE)                                            -- a wall to the roof
+box(1, 0, 3, 1, 2, 3, LAVA, true)                                        -- lava in it at x = 1
+learn(T, -6, -1, -2, 6, 3, 8)
+watch(T)
+ok, why = T.travel(0, 0, 6, { dig = true, scan = false, margin = 3 })
+check("travel with dig = true: no dig beside the lava (not the straight way at x = 0), one dig further off", ok == true and at(T) == "(0,0,6)"
+    and get(0, 0, 3) and get(2, 0, 3) and DIGS == 1 and get(1, 0, 3).name == LAVA, tostring(why) .. " " .. at(T) .. " " .. DIGS .. " digs")
+-- lava the map doesn't know (it thinks the cell is air) but the turtle looked at
+T = fresh()
+box(-6, -1, -1, 6, -1, 8, STONE); box(-6, 1, -1, 6, 1, 8, STONE)
+box(-6, 0, 3, 6, 0, 3, STONE)
+learn(T, -6, -1, -1, 6, 1, 8)
+put(0, 0, 4, LAVA, true)                       -- the map has it as air
+tp(T, -1, 0, 4, 1)
+T.look(1)                                      -- the turtle sees it
+tp(T, 0, 0, 0, 0)
+route = T.path(0, 0, 5, { dig = true, margin = 2, avoidCells = { { x = 0, y = 0, z = 4 } } })
+check("the planner knows what the turtle looked at too: no dig beside lava only it saw", route and not has(route, 0, 0, 3) and #route == 7,
+    route and #route or "nil")
 
 --------------------------------------------------------------------------
 -- What was never seen

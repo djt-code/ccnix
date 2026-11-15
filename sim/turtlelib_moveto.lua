@@ -20,8 +20,8 @@ sleep = function() end
 local W = {}
 local function get(x, y, z) return W[M.key(x, y, z)] or nil end
 local function set(x, y, z, b) W[M.key(x, y, z)] = b or nil end
-local function block(name) return { name = name } end
-local function fluid(name) return { name = name, fluid = true } end
+local function block(name, state) return { name = name, state = state } end
+local function fluid(name, state) return { name = name, fluid = true, state = state } end
 local ENTITY = { entity = true }            -- a mob: nothing to inspect, but it can't be moved into
 S.get = get
 local DIGS = 0
@@ -29,7 +29,7 @@ local DIGS = 0
 local function inspectAt(x, y, z)
     local b = get(x, y, z)
     if not b or b.entity then return false, "No block to inspect" end
-    return true, { name = b.name, state = {} }
+    return true, { name = b.name, state = b.state or {} }
 end
 turtle = M.merge(
     M.inventoryApi(S), M.fuelApi(S), M.noAttackApi(),
@@ -41,6 +41,12 @@ turtle = M.merge(
         if b.name == "minecraft:bedrock" then return false, "Unbreakable block detected" end
         DIGS = DIGS + 1
         set(x, y, z, nil)
+        return true
+    end),
+    M.actingApi(S, "place", function(x, y, z)
+        local b = get(x, y, z)
+        if b and not b.fluid then return false, "Cannot place block here" end
+        set(x, y, z, block("minecraft:cobblestone"))
         return true
     end))
 
@@ -300,3 +306,82 @@ T.registry.travel, T.registry.path = nil, nil            -- (a turtlelib whose r
 set(1, 0, 0, block("minecraft:stone"))
 ok, why = T.moveTo(3, 0, 0, { order = "x", path = true })
 check("opts.path = true with no path module: just the block's reason", ok == false and why == "blocked by minecraft:stone at 1,0,0", tostring(why))
+
+--------------------------------------------------------------------------
+-- Liquids beside a cell to dig (ADR-0011 D1), known from what the turtle looked at (no map here)
+--------------------------------------------------------------------------
+-- (a fresh turtlelib: what the turtle saw lately starts empty)
+local function freshT()
+    package.loaded.turtlelib = nil
+    T = require("turtlelib")
+    clearWorld(); home(); DIGS = 0
+end
+-- The turtle looks at the cell x, y, z from the cell before it on the x axis, facing +x, and comes home.
+local function lookAtX(x, y, z)
+    home(x - 1, y, z, 1)
+    T.look(1)
+    home()
+end
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, fluid("minecraft:lava"))       -- a moat beside the channel
+lookAtX(1, 0, 1)
+ok, why, name, cell = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("a cell to dig with lava beside it (the turtle saw it): refused, nothing dug, the lava named",
+    ok == false and why == "digging minecraft:stone at 1,0,0 would release lava at 1,0,1 (opts.liquid = true digs it anyway)"
+    and name == "minecraft:stone" and cell and cell.x == 1 and DIGS == 0 and get(1, 0, 0) and at() == "(0,0,0)", tostring(why))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true, liquid = true })
+check("...opts.liquid = true digs it anyway", ok == true and DIGS == 1 and at() == "(3,0,0)", tostring(why))
+check("T.liquidNear names the lava and its cell", select("#", T.liquidNear(1, 0, 0)) == 4 and T.liquidNear(1, 0, 0) == "minecraft:lava"
+    and select(4, T.liquidNear(1, 0, 0)) == 1 and T.liquidNear(5, 0, 5) == nil)
+
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, -1, 0, fluid("minecraft:lava"))
+home(0, -1, 0, 1); T.look(1); home()
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("lava below the cell doesn't flow up into it: dug", ok == true and DIGS == 1, tostring(why))
+
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 1, 0, fluid("minecraft:water", { level = 0 }))
+lookAtX(1, 1, 0)
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("a water source above the cell: refused", ok == false and why == "digging minecraft:stone at 1,0,0 would release water at 1,1,0 (opts.liquid = true digs it anyway)"
+    and DIGS == 0, tostring(why))
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, fluid("minecraft:water", { level = 3 }))
+lookAtX(1, 0, 1)
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("flowing water beside it (a level above 0): dug", ok == true and DIGS == 1, tostring(why))
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, block("minecraft:oak_stairs", { waterlogged = true }))
+lookAtX(1, 0, 1)
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("a waterlogged block beside it is water too", ok == false and why and why:find("would release water at 1,0,1", 1, true) and DIGS == 0, tostring(why))
+
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, fluid("minecraft:lava"))
+lookAtX(1, 0, 1)
+set(1, 0, 1, block("minecraft:netherrack"))
+lookAtX(1, 0, 1)
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("a second look that finds the lava gone lifts the refusal", ok == true and DIGS == 1, tostring(why))
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, fluid("minecraft:lava"))
+home(0, 0, 1, 1); T.look(1)
+T.placeDir(1)
+home()
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("...so does a block placed into it", ok == true and DIGS == 1 and get(1, 0, 1).name == "minecraft:cobblestone", tostring(why))
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 0, 1, fluid("minecraft:lava"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("(lava the turtle never saw, with no map, isn't known: dug)", ok == true and DIGS == 1, tostring(why))
+
+-- falling blocks: a warning, not a refusal
+freshT()
+set(1, 0, 0, block("minecraft:stone")); set(1, 1, 0, block("minecraft:gravel"))
+lookAtX(1, 1, 0)
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("a dig under gravel: true, and a warning that it may fall", ok == true and DIGS == 1 and at() == "(3,0,0)"
+    and why == "warning: dug 1,0,0 under minecraft:gravel, which may fall into it", tostring(why))
+check("T.isFalling: sand, gravel, concrete powder; not stone", T.isFalling("minecraft:sand") and T.isFalling("minecraft:red_concrete_powder")
+    and not T.isFalling("minecraft:stone"))

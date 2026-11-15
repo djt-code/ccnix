@@ -4,8 +4,8 @@
 --
 -- T.harvest digs every block in a place whose name matches a glob, nearest first, but a block only after the matching
 -- blocks above it in its column (top down), and never one with a falling block (sand, gravel, concrete powder, an anvil)
--- over it that is not itself to be dug: digging out from under it would bring it down.  A block that lava touches is left
--- (opts.lava lifts that), so is one in a protected area (opts.inside names the area the job owns) and a chest or a
+-- over it that is not itself to be dug: digging out from under it would bring it down.  A block that lava or a water source
+-- touches beside it or over it (T.liquidNear) is left (opts.liquid lifts that), so is one in a protected area (opts.inside names the area the job owns) and a chest or a
 -- computer (T.cfg.digContainers).  It counts as it goes and stops at the target.  The place is a box in the turtle's frame
 -- (the map is scanned for it as needed), a scan's result (T.scan's { ["x,y,z"] = name }) or a list of cells such as
 -- T.map.find gives.  Each block is dug from the nearest cell next to it that the map shows free, tunnelling to one when
@@ -21,7 +21,6 @@
 local T = require("turtlelib")
 local text = require("text")
 local tables = require("tables")
-local glob = require("glob")
 
 local BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 local BUCKET_FUEL = 1000                      -- what a bucket of lava burns for
@@ -31,21 +30,6 @@ local LAVA = { ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true }
 local FLUIDS = { ["minecraft:water"] = true, ["minecraft:flowing_water"] = true, ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true }
 -- Where to go by default: along the map when something is in the way, and no scanning
 local MOVE = { path = true, scan = false }
--- The blocks that fall when what is under them goes (names, and globs for the families)
-local FALLING = {
-    "minecraft:sand", "minecraft:red_sand", "minecraft:gravel", "minecraft:suspicious_sand", "minecraft:suspicious_gravel",
-    "minecraft:*_concrete_powder", "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil",
-    "minecraft:dragon_egg", "minecraft:pointed_dripstone",
-}
-local FALLING_TESTS = {}
-for i, g in ipairs(FALLING) do FALLING_TESTS[i] = glob.compile(g) end
--- Does this block fall when what is under it goes?
-local function isFalling(name)
-    for _, test in ipairs(FALLING_TESTS) do
-        if test(name) then return true end
-    end
-    return false
-end
 local SCAN_FUEL_R16 = 5300                    -- what a radius-16 scan once cost
 local DETOUR = 1.25                           -- a route is this much longer than the straight way
 
@@ -116,14 +100,12 @@ local function standsFor(cell, tunnel)
     return out
 end
 
--- Is the map's lava touching the cell (any side, above too)?
-local function lavaNear(cell)
-    for _, d in ipairs({ 0, 1, 2, 3, "up", "down" }) do
-        local v = T.DELTA[d]
-        local name = T.map.get(cell.x + v[1], cell.y + v[2], cell.z + v[3])
-        if name and LAVA[name] then return true end
-    end
-    return false
+-- Why a block is left for the liquid T.liquidNear finds beside it or over it ("lava touches it (minecraft:lava at
+-- 5,0,0)"), or nil if none would flow in.
+local function liquidTouches(cell)
+    local name, x, y, z = T.liquidNear(cell.x, cell.y, cell.z)
+    if not name then return nil end
+    return (LAVA[name] and "lava" or "a water source") .. " touches it (" .. name .. " at " .. x .. "," .. y .. "," .. z .. ")"
 end
 
 -- How many items aboard match the test.
@@ -223,20 +205,21 @@ local function tellJob(info, pattern)
     if not ok and err == "Terminated" then error(err, 0) end
 end
 
--- Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and
--- ones holding up sand.  True, info; false, why, info when short; nil, why if it couldn't begin.
+-- Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in
+-- by and ones under sand.  True, info; false, why, info when short; nil, why if it couldn't begin.
 --
 -- `pattern` is a glob of block names (the namespace may be left out).  `where` is a box in the turtle's frame (six numbers in a
 -- table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of
 -- T.scan, or a list of cells ({ x, y, z }, as T.map.find gives).  `target`, if given, is how many blocks to dig before
 -- stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead).  Each block is looked
 -- at before it is dug and left if the map was wrong.  Left alone, and listed in info.skipped with why: a block with a
--- falling block over it that is not to be dug too, one that lava touches (opts.lava digs those), one in a protected area
+-- falling block over it that is not to be dug too, one that lava or a water source touches beside it or over it (T.liquidNear;
+-- opts.liquid, or opts.lava as before, digs those), one in a protected area
 -- (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  A block with no free cell
 -- beside it is skipped unless opts.move lets it dig a way in.  It stops when the inventory is full (T.cfg.autoDump
 -- keeps room), or the fuel is out.  Info is { got, target, items = { name = count aboard now that were not before },
 -- seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }.  opts: scan, limit (cells
--- at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, lava, item.
+-- at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, liquid, item.
 function T.harvest(pattern, where, target, opts)
     opts = opts or {}
     if opts.inside then
@@ -276,8 +259,10 @@ function T.harvest(pattern, where, target, opts)
             local guard = T.guarded(c.x, c.y, c.z)
             if guard then skip(c, "protected: " .. guard)
             elseif c.name and T.neverDig(c.name) and not T.cfg.digContainers then skip(c, "won't dig " .. c.name .. " (a container or a computer)")
-            elseif not opts.lava and lavaNear(c) then skip(c, "lava touches it")
-            else keep[#keep + 1] = c end
+            else
+                local wet = not (opts.liquid or opts.lava) and liquidTouches(c)
+                if wet then skip(c, wet) else keep[#keep + 1] = c end
+            end
         end
         columns[key] = keep
     end
@@ -351,7 +336,7 @@ function T.harvest(pattern, where, target, opts)
             if not best then break end
             table.remove(columns[bestKey], 1)
             local above = T.map.get(best.x, best.y + 1, best.z)
-            if above and isFalling(above) then
+            if above and T.isFalling(above) then
                 skip(best, above .. " is over it: digging it out would bring that down")
             else
                 if dig(best) == "stop" then break end

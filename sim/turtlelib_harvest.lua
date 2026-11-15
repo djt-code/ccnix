@@ -4,7 +4,7 @@
 -- drops, chests, a liquid an empty bucket takes up) with a geo scanner on the left.
 --   * T.harvest: every block of a kind in a box, nearest first and each column top down; a target stops it; the place as a
 --     box, a scan's result and a list of cells; a falling block over a block keeps it (unless that is to be dug first);
---     lava touching it, a protected area and a chest keep it (each until the option that lifts it); a map that is wrong is
+--     lava or a water source touching it, a protected area and a chest keep it (each until the option that lifts it); a map that is wrong is
 --     put right (a block gone, a different block); a box the map does not know is scanned first, a known one is not; a
 --     block with no free side is skipped, or tunnelled to when the moves may dig; a full inventory stops it, and
 --     T.cfg.autoDump keeps it going;
@@ -221,6 +221,19 @@ do
         and not has(4, 0, 4) and info.skipped[1].why:find("lava touches it", 1, true), tostring(info and #info.skipped))
     ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 4 }, nil, { lava = true })
     check("opts.lava digs them", ok == true and info.got == 2 and not has(4, 0, 0) and not has(4, 0, 2))
+end
+do
+    -- water: a source beside it keeps a block, flowing water doesn't (ADR-0011 D1)
+    fresh()
+    W.set(4, 0, 0, STONE); W.set(5, 0, 0, "minecraft:water", { level = 0 })
+    W.set(4, 0, 2, STONE); W.set(5, 0, 2, "minecraft:water", { level = 4 })
+    know(0, -1, -1, 7, 2, 6)
+    local ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 2 })
+    check("a water source beside a block keeps it, with the reason; one beside flowing water is dug", ok == true and info.got == 1 and #info.skipped == 1
+        and has(4, 0, 0) and not has(4, 0, 2) and info.skipped[1].why == "a water source touches it (minecraft:water at 5,0,0)",
+        tostring(info and info.skipped[1] and info.skipped[1].why))
+    ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 2 }, nil, { liquid = true })
+    check("opts.liquid digs it", ok == true and info.got == 1 and not has(4, 0, 0))
 end
 
 do

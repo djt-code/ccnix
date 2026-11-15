@@ -66,8 +66,10 @@ T.placeDir(d) - Face direction d (0 to 3, "up" or "down") and place the selected
 T.attackDir(d) - Face direction d (0 to 3, "up" or "down") and attack there. Returns turtle.attack's results.
 T.suckDir(d) - Face direction d (0 to 3, "up" or "down") and pick up items there. Returns turtle.suck's results.
 T.moveDir(d) - Move one block in direction d (T.up/T.down/T.forward: digging what T.diggable allows, attacking what's in the way).
-Moving to a cell in three dimensions, and saying why it stopped:
-T.moveTo(x, y, z, opts) - Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true, or false, why, the block's name and cell where one stopped it. opts: order, dig, avoid, inside, path.
+Liquids and falling blocks:
+T.liquidNear(x, y, z) - The liquid that would flow into the cell x, y, z (or a table { x, y, z }) if it were opened: its name and cell, or nil.
+T.isFalling(name) - Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
+T.moveTo(x, y, z, opts) - Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, avoid, inside, liquid, path.
 T.turnsTo(d) - Turns it takes to face direction d (none for up or down).
 T.eachAround(skip, fn) - Call fn(d) with each direction but `skip`, the fewest turns away first (so up and down, and the way it faces, come before any turn).
 T.stepToward(p) - A step toward p (nearer by taxicab distance), the one needing the fewest turns; nil when there.
@@ -158,7 +160,7 @@ T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
 T.smelt(item, n, fuel, opts) - Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
 Harvesting:
-T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
+T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in by and ones under sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 Fuel from lava:
 T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 What a job costs in fuel:
@@ -182,7 +184,7 @@ T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
-T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 Looking at what came out, and taking it back:
 T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 Placing a block with the state wanted:
