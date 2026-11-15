@@ -57,6 +57,10 @@
 -- what's new.  When a goal ends its tokens are printed: those read from
 -- the cache, written to it and new, and what came out.
 --
+-- Keeping the player told: when claude.remindChat minutes (default 15, 0
+-- for never) pass with no chat message to the player (T.report, the chat
+-- tool), the model is reminded after the next tool results.
+--
 -- The log, claude.log beside the program: each entry with its time (UTC);
 -- the options a session started with, the goals, the code and what it
 -- did, the thinking, each call's tokens and how long it took, retries,
@@ -159,6 +163,8 @@ local KEY_FILE = T.dataPath("claude.key")
 local LOG_FILE = T.dataPath("claude.log")
 local LOG_SIZE = tonumber(T.setting("claude.logSize", 262144,
     "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144
+local REMIND_CHAT = tonumber(T.setting("claude.remindChat", 15,
+    "claude: minutes without a chat message to the player before the model is reminded to tell them (0: never)")) or 15
 local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
 local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
 local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
@@ -1644,6 +1650,18 @@ local function addUser(said, why)
     end
 end
 
+-- A line for after the tool results when the player hasn't been told
+-- anything in chat (T.report, T.report.ask, the chat tool) for
+-- claude.remindChat minutes, counted from `since` (the goal's start, or
+-- the last reminder) or the last message, whichever is later; or nil.
+local function chatReminder(since)
+    if REMIND_CHAT <= 0 or now() - since < REMIND_CHAT * 60 then return nil end
+    local quiet = now() - math.max(since, T.report.lastTold() or 0)
+    if quiet < REMIND_CHAT * 60 then return nil end
+    return string.format("%d minutes without a word to the player in chat: tell them how it is going (the chat tool, or T.report).",
+        math.floor(quiet / 60))
+end
+
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
@@ -1653,6 +1671,7 @@ local function converse(goal)
     addUser(said, "Not run: the goal ended before this call was answered.")
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
+    local quietSince = now()             -- (the goal's start, then each reminder: the player's last word is T.report's)
     while true do
         local started = now()
         local reply, err = request()
@@ -1707,6 +1726,12 @@ local function converse(goal)
                 overBudget = true
                 results[#results + 1] = { type = "text",
                     text = string.format("That was tool call %d of the %d allowed for this goal: stop here and say what you did.", steps, MAX_STEPS) }
+            end
+            local quiet = chatReminder(quietSince)
+            if quiet then
+                quietSince = now()
+                results[#results + 1] = { type = "text", text = quiet }
+                log("reminded: " .. quiet)
             end
             messages[#messages + 1] = { role = "user", content = results }
         elseif reply.stop_reason == "max_tokens" and not cutOff then

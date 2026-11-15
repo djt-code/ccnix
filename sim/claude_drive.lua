@@ -1085,10 +1085,12 @@ check("...the helpers loaded again, the files as they were", resultsIn(4).toolu_
     resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content)
 check("...and it says so, and logs it", Mine.logHas("^A new conversation") and (Mine.files["claude.log"] or ""):find("new conversation\n", 1, true))
 
+
 -- 30. each lua result ends with a status line (ADR-0011 D8): where the
 --     turtle is, its fuel and what the call used, the free slots, and lava
 --     or water beside it; an error result has it too, and a fault in it is
 --     said in its place
+do
 fresh({ "" })
 Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
 Mine.set(0, 0, 3, { name = "minecraft:lava", level = 0 })
@@ -1122,12 +1124,14 @@ run("lava round it")
 local l30 = resultsIn(2).toolu_1
 check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
     l30 and tostring(l30.status))
+end
 
 -- 31. helpers one to a file (ADR-0011 D6): /claude/helpers.lua first, then
 --     each file in /claude/helpers/ in name order, each on its own, the
 --     broken ones named; keep(name, code) compiles, runs and writes one,
 --     and writes nothing for code that doesn't compile or run; a local at
 --     the top of a call is noted as gone
+do
 fresh({ "" })
 Mine.dirs["claude/helpers"] = true
 Mine.files["claude/helpers.lua"] = "ORDER = 'file'"
@@ -1180,6 +1184,7 @@ check("the prompt and the lua tool tell of keep(name, code) and /claude/helpers/
     sys31:find("with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua", 1, true)
         and sys31:find("/claude/helpers.lua, then each file in /claude/helpers/", 1, true)
         and lua31:find("keep(name, code) runs a helper and keeps it", 1, true))
+end
 
 -- 32. the chat tool (ADR-0011 D4): says something through a chat box (the
 --     one aboard equipped for the moment), or asks and waits for an answer
@@ -1189,6 +1194,7 @@ check("the prompt and the lua tool tell of keep(name, code) and /claude/helpers/
 --     (A chat box peripheral, AP's chat events, the settings, and CC's
 --     parallel over coroutines: each scripted event goes to the routines
 --     waiting for it, as CC's does; read() waits for a "sim_read" event.)
+do
 local CHAT = "advancedperipherals:chat_box"
 local CHATSENT = {}
 local chatBox = {
@@ -1343,3 +1349,53 @@ check("the prompt tells of the chat tool and T.report.ask, and to ask in the gam
 peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
 os.pullEvent, read, os.startTimer = pullWas, readWas, timerWas
 parallel, settings = nil, nil
+
+-- 33. keeping the player told (ADR-0011 D5): after claude.remindChat
+--     minutes with no chat message (from the goal's start, the last message
+--     or the last reminder), a line after the tool results says so; a
+--     message told (here the chat tool's) starts the count again; 0 turns
+--     it off.  (Five minutes pass at each request.)
+local CLOCK33, postWas, timeWas33 = 0, HTTP.api.post, os.time
+HTTP.api.post = function(...) CLOCK33 = CLOCK33 + 300; return postWas(...) end
+local BASE33 = timeWas33()
+os.time = function(t) if t ~= nil then return timeWas33(t) end return BASE33 + CLOCK33 end
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local function remindRun(minutes)
+    SET32 = { ["turtle.player"] = "Steve", ["claude.remindChat"] = minutes }
+    settings = { define = function() end, get = function(n) return SET32[n] end }
+    chatFresh()
+    CLOCK33 = 0
+    -- (nothing told yet: scenario 32's clock ran ahead of this one)
+    if turtle._ccnixJournal then turtle._ccnixJournal.told = nil end
+    HTTP.queue = {}
+    for i = 1, 7 do
+        HTTP.queue[i] = reply({ i == 4 and toolUse("chat", { text = "Going well." }) or toolUse("lua", { code = "return " .. i }) }, "tool_use")
+    end
+    HTTP.queue[8] = reply({ text("Done.") }, "end_turn")
+    run("work quietly")
+    local notes = {}
+    for n = 2, 8 do
+        local _, turn = resultsIn(n)
+        for _, b in ipairs(turn.content) do
+            if b.type == "text" then notes[#notes + 1] = n .. ": " .. b.text end
+        end
+    end
+    return notes
+end
+local r33 = remindRun(15)
+check("15 minutes with nothing told: a line after the tool results; the chat tool's message starts the count again",
+    #r33 == 2 and r33[1] == "4: 15 minutes without a word to the player in chat: tell them how it is going (the chat tool, or T.report)."
+        and r33[2]:find("^8: 15 minutes without a word") ~= nil, table.concat(r33, " | "))
+check("...and the reminder is logged", (Mine.files["claude.log"] or ""):find("reminded: 15 minutes without a word", 1, true) ~= nil)
+local r33off = remindRun(0)
+check("claude.remindChat 0: no reminders", #r33off == 0, table.concat(r33off, " | "))
+HTTP.api.post, os.time = postWas, timeWas33
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+settings = nil
+end
