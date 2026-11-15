@@ -834,8 +834,8 @@ local function fuelWatch(job)
     return { approach = way.route, perCell = math.max(all.build - corner.route, job.total) / job.total, spent = 0 }
 end
 
--- Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept.
--- Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+-- Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it
+-- circles.  Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 --
 -- `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a
 -- reboot.  The same plan again carries on too; a different plan while one is unfinished is refused unless

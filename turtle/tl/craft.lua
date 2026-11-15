@@ -27,9 +27,10 @@
 -- T.smelt runs a furnace: a furnace takes fuel through its sides, the item through its top, and gives the result
 -- through its underside only.  It sets the furnace up in front of the turtle, one block up, so the cell under it is
 -- free to stand in, drops the fuel from beside, the item from above, sucks the results from below as they cook (ten
--- seconds an item), and takes the furnace back.  T.smeltAt does the same at a furnace standing in the world (fuel from a
--- side, the item from the top, the results from below), and need not wait for it.  What burns and how long (T.fuelTicks; the nether's woods do not) and
--- what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and T.SMELTS.
+-- seconds an item), and takes the furnace back.  T.smeltAt does the same at a furnace standing in the world (fuel from
+-- a side, the item from the top, the results from below), and need not wait for it.  What burns and how long
+-- (T.fuelTicks; the nether's woods do not) and what smelts into what (T.smeltsTo) are tables: T.FURNACE_FUEL and
+-- T.SMELTS.
 
 local T = require("turtlelib")
 local text = require("text")

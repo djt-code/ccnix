@@ -150,7 +150,7 @@ T.blueprint.at(plan, x, y, z) - The block a plan has at x, y, z (turtle frame): 
 T.blueprint.extent(plan) - The box a plan covers: x1, y1, z1, x2, y2, z2 of the turtle's frame (the cells its text reaches).
 T.blueprint.put(plan, x, y, z, item) - Set one cell of a plan to a block (`item`, with a state in brackets if it has one; "air" for air; nil or " " to leave it alone). Returns true, or nil and why.
 Building:
-T.build(plan, opts) - Build a plan: its cells placed in the order the overview gives, with the materials checked first and the progress kept. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
+T.build(plan, opts) - Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it circles. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 Checking:
 T.verify(plan, opts) - Check a plan against the world: the cells that differ, as a list of { x, y, z, want, wantState, found, foundState, why, unverified }, and { checked, inspected, differing, unverified }; nil and why if it can't start.
 Swapping blocks:

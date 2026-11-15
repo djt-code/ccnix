@@ -761,7 +761,7 @@ do
     local posts = { anchor = { 0, 0, 3 }, legend = { B = STONE }, layers = { string.rep("B" .. string.rep(" ", 14), 19) .. "B" } }   -- (20, 15 apart)
     local ok, why, info = buildFresh(posts, nil, stoneOnly)
     check("a build that spends over 3 times the estimate stops, saying so: \"circling: N fuel for M cells, estimate E\"", ok == false
-        and why:find("^circling: %d+ fuel for 8 cells, estimate %d+") ~= nil and info.done == 8 and info.fuel and info.fuel.spent > 3 * info.fuel.estimate,
+        and why:find("circling: ", 1, true) == 1 and why:find(" fuel for 8 cells, estimate ", 1, true) ~= nil and info.done == 8 and info.fuel and info.fuel.spent > 3 * info.fuel.estimate,
         tostring(why))
     local again
     ok, again, info = build()
