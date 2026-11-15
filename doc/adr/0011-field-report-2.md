@@ -232,7 +232,8 @@ That is how a pass reaches the turtle without anyone editing its files.
 - `T.cfg.maxHeight` in a claude session: 256 (relative to the start;
   mine sets 1000; farm relies on 16, so the default stays).
 - An optional `review = true` on a `lua` call: show the code and ask
-  before it runs (at the keyboard or by D4's chat).
+  before it runs (at the keyboard or by D4's chat). Built at the keyboard
+  only; by chat is left for later.
 
 ## Trade-off analysis
 
@@ -260,33 +261,34 @@ known.
 ### Phase 0: the safety net
 
 1. [x] Repeatable sims (#21).
-2. [ ] A failing scenario for each confirmed defect, before its fix:
+2. [x] A failing scenario for each confirmed defect, before its fix:
    the dig beside a moat, autoDump inside a protected area, the stale
    job line, the double chest, `T.up` at maxHeight, refuelFromLava in a
    protected area.
 
 ### Phase 1: defects (one commit each, no decision)
 
-1. [ ] `T.up`, `T.down`, `T.forward`, `T.back` return `false, why`
+1. [x] `T.up`, `T.down`, `T.forward`, `T.back` return `false, why`
    ("maxHeight 16 reached (T.cfg.maxHeight)", "blocked by X").
-2. [ ] `T.keep` takes a list or a set; a warning when it's empty at the
-   start of a dig job.
-3. [ ] A finished job no longer rides on `T.report`; `T.job.done` on the
+2. [x] `T.keep` takes a list or a set; a warning when it's empty at the
+   start of a dig job. (The warning was left out: there is no
+   "dig job" to hang it on; lists now work, which was the harm.)
+3. [x] A finished job no longer rides on `T.report`; `T.job.done` on the
    last step finishes it.
-4. [ ] autoDump: tidy before counting, a failure noted in the job and
+4. [x] autoDump: tidy before counting, a failure noted in the job and
    told to the caller, off after two failures in a row; `T.dumpJunk`
    walks with the path finder.
-5. [ ] `T.refuelFromLava` skips protected lava.
-6. [ ] The catalogue: one record per chest; `T.where` gives each count's
+5. [x] `T.refuelFromLava` skips protected lava.
+6. [x] The catalogue: one record per chest; `T.where` gives each count's
    age.
-7. [ ] `placeAt` says which approaches it tried and what each lacked.
-8. [ ] `T.inspectAt` approaches with the path finder by default.
-9. [ ] `T.scanBox`'s refusal says the cost; r8 is cheap.
-10. [ ] Lists and sets: `dig`, `T.keep` and the other item lists take
+7. [x] `placeAt` says which approaches it tried and what each lacked.
+8. [x] `T.inspectAt` approaches with the path finder by default.
+9. [x] `T.scanBox`'s refusal says the cost; r8 is cheap.
+10. [x] Lists and sets: `dig`, `T.keep` and the other item lists take
     either, and globs (`"*netherrack"`) wherever item names are matched.
-11. [ ] "no route" says what walled it off when the search gives up
+11. [x] "no route" says what walled it off when the search gives up
     (the protected areas and doors it met).
-12. [ ] `T.fetch`'s doubled suffix; `T.smelt` takes its own furnace back
+12. [x] `T.fetch`'s doubled suffix; `T.smelt` takes its own furnace back
     inside a protected area (it placed it); `T.setOrigin` warns of saved
     jobs (`mine.job`, `.build`) in the old frame.
 13. [x] claude (#23): `--model` takes `opus`, `sonnet`, `haiku`; `env.print`
@@ -297,7 +299,7 @@ known.
 
 ### Phase 2: what the model is told (no decision)
 
-1. [ ] index and help: `T.keep` is a set, `maxHeight` 16, `T.job.clear`,
+1. [x] index and help: `T.keep` is a set, `maxHeight` 16, `T.job.clear`,
    protection blocks digs (not placing), harvest skips protected areas.
 2. [x] The prompt (#23): globals persist and `local` doesn't; clearing doesn't
    remove definitions; plan files before a big job; a pre-flight check
@@ -314,13 +316,15 @@ known.
 
 ### Phase 3: the decisions, after acceptance
 
-D1 to D10 as decided, one pull request per module, each with its sims.
+D1 to D10 as decided, one pull request per module, each with its sims:
+#26 (core: D1, D2, D7.1-3, D7.7-8), #27 (harness: D3-D6, D8-D10), #28
+(materials: D7.4-6). Phases 0-2: #21, #23, #25.
 
 ### Phase 4: release and hand back
 
-1. [ ] `doc/claude-news.txt` for this release; version bump (minor);
+1. [x] `doc/claude-news.txt` for this release; version bump (0.51.0);
    UNTESTED.md entries; the lockstep bump in ccnix-mod.
 2. [ ] The user runs `/ccnix rom update` and gives the turtle a goal:
    read what's new, retire replaced helpers, keep
    `/claude/report_harness_v3.md`.
-3. [ ] Mark this ADR Accepted.
+3. [x] Mark this ADR Accepted.

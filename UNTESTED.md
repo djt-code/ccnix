@@ -5,6 +5,39 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## ADR-0011: what the turtle learned, second pass (ccnix 0.51.0)
+
+In-game order: on the castle turtle, after `/ccnix rom update`, give claude a goal like "read what's new,
+retire the helpers it names, then carry on, and keep /claude/report_harness_v3.md as you work"; the items
+below come up as it works, or try them by asking for them.
+
+- **What's new**: the first goal after the update carries "ccnix was updated from 0.50.x to 0.51.0" and the
+  0.51.0 lines of `help claude-news`; `/claude/.version` is written; the next session doesn't repeat it.
+- **Chat**: the `chat` tool says something in game; with ask, a reply "claude <text>" from the player in
+  `turtle.player` comes back (another player's doesn't), and typing at the turtle answers too. `T.report.ask`
+  from code the same. After 15 quiet minutes the model is reminded (`claude.remindChat`).
+- **Status line and review**: each lua result ends with position, fuel used, free slots and lava/water seen;
+  `review = true` shows the code and runs only on a yes.
+- **Helpers**: `keep("name", code)` writes `/claude/helpers/name.lua`; a broken helper file beside good ones is
+  named at the start and the rest still load; `print` at the top of helpers.lua works.
+- **The conversation**: the log's `tokens:` lines over a long goal, against the 200k to 341k of 0.50 (old code
+  and thinking are cleared now); `/new` at the goal prompt starts afresh with memory kept.
+- **Liquids**: `T.moveTo(..., {dig = true})` beside the moat refuses ("would release lava at ..."), and plans
+  round it; `T.digCell` beside lava refuses; with `liquid = true` it digs. `T.harvest` skips blocks touching
+  water sources too.
+- **Areas and routes**: `T.inside({"a", "b"}, fn)` digs a cell in two overlapping areas; `T.travel` into the
+  keep through its open hall without unprotecting; "no route" names the area or door that walled it in.
+- **Moves and lists**: `T.up` at the old 16 says why (claude sessions now allow 256); `T.keep` and `dig` as a
+  list or a set, globs too.
+- **Storage and crafting**: the catalogue counts a double chest once (bricks against what is really there);
+  `T.where` ages; `T.craftBatch` (torches from logs, one stash), `T.craftPlan`, `T.smeltAt` at the permanent
+  furnaces, `T.prepare`, `T.inventoryReport`, `T.fetch{stay = true}`; coal from coal blocks with no recipe added.
+- **Building**: `T.build(plan, {order = "column"})` on a wall: fuel against the old 807 for 58 blocks; a build
+  that circles stops with "circling: ...".
+- **Smaller ones**: `T.refuelFromLava` leaves the protected moat alone; autoDump says when it fails and stops
+  after two; a finished job no longer ends every chat message (mine's and farm's reports too); `T.retrace(n)`
+  walks back; the map keeps the castle's cubes when it evicts (`T.map.stats()`); `--model sonnet`.
+
 ## The mod's icon (ccnix-mod 0.26.10)
 
 - **The mod list**: the page's links go to the repo and its issues.
