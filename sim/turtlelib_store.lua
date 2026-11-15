@@ -240,6 +240,50 @@ do
     check("...and the turtle ends where it began", here())
 end
 
+do
+    -- one record per chest: two stands for the same chest, and the two halves of a double chest (each half is a peripheral
+    -- listing the whole of it), are one chest
+    local BRICKS = "minecraft:bricks"
+    local function double(x1, x2, items)
+        W.set(x1, 0, 1, "minecraft:chest", { facing = "south", type = "right" })
+        W.set(x2, 0, 1, "minecraft:chest", { facing = "south", type = "left" })
+        W.get(x2, 0, 1).inv = W.get(x1, 0, 1).inv
+        fill(x1, 0, 1, items)
+    end
+    fresh()
+    double(3, 4, { [1] = { BRICKS, 64 }, [2] = { BRICKS, 64 } })
+    T.addChest(3, 0, 0, 0); T.addChest(4, 0, 0, 0)
+    local ok, info = T.catalogue()
+    local found, total = T.where(BRICKS)
+    check("a double chest whose halves were both added is one chest: its bricks counted once", ok == true and #T.chests() == 1
+        and total == 128 and #found == 1, tostring(#T.chests()) .. " chests, " .. tostring(total) .. " bricks")
+    check("...and the catalogue says one chest", info.chests == 1, tostring(info and info.chests))
+    T.addChest(3, 1, 1, "down")
+    check("a second stand for a chest already known is the same chest", #T.chests() == 1 and select(2, T.where(BRICKS)) == 128,
+        tostring(#T.chests()))
+    T.addChest(3, 1, 1, "down", true)
+    check("...and naming it the bulk chest from there marks the one record", #T.chests() == 1 and T.chests()[1].bulk == true)
+    check("...and forgetting it from there forgets it", T.forgetChest(3, 1, 1, "down") == true and #T.chests() == 0)
+    local f = fs.open(T.dataPath(".chests"), "w")
+    f.write("chest 3 0 0 0 plain 0\nitem 5 minecraft:dirt\nchest 3 1 1 down bulk 0\nitem 5 minecraft:dirt\n")
+    f.close()
+    check("a file from before with two stands for one chest reads as one, the bulk chest if either was", #T.chests() == 1
+        and T.chests()[1].bulk == true and select(2, T.where(DIRT)) == 5)
+
+    -- with the world origin known, the halves are told by their facing: two double chests side by side, both empty, stay two
+    fresh()
+    T.setOrigin(0, 0, 0, "north")
+    double(3, 4, {})
+    double(5, 6, {})
+    for x = 3, 6 do T.addChest(x, 0, 0, 0) end
+    T.catalogue()
+    local cells = {}
+    for _, c in ipairs(T.chests()) do cells[#cells + 1] = c.x end
+    table.sort(cells)
+    check("...two double chests side by side, empty, are two chests, not one or three", #cells == 2 and cells[1] == 3 and cells[2] == 5,
+        table.concat(cells, " "))
+end
+
 --------------------------------------------------------------------------
 -- T.where
 --------------------------------------------------------------------------
@@ -257,6 +301,12 @@ do
     check("the namespace may be left out", total == 45)
     found, total = T.where("*planks")
     check("a glob", total == 45 and #found == 2)
+    local readAt = CLOCK
+    CLOCK = CLOCK + 60
+    found = T.where(PLANKS)
+    check("each count says when it was read, and how long ago (seen, age)", found[1].seen == readAt and found[1].age == 60,
+        tostring(found[1].seen) .. " " .. tostring(found[1].age))
+    CLOCK = readAt
     found, total = T.where("minecraft:*")
     check("a glob over everything", total == 64 + 40 + 10 + 5 + 30 + 7 and #found == 4, tostring(total))
     found, total = T.where("minecraft:diamond")

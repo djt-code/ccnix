@@ -192,12 +192,12 @@ Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 The list of chests, in a data file:
 T.addChest(x, y, z, side, bulk) - Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
-T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it). True, or false and why.
-T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never.
+T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
+T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
 Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 Where an item is, and fetching it:
-T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk }, the nearest to the turtle first, and the total. Moves nothing.
+T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
 T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
 Putting away:
 T.stow(opts) - Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
