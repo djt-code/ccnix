@@ -6,12 +6,14 @@
 -- T.path finds a route: A* in three dimensions over the map (tl.world), with a binary heap.  What a
 -- step into a cell costs depends on what the map holds there:
 --   known air or water   one move
---   a block it may dig   a move and a dig (opts.dig says what may be dug, as for T.moveTo)
+--   a block it may dig   a move and a dig (opts.dig says what may be dug, as for T.moveTo), unless lava or a water
+--                        source is beside it or over it (T.liquidNear): that is a wall unless opts.liquid
 --   a cell never seen    a move and a dig when digging everything is allowed; otherwise a move and a
 --                        penalty, so a route through the unseen is possible but the known is preferred
 --                        (it is checked as it is walked)
---   a wall               never: a protected area (except the one opts.inside names, and except the empty cells of an
---                        area the route starts or ends in), what opts.avoid lists (lava, fire and doors unless it says
+--   a wall               never: a cell of a protected area the map doesn't know to be empty (a block, or never seen:
+--                        nothing in an area is dug, except in the one opts.inside names; its known air and water are
+--                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says
 --                        otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
@@ -99,7 +101,8 @@ local function newWorld(opts, from, to)
         toS = function(x, y, z) return x, y, z end
         fromS = toS
     end
-    local mayDig = T.nameTest(opts.dig)
+    local only = opts.digOnly ~= nil and (T.cellSet(opts.digOnly) or {}) or nil
+    local mayDig = T.nameTest(opts.dig == nil and only and true or opts.dig)
     local avoid = T.nameTest(opts.avoid == nil and T.DEFAULT_AVOID or opts.avoid)
     local containers = T.cfg.digContainers
     local memo = {}
@@ -149,25 +152,37 @@ local function newWorld(opts, from, to)
             anyBanned = true
         end
     end
-    -- the protected areas, as boxes of this frame; one the route starts or ends in is open to empty cells
-    local sx, sy, sz = toS(from.x, from.y, from.z)
-    local gx, gy, gz = toS(to.x, to.y, to.z)
+    -- the protected areas, as boxes of this frame: their cells known to be empty are open, the rest walls
     local boxes = {}
-    local inside = opts.inside or T.cfg.inside
+    local owned = T.areaSet(T.cfg.inside)
+    for name in pairs(T.areaSet(opts.inside)) do owned[name] = true end
     for _, a in ipairs(T.protections()) do
-        if a.name ~= inside then
+        if not owned[a.name] then
             local ax, ay, az = toS(a.x1, a.y1, a.z1)
             local bx, by, bz = toS(a.x2, a.y2, a.z2)
-            local box = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by),
-                          math.max(az, bz), name = a.name }
-            local function holds(x, y, z)
-                return x >= box[1] and x <= box[4] and y >= box[2] and y <= box[5] and z >= box[3] and z <= box[6]
-            end
-            box.open = holds(sx, sy, sz) or holds(gx, gy, gz)
-            boxes[#boxes + 1] = box
+            boxes[#boxes + 1] = { math.min(ax, bx), math.min(ay, by), math.min(az, bz), math.max(ax, bx), math.max(ay, by),
+                                  math.max(az, bz), name = a.name }
         end
     end
     local w = { toS = toS, fromS = fromS, dig = opts.dig, boxes = boxes }
+    -- a cell of the map's frame as { x, y, z } of the turtle's
+    local function cellAt(mx, my, mz)
+        local x, y, z = fromS(mx, my, mz)
+        return { x = x, y = y, z = z }
+    end
+    -- a block to dig that would let liquid in is a wall unless opts.liquid (the map frame's cell number: the liquid's
+    -- name, or false)
+    local wet = {}
+    local function wetAt(mx, my, mz)
+        if opts.liquid then return false end
+        local id = idOf(mx, my, mz)
+        local v = wet[id]
+        if v == nil then
+            v = T.liquidNear(fromS(mx, my, mz)) or false
+            wet[id] = v
+        end
+        return v
+    end
     -- the block the map holds in a cell (air, or nil if never seen)
     local function nameIn(mx, my, mz)
         if not aligned then return nil end
@@ -184,10 +199,11 @@ local function newWorld(opts, from, to)
         for i = 1, #boxes do
             local b = boxes[i]
             if mx >= b[1] and mx <= b[4] and my >= b[2] and my <= b[5] and mz >= b[3] and mz <= b[6] then
-                if b.open and c == PASS then return PASS end
+                if c == PASS then return PASS end
                 return WALL
             end
         end
+        if c == DIG and (wetAt(mx, my, mz) or (only and not only[T.posKey(cellAt(mx, my, mz))])) then return WALL end
         return c
     end
     -- Why a cell is a wall, in words: the protected area, the cell banned, or the block.
@@ -199,6 +215,11 @@ local function newWorld(opts, from, to)
             end
         end
         local name = nameIn(mx, my, mz)
+        if name and only and baseClass(mx, my, mz) == DIG and not only[T.posKey(cellAt(mx, my, mz))] then
+            return name .. ", not a cell opts.digOnly lists"
+        end
+        local liquid = name and wetAt(mx, my, mz)
+        if liquid then return name .. " with " .. liquid .. " beside it, which a route doesn't dig (opts.liquid = true digs it)" end
         if name then return name .. ", which a route here may not enter" end
         return "a cell it may not enter"
     end
@@ -213,6 +234,9 @@ local function newWorld(opts, from, to)
         end
         local name = nameIn(mx, my, mz)
         if name and avoid(name) then return name, 2 end
+        if name and baseClass(mx, my, mz) == DIG and wetAt(mx, my, mz) then
+            return "blocks beside lava or water, which no route digs (opts.liquid = true digs them)", 2
+        end
         return nil
     end
     return w
@@ -377,8 +401,10 @@ end
 -- overview of this module.  A second result gives { nodes, cost, digs, unknown }: how many cells the search
 -- looked at, the route's cost, and how many of its cells need a dig or were never seen.  Nothing moves.  opts (all optional):
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+--   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
 --   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
---   inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
+--   inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
+--   liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
 --   avoidCells a list of { x, y, z } cells a route may not use
 --   limit      cells to search before giving up (default 20000)
 --   margin     how far outside the box of the two cells it may look (default 24)
@@ -452,8 +478,8 @@ end
 --------------------------------------------------------------------------
 
 -- Walk a route of cells (turtle frame) from where the turtle is: T.moveTo for each straight stretch.  True, or
--- false, why, the block's name and its cell, as T.moveTo says.
-local function walk(route, moveOpts)
+-- false, why, the block's name and its cell, as T.moveTo says.  T.moveTo's warnings go in the list `warn`.
+local function walk(route, moveOpts, warn)
     local i = 1
     while i <= #route do
         local from = i == 1 and T.pos or route[i - 1]
@@ -466,6 +492,7 @@ local function walk(route, moveOpts)
         end
         local ok, why, name, cell = T.moveTo(route[j].x, route[j].y, route[j].z, moveOpts)
         if not ok then return false, why, name, cell end
+        if why then warn[#warn + 1] = why end
         i = j + 1
     end
     return true
@@ -477,13 +504,14 @@ local function routeBox(from, to, span)
              math.max(from.x, to.x), math.max(from.y, to.y) + span, math.max(from.z, to.z) }
 end
 
--- Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+-- Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 --
 -- Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map
 -- doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no
 -- layer, T.path's search.  Each stretch is walked with T.moveTo.  A block it did not expect stops a step: the block is
 -- noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans
--- times (default 6).  opts are T.path's (dig, avoid, inside, avoidCells, limit, margin), plus span (how far above the
+-- times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too.  opts are
+-- T.path's (dig, digOnly, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the
 -- higher end a layer may be, default 8), scan, replans, and scanning's opts.move.  On failure the turtle stays where it got to.
 function T.travel(x, y, z, opts)
     opts = opts or {}
@@ -495,8 +523,9 @@ function T.travel(x, y, z, opts)
     local banned = {}
     for _, c in ipairs(opts.avoidCells or {}) do banned[#banned + 1] = c end
     local ruleOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, limit = opts.limit, margin = opts.margin,
-                       avoidCells = banned }
-    local moveOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, path = false }
+                       avoidCells = banned, liquid = opts.liquid, digOnly = opts.digOnly }
+    local moveOpts = { dig = opts.dig, avoid = opts.avoid, inside = opts.inside, liquid = opts.liquid, digOnly = opts.digOnly,
+                       path = false }
     local here = T.here()
     -- the first route: a layer, scanning for it if the map doesn't know
     local route
@@ -530,10 +559,11 @@ function T.travel(x, y, z, opts)
     end
     local replans = opts.replans or REPLANS
     local last
+    local warn = {}
     for attempt = 0, replans do
-        local ok, stopped, name, cell = walk(route, moveOpts)
+        local ok, stopped, name, cell = walk(route, moveOpts, warn)
         if ok then
-            if T.pos.x == x and T.pos.y == y and T.pos.z == z then return true end
+            if T.pos.x == x and T.pos.y == y and T.pos.z == z then return true, warn[1] and table.concat(warn, "; ") or nil end
             return false, "stopped short of " .. x .. "," .. y .. "," .. z .. " at " .. T.posString()
         end
         last = stopped

@@ -1,14 +1,19 @@
 -- sim/turtlelib_path.lua
 --
 -- tl.path (ADR-0008): routes over the map, and walking them.
---   * T.path: a route through known air; round a protected box (and through it with opts.inside), round lava, fire,
+--   * T.path: a route through known air; through a protected box's known air, round its solid cells (and through those
+--     with opts.inside), round lava, fire,
 --     doors and chests; through a wall only where digging is allowed (and only the blocks opts.dig names); through
 --     cells never seen, at a cost, with the unseen counted in the info; the cells opts.avoidCells lists; a goal that
 --     is a wall says why; a sealed goal says no route; the node limit says so; a map in another frame; an unaligned map;
 --   * the search reads cubes as strings (no T.map.get), and gives the computer a turn on a clock;
 --   * T.travel: over a wall under a roof along a clear layer, scanning first when the map doesn't know, a search when
 --     there is no layer; an unexpected block is noted in the map and the route planned again, a bounded number of times;
---     protected areas kept out of; T.moveTo's opts.path asks it.
+--     protected areas crossed through known air, never dug (ADR-0011 D2); T.moveTo's opts.path asks it;
+--   * liquids (ADR-0011 D1): a block to dig with lava or a water source beside it or over it is a wall unless
+--     opts.liquid; travel digs beside a moat, not into it;
+--   * T.digCell (ADR-0011 D7.1): one cell dug from beside it and nothing else, refusing lava beside it and protected
+--     cells; opts.digOnly in T.path and T.travel.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -185,16 +190,23 @@ check("opts.from is a cell too", route == nil and why:find("opts.from", 1, true)
 --------------------------------------------------------------------------
 T.protect("castle", -2, -3, 2, 2, 3, 3)
 route, info = T.path(0, 0, 6)
+check("a protected box the map knows is air is crossed, straight through (ADR-0011 D2: nothing in it is dug)",
+    route and #route == 6 and has(route, 0, 0, 2) and info.digs == 0 and connected(route, T.pos), route and #route or tostring(info))
+box(-2, -3, 2, 2, 3, 3, STONE)
+learn(T, -2, -3, 2, 2, 3, 3)
+route, info = T.path(0, 0, 6, { dig = true })
 local inBox = false
 for _, c in ipairs(route or {}) do if T.protected(c.x, c.y, c.z) then inBox = true end end
-check("round a protected box that fills the known height: a detour, none of its cells inside",
+check("...one the map knows is solid is gone round, even with dig = true: a detour, none of its cells inside",
     route and not inBox and connected(route, T.pos) and #route == 6 + 6 and route[#route].z == 6, route and #route or tostring(info))
-route = T.path(0, 0, 6, { inside = "castle" })
-check("opts.inside: the area the job owns is an ordinary region (here, air)", route and #route == 6 and has(route, 0, 0, 2))
+route, info = T.path(0, 0, 6, { inside = "castle", dig = true })
+check("opts.inside: the area the job owns is an ordinary region (here, stone to dig)", route and #route == 6 and has(route, 0, 0, 2) and info.digs == 2)
 T.cfg.inside = "castle"
-route = T.path(0, 0, 6)
+route = T.path(0, 0, 6, { dig = true })
 check("...so is T.cfg.inside (T.inside)", route and #route == 6)
 T.cfg.inside = nil
+box(-2, -3, 2, 2, 3, 3, nil)
+learn(T, -2, -3, 2, 2, 3, 3)
 route = T.path(0, 0, 3)
 check("a goal in an empty cell of a protected area is reachable (only its empty cells)", route and #route == 3 and connected(route, T.pos))
 put(1, 0, 3, STONE); T.map.set(1, 0, 3, STONE)
@@ -220,7 +232,24 @@ route = T.path(0, 0, 4, { dig = true, margin = 0 })
 check("...but a protected wall is not, even with dig = true", route == nil)
 route = T.path(0, 0, 4, { dig = true, margin = 0, inside = "wall" })
 check("...unless the job owns it (opts.inside)", route and #route == 4)
+T.protect("gate", 0, 0, 2, 0, 0, 2)                  -- a second area over the wall's middle
+route = T.path(0, 0, 4, { dig = true, margin = 0, inside = "wall" })
+check("a cell in two areas: owning one is not enough", route == nil)
+route = T.path(0, 0, 4, { dig = true, margin = 0, inside = { "wall", "gate" } })
+check("...opts.inside as a list of both opens it", route and #route == 4)
+route = T.inside("gate", T.path, 0, 0, 4, { dig = true, margin = 0, inside = "wall" })
+check("...so do T.inside's areas and opts.inside's together", route and #route == 4)
+T.unprotect("gate")
 T.unprotect("wall")
+-- cells of a protected area never seen are walls: only known air is crossed
+T = fresh()
+T.protect("unseen", -1, -1, 2, 1, 1, 2)
+route = T.path(0, 0, 4)
+local crossed = false
+for _, c in ipairs(route or {}) do if T.protected(c.x, c.y, c.z) then crossed = true end end
+check("a protected area the map has never seen is gone round, not crossed", route and not crossed and connected(route, T.pos) and #route == 8,
+    route and #route or "nil")
+T.unprotect("unseen")
 
 --------------------------------------------------------------------------
 -- Lava, fire, doors, chests, bedrock, avoidCells
@@ -311,6 +340,114 @@ route, info = T.path(0, 0, 5, { dig = true })
 check("...a three-block wall is dug: the detour round it costs more", route and #route == 5 and info.digs == 1, route and #route or "nil")
 
 --------------------------------------------------------------------------
+-- Liquids beside a cell to dig (ADR-0011 D1)
+--------------------------------------------------------------------------
+T = fresh()
+box(-6, -1, -1, 6, -1, 8, STONE); box(-6, 2, -1, 6, 2, 8, STONE)       -- a floor and a ceiling
+box(-6, 0, 3, 6, 1, 3, STONE)                                            -- a wall between
+put(0, 1, 3, LAVA, true)                                                 -- lava in the wall, over the straight way's dig
+learn(T, -6, -1, -1, 6, 2, 8)
+route, info = T.path(0, 0, 5, { dig = true, margin = 2 })
+check("a block to dig with lava over it (the map knows) is a wall: the route digs beside it instead",
+    route and not has(route, 0, 0, 3) and info.digs == 1 and #route == 7 and connected(route, T.pos), route and #route or tostring(info))
+route, info = T.path(0, 0, 5, { dig = true, margin = 2, liquid = true })
+check("...opts.liquid = true digs it", route and has(route, 0, 0, 3) and #route == 5 and info.digs == 1)
+ok, why = T.moveTo(0, 0, 5, { dig = true })
+check("T.moveTo refuses that dig too, from the map alone", ok == false and why == "digging minecraft:stone at 0,0,3 would release lava at 0,1,3 (opts.liquid = true digs it anyway)"
+    and get(0, 0, 3) and at(T) == "(0,0,2)", tostring(why))
+tp(T, 0, 0, 0, 0)
+box(-6, 1, 3, 6, 1, 3, LAVA, true)
+learn(T, -6, 1, 3, 6, 1, 3)
+route, why = T.path(0, 0, 5, { dig = true, margin = 0 })
+check("lava over the whole wall: no route, and the reason says the liquid is why", route == nil
+    and why:find("blocks beside lava or water, which no route digs (opts.liquid = true digs them)", 1, true), tostring(why))
+route, why = T.path(0, 0, 3, { dig = true, margin = 0 })
+check("...a goal that is such a block says so", route == nil and why:find("goal 0,0,3 is minecraft:stone with minecraft:lava beside it", 1, true), tostring(why))
+-- travel: lava in the wall beside the straight way's dig (a moat's edge); the dig beside it is planned round
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 3, -2, 6, 3, 8, STONE)        -- a floor and a roof
+box(-6, 0, 3, 6, 2, 3, STONE)                                            -- a wall to the roof
+box(1, 0, 3, 1, 2, 3, LAVA, true)                                        -- lava in it at x = 1
+learn(T, -6, -1, -2, 6, 3, 8)
+watch(T)
+ok, why = T.travel(0, 0, 6, { dig = true, scan = false, margin = 3 })
+check("travel with dig = true: no dig beside the lava (not the straight way at x = 0), one dig further off", ok == true and at(T) == "(0,0,6)"
+    and get(0, 0, 3) and get(2, 0, 3) and DIGS == 1 and get(1, 0, 3).name == LAVA, tostring(why) .. " " .. at(T) .. " " .. DIGS .. " digs")
+-- lava the map doesn't know (it thinks the cell is air) but the turtle looked at
+T = fresh()
+box(-6, -1, -1, 6, -1, 8, STONE); box(-6, 1, -1, 6, 1, 8, STONE)
+box(-6, 0, 3, 6, 0, 3, STONE)
+learn(T, -6, -1, -1, 6, 1, 8)
+put(0, 0, 4, LAVA, true)                       -- the map has it as air
+tp(T, -1, 0, 4, 1)
+T.look(1)                                      -- the turtle sees it
+tp(T, 0, 0, 0, 0)
+route = T.path(0, 0, 5, { dig = true, margin = 2, avoidCells = { { x = 0, y = 0, z = 4 } } })
+check("the planner knows what the turtle looked at too: no dig beside lava only it saw", route and not has(route, 0, 0, 3) and #route == 7,
+    route and #route or "nil")
+
+--------------------------------------------------------------------------
+-- T.digCell and opts.digOnly (ADR-0011 D7.1)
+--------------------------------------------------------------------------
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 2, -2, 6, 2, 8, STONE)        -- a floor and a ceiling
+box(-6, 0, 3, 6, 1, 3, STONE)                                            -- a wall between
+learn(T, -6, -1, -2, 6, 2, 8)
+route, info = T.path(0, 0, 5, { digOnly = { "2,0,3" }, margin = 2 })
+check("T.path with opts.digOnly: the route digs that cell and no other", route and has(route, 2, 0, 3) and info.digs == 1 and connected(route, T.pos),
+    route and #route or tostring(info))
+route, why = T.path(0, 0, 5, { digOnly = { "2,0,3" }, margin = 0 })
+check("...with that cell out of the search's reach, no route: the wall in front isn't dug", route == nil and why:find("walled off", 1, true), tostring(why))
+watch(T)
+ok, why = T.travel(0, 0, 5, { digOnly = { "-3,1,3", "-3,0,3" }, scan = false, margin = 4 })
+check("T.travel with opts.digOnly digs only those", ok == true and at(T) == "(0,0,5)" and DIGS >= 1 and DIGS <= 2 and get(0, 0, 3) and get(2, 0, 3),
+    tostring(why) .. " " .. at(T) .. " " .. DIGS)
+
+T = fresh()
+box(-6, -1, -2, 6, -1, 8, STONE); box(-6, 2, -2, 6, 2, 8, STONE)
+box(-6, 0, 3, 6, 1, 3, STONE)
+learn(T, -6, -1, -2, 6, 2, 8)
+watch(T)
+local was, warning
+ok, was, warning = T.digCell(2, 1, 3)
+check("T.digCell digs exactly that one cell, from a cell beside it it walks to, and says what it dug", ok == true and was == STONE and warning == nil
+    and get(2, 1, 3) == nil and DIGS == 1 and T.dist(T.pos, { x = 2, y = 1, z = 3 }) == 1, tostring(was) .. " " .. at(T))
+check("...the map has it as air now", T.map.get(2, 1, 3) == AIR)
+ok, was = T.digCell(2, 1, 3)
+check("...a second time: true, nothing there", ok == true and was == nil and DIGS == 1)
+ok, why = T.digCell(2, 0, 5)
+check("an empty cell far off: true, nil (looked at, nothing dug)", ok == true and why == nil and DIGS == 1)
+-- behind the wall, nothing beside it empty and reachable without digging
+tp(T, 0, 0, 0, 0)
+box(-6, 0, 5, 6, 1, 8, STONE); learn(T, -6, 0, 5, 6, 1, 8)
+ok, why = T.digCell(0, 0, 6, { move = { path = true, scan = false, margin = 2 } })
+check("a cell only reachable by digging: false, and nothing else dug", ok == false and why:find("couldn't get beside 0,0,6", 1, true) and DIGS == 1 and get(0, 0, 6),
+    tostring(why))
+-- lava beside: refused before it goes
+tp(T, 0, 0, 0, 0)
+put(-2, 1, 3, LAVA, true); T.map.set(-2, 1, 3, LAVA)
+local moves = S.moves
+ok, why = T.digCell(-2, 0, 3)
+check("lava over the cell: refused before going, the lava named", ok == false and why == "digging minecraft:stone at -2,0,3 would release lava at -2,1,3 (opts.liquid = true digs it anyway)"
+    and S.moves == moves and get(-2, 0, 3), tostring(why))
+ok, was = T.digCell(-2, 0, 3, { liquid = true })
+check("...opts.liquid digs it", ok == true and was == STONE and get(-2, 0, 3) == nil)
+-- protected
+T.protect("gate", -4, 0, 3, -4, 0, 3)
+ok, why = T.digCell(-4, 0, 3)
+check("a protected cell: refused", ok == false and why == "protected: gate (minecraft:stone at -4,0,3)" and get(-4, 0, 3), tostring(why))
+ok = T.digCell(-4, 0, 3, { inside = "gate" })
+check("...opts.inside digs it", ok == true and get(-4, 0, 3) == nil and T.cfg.inside == nil)
+T.unprotect("gate")
+-- falling block over it: a warning
+put(4, 1, 3, "minecraft:gravel"); T.map.set(4, 1, 3, "minecraft:gravel")
+ok, was, warning = T.digCell(4, 0, 3)
+check("a block under gravel: dug, with a warning", ok == true and was == STONE and warning == "warning: dug 4,0,3 under minecraft:gravel, which may fall into it",
+    tostring(warning))
+ok, why = T.digCell(1, 0.5, 3)
+check("a cell of whole numbers", ok == false and why:find("whole numbers", 1, true))
+
+--------------------------------------------------------------------------
 -- What was never seen
 --------------------------------------------------------------------------
 T = fresh()
@@ -345,7 +482,7 @@ check("...the default limit is enough for this", route and #route == 36)
 -- what walls a goal in is named: a protected area and a door, not just a count of cells
 T = fresh()
 learn(T, -2, 0, -2, 6, 0, 6)
-put(4, 0, 3, DOOR); learn(T, 4, 0, 3, 4, 0, 3)
+put(4, 0, 3, DOOR); put(3, 0, 4, STONE); learn(T, 3, 0, 3, 4, 0, 4)
 T.protect("keep", 3, 0, 4, 3, 0, 4)
 route, why = T.path(4, 0, 4, { margin = 0 })
 check("walled off by a protected area and a door: the reason names them", route == nil and why:find("walled off", 1, true)
@@ -445,8 +582,18 @@ watch(T)
 ok, why = T.travel(0, 0, 8, { scan = false })
 local trespass = false
 for _, c in ipairs(visited) do if T.protected(c.x, c.y, c.z) then trespass = true end end
-check("a protected area is kept out of (over it, the area reaching the top of the known cube is not a layer)", ok and not trespass and at(T) == "(0,0,8)" and DIGS == 0,
-    tostring(why) .. " " .. at(T))
+check("a protected area is not dug, but crossed through known air (ADR-0011 D2)", ok and trespass and at(T) == "(0,0,8)" and DIGS == 0 and S.moves == 8,
+    tostring(why) .. " " .. at(T) .. " " .. S.moves .. " moves")
+T = fresh()
+box(-2, -1, 3, 2, 3, 5, STONE)
+learn(T, -10, -1, -10, 10, 3, 10)
+T.protect("keep", -2, -1, 3, 2, 3, 5)
+watch(T)
+ok, why = T.travel(0, 0, 8, { scan = false, dig = true })
+trespass = false
+for _, c in ipairs(visited) do if T.protected(c.x, c.y, c.z) then trespass = true end end
+check("...a solid one is kept out of, even with dig = true: gone round (over it, the area reaching the top of the known cube is not a layer)",
+    ok and not trespass and at(T) == "(0,0,8)" and DIGS == 0 and get(0, 0, 4), tostring(why) .. " " .. at(T))
 
 T = fresh()
 learn(T, -10, -1, -10, 10, 3, 10)

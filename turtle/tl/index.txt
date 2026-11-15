@@ -11,10 +11,12 @@ T.owns() - Is this copy of turtlelib the one the wrapped turtle functions keep u
 T.onChange(fn) - Call fn(event) for every successful dig, placement and move from now on, by any program on this turtle; event.kind is "dig", "change", "place" or "move", with x, y, z. Returns a function that removes the listener.
 T.protect(name, x1, y1, z1, x2, y2, z2) - Protect the box between two corners (x, y, z in the turtle's frame, either order) under `name`: a dig into it returns false, "protected: <name>" (placing and moving in it are not stopped). True, or nil and why.
 T.unprotect(name) - Remove the area called `name`. True, or false and why (none by that name).
-T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name, leaves that area out (see T.guarded).
+T.areaSet(names) - The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
+T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 T.protections() - The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (copies: changing one changes nothing).
-T.guarded(x, y, z) - The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the area the job is working inside (T.cfg.inside, set by T.inside). nil if none.
-T.inside(name, fn, ...) - Run fn(...) as a job that owns the protected area `name`: digging in it is allowed meanwhile (other areas still hold). Puts back what was set before, even if fn errors (the error is re-thrown); returns what fn returned.
+T.guarded(x, y, z) - The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
+T.inside(names, fn, ...) - Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
+T.withUnprotected(names, fn, ...) - Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
 T.neverDig(name) - Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
 T.turnRight() - Turn a quarter turn to the right, keeping T.dir and the saved position right.
 T.turnLeft() - Turn a quarter turn to the left, keeping T.dir and the saved position right.
@@ -66,8 +68,14 @@ T.placeDir(d) - Face direction d (0 to 3, "up" or "down") and place the selected
 T.attackDir(d) - Face direction d (0 to 3, "up" or "down") and attack there. Returns turtle.attack's results.
 T.suckDir(d) - Face direction d (0 to 3, "up" or "down") and pick up items there. Returns turtle.suck's results.
 T.moveDir(d) - Move one block in direction d (T.up/T.down/T.forward: digging what T.diggable allows, attacking what's in the way).
-Moving to a cell in three dimensions, and saying why it stopped:
-T.moveTo(x, y, z, opts) - Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true, or false, why, the block's name and cell where one stopped it. opts: order, dig, avoid, inside, path.
+Liquids and falling blocks:
+T.liquidNear(x, y, z) - The liquid that would flow into the cell x, y, z (or a table { x, y, z }) if it were opened: its name and cell, or nil.
+T.isFalling(name) - Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
+T.cellSet(spec) - The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
+T.moveTo(x, y, z, opts) - Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. True (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid, path.
+T.digCell(x, y, z, opts) - Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
+T.trail() - The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
+T.retrace(n, opts) - Walk back along the trail over the last n cells (default all of it), skipping loops. True and the moves made, or false, why and the moves made.
 T.turnsTo(d) - Turns it takes to face direction d (none for up or down).
 T.eachAround(skip, fn) - Call fn(d) with each direction but `skip`, the fewest turns away first (so up and down, and the way it faces, come before any turn).
 T.stepToward(p) - A step toward p (nearer by taxicab distance), the one needing the fewest turns; nil when there.
@@ -158,7 +166,7 @@ T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
 T.smelt(item, n, fuel, opts) - Smelt n of an item in a furnace the turtle carries, set up in front of it: true and how many came out, or false/nil and why.
 Harvesting:
-T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
+T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in by and ones under sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 Fuel from lava:
 T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
 What a job costs in fuel:
@@ -182,7 +190,7 @@ T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
-T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 Looking at what came out, and taking it back:
 T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 Placing a block with the state wanted:
@@ -218,8 +226,10 @@ T.map.count(pattern, box) - How many cells inside the box (the whole map if none
 T.map.heights(box) - A height map of the box (17 by 17 about the turtle if none) as text: each column's highest solid y, "." where none is known.
 T.map.slice(y, box) - The layer at height y in the box (17 by 17 about the turtle if none) as text, a character a cell, with a legend of the symbols.
 T.map.flush() - Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
-T.map.stats() - What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
-T.map.clear() - Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+T.map.stats() - What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+T.map.pin(box) - Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap. True, or nil and why.
+T.map.unpin(box) - Let a pinned box go (the same six numbers T.map.pin was given), or every pin with no box. True, or false and why.
+T.map.clear() - Throw the map away: every cube (and every pin) is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
 T.map.frame() - The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).
 T.map.toMap(x, y, z) - A point of the turtle's frame in the map's: mx, my, mz (T.map.frame says how they relate).
 T.map.fromMap(mx, my, mz) - A point of the map's frame in the turtle's: x, y, z.

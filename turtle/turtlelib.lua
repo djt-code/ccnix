@@ -27,7 +27,8 @@
 --     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
 --     for block states; a re-zeroed frame (--here) keeps the map right
 --   * routes (tl.path, loaded when first used): T.path, A* over the map round
---     protected areas, lava, fire and doors, and T.travel, which walks one
+--     lava, fire and doors and through protected areas only where the map
+--     knows they are empty (nothing in one is dug), and T.travel, which walks one
 --     along a clear layer (or the search), planning again at a block it did
 --     not expect; T.moveTo's opts.path asks for it
 --   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab,
@@ -280,6 +281,17 @@ local reframers = {}
 -- are not moved: they belong to the frame they were made in.)
 local REFRAMED_FILES = { [".chests"] = "reframeChests" }
 
+-- The breadcrumb trail (T.trail, T.retrace): the cells the turtle moved through lately, oldest first, kept on the
+-- turtle table so every copy of the library adds to the same one.  Up to TRAIL_MOST cells, in memory only (the
+-- position file is written every move; the trail would make that write 200 times bigger).
+local TRAIL_MOST = 200
+local trailHolder = turtle or {}
+local trail = trailHolder._ccnixTrail
+if not trail then
+    trail = { cells = {} }
+    trailHolder._ccnixTrail = trail
+end
+
 -- (x, z) turned by k quarter turns to the right, as tl.world turns its frames
 local TURN_XZ = { [0] = { 1, 0, 0, 1 }, { 0, 1, -1, 0 }, { -1, 0, 0, -1 }, { 0, -1, 1, 0 } }
 
@@ -304,6 +316,8 @@ local function frameMoved(old)
                 if f then f(move, turns) end
             end
         end
+    else
+        trail.cells = {}               -- (nobody knows where the trail's cells are now)
     end
     if not fs.exists(T.dataPath(T.MAP_DIR)) then return end
     local changed = T.need("frameChanged")
@@ -480,11 +494,24 @@ local function targetOf(side)
     return T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3]
 end
 
--- A successful move: T.pos follows, the listeners hear, it's saved.
+-- Add the cell the turtle moved into to the trail, after the one it left if the trail doesn't end there (its first move,
+-- or the position was set by hand).  Kept to the last TRAIL_MOST cells.
+local function crumb(fx, fy, fz)
+    if trail.paused then return end
+    local cells = trail.cells
+    local last = cells[#cells]
+    if not (last and last.x == fx and last.y == fy and last.z == fz) then cells[#cells + 1] = { x = fx, y = fy, z = fz } end
+    cells[#cells + 1] = { x = T.pos.x, y = T.pos.y, z = T.pos.z }
+    if #cells > 2 * TRAIL_MOST then trail.cells = { table.unpack(cells, #cells - TRAIL_MOST + 1) } end
+end
+
+-- A successful move: T.pos follows, the trail and the listeners hear, it's saved.
 local function moved(name)
     local dx, dy, dz = MOVE_STEP[name]()
     local from = W and W.listeners[1] and T.here()
+    local fx, fy, fz = T.pos.x, T.pos.y, T.pos.z
     T.pos.x, T.pos.y, T.pos.z = T.pos.x + dx, T.pos.y + dy, T.pos.z + dz
+    crumb(fx, fy, fz)
     if from then tell({ kind = "move", x = T.pos.x, y = T.pos.y, z = T.pos.z, from = from }) end
     T.savePos()
 end
@@ -594,11 +621,26 @@ function T.unprotect(name)
     return false, "no protected area called " .. tostring(name)
 end
 
+-- The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
+function T.areaSet(names)
+    local set = {}
+    if type(names) == "string" then
+        set[names] = true
+    elseif type(names) == "table" then
+        for _, n in ipairs(names) do set[n] = true end
+        for k, v in pairs(names) do
+            if type(k) == "string" and v then set[k] = true end
+        end
+    end
+    return set
+end
+
 -- The name of the first protected area that holds the cell, or nil.
--- `skip`, a name, leaves that area out (see T.guarded).
+-- `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 function T.protected(x, y, z, skip)
+    local left = skip ~= nil and T.areaSet(skip) or {}
     for _, a in ipairs(areas()) do
-        if a.name ~= skip and x >= a[1] and x <= a[4] and y >= a[2] and y <= a[5] and z >= a[3] and z <= a[6] then
+        if not left[a.name] and x >= a[1] and x <= a[4] and y >= a[2] and y <= a[5] and z >= a[3] and z <= a[6] then
             return a.name
         end
     end
@@ -615,23 +657,36 @@ function T.protections()
 end
 
 -- The name of the protected area that stops the current job from digging
--- the cell: T.protected, but not counting the area the job is working
+-- the cell: T.protected, but not counting the areas the job is working
 -- inside (T.cfg.inside, set by T.inside).  nil if none.
 function T.guarded(x, y, z)
     return T.protected(x, y, z, T.cfg.inside)
 end
 
--- Run fn(...) as a job that owns the protected area `name`: digging in it
--- is allowed meanwhile (other areas still hold).  Puts back what was set
--- before, even if fn errors (the error is re-thrown); returns what fn
--- returned.
-function T.inside(name, fn, ...)
+-- Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them
+-- is allowed meanwhile (other areas still hold).  Puts it back after, even if fn errors (the error goes on); returns fn's results.
+--
+-- A cell in two areas can be dug when the job owns both: T.inside({ "keep", "wall" }, fn).  Inside another
+-- T.inside the job owns the areas of both.
+function T.inside(names, fn, ...)
+    if type(names) ~= "string" and type(names) ~= "table" then error("T.inside wants an area's name or a list of names", 2) end
     local before = T.cfg.inside
-    T.cfg.inside = name
+    if before == nil then
+        T.cfg.inside = names
+    else
+        local both = T.areaSet(before)
+        for n in pairs(T.areaSet(names)) do both[n] = true end
+        T.cfg.inside = tables.sortedKeys(both)
+    end
     local res = table.pack(pcall(fn, ...))
     T.cfg.inside = before
     if not res[1] then error(res[2], 0) end
     return table.unpack(res, 2, res.n)
+end
+
+-- Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
+function T.withUnprotected(names, fn, ...)
+    return T.inside(names, fn, ...)
 end
 
 -- Is this block one the dig functions refuse (a container, spawner or
@@ -655,6 +710,26 @@ local function lookAt(side)
     return nil
 end
 
+-- What the turtle saw itself lately (T.look), by "x,y,z": { name, state }, air as "minecraft:air".  T.liquidNear
+-- reads it before the map, being newer.  It holds SEEN_MOST cells, then starts again; a dig or a placement forgets
+-- its cell, and a re-zero all of them.
+local SEEN_MOST = 256
+local seen = { cells = {}, n = 0 }
+
+local function noteSeen(x, y, z, name, state)
+    if seen.n >= SEEN_MOST then seen.cells, seen.n = {}, 0 end
+    local k = x .. "," .. y .. "," .. z
+    if not seen.cells[k] then seen.n = seen.n + 1 end
+    seen.cells[k] = { name = name, state = state }
+end
+
+local function forgetSeen(x, y, z) seen.cells[x .. "," .. y .. "," .. z] = nil end
+
+reframers[#reframers + 1] = function() seen.cells, seen.n = {}, 0 end
+reframers[#reframers + 1] = function(move)
+    for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
+end
+
 -- The wrapped digs: refuse what's protected, look at what's there (the
 -- listeners are told it), then dig (with the tool side the caller named,
 -- if any).  A dig of a block a hoe tills is looked at again after, since
@@ -671,6 +746,7 @@ for name, side in pairs(DIG_SIDE) do
             return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
         end
         return afterwards(function()
+            forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
             local was = ok and data and data.name or nil
             local event = { kind = "dig", x = x, y = y, z = z, was = was, state = ok and data and data.state or nil }
@@ -694,6 +770,7 @@ for name, side in pairs(PLACE_SIDE) do
             item = it and it.name
         end
         return afterwards(function()
+            forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
             local block, state = lookAt(side)
             tell({ kind = "place", x = x, y = y, z = z, item = item, block = block, state = state })
@@ -1278,11 +1355,23 @@ function T.dirTo(p)
 end
 
 -- Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
+--
+-- What it sees is remembered a while (the last 256 cells), so T.liquidNear knows of lava the turtle looked at even
+-- with no map.
 function T.look(d)
-    if d == "up" then return turtle.inspectUp() end
-    if d == "down" then return turtle.inspectDown() end
-    T.face(d)
-    return turtle.inspect()
+    local ok, data
+    if d == "up" then ok, data = turtle.inspectUp()
+    elseif d == "down" then ok, data = turtle.inspectDown()
+    else
+        T.face(d)
+        ok, data = turtle.inspect()
+    end
+    local v = T.DELTA[d]
+    if v then
+        local seenOk = ok and type(data) == "table" and data.name
+        noteSeen(T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3], seenOk and data.name or "minecraft:air", seenOk and data.state or nil)
+    end
+    return ok, data
 end
 
 -- Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected
@@ -1348,11 +1437,116 @@ local FLUID = {
 
 T.nameTest = nameTest                     -- (tl.path reads opts.dig and opts.avoid the same way)
 
--- One step in direction d for moveTo: look at what's there; refuse what's
--- to be avoided, dig what may be dug (not what is protected), move,
--- attacking what's in the way.  true, or false, why, the block's name (if
--- a block stopped it) and its cell.
-local function stepInto(d, mayDig, avoid)
+--------------------------------------------------------------------------
+-- Liquids and falling blocks: what opening a cell lets in or brings down
+--------------------------------------------------------------------------
+-- What flows into a cell opened beside it or under it, and the word a refusal uses: lava at any level, and water
+-- from a source (water whose state gives no level above 0; a scan gives none, so the map's water counts)
+local LIQUID_WORD = { ["minecraft:lava"] = "lava", ["minecraft:flowing_lava"] = "lava", ["minecraft:water"] = "water" }
+local SOURCE_ONLY = { ["minecraft:water"] = true }
+-- The sides of a cell liquid comes in by (what is below doesn't flow up)
+local LIQUID_SIDES = { 0, 1, 2, 3, "up" }
+
+-- The blocks that fall when what is under them goes (names, and globs for the families)
+local fallingTest = nameTest({
+    "minecraft:sand", "minecraft:red_sand", "minecraft:gravel", "minecraft:suspicious_sand", "minecraft:suspicious_gravel",
+    "minecraft:*_concrete_powder", "minecraft:anvil", "minecraft:chipped_anvil", "minecraft:damaged_anvil",
+    "minecraft:dragon_egg", "minecraft:pointed_dripstone",
+})
+
+-- The block in a cell as far as the turtle knows: what it looked at lately, else what the map holds (if one is
+-- loaded); its name and state, or nil.
+local function knownAt(x, y, z)
+    local s = seen.cells[x .. "," .. y .. "," .. z]
+    if s then return s.name, s.state end
+    local map = rawget(T, "map")
+    if not map then return nil end
+    local name, state = map.get(x, y, z)
+    if name then return name, type(state) == "table" and state or nil end
+    return nil
+end
+
+-- Would this block, beside an opened cell, flow into it?  The word for what flows ("lava", "water"), or nil.
+local function flowsIn(name, state)
+    local word = LIQUID_WORD[name]
+    if word and SOURCE_ONLY[name] and type(state) == "table" and state.level ~= nil and tonumber(state.level) ~= 0 then
+        return nil
+    end
+    if not word and type(state) == "table" and state.waterlogged == true then word = "water" end
+    return word
+end
+
+-- The liquid that would flow into the cell x, y, z (or a table { x, y, z }) if it were opened: its name and cell, or nil.
+--
+-- Lava, or a water source (a waterlogged block too), beside the cell or above it, as far as the map and what the
+-- turtle looked at lately (T.look) know.  Lava under it doesn't flow up, so it isn't counted; water whose state says
+-- it is flowing isn't either (the map's water from a scan has no state, so it counts as a source).  T.moveTo and
+-- T.travel refuse to dig such a cell on their way unless opts.liquid, T.digCell too, and T.harvest leaves it.
+function T.liquidNear(x, y, z)
+    if type(x) == "table" then x, y, z = x.x, x.y, x.z end
+    for _, d in ipairs(LIQUID_SIDES) do
+        local v = T.DELTA[d]
+        local nx, ny, nz = x + v[1], y + v[2], z + v[3]
+        local name, state = knownAt(nx, ny, nz)
+        if name and flowsIn(name, state) then return name, nx, ny, nz end
+    end
+    return nil
+end
+
+-- Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
+function T.isFalling(name)
+    return type(name) == "string" and fallingTest(name)
+end
+
+-- The refusal of a dig of the block `name` at `cell` that would let liquid in, or nil if none would.
+local function liquidRefusal(name, cell)
+    local lq, lx, ly, lz = T.liquidNear(cell.x, cell.y, cell.z)
+    if not lq then return nil end
+    local word = flowsIn(lq, select(2, knownAt(lx, ly, lz))) or "liquid"
+    return "digging " .. name .. " at " .. T.posKey(cell) .. " would release " .. word .. " at " .. lx .. "," .. ly .. ","
+        .. lz .. " (opts.liquid = true digs it anyway)"
+end
+
+-- A warning for a dig at `cell` with a falling block known over it, added to the list `warn` (once a cell).
+local function warnFalling(warn, cell)
+    if not warn or warn[T.posKey(cell)] then return end
+    local over = knownAt(cell.x, cell.y + 1, cell.z)
+    if over and T.isFalling(over) then
+        warn[T.posKey(cell)] = true
+        warn[#warn + 1] = "dug " .. T.posKey(cell) .. " under " .. over .. ", which may fall into it"
+    end
+end
+
+-- The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
+--
+-- Each is "x,y,z" or { x, y, z } (fields or the three numbers in order); a set's keys are "x,y,z" too, and one cell
+-- { x =, y =, z = } on its own will do.
+function T.cellSet(spec)
+    if type(spec) ~= "table" then return nil, "cells are a list or set of \"x,y,z\" or { x, y, z }" end
+    if spec.x ~= nil then spec = { spec } end
+    local set = {}
+    local function add(c)
+        local x, y, z
+        if type(c) == "string" then x, y, z = T.keyPos(c)
+        elseif type(c) == "table" then x, y, z = c.x or c[1], c.y or c[2], c.z or c[3] end
+        if not (isWhole(x) and isWhole(y) and isWhole(z)) then return false end
+        set[x .. "," .. y .. "," .. z] = true
+        return true
+    end
+    for _, c in ipairs(spec) do
+        if not add(c) then return nil, "a cell is \"x,y,z\" or { x, y, z }, whole numbers: " .. tostring(c) end
+    end
+    for k, v in pairs(spec) do
+        if type(k) == "string" and v and not add(k) then return nil, "a cell is \"x,y,z\", whole numbers: " .. k end
+    end
+    return set
+end
+
+-- One step in direction d for moveTo: look at what's there; refuse what's to be avoided, dig what may be dug (not
+-- what is protected, not a cell outside rules.only, not one that would let liquid in unless rules.liquid), move,
+-- attacking what's in the way.  true, or false, why, the block's name (if a block stopped it) and its cell.  A dig
+-- under a falling block adds a warning to rules.warn.
+local function stepInto(d, rules)
     local v = T.DELTA[d]
     local cell = { x = T.pos.x + v[1], y = T.pos.y + v[2], z = T.pos.z + v[3] }
     local at = T.posKey(cell)
@@ -1361,11 +1555,17 @@ local function stepInto(d, mayDig, avoid)
     for _ = 1, 6 do
         local ok, data = T.look(d)
         name = ok and type(data) == "table" and data.name or nil
-        if name and avoid(name) then return false, "avoiding " .. name .. " at " .. at, name, cell end
+        if name and rules.avoid(name) then return false, "avoiding " .. name .. " at " .. at, name, cell end
         if name and not FLUID[name] then
-            if not mayDig(name) then return false, "blocked by " .. name .. " at " .. at, name, cell end
+            if not rules.mayDig(name) then return false, "blocked by " .. name .. " at " .. at, name, cell end
+            if rules.only and not rules.only[at] then
+                return false, "blocked by " .. name .. " at " .. at .. " (not a cell opts.digOnly lists)", name, cell
+            end
             local area = T.guarded(cell.x, cell.y, cell.z)
             if area then return false, "protected: " .. area .. " (" .. name .. " at " .. at .. ")", name, cell end
+            local wet = not rules.liquid and liquidRefusal(name, cell)
+            if wet then return false, wet, name, cell end
+            warnFalling(rules.warn, cell)
             local dug, why = T.digDir(d)
             if not dug then
                 return false, "couldn't dig " .. name .. " at " .. at .. (why and (": " .. tostring(why)) or ""), name, cell
@@ -1384,24 +1584,31 @@ local function stepInto(d, mayDig, avoid)
 end
 
 -- Move to the cell x, y, z (the turtle's frame), digging only what opts.dig
--- allows.  Returns true, or false, why, the block's name and cell where one
--- stopped it.  opts: order, dig, avoid, inside, path.
+-- allows.  True (and a warning if it dug under sand), or false, why, the block and cell that stopped
+-- it.  opts: order, dig, digOnly, avoid, inside, liquid, path.
 --
 -- It goes along the axes in the order opts.order names (default "yxz": up or
 -- down first, then x, then z).  opts (all optional):
 --   dig     false (default), true, a glob, or a list or set of globs: the
 --           blocks it may dig on the way (a protected area, a chest or a
 --           computer is never dug)
+--   digOnly a list or set of cells ("x,y,z" or { x, y, z }, see T.cellSet):
+--           the only cells it may dig (whatever block is there, unless
+--           opts.dig says which); any other block stops it
 --   avoid   a glob, a list or a set: blocks it stops at rather than enter
 --           (default: lava, fire and doors); {} avoids nothing
---   inside  the name of a protected area the move may dig in (see T.inside)
+--   inside  the name of a protected area the move may dig in, or a list of
+--           names (see T.inside)
+--   liquid  true: dig a cell even when lava or a water source is beside it
+--           or above it (T.liquidNear); by default that dig is refused
 --   path    true, or a function(x, y, z, opts): when a straight run is
 --           blocked, ask a route finder (T.travel, from the path module, if
 --           there is one; or this function) to take it the rest of the way
 -- The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4",
--- "protected: castle (...)", "avoiding minecraft:lava at ..."; the cell is
--- { x, y, z }.  The turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a
--- program's grid, don't apply.)
+-- "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava
+-- at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }.  The warning, when a cell it dug has a
+-- falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it".  The
+-- turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
 function T.moveTo(x, y, z, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -1412,28 +1619,179 @@ function T.moveTo(x, y, z, opts)
         if not AXIS[order:sub(i, i)] then return false, "the order of axes is letters x, y and z, like \"yxz\"" end
     end
     local want = { x = x, y = y, z = z }
-    local mayDig = nameTest(opts.dig)
-    local avoid = nameTest(opts.avoid == nil and DEFAULT_AVOID or opts.avoid)
+    local only, badCells
+    if opts.digOnly ~= nil then
+        only, badCells = T.cellSet(opts.digOnly)
+        if not only then return false, "opts.digOnly: " .. badCells end
+    end
+    local rules = { mayDig = nameTest(opts.dig == nil and only and true or opts.dig), only = only, avoid = nameTest(opts.avoid == nil and DEFAULT_AVOID or opts.avoid),
+                    liquid = opts.liquid, warn = {} }
+    local function warning()
+        if #rules.warn == 0 then return nil end
+        return "warning: " .. table.concat(rules.warn, "; ")
+    end
     local function run()
         for i = 1, #order do
             local field, more, less = table.unpack(AXIS[order:sub(i, i)])
             while T.pos[field] ~= want[field] do
-                local ok, why, name, cell = stepInto(T.pos[field] < want[field] and more or less, mayDig, avoid)
+                local ok, why, name, cell = stepInto(T.pos[field] < want[field] and more or less, rules)
                 if not ok then
                     local finder = type(opts.path) == "function" and opts.path or opts.path and (T.need("travel") or T.need("path"))
                     if finder and name then
                         local routed, noRoute = finder(x, y, z, opts)
-                        if routed and T.pos.x == x and T.pos.y == y and T.pos.z == z then return true end
+                        if routed and T.pos.x == x and T.pos.y == y and T.pos.z == z then
+                            -- (the finder's second result, on success, is its own warning)
+                            local mine = warning()
+                            if mine and noRoute then return true, mine .. "; " .. tostring(noRoute) end
+                            return true, mine or noRoute
+                        end
                         if noRoute then why = why .. " (no route: " .. tostring(noRoute) .. ")" end
                     end
                     return false, why, name, cell
                 end
             end
         end
-        return true
+        return true, warning()
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()
+end
+
+-- Names a turtle may stand in to dig a cell beside it
+local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true,
+                    ["minecraft:water"] = true, ["minecraft:flowing_water"] = true }
+
+-- Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it.  True, the block's
+-- name (nil: it was empty) and a warning (sand over it); or false and why.
+--
+-- It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer
+-- (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs
+-- it anyway), checked before it goes and again when it is there.  It stands in a cell beside it the map (or what the
+-- turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default
+-- { path = true, scan = false }; digging is turned off).  The dig goes into the map as every dig does.  The turtle
+-- stays beside the cell.
+function T.digCell(x, y, z, opts)
+    opts = opts or {}
+    for _, n in ipairs({ x, y, z }) do
+        if not isWhole(n) then return false, "digCell wants a cell of whole numbers: x, y, z" end
+    end
+    local cell = { x = x, y = y, z = z }
+    local at = T.posKey(cell)
+    if T.at(cell) then return true, nil end
+    local function refusal(name)
+        local area = T.guarded(x, y, z)
+        if area then return "protected: " .. area .. " (" .. (name or "the block") .. " at " .. at .. ")" end
+        if not opts.liquid then return liquidRefusal(name or "the block", cell) end
+    end
+    local function run()
+        local why = refusal(knownAt(x, y, z))
+        if why then return false, why end
+        -- where to stand: beside it, the turtle's own cell first, then empty ones, then unseen ones, the nearest first
+        local stands = {}
+        for _, d in ipairs({ "up", "down", 0, 1, 2, 3 }) do
+            local v = T.DELTA[d]
+            local s = { x = x + v[1], y = y + v[2], z = z + v[3] }
+            local name = knownAt(s.x, s.y, s.z)
+            s.rank = (T.at(s) and 0) or (name == nil and 2) or (STANDABLE[name] and 1) or nil
+            if s.rank then
+                s.dist = T.dist(T.pos, s)
+                stands[#stands + 1] = s
+            end
+        end
+        table.sort(stands, function(a, b)
+            if a.rank ~= b.rank then return a.rank < b.rank end
+            if a.dist ~= b.dist then return a.dist < b.dist end
+            return T.posKey(a) < T.posKey(b)
+        end)
+        local move = tables.copy(opts.move or { path = true, scan = false })
+        move.dig, move.digOnly = false, nil
+        local reached, last = false, "no cell beside it is known to be empty or unseen"
+        for _, s in ipairs(stands) do
+            local ok, moveWhy = T.moveTo(s.x, s.y, s.z, move)
+            if ok then reached = true; break end
+            last = moveWhy
+        end
+        if not reached then return false, "couldn't get beside " .. at .. ": " .. tostring(last) end
+        local d = T.dirTo(cell)
+        local ok, data = T.look(d)
+        local name = ok and type(data) == "table" and data.name or nil
+        if not name then
+            local map = rawget(T, "map")
+            if map then pcall(map.set, x, y, z, "minecraft:air") end
+            return true, nil
+        end
+        if FLUID[name] then return false, at .. " holds " .. name .. ": nothing to dig" end
+        why = refusal(name)
+        if why then return false, why end
+        local warn = {}
+        warnFalling(warn, cell)
+        local dug, digWhy = T.digDir(d)
+        if not dug then return false, "couldn't dig " .. name .. " at " .. at .. (digWhy and (": " .. tostring(digWhy)) or "") end
+        return true, name, warn[1] and ("warning: " .. warn[1]) or nil
+    end
+    if opts.inside then return T.inside(opts.inside, run) end
+    return run()
+end
+
+-- The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where
+-- it moved to last.
+--
+-- Every move through turtlelib or the turtle API adds to it, by any program; T.retrace walks it back.  It lives in memory
+-- (a reboot starts it again) and moves with the frame when the turtle re-zeroes.
+function T.trail()
+    local cells, out = trail.cells, {}
+    for i = math.max(1, #cells - TRAIL_MOST + 1), #cells do
+        local c = cells[i]
+        out[#out + 1] = { x = c.x, y = c.y, z = c.z }
+    end
+    return out
+end
+
+-- Walk back along the trail over the last n cells (default all of it), skipping loops.  True and the moves made, or false,
+-- why and the moves made.
+--
+-- Each hop is a T.moveTo to the cell before, with opts (T.moveTo's: dig, avoid, path, ...; default none, so it goes only
+-- where it went before).  A cell the trail passed through twice is a loop: from the later visit it goes straight on from
+-- the earlier one.  The cells walked back are taken off the trail, so a second T.retrace goes further back, not forward.
+function T.retrace(n, opts)
+    opts = opts or {}
+    local cells = trail.cells
+    if #cells > TRAIL_MOST then
+        trail.cells = { table.unpack(cells, #cells - TRAIL_MOST + 1) }
+        cells = trail.cells
+    end
+    local last = cells[#cells]
+    if last and not T.at(last) then cells[#cells + 1] = T.here() end      -- (it was put somewhere by hand)
+    local i = #cells
+    if i == 0 then return true, 0 end
+    if n == nil then n = i - 1 end
+    if not (isWhole(n) and n >= 0) then return false, "retrace wants a whole number of cells from 0", 0 end
+    local stop = math.max(1, i - n)
+    local first = {}
+    for j = stop, i do
+        local k = T.posKey(cells[j])
+        if not first[k] then first[k] = j end
+    end
+    local hops = 0
+    local function back()
+        while i > 0 do
+            i = first[T.posKey(cells[i])]                 -- (a loop through this cell is skipped)
+            for j = #cells, i + 1, -1 do cells[j] = nil end
+            if i <= stop then return true end
+            local c = cells[i - 1]
+            local ok, why = T.moveTo(c.x, c.y, c.z, opts)
+            if not ok then return false, "retrace stopped short of " .. T.posKey(c) .. ": " .. tostring(why) end
+            hops = hops + 1
+            i = i - 1
+        end
+        return true
+    end
+    trail.paused = true
+    local res = table.pack(pcall(back))
+    trail.paused = false
+    if not res[1] then error(res[2], 0) end
+    if res[2] then return true, hops end
+    return false, res[3], hops
 end
 
 -- Turns it takes to face direction d (none for up or down).

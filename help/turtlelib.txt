@@ -9,7 +9,7 @@ Provides:
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
-  * routes (tl.path, loaded when first used): T.path, A* over the map round protected areas, lava, fire and doors, and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
+  * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire and doors and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
@@ -80,17 +80,25 @@ T.protect(name, x1, y1, z1, x2, y2, z2)
 T.unprotect(name)
     Remove the area called `name`. True, or false and why (none by that name).
 
+T.areaSet(names)
+    The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
+
 T.protected(x, y, z, skip)
-    The name of the first protected area that holds the cell, or nil. `skip`, a name, leaves that area out (see T.guarded).
+    The name of the first protected area that holds the cell, or nil. `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 
 T.protections()
     The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (copies: changing one changes nothing).
 
 T.guarded(x, y, z)
-    The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the area the job is working inside (T.cfg.inside, set by T.inside). nil if none.
+    The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
 
-T.inside(name, fn, ...)
-    Run fn(...) as a job that owns the protected area `name`: digging in it is allowed meanwhile (other areas still hold). Puts back what was set before, even if fn errors (the error is re-thrown); returns what fn returned.
+T.inside(names, fn, ...)
+    Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
+
+    A cell in two areas can be dug when the job owns both: T.inside({ "keep", "wall" }, fn). Inside another T.inside the job owns the areas of both.
+
+T.withUnprotected(names, fn, ...)
+    Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
 
 T.neverDig(name)
     Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
@@ -239,6 +247,8 @@ T.dirTo(p)
 T.look(d)
     Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 
+    What it sees is remembered a while (the last 256 cells), so T.liquidNear knows of lava the turtle looked at even with no map.
+
 T.digDir(d)
     Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected area holds. Returns turtle.dig's results (false and why if it can't).
 
@@ -254,22 +264,56 @@ T.suckDir(d)
 T.moveDir(d)
     Move one block in direction d (T.up/T.down/T.forward: digging what T.diggable allows, attacking what's in the way).
 
-== Moving to a cell in three dimensions, and saying why it stopped ==
+== Liquids and falling blocks ==
+
+T.liquidNear(x, y, z)
+    The liquid that would flow into the cell x, y, z (or a table { x, y, z }) if it were opened: its name and cell, or nil.
+
+    Lava, or a water source (a waterlogged block too), beside the cell or above it, as far as the map and what the turtle looked at lately (T.look) know. Lava under it doesn't flow up, so it isn't counted; water whose state says it is flowing isn't either (the map's water from a scan has no state, so it counts as a source). T.moveTo and T.travel refuse to dig such a cell on their way unless opts.liquid, T.digCell too, and T.harvest leaves it.
+
+T.isFalling(name)
+    Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
+
+T.cellSet(spec)
+    The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
+
+    Each is "x,y,z" or { x, y, z } (fields or the three numbers in order); a set's keys are "x,y,z" too, and one cell { x =, y =, z = } on its own will do.
 
 T.moveTo(x, y, z, opts)
-    Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. Returns true, or false, why, the block's name and cell where one stopped it. opts: order, dig, avoid, inside, path.
+    Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. True (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid, path.
 
     It goes along the axes in the order opts.order names (default "yxz": up or down first, then x, then z). opts (all optional):
       dig     false (default), true, a glob, or a list or set of globs: the
               blocks it may dig on the way (a protected area, a chest or a
               computer is never dug)
+      digOnly a list or set of cells ("x,y,z" or { x, y, z }, see T.cellSet):
+              the only cells it may dig (whatever block is there, unless
+              opts.dig says which); any other block stops it
       avoid   a glob, a list or a set: blocks it stops at rather than enter
               (default: lava, fire and doors); {} avoids nothing
-      inside  the name of a protected area the move may dig in (see T.inside)
+      inside  the name of a protected area the move may dig in, or a list of
+              names (see T.inside)
+      liquid  true: dig a cell even when lava or a water source is beside it
+              or above it (T.liquidNear); by default that dig is refused
       path    true, or a function(x, y, z, opts): when a straight run is
               blocked, ask a route finder (T.travel, from the path module, if
               there is one; or this function) to take it the rest of the way
-    The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ..."; the cell is { x, y, z }. The turtle stays wherever it got to. (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
+    The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }. The warning, when a cell it dug has a falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it". The turtle stays wherever it got to. (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
+
+T.digCell(x, y, z, opts)
+    Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
+
+    It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs it anyway), checked before it goes and again when it is there. It stands in a cell beside it the map (or what the turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default { path = true, scan = false }; digging is turned off). The dig goes into the map as every dig does. The turtle stays beside the cell.
+
+T.trail()
+    The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
+
+    Every move through turtlelib or the turtle API adds to it, by any program; T.retrace walks it back. It lives in memory (a reboot starts it again) and moves with the frame when the turtle re-zeroes.
+
+T.retrace(n, opts)
+    Walk back along the trail over the last n cells (default all of it), skipping loops. True and the moves made, or false, why and the moves made.
+
+    Each hop is a T.moveTo to the cell before, with opts (T.moveTo's: dig, avoid, path, ...; default none, so it goes only where it went before). A cell the trail passed through twice is a loop: from the later visit it goes straight on from the earlier one. The cells walked back are taken off the trail, so a second T.retrace goes further back, not forward.
 
 T.turnsTo(d)
     Turns it takes to face direction d (none for up or down).
@@ -616,18 +660,18 @@ tl.harvest: taking blocks by name, fuel from lava, and what a job will cost in f
 
 Loaded by turtlelib the first time one of its functions is used (T.harvest, T.refuelFromLava, T.fuelFor).
 
-T.harvest digs every block in a place whose name matches a glob, nearest first, but a block only after the matching blocks above it in its column (top down), and never one with a falling block (sand, gravel, concrete powder, an anvil) over it that is not itself to be dug: digging out from under it would bring it down.  A block that lava touches is left (opts.lava lifts that), so is one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  It counts as it goes and stops at the target.  The place is a box in the turtle's frame (the map is scanned for it as needed), a scan's result (T.scan's { ["x,y,z"] = name }) or a list of cells such as T.map.find gives.  Each block is dug from the nearest cell next to it that the map shows free, tunnelling to one when opts.move allows digging.  The turtle stays where the last block was.
+T.harvest digs every block in a place whose name matches a glob, nearest first, but a block only after the matching blocks above it in its column (top down), and never one with a falling block (sand, gravel, concrete powder, an anvil) over it that is not itself to be dug: digging out from under it would bring it down.  A block that lava or a water source touches beside it or over it (T.liquidNear) is left (opts.liquid lifts that), so is one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  It counts as it goes and stops at the target.  The place is a box in the turtle's frame (the map is scanned for it as needed), a scan's result (T.scan's { ["x,y,z"] = name }) or a list of cells such as T.map.find gives.  Each block is dug from the nearest cell next to it that the map shows free, tunnelling to one when opts.move allows digging.  The turtle stays where the last block was.
 
 T.refuelFromLava finds the nearest lava source the map knows, goes next to it, takes it up with an empty bucket (a turtle that places an empty bucket on a source takes it up, as mine's scoop does), burns the bucket of lava for 1000 fuel and goes back where it began.
 
-T.fuelFor adds up what a route, a build and some scans will cost in fuel and says whether the tank and the fuel on board will do.  The cost of a scan is an estimate (set T.cfg.scanFuel = { [8] = cost } from what T.scan reports in info.fuel).
+T.fuelFor adds up what a route, a build and some scans will cost in fuel and says whether the tank and the fuel on board will do.  A scan of radius 8 or less costs nothing (the Geo Scanner's free radius by default); a wider one is an estimate (set T.cfg.scanFuel = { [12] = cost } from what T.scan reports in info.fuel).
 
 == Harvesting ==
 
 T.harvest(pattern, where, target, opts)
-    Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, lava-touched blocks and ones holding up sand. True, info; false, why, info when short; nil, why if it couldn't begin.
+    Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in by and ones under sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 
-    `pattern` is a glob of block names (the namespace may be left out). `where` is a box in the turtle's frame (six numbers in a table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of T.scan, or a list of cells ({ x, y, z }, as T.map.find gives). `target`, if given, is how many blocks to dig before stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead). Each block is looked at before it is dug and left if the map was wrong. Left alone, and listed in info.skipped with why: a block with a falling block over it that is not to be dug too, one that lava touches (opts.lava digs those), one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers). A block with no free cell beside it is skipped unless opts.move lets it dig a way in. It stops when the inventory is full (T.cfg.autoDump keeps room), or the fuel is out. Info is { got, target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, stopped }, the lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, lava, item.
+    `pattern` is a glob of block names (the namespace may be left out). `where` is a box in the turtle's frame (six numbers in a table, or x1 to z2 fields; the map is scanned for it if it does not know it all, unless opts.scan is false), the result of T.scan, or a list of cells ({ x, y, z }, as T.map.find gives). `target`, if given, is how many blocks to dig before stopping (opts.item, a glob of item names, counts the items of that kind that came aboard instead). Each block is looked at before it is dug and left if the map was wrong. Left alone, and listed in info.skipped with why: a block with a falling block over it that is not to be dug too, one that lava or a water source touches beside it or over it (T.liquidNear; opts.liquid, or opts.lava as before, digs those), one in a protected area (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers). A block with no free cell beside it is skipped unless opts.move lets it dig a way in, and so is one in opts.exclude (protected areas' names and boxes, as T.refuelFromLava takes). It stops when the inventory is full (T.cfg.autoDump keeps room), the fuel is out, it has spent opts.maxFuel fuel (scanning included) or run opts.timeout seconds. Info is { got, target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, spent, stopped }, the lists of { x, y, z, name, why }, spent the fuel it used. opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default { path = true, scan = false }), inside, liquid, item, exclude, maxFuel, timeout.
 
 == Fuel from lava ==
 
@@ -721,11 +765,11 @@ T.path finds a route: A* in three dimensions over the map (tl.world), with a bin
   known air or water
       one move
   a block it may dig
-      a move and a dig (opts.dig says what may be dug, as for T.moveTo)
+      a move and a dig (opts.dig says what may be dug, as for T.moveTo), unless lava or a water source is beside it or over it (T.liquidNear): that is a wall unless opts.liquid
   a cell never seen
       a move and a dig when digging everything is allowed; otherwise a move and a penalty, so a route through the unseen is possible but the known is preferred (it is checked as it is walked)
   a wall
-      never: a protected area (except the one opts.inside names, and except the empty cells of an area the route starts or ends in), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
+      never: a cell of a protected area the map doesn't know to be empty (a block, or never seen: nothing in an area is dug, except in the one opts.inside names; its known air and water are crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
 The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
 
 T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits bastion ceilings): up, across, down.  If the map doesn't know enough it scans the route's box first; if there is no layer it uses the search.  Then it walks the route.  A block it didn't expect stops a step: it notes the block in the map and plans again from where it is, a few times.
@@ -737,8 +781,10 @@ T.path(x, y, z, opts)
 
     It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
       dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
+      digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
       avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
-      inside     the name of a protected area the route may dig in (default T.cfg.inside, see T.inside)
+      inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
+      liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
       avoidCells a list of { x, y, z } cells a route may not use
       limit      cells to search before giving up (default 20000)
       margin     how far outside the box of the two cells it may look (default 24)
@@ -746,9 +792,9 @@ T.path(x, y, z, opts)
 == Walking a route ==
 
 T.travel(x, y, z, opts)
-    Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true, or false and why.
+    Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 
-    Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6). opts are T.path's (dig, avoid, inside, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
+    Up, across and down at a height where the map shows the whole way empty (the lowest climb first); if the map doesn't know enough to find one it scans the route's box first (T.scanBox, once; opts.scan = false skips that); with no layer, T.path's search. Each stretch is walked with T.moveTo. A block it did not expect stops a step: the block is noted in the map, the cell is kept out of the next plan, and it plans again from where it is, up to opts.replans times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too. opts are T.path's (dig, digOnly, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the higher end a layer may be, default 8), scan, replans, and scanning's opts.move. On failure the turtle stays where it got to.
 
 tl.place: placing blocks the right way round: stairs, slabs, logs, torches, doors and the rest, and lighting a fire
 
@@ -851,7 +897,7 @@ Loaded by turtlelib the first time one of these is used (T.scan, T.map, T.setOri
 
 Frames.  The turtle's frame isn't fixed: `--here`, T.setHomeHere, T.clearPos and a run with no saved position make wherever it stands (0,0,0) again.  So the map keeps a frame of its own, the one it was started in, and the transform (a shift and quarter turns) from the turtle's current frame to it.  Whenever turtlelib re-zeroes it tells this module where that spot was, and the transform is updated, so what the map holds stays where it is.  If the frame was lost without that (the saved position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder (.map/frame).
 
-The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
+The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first, except those the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in .map/pins in the map's frame) overlaps, and those holding home or the map's own origin; when only those are left the map says it is over its cap (T.map.stats().over, printed once) rather than growing without a word.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
 
 A cell's "when" is the time its cube was last seen, in seconds (os.epoch "utc").
 
@@ -917,11 +963,23 @@ T.map.slice(y, box)
 T.map.flush()
     Write what has changed to disk now (it is written in batches as it goes). True, or false and why.
 
+    When the map is over its cap with only the cubes it keeps left (see T.map.pin), it is true and that, said.
+
 T.map.stats()
-    What the map takes: { cubes, bytes, cap, unsaved, aligned }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+    What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+
+    kept is how many cubes the cap never drops (protected areas, pinned boxes, home), pins how many boxes are pinned, and over, when the map is over its cap with only kept cubes left to drop, says so (nil otherwise).
+
+T.map.pin(box)
+    Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap. True, or nil and why.
+
+    The cap drops the cubes unseen longest; it never drops a pinned box's, a protected area's or home's. Pins are kept beside the map (.map/pins) in its own frame, so a re-zero doesn't move them; T.map.unpin lets one go.
+
+T.map.unpin(box)
+    Let a pinned box go (the same six numbers T.map.pin was given), or every pin with no box. True, or false and why.
 
 T.map.clear()
-    Throw the map away: every cube is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
+    Throw the map away: every cube (and every pin) is deleted. An unaligned map becomes aligned again, with the turtle's frame as its own (and the world origin is forgotten, as it was set against the old frame).
 
 T.map.frame()
     The frame the map is in relation to the turtle's: { turns, dx, dy, dz, aligned } (see T.alignMap).

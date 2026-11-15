@@ -4,15 +4,16 @@
 -- drops, chests, a liquid an empty bucket takes up) with a geo scanner on the left.
 --   * T.harvest: every block of a kind in a box, nearest first and each column top down; a target stops it; the place as a
 --     box, a scan's result and a list of cells; a falling block over a block keeps it (unless that is to be dug first);
---     lava touching it, a protected area and a chest keep it (each until the option that lifts it); a map that is wrong is
+--     lava or a water source touching it, a protected area and a chest keep it (each until the option that lifts it); a map that is wrong is
 --     put right (a block gone, a different block); a box the map does not know is scanned first, a known one is not; a
 --     block with no free side is skipped, or tunnelled to when the moves may dig; a full inventory stops it, and
 --     T.cfg.autoDump keeps it going;
 --   * T.refuelFromLava: the nearest source the map knows, taken up with an empty bucket and burned, back where it began;
 --     flowing lava passed over (known and found out), an unreachable source passed over, no bucket, a lava bucket aboard
 --     burned first, a tank with no room, no lava known, unlimited fuel; stops at the target;
---   * T.fuelFor: a route, a build, scans and a box of scans added up against the tank and the fuel on board, with the
---     margin and the detour; short, enough, unlimited fuel, a plan it cannot read.
+--   * T.fuelFor: a route, a build, scans (free up to radius 8) and a box of scans added up against the tank and the fuel on
+--     board, with the margin and the detour; short, enough, unlimited fuel, a plan it cannot read;
+--   * T.harvest's limits (ADR-0011 D7.8): opts.maxFuel, opts.timeout, opts.exclude.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -221,6 +222,51 @@ do
         and not has(4, 0, 4) and info.skipped[1].why:find("lava touches it", 1, true), tostring(info and #info.skipped))
     ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 4 }, nil, { lava = true })
     check("opts.lava digs them", ok == true and info.got == 2 and not has(4, 0, 0) and not has(4, 0, 2))
+end
+do
+    -- water: a source beside it keeps a block, flowing water doesn't (ADR-0011 D1)
+    fresh()
+    W.set(4, 0, 0, STONE); W.set(5, 0, 0, "minecraft:water", { level = 0 })
+    W.set(4, 0, 2, STONE); W.set(5, 0, 2, "minecraft:water", { level = 4 })
+    know(0, -1, -1, 7, 2, 6)
+    local ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 2 })
+    check("a water source beside a block keeps it, with the reason; one beside flowing water is dug", ok == true and info.got == 1 and #info.skipped == 1
+        and has(4, 0, 0) and not has(4, 0, 2) and info.skipped[1].why == "a water source touches it (minecraft:water at 5,0,0)",
+        tostring(info and info.skipped[1] and info.skipped[1].why))
+    ok, info = T.harvest("stone", { 4, 0, 0, 4, 0, 2 }, nil, { liquid = true })
+    check("opts.liquid digs it", ok == true and info.got == 1 and not has(4, 0, 0))
+end
+
+do
+    -- limits (ADR-0011 D7.8): the fuel spent, the time, and places left out
+    fresh()
+    W.fill(2, 0, 2, 4, 0, 4, BSTONE)
+    know(-1, -1, -1, 6, 2, 6)
+    local ok, why, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { maxFuel = 6 })
+    check("opts.maxFuel: it stops once it has spent that much, and says so", ok == false and why == "spent 6 fuel (opts.maxFuel 6)"
+        and info.spent >= 6 and info.got >= 1 and info.got < 9 and FUEL == 200 - info.spent, tostring(why) .. " " .. tostring(info and info.got))
+    ok, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 })
+    check("...without it, the rest; info.spent says what it used", ok == true and info.got >= 1 and info.spent > 0 and not has(4, 0, 4),
+        tostring(info and info.spent))
+    fresh()
+    W.fill(2, 0, 2, 4, 0, 4, BSTONE)
+    know(-1, -1, -1, 6, 2, 6)
+    ok, why, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { timeout = 0 })
+    check("opts.timeout: past it, it stops and says so", ok == false and why == "ran 0 s (opts.timeout)" and info.got == 0, tostring(why))
+    ok, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { timeout = 1000 })
+    check("...a long enough one is no stop", ok == true and info.got == 9)
+    fresh()
+    W.fill(2, 0, 2, 4, 0, 4, BSTONE)
+    know(-1, -1, -1, 6, 2, 6)
+    T.protect("shrine", 4, 0, 2, 4, 0, 4)
+    ok, info = T.inside("shrine", T.harvest, "blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { exclude = { { 2, 0, 2, 2, 0, 4 }, "shrine" } })
+    check("opts.exclude: boxes and areas by name (even one the job is inside) are left, each listed with why", ok == true and info.got == 3 and #info.skipped == 6
+        and has(2, 0, 3) and has(4, 0, 3) and not has(3, 0, 3) and info.skipped[1].why == "in opts.exclude", tostring(info and info.got))
+    local bad, badWhy = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { exclude = { 7 } })
+    check("...an entry that is neither: nil and why", bad == nil and badWhy:find("opts.exclude", 1, true), tostring(badWhy))
+    bad, badWhy = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { maxFuel = "lots" })
+    check("opts.maxFuel and opts.timeout are numbers", bad == nil and badWhy == "opts.maxFuel is a number from 0", tostring(badWhy))
+    T.unprotect("shrine")
 end
 
 do
@@ -497,17 +543,21 @@ do
     check("it moves nothing and burns nothing", W.S.moves == 0 and carrying("minecraft:coal") == 2 and FUEL == 20)
     FUEL = 19000
     ok, info = T.fuelFor({ scans = 2 })
-    check("scans: a radius-8 scan is estimated from the 5300 of a radius-16 one", info.scans == 2 * 663 and info.need == 1326 + 30, tostring(info.scans))
+    check("scans of radius 8 cost nothing (the Geo Scanner's free radius, ADR-0011 D7.8)", info.scans == 0 and info.need == 30, tostring(info.scans))
+    ok, info = T.fuelFor({ scans = 2, radius = 12 })
+    check("...a wider one is estimated from the 5300 of a radius-16 one", info.scans == 2 * 2236 and info.need == 4472 + 30, tostring(info.scans))
     T.cfg.scanFuel = { [8] = 500 }
     ok, info = T.fuelFor({ scans = 2 })
     check("T.cfg.scanFuel gives the real cost", info.scans == 1000)
     ok, info = T.fuelFor({ scans = 1, radius = 4 })
-    check("...a radius it has no cost for is estimated", info.scans == math.ceil(5300 / 64), tostring(info.scans))
+    check("...a radius it has no cost for is free up to 8", info.scans == 0, tostring(info.scans))
+    ok, info = T.fuelFor({ scans = 1, radius = 16 })
+    check("...and estimated above it", info.scans == 5300, tostring(info.scans))
     T.cfg.scanFuel = nil
     ok, info = T.fuelFor({ box = { 0, 0, 0, 16, 16, 16 } })
-    check("a box of scans: one tile of 17, the scan and the moves across it", info.scans == 663 + 17, tostring(info.scans))
+    check("a box of scans: one tile of 17, the scan (free) and the moves across it", info.scans == 17, tostring(info.scans))
     ok, info = T.fuelFor({ box = { 0, 0, 0, 17, 16, 16 } })
-    check("...a box one wider is two tiles", info.scans == 2 * 663 + 2 * 17, tostring(info.scans))
+    check("...a box one wider is two tiles", info.scans == 2 * 17, tostring(info.scans))
     local plan = T.blueprint.fill(0, 0, 3, 2, 0, 5, STONE)
     ok, info = T.fuelFor(plan)
     check("a blueprint: 9 cells, a layer, the way to its corner, a quarter more", info.build == math.ceil((9 + 1 + 3) * 1.25), tostring(info.build))
