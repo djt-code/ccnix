@@ -40,6 +40,18 @@ end
 local function thinking() return { type = "thinking", thinking = "", signature = "sig" } end
 
 -- The tool results in the user turn of request n: { [tool_use_id] = block }.
+-- A lua result's last line, the status line ("[at 0,0,2 facing 0, ...]"),
+-- is taken off its content and kept as the block's .status, so the checks
+-- on what the code said read it alone (scenario 30 checks the line).
+local function withoutStatus(b)
+    if type(b.content) ~= "string" then return b end
+    local cut = b.content:find("\n%[at %-?%d+,%-?%d+,%-?%d+ facing [^\n]*%]$") or b.content:find("\n%[status: [^\n]*%]$")
+    if not cut then return b end
+    local copy = {}
+    for k, v in pairs(b) do copy[k] = v end
+    copy.content, copy.status = b.content:sub(1, cut - 1), b.content:sub(cut + 1)
+    return copy
+end
 local function resultsIn(n)
     local req = HTTP.requests[n]
     if not req then return {}, { content = {} } end
@@ -48,7 +60,7 @@ local function resultsIn(n)
     local out = {}
     if type(last.content) == "table" then
         for _, b in ipairs(last.content) do
-            if b.type == "tool_result" then out[b.tool_use_id] = b end
+            if b.type == "tool_result" then out[b.tool_use_id] = withoutStatus(b) end
         end
     end
     return out, last
@@ -1072,3 +1084,41 @@ check("/new: the next goal starts a conversation of its own, told that it is new
 check("...the helpers loaded again, the files as they were", resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content == "-> 2\n-> true",
     resultsIn(4).toolu_2 and resultsIn(4).toolu_2.content)
 check("...and it says so, and logs it", Mine.logHas("^A new conversation") and (Mine.files["claude.log"] or ""):find("new conversation\n", 1, true))
+
+-- 30. each lua result ends with a status line (ADR-0011 D8): where the
+--     turtle is, its fuel and what the call used, the free slots, and lava
+--     or water beside it; an error result has it too, and a fault in it is
+--     said in its place
+fresh({ "" })
+Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 0, 3, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 1, 2, { name = "minecraft:water", level = 0 })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.dig(); T.forward(); turtle.dig(); T.forward(); return 'two'" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "error('stuck', 0)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "turtle.getItemCount = function() error('no count', 0) end; return 1" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+local countWas = turtle.getItemCount
+run("look at the status line")
+turtle.getItemCount = countWas
+local s30 = resultsIn(2).toolu_1
+check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it",
+    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above]",
+    s30 and tostring(s30.status))
+local e30 = resultsIn(3).toolu_2
+check("...an error result too", e30 and e30.is_error == true and e30.content == "error: stuck"
+    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above]", e30 and tostring(e30.status))
+local f30 = resultsIn(4).toolu_3
+check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
+    f30 and tostring(f30.status))
+check("...the line is logged with the result, not shown on the screen",
+    (Mine.files["claude.log"] or ""):find("result:\n-> two\n[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
+fresh({ "" })
+Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
+Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("lava round it")
+local l30 = resultsIn(2).toolu_1
+check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
+    l30 and tostring(l30.status))

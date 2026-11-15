@@ -85,6 +85,10 @@
 -- but the API key, and write only under /claude/ (so it can't rewrite the
 -- programs or the startup).  No shell.
 --
+-- Each result of the code ends with a line saying where the turtle is, its
+-- fuel and what the call used, its free slots, and any lava or water
+-- beside it (the log has it too; the screen doesn't).
+--
 -- The other tools:
 --   status       where it is, fuel, what's around, what it carries, the
 --                tools equipped, what's attached, the protected areas
@@ -301,7 +305,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = { code = { type = "string", description = "The Lua code to run." } },
@@ -760,6 +764,50 @@ local function runLua(code)
     return clip(all), not ok
 end
 
+-- The liquids the status line names, by block, in the order it names them,
+-- and the sides it looks at, with the inspect for each
+local LIQUIDS = { ["minecraft:lava"] = "lava", ["minecraft:water"] = "water" }
+local LIQUID_ORDER = { "lava", "water" }
+local LOOKS = { { "below", "inspectDown" }, { "ahead", "inspect" }, { "above", "inspectUp" } }
+
+-- The line that ends each lua result: where the turtle is, its fuel and
+-- what the call used of it (fuelBefore: the level before), the free
+-- slots, and lava or water beside it:
+-- "[at 1,0,2 facing 1, fuel 997 (-3), 14 slots free; lava below/ahead]".
+-- A fault in it is said in its place; Ctrl+T still stops claude.
+local function statusLine(fuelBefore)
+    local ok, line = pcall(function()
+        local fuel = turtle.getFuelLevel()
+        local used = ""
+        if type(fuel) == "number" and type(fuelBefore) == "number" then
+            local d = fuel - fuelBefore
+            used = d > 0 and string.format(" (+%d)", d) or string.format(" (-%d)", -d)
+        end
+        local free = 0
+        for s = 1, 16 do
+            if turtle.getItemCount(s) == 0 then free = free + 1 end
+        end
+        local sides = {}                -- liquid -> the sides it is on
+        for _, look in ipairs(LOOKS) do
+            local seen, data = turtle[look[2]]()
+            local liquid = seen and type(data) == "table" and LIQUIDS[data.name]
+            if liquid then
+                sides[liquid] = sides[liquid] or {}
+                table.insert(sides[liquid], look[1])
+            end
+        end
+        local wet = {}
+        for _, liquid in ipairs(LIQUID_ORDER) do
+            if sides[liquid] then wet[#wet + 1] = liquid .. " " .. table.concat(sides[liquid], "/") end
+        end
+        return string.format("[at %d,%d,%d facing %d, fuel %s%s, %d slots free%s]", T.pos.x, T.pos.y, T.pos.z, T.dir,
+            tostring(fuel), used, free, #wet > 0 and "; " .. table.concat(wet, ", ") or "")
+    end)
+    if ok then return line end
+    if line == "Terminated" then error(line, 0) end
+    return "[status: " .. tostring(line) .. "]"
+end
+
 local function status()
     local function at(inspect)
         local ok, d = inspect()
@@ -1094,6 +1142,7 @@ local function runTool(name, input)
         say("lightBlue", "---")
         -- what the code prints, in grey, apart from what Claude says
         if COLOUR then term.setTextColour(colours.lightGrey) end
+        local fuelBefore = turtle.getFuelLevel()
         local ok, out, isErr = pcall(runLua, code)
         if COLOUR then term.setTextColour(colours.white) end
         if not ok then error(out, 0) end        -- Terminated
@@ -1102,6 +1151,8 @@ local function runTool(name, input)
             local from = text.find(out, "error: ")
             say("red", from and (text.cut(out:sub(from), "\n")) or out)
         end
+        -- (for the model and the log; the screen has seen it happen)
+        out = out .. "\n" .. statusLine(fuelBefore)
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
     elseif name == "status" then
