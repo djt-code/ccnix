@@ -212,9 +212,13 @@ Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before. Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+What there is, everywhere:
+T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:
 T.stow(opts) - Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+Getting ready for a job:
+T.prepare(spec) - Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch what is, come back, check the room. True, info; false, why, info (what is short, too few slots free); nil, why.
 T.autoDump() - Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
 Frames and the world:
 T.frameChanged(old, new) - Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0). turtlelib calls it; returns true, or false and why.

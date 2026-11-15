@@ -1,7 +1,7 @@
 -- store.lua -- chests at home: where they are, what is in them, fetching from them and putting away
 --
 -- Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue,
--- T.where, T.fetch, T.stow, T.autoDump), or when T.cfg.autoDump is set.
+-- T.where, T.fetch, T.stow, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
 --
 -- A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the
 -- turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about
@@ -9,7 +9,8 @@
 -- takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk
 -- chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free
 -- slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known
--- it takes the junk chest's trip instead (T.dumpJunk).
+-- it takes the junk chest's trip instead (T.dumpJunk).  T.inventoryReport adds up what the chests and the turtle hold,
+-- and T.prepare readies the turtle for a job in one trip: what isn't needed put away, what is fetched, the room checked.
 --
 -- A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at)
 -- is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which
@@ -273,11 +274,12 @@ local function arrive(c, move)
     return side
 end
 
--- Run fn and then go back to where the turtle began, facing as before.  Returns fn's results, with a note on the
--- last if it couldn't get back.
-local function round(move, fn)
+-- Run fn and then go back to where the turtle began, facing as before (unless `stay`: then it stays where fn left it).
+-- Returns fn's results, with a note on the last if it couldn't get back.
+local function round(move, fn, stay)
     local from, dir = T.here(), T.dir
     local a, b, c = fn()
+    if stay then return a, b, c end
     if not T.at(from) then
         local ok, why = reach(from, move)
         if not ok then
@@ -496,12 +498,12 @@ function T.where(name)
     return nearest(found, T.here()), total
 end
 
--- Go to the chests that hold `name` and take n of it (default 1), then come back facing as before.  Returns how many
--- came aboard, and why if that is short of n.
+-- Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at
+-- the last chest).  Returns how many came aboard, and why if that is short of n.
 --
 -- `name` is an item's name (minecraft: assumed).  The chests come nearest first, each read again as it is visited
 -- (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the
--- turtle has no room.  opts.move is T.moveTo's.
+-- turtle has no room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
     n = n or 1
@@ -529,9 +531,83 @@ function T.fetch(name, n, opts)
                 why = reason
             end
         end
-    end)
+    end, opts.stay)
     if got >= n then return got end
     return got, (why or "the chests hold no more " .. name) .. " (got " .. got .. " of " .. n .. ")"
+end
+
+--------------------------------------------------------------------------
+-- What there is, everywhere
+--------------------------------------------------------------------------
+
+-- An age in seconds in words: "40s", "12m", "3h".
+local function ageText(s)
+    if s < 120 then return s .. "s" end
+    if s < 7200 then return math.floor(s / 60) .. "m" end
+    return math.floor(s / 3600) .. "h"
+end
+
+-- How the rows of a report are sorted: by name, or the most first
+local REPORT_ORDER = {
+    name = function(a, b) return a.name < b.name end,
+    count = function(a, b)
+        if a.total ~= b.total then return a.total > b.total end
+        return a.name < b.name
+    end,
+}
+
+-- Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total,
+-- turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }.  Moves nothing.
+--
+-- turtle is what is aboard, chests what the chests held when T.catalogue (or a fetch or stow since) last read them, places
+-- how many chests hold some, and age the seconds since the oldest of those counts was read (nil: aboard only).
+-- info.text is the report as lines ("cobblestone 164: turtle 20, 2 chests, read 5m ago").  opts.match (a name, a glob,
+-- a list or set of them) reports only those; opts.sort = "count" puts the most first.
+function T.inventoryReport(opts)
+    opts = opts or {}
+    local order = REPORT_ORDER[opts.sort or "name"]
+    if not order then return nil, "opts.sort is \"name\" or \"count\", not " .. tostring(opts.sort) end
+    local test = opts.match and matcher(opts.match) or function() return true end
+    local now, rows = clock(), {}
+    local function row(name)
+        if not rows[name] then rows[name] = { name = name, total = 0, turtle = 0, chests = 0, places = 0 } end
+        return rows[name]
+    end
+    for slot = 1, 16 do
+        local it = turtle.getItemDetail(slot)
+        if it and test(it.name) then row(it.name).turtle = row(it.name).turtle + it.count end
+    end
+    local list = load()
+    for _, c in ipairs(list) do
+        for name, n in pairs(c.items) do
+            if n > 0 and test(name) then
+                local r = row(name)
+                r.chests, r.places = r.chests + n, r.places + 1
+                local age = c.seen and c.seen > 0 and now - c.seen or nil
+                if age and (not r.age or age > r.age) then r.age = age end
+            end
+        end
+    end
+    local report = {}
+    local info = { kinds = 0, items = 0, chests = #list, text = {} }
+    for _, r in pairs(rows) do
+        r.total = r.turtle + r.chests
+        report[#report + 1] = r
+        info.kinds, info.items = info.kinds + 1, info.items + r.total
+        if r.age and (not info.oldest or r.age > info.oldest) then info.oldest = r.age end
+    end
+    table.sort(report, order)
+    for i, r in ipairs(report) do
+        local parts = {}
+        if r.turtle > 0 then parts[#parts + 1] = "turtle " .. r.turtle end
+        if r.places > 0 then
+            parts[#parts + 1] = (r.places == 1 and "1 chest" or r.places .. " chests") ..
+                (r.age and ", read " .. ageText(r.age) .. " ago" or "")
+        end
+        info.text[i] = (text.stripPrefix(r.name, NS) or r.name) .. " " .. r.total .. ": " .. table.concat(parts, ", ")
+    end
+    info.text = table.concat(info.text, "\n")
+    return report, info
 end
 
 --------------------------------------------------------------------------
@@ -539,8 +615,9 @@ end
 --------------------------------------------------------------------------
 
 -- Can the item go in a chest by default?  What isn't kept (T.isJunk); with opts.all also what the job keeps, but never a
--- tool, fuel or a peripheral (T.isEssential).
-local function stowable(name, opts)
+-- tool, fuel or a peripheral (T.isEssential); never what opts.keep names (a test made from it).
+local function stowable(name, opts, keep)
+    if keep and keep(name) then return false end
     if opts.all then return not T.isEssential(name) end
     return T.isJunk(name)
 end
@@ -569,16 +646,18 @@ end
 -- a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or
 -- a peripheral.  It goes to the nearest chest that wants something, drops what that chest should have, reads it again
 -- for the list and goes on, then comes back facing as before.  What no chest holds, with no bulk chest, or what does
--- not fit, stays aboard.  Info is { stowed, chests, left = { name = count } }; opts.move is T.moveTo's.
+-- not fit, stays aboard.  Info is { stowed, chests, left = { name = count } }.  opts: move (T.moveTo's), keep (names,
+-- a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
 function T.stow(opts)
     opts = opts or {}
     local move = opts.move or MOVE
     local list = load()
     if #list == 0 then return nil, "no chests are known: T.addChest (and a bulk chest), then T.stow" end
+    local keep = opts.keep and T.nameTest(opts.keep)
     local names = {}
     for slot = 1, 16 do
         local it = turtle.getItemDetail(slot)
-        if it and stowable(it.name, opts) then names[it.name] = true end
+        if it and stowable(it.name, opts, keep) then names[it.name] = true end
     end
     local info = { stowed = 0, chests = 0, left = {} }
     if next(names) == nil then return true, info end
@@ -624,7 +703,7 @@ function T.stow(opts)
             end
             for _, name in ipairs(wanted) do tried[keyOf(best) .. name] = true end
         end
-    end)
+    end, opts.stay)
     local why
     for name in pairs(names) do
         local n = T.countItem(name)
@@ -638,6 +717,90 @@ function T.stow(opts)
         return false, why, info
     end
     return true, info
+end
+
+--------------------------------------------------------------------------
+-- Getting ready for a job
+--------------------------------------------------------------------------
+
+-- What is short as words: "cobblestone: need 64, have 20; torch: need 8, have 0".
+local function shortWords(short)
+    local parts = {}
+    for i, s in ipairs(short) do
+        parts[i] = (text.stripPrefix(s.item, NS) or s.item) .. ": need " .. s.need .. ", have " .. s.have
+    end
+    return table.concat(parts, "; ")
+end
+
+-- Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch
+-- what is, come back, check the room.  True, info; false, why, info (what is short, too few slots free); nil, why.
+--
+-- spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots
+-- must be empty after (default 0).  The chests' list (as last read) is checked first: if they and the turtle together
+-- hold too little of something it refuses before moving, naming what is short, unless spec.partial.  Then it stows
+-- everything that isn't needed (but never tools, fuel or a peripheral; what is needed stays aboard whole), fetches what
+-- is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest).  Then it counts
+-- again: anything still short, or fewer free slots than asked, is a failure that says what.  spec.move is T.moveTo's.
+-- Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
+function T.prepare(spec)
+    spec = spec or {}
+    local need = spec.need or {}
+    if type(need) ~= "table" then return nil, "T.prepare wants { need = { [name] = n }, freeSlots = k }" end
+    local slots = spec.freeSlots or 0
+    if not (whole(slots) and slots >= 0 and slots <= 16) then return nil, "freeSlots is a whole number from 0 to 16" end
+    local want = {}
+    for name, n in pairs(need) do
+        if type(name) ~= "string" or not (whole(n) and n >= 0) then
+            return nil, "need is { [name] = n }, each n a whole number: " .. tostring(name) .. " = " .. tostring(n)
+        end
+        want[full(name)] = n
+    end
+    local names = tables.sortedKeys(want)
+    if #load() == 0 then return nil, "no chests are known: T.addChest, then T.catalogue" end
+    local short = {}
+    for _, name in ipairs(names) do
+        local have = T.countItem(name)
+        if have < want[name] then
+            local _, stored = T.where(name)
+            if have + (stored or 0) < want[name] then short[#short + 1] = { item = name, need = want[name], have = have + (stored or 0) } end
+        end
+    end
+    if #short > 0 and not spec.partial then
+        return nil, "short of " .. shortWords(short) .. " (aboard and in the chests as last read; T.catalogue reads them " ..
+            "again, spec.partial goes for what there is)", { short = short }
+    end
+    local move = spec.move or MOVE
+    local info = { fetched = {}, stowed = 0, short = {}, free = 0 }
+    local notes = {}
+    local ok, why = round(move, function()
+        local stowed, stowWhy, stowInfo = T.stow({ all = true, keep = names, stay = true, move = move })
+        if stowed then stowInfo = stowWhy else notes[#notes + 1] = "stowing: " .. tostring(stowWhy) end
+        info.stowed = stowInfo and stowInfo.stowed or 0
+        for _, name in ipairs(names) do
+            local missing = want[name] - T.countItem(name)
+            if missing > 0 then
+                local got, fetchWhy = T.fetch(name, missing, { stay = true, move = move })
+                info.fetched[name] = got
+                if got < missing then notes[#notes + 1] = tostring(fetchWhy) end
+            end
+        end
+        return true
+    end, spec.stay)
+    for _, name in ipairs(names) do
+        local have = T.countItem(name)
+        if have < want[name] then info.short[#info.short + 1] = { item = name, need = want[name], have = have } end
+    end
+    info.free = T.freeSlots()
+    local fails = {}
+    if not ok then fails[#fails + 1] = tostring(why) end
+    if #info.short > 0 then fails[#fails + 1] = "short of " .. shortWords(info.short) end
+    if info.free < slots then
+        fails[#fails + 1] = "only " .. info.free .. " slots free, " .. slots .. " wanted (what is needed, tools, fuel and " ..
+            "what no chest would take stay aboard)"
+    end
+    if #fails == 0 then return true, info end
+    if #notes > 0 then fails[#fails + 1] = "(" .. table.concat(notes, "; ") .. ")" end
+    return false, table.concat(fails, "; "), info
 end
 
 -- Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it
