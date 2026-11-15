@@ -679,10 +679,9 @@ numbers, the text tools and the network tools. Still to try:
 
 ## IRC
 
-- **A real client through the gateway** (0.35.0). From the VM:
-  `irssi -c 10.1.1.6 -n vm`, /join #minecraft, talk with B. On Libera,
-  `/set network.<name>.sasl_user` and `sasl_pass` for SASL (a channel
-  that wants a NickServ account, as #minecraft there does).
+- **SASL on Libera** (0.35.0): `/set network.<name>.sasl_user` and
+  `sasl_pass` in irc, for a channel that wants a NickServ account (as
+  #minecraft there does).
 
 ## The mod
 
@@ -720,6 +719,13 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`).
 
 ## Tested
+
+- 2026-11-14 — A real IRC client through the gateway (ircd 0.35.0):
+  irssi on a real machine registered with the ircd (its CAP LS answered,
+  then the welcome), joined #minecraft and saw MC and Lab-B there. A
+  first try stalled after the TCP handshake, at "Waiting for CAP LS
+  response": the client machine lacked its route back to the CC networks
+  (asymmetric routing), not an ircd or gateway fault.
 
 - 2026-11-14 — ccnix-mod 0.27.0, on the dma.space pack's client:
   - The client joins the pack's own server, which has no ccnix, with no mod error.
