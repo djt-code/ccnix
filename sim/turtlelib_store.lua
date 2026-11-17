@@ -12,7 +12,8 @@
 --     the next chest when one is empty behind its back, stops for no room, comes back;
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
---     aboard and say so; nothing is ever dropped in the world;
+--     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
+--     the why; nothing is ever dropped in the world;
 --   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
 --   * T.inventoryReport: every item across the chests and the turtle, totalled, with each count's age, as lines too,
 --     sorted by name or count, matched; it moves nothing;
@@ -473,6 +474,11 @@ do
     check("...a bulk chest that is full too: false, it says so, the items stay aboard", ok == false and why:find("stayed aboard", 1, true) and info.left[COBBLE] == 64 and info.left[DIRT] == 5
         and carrying(COBBLE) == 64 and carrying(DIRT) == 5 and here(), tostring(why))
     check("...nothing was thrown", (W.thrown or 0) == 0)
+    check("...each item left aboard has its reason in info: every chest it was tried at, and that each was full",
+        info.reasons and info.reasons[COBBLE] == "chest at 3,0,1 full, bulk chest at 0,0,-3 full" and info.reasons[DIRT] == "bulk chest at 0,0,-3 full",
+        tostring(info.reasons and info.reasons[COBBLE]) .. " / " .. tostring(info.reasons and info.reasons[DIRT]))
+    check("...and the why says them all, not the first item only",
+        why == "some stayed aboard: 64 cobblestone (chest at 3,0,1 full, bulk chest at 0,0,-3 full); 5 dirt (bulk chest at 0,0,-3 full)", tostring(why))
 
     -- a chest with room for part of it, and no bulk chest: the part that fits is counted
     setUp()
@@ -486,6 +492,8 @@ do
     ok, why, info = T.stow()
     check("a chest with room for part of it: the part that fits goes in and is counted, the rest stays aboard", ok == false and info.stowed == 24 and info.left[COBBLE] == 40
         and carrying(COBBLE) == 40 and chestHas(3, 0, 1, COBBLE) == 64, tostring(info.stowed) .. " " .. tostring(carrying(COBBLE)))
+    check("...its reason: the chest full, and no bulk chest", info.reasons and info.reasons[COBBLE] == "chest at 3,0,1 full; no bulk chest"
+        and why == "some stayed aboard: 40 cobblestone (chest at 3,0,1 full; no bulk chest)", tostring(why))
 
     setUp()
     T.forgetChest(C.x, C.y, C.z, C.side)
@@ -496,6 +504,8 @@ do
     ok, why, info = T.stow()
     check("no bulk chest: what a chest holds goes in, the rest stays aboard and is reported", ok == false and chestHas(3, 0, 1, COBBLE) == 74 and carrying(COBBLE) == 0
         and carrying("minecraft:gravel") == 10 and info.left["minecraft:gravel"] == 10 and next(info.left, "minecraft:gravel") == nil, tostring(why))
+    check("...its reason: no chest holds it and no bulk chest", info.reasons and info.reasons["minecraft:gravel"] == "no chest holds it and no bulk chest"
+        and why == "some stayed aboard: 10 gravel (no chest holds it and no bulk chest)", tostring(why))
     -- the dirt is in a chest: the one that holds it, not the bulk chest
     setUp()
     T.catalogue()
@@ -514,6 +524,16 @@ do
     W.give(1, COBBLE, 10)
     ok, why = T.stow()
     check("the chest that held it is gone: the bulk chest takes it", ok == true and chestHas(0, 0, -3, COBBLE) == 10 and here(), tostring(why))
+    -- a chest that is gone, and no bulk chest: the reason is the trip's
+    setUp()
+    T.forgetChest(C.x, C.y, C.z, C.side)
+    T.catalogue()
+    W.set(3, 0, 1, nil)
+    W.give(1, COBBLE, 10)
+    local info2
+    ok, why, info2 = T.stow()
+    check("...gone, and no bulk chest: the item stays aboard, its reason what went wrong there", ok == false and carrying(COBBLE) == 10
+        and info2.reasons[COBBLE] == "no chest on the front of 3,0,0; no bulk chest", tostring(info2 and info2.reasons and info2.reasons[COBBLE]))
 end
 
 --------------------------------------------------------------------------
