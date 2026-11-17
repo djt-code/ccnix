@@ -74,7 +74,7 @@ Liquids and falling blocks:
 T.liquidNear(x, y, z) - The liquid that would flow into the cell x, y, z (or a table { x, y, z }) if it were opened: its name and cell, or nil.
 T.isFalling(name) - Does this block fall when what is under it goes (sand, gravel, concrete powder, an anvil, ...)?
 T.cellSet(spec) - The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
-T.moveTo(x, y, z, opts) - Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. True (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid, path.
+T.moveTo(x, y, z, opts) - Move to x, y, z, digging only what opts.dig allows: true (and a warning, if any), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid; path = true hands a blocked run to T.travel.
 T.digCell(x, y, z, opts) - Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
 T.trail() - The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
 T.retrace(n, opts) - Walk back along the trail over the last n cells (default all of it), skipping loops. True and the moves made, or false, why and the moves made.
@@ -258,4 +258,4 @@ T.mergeScan(entries, r, opts) - Put a scan somebody else took, here, in the map:
 T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
 Inspecting:
 T.inspectAt(x, y, z, opts) - Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
-T.inspectAll(list, opts) - T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.
+T.inspectAll(list, opts) - T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed: the way to get block states over an area (T.scan gives names only).

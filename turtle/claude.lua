@@ -216,6 +216,11 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
+-- Memory over NOTES.large bytes in all is a start note: a file viewed
+-- stays in the conversation, never cleared, so it is sent on every call
+-- (about NOTES.bytesAToken bytes a token: the field's 80 KB notes.md came
+-- to about 28k tokens)
+local NOTES = { large = 32 * 1024, bytesAToken = 3 }
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -367,9 +372,9 @@ Cost: a move costs one fuel; a Geo Scanner scan costs fuel too, steeply with its
 
 Building: the library is meant to be used end to end, and loads each part the first time you call it. (1) Where: T.setOrigin(x, y, z, facing) once, with the cell the turtle stands on and the compass way it faces (ask the player; gps.locate is used when there is a GPS; without a facing a scan works it out), then T.toWorld / T.toLocal convert between this frame and the game's. (2) Look: T.scan(r) and T.scanBox(box) put what the Geo Scanner sees into the map, a record on disk of every block the turtle has seen, dug, placed or walked through; read it with T.map.get / find / count / top, and as text with T.map.heights(box) and T.map.slice(y, box). A scan gives names, not states: T.inspectAt / inspectAll read a block's facing and half. Ask the map rather than keeping your own tables of the world. (3) Go: T.moveTo for a short run, T.travel(x, y, z) for a long one (it plans over the map, along a clear layer, round protected areas and lava, and re-plans at a bump); T.path only plans. (4) Place: T.placeAt(x, y, z, item, { facing = "north", half = "top" }) gets stairs, slabs, logs, doors, torches and the like the right way round (it learns what the game does; T.forgetPlacements() drops what it learnt if that goes wrong); for a structure write a blueprint (T.blueprint.walls / box / fill / fromMap, or parse a plan file or table) and T.build(plan, { inside = "keep" }) (inside names the protected area the build works in, protect "keep" afterwards with opts.protect): it checks the materials, builds layer by layer, saves its progress and carries on where it stopped if you call T.build() again; T.verify(plan) lists what differs; T.replace swaps one block for another in a box. (5) Materials: T.canCraft and T.craft(name, n) work from a chest in front (they stash and restore the inventory themselves), T.smelt, T.harvest(pattern, box, n) digs what you need nearest first, T.fetch / T.stow / T.where / T.catalogue for the chests at home (tell it with T.addChest), T.refuelFromLava, T.fuelFor(plan) before a big job; T.cfg.autoDump = true sends a nearly full inventory to the chests by itself (in your code, not while a program you run has the turtle). T.addRecipe is kept in memory only: keep() the calls. (6) Keep track: T.job.start(goal, steps) and T.job.done() so a cleared conversation or a reboot resumes at the step; T.report(text) tells the player through a chat box; T.cfg.undo = true journals your digs and placements (not a program's you run) so T.undo(n) can put them back; a block with a facing goes back only once T.setOrigin is told.
 
-How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep each reusable helper (a function you will want again) with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua (code that doesn't compile or run is refused, and nothing is written); at the start of every session /claude/helpers.lua, then each file in /claude/helpers/, is loaded into the code's world, each on its own, so what they define is there in every lua call. Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too: a session starts with turtlelib's defaults. While a goal is under way /claude/resume.txt holds it, for a resume after a reboot: keep its first line, and add where you are and what's left as you go. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil. Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
+How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep each reusable helper (a function you will want again) with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua (code that doesn't compile or run is refused, and nothing is written); at the start of every session /claude/helpers.lua, then each file in /claude/helpers/, is loaded into the code's world, each on its own, so what they define is there in every lua call. Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too: a session starts with turtlelib's defaults. While a goal is under way /claude/resume.txt holds it, for a resume after a reboot: keep its first line, and add where you are and what's left as you go. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil: read the whole why before you shorten it (what to do is often at its end). Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
 
-The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. What they say in chat while you think comes with your next results (a chat box aboard listens); what's said while your code runs is missed. The chat tool says something in the game's chat without code, and with ask = true asks and waits for the answer, from the chat or the keyboard; T.report.ask(question, opts) asks from code. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
+The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. What they say in chat while you think comes with your next results (a chat box aboard listens); what's said while your code runs is missed. The chat tool says something in the game's chat without code, and with ask = true asks and waits for the answer, from the chat or the keyboard; T.report.ask(question, opts) asks from code. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use; put a block back with T.placeAt (it stands outside the cell), not by placing up from the hole. A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal ("Movement obstructed"): ask the player to test those. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
 
 What you can call in turtlelib (T), one line a function, with what it does and returns (made from the code's own comments, so it is right). A line ending in a colon is a group heading, not a function.
 @INDEX@
@@ -391,7 +396,7 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories (a file you view is sent on every call after, so keep notes.md short). web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
 Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, ask: the chat tool with ask = true reaches the player in the game, ask_user only the keyboard. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
@@ -1141,6 +1146,8 @@ local function chatTool(input)
         log("chat: " .. said)
         local ok, why = T.report.now(said, { plain = true })
         if ok then return "said in chat" end
+        say("orange", "(not said in chat: " .. tostring(why) .. ")")
+        log("chat: not said: " .. tostring(why))
         return "not said in chat: " .. tostring(why), true
     end
     local ttl = CACHE_SECONDS[opts.cache or "5m"]
@@ -1182,6 +1189,8 @@ local function chatTool(input)
         return string.format("%s (the wait stops short of the cache's %s; a longer timeout_s waits longer, and then the next call writes the conversation to the cache again)",
             failed, CACHE_TTLS[opts.cache or "5m"])
     end
+    say("orange", "(couldn't ask in chat: " .. tostring(failed) .. ")")
+    log("chat, couldn't ask: " .. tostring(failed))
     return "couldn't ask in chat: " .. tostring(failed) .. " (ask_user asks at the keyboard alone)", true
 end
 
@@ -1551,6 +1560,24 @@ local function whatsNew()
     if #lines == 0 then return nil end
     return string.format("ccnix was updated from %s to %s; what changed for you:\n%s", last or "an earlier version", current,
         table.concat(lines, "\n"))
+end
+
+-- The bytes in a folder and every folder in it
+function NOTES.size(dir)
+    local total = 0
+    for _, name in ipairs(fs.exists(dir) and fs.isDir(dir) and fs.list(dir) or {}) do
+        local file = fs.combine(dir, name)
+        total = total + (fs.isDir(file) and NOTES.size(file) or fs.getSize(file))
+    end
+    return total
+end
+
+-- The note on memory grown past NOTES.large, or nil
+function NOTES.note()
+    local size = NOTES.size(MEMORY_DIR)
+    if size <= NOTES.large then return nil end
+    return string.format("Your notes in %s are %d KB, about %dk tokens on every call once viewed: move what you no longer need to an archive file outside %s (under /%s/, read with fs when it's wanted).",
+        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
 end
 
 -- Keep the version the model has had the news for.
@@ -1930,7 +1957,69 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
-local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
+-- What the log says of a reply besides its tokens: each context edit the
+-- API applied (by its kind), the cache written again, a cut-off.
+--
+-- EDITS: each kind of edit's line, from the fields it reports, and what
+-- it does to the cache when it changes (another kind: its type, and the
+-- tokens it freed).  cleared: the last line logged for each kind (the API
+-- reports the same clear on every call after it, so a line is logged
+-- when it differs from its own kind's last one).  last: the last call,
+-- what it had in all and when it came back (nil: nothing to compare with,
+-- at a conversation's start or after a web search, whose usage adds up
+-- the search's passes).  A call that read from the cache at least
+-- rewriteMin tokens less than the last call had in all, and wrote at
+-- least that much, wrote the conversation to the cache again from where
+-- it changed (an hour's cache costs twice the input's price to write).
+local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
+    clear_thinking_20251015 = { why = "old thinking cleared", line = function(e)
+        return string.format("context: old thinking cleared (%d turns, %d tokens)",
+            e.cleared_thinking_turns or 0, e.cleared_input_tokens or 0)
+    end },
+    clear_tool_uses_20250919 = { why = "old tool results cleared", line = function(e)
+        return string.format("context: %d old tool results cleared (%d tokens)",
+            e.cleared_tool_uses or 0, e.cleared_input_tokens or 0)
+    end },
+} }
+
+-- A new conversation: no clears seen, nothing to compare with
+function replyLog.reset()
+    replyLog.cleared, replyLog.last = {}, nil
+end
+
+-- Log what changed in `reply` (asked for at `started`)
+function replyLog.add(reply, started)
+    local why = {}             -- (what wrote the cache again, if it was)
+    for _, e in ipairs((reply.context_management or {}).applied_edits or {}) do
+        local kind = replyLog.EDITS[e.type]
+        local line = kind and kind.line(e)
+            or string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0)
+        if line ~= replyLog.cleared[e.type] then
+            log(line)
+            replyLog.cleared[e.type] = line
+            why[#why + 1] = kind and kind.why or tostring(e.type)
+        end
+    end
+    local u, last = reply.usage or {}, replyLog.last
+    local read, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+    if last and last.input - read >= replyLog.rewriteMin and written >= replyLog.rewriteMin then
+        if started - last.at >= CACHE_SECONDS[opts.cache or "5m"] then
+            why[#why + 1] = "over the cache's " .. CACHE_TTLS[opts.cache or "5m"] .. " since the last call"
+        end
+        log(string.format("cache: written again (%d tokens written, %d read from it; the last call had %d in): %s",
+            written, read, last.input, #why > 0 and table.concat(why, ", ") or "why not seen"))
+    end
+    replyLog.last = { input = (u.input_tokens or 0) + read + written, at = now() }
+    for _, b in ipairs(reply.content) do
+        if b.type == "server_tool_use" then replyLog.last = nil end
+    end
+    if reply.stop_reason == "max_tokens" then
+        local thought = (u.output_tokens_details or {}).thinking_tokens
+        log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
+            thought and string.format(", %d thinking", thought) or ""))
+    end
+end
+
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -1964,13 +2053,7 @@ local function converse(goal)
                 log(what)
             end
         end
-        -- (logged when it differs from the last one: a clear stays applied,
-        -- and is reported again, on every call until a bigger one)
-        for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            local line = string.format("context: %d old tool results cleared (%d tokens)",
-                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0)
-            if line ~= lastCleared then log(line); lastCleared = line end
-        end
+        replyLog.add(reply, started)
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):
             -- sent back as it is, it carries on where it was
@@ -2027,11 +2110,14 @@ end
 local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
-    hardClear, lastCleared, startNotes = false, nil, {}
+    hardClear, startNotes = false, {}
+    replyLog.reset()
     startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
     say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    local memory = NOTES.note()
+    if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
 end
 
@@ -2058,6 +2144,12 @@ local function main()
         say("yellow", (text.cut(news, ";")) .. ": Claude is told what changed.")
         log("news: " .. news)
         startNotes[#startNotes + 1] = news
+    end
+    local memory = NOTES.note()
+    if memory then
+        say("yellow", memory)
+        log("memory: " .. memory)
+        startNotes[#startNotes + 1] = memory
     end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
     if goal == "" then

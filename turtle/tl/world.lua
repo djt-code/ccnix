@@ -1569,7 +1569,7 @@ local function cellOf(item)
     return item[1], item[2], item[3]
 end
 
--- T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.
+-- T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed: the way to get block states over an area (T.scan gives names only).
 --
 -- Each time it goes next to the nearest one (greedy, not the shortest tour), and looks at any other cell beside it from there.
 function T.inspectAll(list, opts)

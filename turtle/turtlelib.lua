@@ -83,6 +83,11 @@
 -- Programs configure it by setting fields on T.cfg and T.diggable before
 -- moving.  Everything is relative to where the turtle starts: (0,0,0)
 -- facing +z, with +x to its right.
+--
+-- A turtle can't open doors or trapdoors, press buttons, set a repeater's
+-- delay or pass a nether portal (it gets "Movement obstructed"): the
+-- player tests those.  Put a block back with T.placeAt, which stands
+-- outside the cell, not by placing up from the hole.
 
 local T = {}
 
@@ -1627,9 +1632,10 @@ local function stepInto(d, rules)
     return false, "can't move into " .. at .. (name and (" (" .. name .. ")") or ": something is in the way"), name, cell
 end
 
--- Move to the cell x, y, z (the turtle's frame), digging only what opts.dig
--- allows.  True (and a warning if it dug under sand), or false, why, the block and cell that stopped
--- it.  opts: order, dig, digOnly, avoid, inside, liquid, path.
+-- Move to x, y, z, digging only what opts.dig allows: true (and a warning,
+-- if any), or false, why, the block and cell that stopped it.  opts: order,
+-- dig, digOnly, avoid, inside, liquid; path = true hands a blocked run to
+-- T.travel.
 --
 -- It goes along the axes in the order opts.order names (default "yxz": up or
 -- down first, then x, then z).  opts (all optional):

@@ -461,6 +461,23 @@ check("a tool call cut off at max_tokens is answered (not run), then told to car
     cr and cr[1].type == "tool_result" and cr[1].tool_use_id == "toolu_1" and cr[1].is_error == true
         and cr[2].type == "text" and cr[2].text:find("cut off") and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
 
+-- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1),
+--      the second as the first (what a second one does is D4's)
+do
+fresh({ "" })
+HTTP.queue = {
+    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000, cache_read_input_tokens = 50,
+        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 31800 } } }),
+    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000,
+        cache_read_input_tokens = 50, cache_creation_input_tokens = 25 } }),
+}
+run("think hard")
+local klog = Mine.files["claude.log"] or ""
+check("a cut-off at max_tokens is logged with the tokens out and thinking, each time",
+    #HTTP.requests == 2 and klog:find("cut off at max_tokens (32000 out, 31800 thinking)", 1, true)
+        and klog:find("cut off at max_tokens (32000 out)\n", 1, true), klog)
+end
+
 -- 14. a request that fails after tool results: the results stay, and the
 --     next goal goes on from them in the same turn
 fresh({ "try again", "" })
@@ -730,6 +747,79 @@ local clog = Mine.files["claude.log"] or ""
 local _, sameClears = clog:gsub("context: 4 old tool results cleared %(20000 tokens%)", "")
 check("the same clear reported on three calls is logged once, a new one again",
     sameClears == 1 and clog:find("context: 9 old tool results cleared (41000 tokens)", 1, true), sameClears)
+
+-- both edits in one reply, as the API reports them (ADR-0013 phase 1):
+-- each logged by its own type (old thinking as turns, not as "0 old tool
+-- results"), and each once until it changes, the other's line between
+-- them notwithstanding
+do
+fresh({ "" })
+local function bothCleared(turns, thinkTokens)
+    return { context_management = { applied_edits = {
+        { type = "clear_thinking_20251015", cleared_thinking_turns = turns, cleared_input_tokens = thinkTokens },
+        { type = "clear_tool_uses_20250919", cleared_tool_uses = 4, cleared_input_tokens = 20000 } } } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", bothCleared(3, 15000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", bothCleared(3, 15000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", bothCleared(4, 18000)),
+    reply({ text("Done.") }, "end_turn", bothCleared(4, 18000)),
+}
+run("clear both")
+local blog = Mine.files["claude.log"] or ""
+local _, toolLines = blog:gsub("context: 4 old tool results cleared %(20000 tokens%)", "")
+local _, think3 = blog:gsub("context: old thinking cleared %(3 turns, 15000 tokens%)", "")
+local _, think4 = blog:gsub("context: old thinking cleared %(4 turns, 18000 tokens%)", "")
+check("both edits in a reply: old thinking logged as turns, each edit once until it changes",
+    toolLines == 1 and think3 == 1 and think4 == 1 and not blog:find("context: 0 old tool results", 1, true),
+    toolLines .. " " .. think3 .. " " .. think4)
+end
+
+-- the cache written again (ADR-0013 phase 1): a call that reads much less
+-- from the cache than the last call had in all is logged, with why when
+-- the harness saw why (a clear in that reply, a wait past the cache's
+-- TTL); the growth of a conversation isn't, nor the call after a web
+-- search (its usage adds up the search's passes), nor a new conversation
+do
+fresh({ "/new", "fresh start", "" })
+local function used(read, written, more)
+    local r = { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = read,
+                          cache_creation_input_tokens = written } }
+    for k, v in pairs(more or {}) do r[k] = v end
+    return r
+end
+local thinkCleared = { context_management = { applied_edits = {
+    { type = "clear_thinking_20251015", cleared_thinking_turns = 1, cleared_input_tokens = 9000 } } } }
+local timeWas19, sleepWas19 = os.time, sleep
+local skipped = 0
+os.time = function(t) if t ~= nil then return timeWas19(t) end return timeWas19() + skipped end
+sleep = function(s) skipped = skipped + (tonumber(s) or 0) end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", used(27000, 70000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", used(97000, 3000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", used(27000, 76000, thinkCleared)),
+    reply({ toolUse("lua", { code = "sleep(400) return 4" }) }, "tool_use", used(103000, 2000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 5" }) }, "tool_use", used(27000, 80000, thinkCleared)),
+    reply({ { type = "server_tool_use", id = "srvtoolu_9", name = "web_search", input = { query = "x" } },
+            { type = "web_search_tool_result", tool_use_id = "srvtoolu_9", content = {} },
+            toolUse("lua", { code = "return 6" }) }, "tool_use", used(300000, 5000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 7" }) }, "tool_use", used(110000, 4000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 8" }) }, "tool_use", used(80000, 60000, thinkCleared)),
+    reply({ text("Done.") }, "end_turn", used(140000, 2000, thinkCleared)),
+    reply({ text("New here.") }, "end_turn", used(27000, 1000)),
+}
+run("rewrites")
+os.time, sleep = timeWas19, sleepWas19
+local rlog = Mine.files["claude.log"] or ""
+local rewrites = {}
+for line in rlog:gmatch("cache: written again[^\n]*") do rewrites[#rewrites + 1] = line end
+check("the cache written again is logged with why: a clear, the cache's TTL passed, or not seen; growth and a web search's sum aren't",
+    #rewrites == 3
+        and rewrites[1] == "cache: written again (76000 tokens written, 27000 read from it; the last call had 100100 in): old thinking cleared"
+        and rewrites[2] == "cache: written again (80000 tokens written, 27000 read from it; the last call had 105100 in): over the cache's 5 minutes since the last call"
+        and rewrites[3] == "cache: written again (60000 tokens written, 80000 read from it; the last call had 114100 in): why not seen",
+    table.concat(rewrites, "\n"))
+end
 
 -- 19b. the rest of the sandbox (scenario 2 has the start of it): write
 --     and io.write come back a line at a time (print after a write
@@ -1336,6 +1426,27 @@ local c7, c8 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
 check("no chat box: an error result saying why, nothing waited for",
     c7 and c7.is_error == true and c7.content:find("^couldn't ask in chat: .*chat_box") and c8 and c8.is_error == true
         and c8.content:find("^not said in chat: "), c7 and c7.content)
+local nlog = Mine.files["claude.log"] or ""
+check("...both failures logged and shown (ADR-0013 phase 1)",
+    nlog:find("chat, couldn't ask: [^\n]*chat_box") and nlog:find("chat: not said: [^\n]*chat_box")
+        and Mine.logHas("^%(not said in chat: .*chat_box"), nlog)
+
+-- with no turtle.player, T.report refuses: the refusal is logged and
+-- shown, not only the line said before it (ADR-0013 phase 1; whether the
+-- tool then speaks to everyone is D3's)
+chatFresh()
+SET32["turtle.player"] = nil
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Starting." }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("nobody set")
+SET32["turtle.player"] = "Steve"
+local c9 = resultsIn(2).toolu_1
+check("no player set: the chat tool's refusal is logged and shown",
+    c9 and c9.is_error == true and c9.content:find("no player to tell", 1, true)
+        and (Mine.files["claude.log"] or ""):find("chat: not said: no player to tell", 1, true)
+        and Mine.logHas("^%(not said in chat: no player to tell"), c9 and c9.content)
 
 chatFresh()
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
@@ -1769,4 +1880,55 @@ run("keep my settings")
 local sys39 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
     sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
+end
+
+-- 40. large notes (ADR-0013 phase 1): memory over 32 KB in all (its
+--     folders counted) is a start note, on the screen and with the first
+--     goal (and after /new), saying what it costs and where the old
+--     goes; under it, none
+do
+fresh({ "/new", "again", "" })
+fs.makeDir("claude/memories")
+fs.makeDir("claude/memories/old")
+Mine.files["claude/memories/notes.md"] = string.rep("x", 30 * 1024)
+Mine.files["claude/memories/old/done.md"] = string.rep("y", 10 * 1024)
+HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
+run("tidy up")
+local goal40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local NOTE40 = "Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: move what you no longer need to an archive file outside /memories (under /claude/, read with fs when it's wanted)."
+check("memory over 32 KB: a start note with the first goal and on the screen",
+    goal40 == "tidy up\n\n[" .. NOTE40 .. "]" and Mine.logHas("^Your notes in /memories are 40 KB"), goal40)
+local new40 = HTTP.requests[2] and HTTP.requests[2].body.messages[1].content or ""
+check("...and with the first goal after /new", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
+
+fresh({ "" })
+fs.makeDir("claude/memories")
+Mine.files["claude/memories/notes.md"] = string.rep("x", 20 * 1024)
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("small notes")
+check("...under it, no note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "small notes")
+end
+
+-- 41. the prompt and the manual (ADR-0013 phase 2): what a turtle can't
+--     do and the player tests, a block put back with T.placeAt, a why
+--     read whole before it's shortened, notes kept short; the index's
+--     lines for T.moveTo's path and T.inspectAll
+do
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("what can't I do")
+local sys41 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt: no doors, buttons, repeater delays or portals for a turtle: the player tests them",
+    sys41:find("A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal", 1, true) ~= nil)
+check("...a block put back with T.placeAt, not placed up from the hole",
+    sys41:find("put a block back with T.placeAt", 1, true) ~= nil)
+check("...a why read whole before it's shortened",
+    sys41:find("read the whole why before you shorten it", 1, true) ~= nil)
+check("...notes kept short, the old outside /memories",
+    sys41:find("the old moved to an archive file outside /memories", 1, true) ~= nil)
+check("the manual's overview says what a turtle can't do",
+    REAL_MANUAL:find("A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal", 1, true) ~= nil)
+check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way to block states over an area",
+    sys41:find("\nT%.moveTo%(x, y, z, opts%) %- [^\n]*path = true hands a blocked run to T%.travel")
+        and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
 end
