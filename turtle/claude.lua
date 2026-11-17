@@ -147,10 +147,13 @@
 --                insert, delete, rename, only under that folder)
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
--- Old tool calls (the code and its results) and old thinking are cleared
--- from the conversation once it's long (the API's context editing), the
--- memory tool's kept; when the API says the conversation is too long all
--- the same, it's sent again with more of it cleared.  A reply paused
+-- Old tool calls (the code and its results) and old thinking are kept
+-- while the conversation grows, and cleared in one go once a call's input
+-- reaches 180k tokens (the API's context editing): all but the last 6
+-- calls, the memory tool's kept, and the thinking before the turn in
+-- progress.  Each clear has the cache written again, so one deep clear
+-- pays for many calls.  When the API says the conversation is too long
+-- all the same, it's sent again with more of it cleared.  A reply paused
 -- partway through its web searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
@@ -225,18 +228,26 @@ local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran 
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
--- Old tool results cleared once the conversation is this long (tokens in),
--- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST.  A
--- clear changes the conversation from the first result cleared on, so the
--- cache is written again from there: rarer and bigger clears cost less
--- than many small ones.
-local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
--- The harder clear once the API has said the prompt is too long: sooner,
--- fewer results kept, and whatever it frees
-local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST = 50000, 2, 0
--- The thinking of the last THINKING_TURNS assistant turns is kept; older
--- thinking is cleared with the old tool results' code
-local THINKING_TURNS = 3
+-- Context editing (ADR-0013 D1).  The API clears old thinking and old tool
+-- calls on its side, from what each request sends (it keeps nothing
+-- between requests), and the cache is written again from the first block
+-- a clear changes: each clear costs a rewrite of the conversation from
+-- there on.  Clearing a little at a time (the last 3 thinking turns kept,
+-- tool results from 100k) cost 41 rewrites in a day, most of the spend.
+-- So all thinking and every tool call are kept while the conversation
+-- grows, and once a call's input reaches CLEAR.mark the next request clears
+-- deep: the thinking of all but the turn in progress, and every tool call
+-- but the last CLEAR.keep.  One rewrite down to the floor buys many cheap
+-- calls after it.  The requests after it ask for the same clear and no
+-- more (its keep counts grow with what came since): asking for less would
+-- send back what was cleared, the API being stateless.  CLEAR.trigger is
+-- the tool edit's: under any conversation that reached the mark, so the
+-- clear applies to all a request sends.  (The functions are by the API's.)
+local CLEAR = { mark = 180000, keep = 6, trigger = 100000 }
+-- The harder clear once the API has said the prompt is too long, for the
+-- rest of the conversation: sooner, fewer results kept, whatever it frees,
+-- and the thinking of the last 3 turns kept
+local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
@@ -1693,14 +1704,13 @@ end
 -- harder one for the rest of the conversation (/new starts it again)
 local hardClear = false
 
--- The context edits: old thinking first (the API wants that edit listed
--- before the others), then the old tool calls, their code and results
--- both, the memory tool's kept.
-local function contextEdits()
-    local trigger, keep, atLeast = CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST
-    if hardClear then trigger, keep, atLeast = HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST end
-    return { edits = {
-        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = THINKING_TURNS } },
+-- The edits that clear old thinking (keeping that of the last `turns`
+-- turns) and old tool calls (keeping the last `keep`), their code and
+-- results both, the memory tool's never: the thinking edit first, as the
+-- API wants.
+function CLEAR.edits(turns, trigger, keep, atLeast)
+    return {
+        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = turns } },
         {
             type = "clear_tool_uses_20250919",
             trigger = { type = "input_tokens", value = trigger },
@@ -1709,7 +1719,64 @@ local function contextEdits()
             clear_tool_inputs = true,
             exclude_tools = { "memory" },
         },
-    } }
+    }
+end
+
+-- The conversation's turns as the API counts them for the thinking edit:
+-- each user message that isn't all tool results starts one (a goal, or
+-- results with a note after them: chat heard, a reminder)
+function CLEAR.turns()
+    local n = 0
+    for _, m in ipairs(messages) do
+        local results = m.role == "user" and type(m.content) == "table" and #m.content > 0
+        for _, b in ipairs(results and m.content or {}) do
+            if b.type ~= "tool_result" then results = false end
+        end
+        if m.role == "user" and not results then n = n + 1 end
+    end
+    return n
+end
+
+-- The tool calls the tool edit may clear: all but the memory tool's
+function CLEAR.calls()
+    local n = 0
+    for _, m in ipairs(messages) do
+        for _, b in ipairs(m.role == "assistant" and type(m.content) == "table" and m.content or {}) do
+            if b.type == "tool_use" and b.name ~= "memory" then n = n + 1 end
+        end
+    end
+    return n
+end
+
+-- The deep clear's edits, when the last call's input (lastInput, nil after
+-- a web search, whose usage adds up its passes) reached CLEAR.mark and
+-- there's more than the kept calls to clear since the last one; else nil.
+-- Where it was is kept in CLEAR.at for the requests after it.  (This is the
+-- one place that decides the mark: a compaction step could stand here.)
+function CLEAR.atMark(lastInput)
+    if not lastInput or lastInput < CLEAR.mark then return nil end
+    local calls = CLEAR.calls()
+    if CLEAR.at and calls - CLEAR.at.calls <= CLEAR.keep then return nil end
+    CLEAR.at = { turns = CLEAR.turns(), calls = calls }
+    log(string.format("context: a deep clear at %d tokens in (the last call's): the old thinking, and all but the last %d tool calls",
+        lastInput, CLEAR.keep))
+    return CLEAR.since()
+end
+
+-- After a deep clear, the edits that clear what it cleared and no more:
+-- the thinking of the turn it was in and of each since, the kept calls
+-- and each one since
+function CLEAR.since()
+    return CLEAR.edits(1 + CLEAR.turns() - CLEAR.at.turns, CLEAR.trigger, CLEAR.keep + CLEAR.calls() - CLEAR.at.calls, 0)
+end
+
+-- The context edits a request sends: the hard clear once the API has said
+-- the conversation is too long; a deep clear at the mark and the same
+-- after it; before it, all thinking kept and no tool call cleared.
+local function contextEdits()
+    if hardClear then return { edits = CLEAR.edits(HARD_THINKING, HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST) } end
+    local edits = CLEAR.atMark(CLEAR.lastInput) or (CLEAR.at and CLEAR.since())
+    return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
 
 local function body()
@@ -1738,9 +1805,9 @@ local function body()
         -- model server-side (see the API docs: server-side fallback)
         fallbacks = "default",
         -- a long session's old tool calls and thinking are cleared
-        -- server-side (the newest kept, the memory tool's never), so each
-        -- round trip doesn't carry all of them (see the API docs: context
-        -- editing)
+        -- server-side in one go at a mark (the newest kept, the memory
+        -- tool's never), so each round trip doesn't carry all of them
+        -- (contextEdits; see the API docs: context editing)
         context_management = contextEdits(),
     }), { allow_repetitions = true, unicode_strings = true })
 end
@@ -1985,6 +2052,7 @@ local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
 -- A new conversation: no clears seen, nothing to compare with
 function replyLog.reset()
     replyLog.cleared, replyLog.last = {}, nil
+    CLEAR.lastInput, CLEAR.at = nil, nil
 end
 
 -- Log what changed in `reply` (asked for at `started`)
@@ -2013,6 +2081,7 @@ function replyLog.add(reply, started)
     for _, b in ipairs(reply.content) do
         if b.type == "server_tool_use" then replyLog.last = nil end
     end
+    CLEAR.lastInput = replyLog.last and replyLog.last.input     -- (what the next request's mark is measured by)
     if reply.stop_reason == "max_tokens" then
         local thought = (u.output_tokens_details or {}).thinking_tokens
         log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,

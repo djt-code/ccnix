@@ -63,7 +63,7 @@ The other tools:
       its notes, kept between sessions in /claude/memories/ (the API's memory tool: view, create, str_replace, insert, delete, rename, only under that folder)
   web_search, web_fetch
       run on Anthropic's side, not the turtle's (each costs a little; at most a few a reply)
-Old tool calls (the code and its results) and old thinking are cleared from the conversation once it's long (the API's context editing), the memory tool's kept; when the API says the conversation is too long all the same, it's sent again with more of it cleared.  A reply paused partway through its web searches is carried on.
+Old tool calls (the code and its results) and old thinking are kept while the conversation grows, and cleared in one go once a call's input reaches 180k tokens (the API's context editing): all but the last 6 calls, the memory tool's kept, and the thinking before the turn in progress.  Each clear has the cache written again, so one deep clear pays for many calls.  When the API says the conversation is too long all the same, it's sent again with more of it cleared.  A reply paused partway through its web searches is carried on.
 
 Position: it picks up turtlelib's saved position (.turtlepos) if there is one, so `home` still works afterwards; otherwise here is (0,0,0) facing +z.  In a session T.cfg.maxHeight is 256 (programs keep 16), unless the helpers or the model set it otherwise.
 

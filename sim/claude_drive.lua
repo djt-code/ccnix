@@ -114,17 +114,10 @@ check("the request names the model, effort, cached system prompt and the tools: 
             .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
         and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
 local edits1 = r1 and r1.body.context_management.edits or {}
-check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
-    edits1[2] and edits1[2].type == "clear_tool_uses_20250919"
-        and edits1[2].exclude_tools[1] == "memory"
-        and edits1[2].trigger.value == 100000
-        and edits1[2].clear_at_least.value == 30000
+check("a short conversation keeps all its thinking and every tool call (ADR-0013 D1: scenario 42 has the clear), with the beta header for it",
+    #edits1 == 1 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep == "all"
         and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
-        and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
-check("...the code of a cleared call goes with its result (clear_tool_inputs)", edits1[2] and edits1[2].clear_tool_inputs == true)
-check("...and old thinking is cleared, the last 3 turns' kept: that edit first, as the API wants",
-    #edits1 == 2 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep.type == "thinking_turns"
-        and edits1[1].keep.value == 3, textutils.serialiseJSON(edits1))
+        and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true), textutils.serialiseJSON(edits1))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
     r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
         and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
@@ -222,7 +215,8 @@ local function clearOf(n)
 end
 check("prompt too long: sent again at once (no wait) with the harder clear, the same conversation",
     #HTTP.requests == 4 and clearOf(3).trigger.value == 50000 and clearOf(3).keep.value == 2
-        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger.value == 100000
+        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger == nil
+        and HTTP.requests[3].body.context_management.edits[1].keep.value == 3
         and #HTTP.requests[3].body.messages == #HTTP.requests[2].body.messages
         and Mine.logHas("too long; trying again with more of it cleared"), textutils.serialiseJSON(clearOf(3)))
 check("...the harder clear stays for the conversation's next calls", clearOf(4).trigger.value == 50000)
@@ -1931,4 +1925,50 @@ check("the manual's overview says what a turtle can't do",
 check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way to block states over an area",
     sys41:find("\nT%.moveTo%(x, y, z, opts%) %- [^\n]*path = true hands a blocked run to T%.travel")
         and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
+end
+
+-- 42. context editing for the cache (ADR-0013 D1): while the last call's
+--     input is under 180k a request keeps all thinking and clears no tool
+--     call; once one reaches it, the next request clears deep (the
+--     thinking of all but the turn in progress, every tool call but the
+--     last 6, the memory tool's never, the code with its result), logged;
+--     the requests after it ask for that same clear and no more: the API
+--     edits what each request sends and keeps nothing, so the counts kept
+--     grow with what came since (a tool call, a new goal's turn), and
+--     nothing cleared comes back.  (The hard clear is 3c's.)
+do
+fresh({ "and more", "" })
+local function inp(n)
+    return { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = n - 100, cache_creation_input_tokens = 0 } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inp(120000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inp(185000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inp(100000)),
+    reply({ toolUse("lua", { code = "return 4" }) }, "tool_use", inp(101000)),
+    reply({ text("Done.") }, "end_turn", inp(102000)),
+    reply({ text("More.") }, "end_turn", inp(103000)),
+}
+run("grow")
+local function edits42(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {} end
+local function keepsAll(n) local e = edits42(n); return #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all" end
+-- the thinking turns and the tool calls a request keeps, as "turns/calls"
+local function kept(n)
+    local e = edits42(n)
+    if not (e[1] and e[2] and type(e[1].keep) == "table") then return textutils.serialiseJSON(e) end
+    return e[1].keep.value .. "/" .. e[2].keep.value
+end
+check("under the mark: every request keeps all thinking and clears no tool call", keepsAll(1) and keepsAll(2),
+    textutils.serialiseJSON(edits42(2)))
+local mark = edits42(3)
+check("at the mark (the last call had 185k in): one request clears both, the thinking edit first",
+    #mark == 2 and mark[1].type == "clear_thinking_20251015" and mark[1].keep.type == "thinking_turns" and mark[1].keep.value == 1
+        and mark[2].type == "clear_tool_uses_20250919" and mark[2].trigger.type == "input_tokens" and mark[2].trigger.value <= 185000
+        and mark[2].keep.type == "tool_uses" and mark[2].keep.value == 6 and mark[2].clear_at_least.value == 0
+        and mark[2].clear_tool_inputs == true and mark[2].exclude_tools[1] == "memory", textutils.serialiseJSON(mark))
+check("...and the log says so", (Mine.files["claude.log"] or ""):find("context: a deep clear at 185000 tokens in", 1, true) ~= nil)
+check("after it: the same clear, the counts grown by what came since (a lua call; the memory tool's not counted; a new goal's turn)",
+    kept(4) == "1/7" and kept(5) == "1/8" and kept(6) == "2/8", kept(4) .. " " .. kept(5) .. " " .. kept(6))
+local _, marks = (Mine.files["claude.log"] or ""):gsub("context: a deep clear", "")
+check("...and under the mark again, no second deep clear", marks == 1, marks)
 end
