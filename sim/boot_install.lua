@@ -501,3 +501,18 @@ do
     end
     check("setup ships every library turtlelib and turtle/tl/ require", #missing == 0, table.concat(missing, "; "))
 end
+
+-- setup's claude app carries the file claude reads for what changed (its NEWS, help/claude-news.txt): a computer set up
+-- with `setup claude` shows the model the news too
+do
+    local claude = repoFile("turtle/claude.lua")
+    local at = claude:find('local NEWS = "', 1, true)
+    local news = at and claude:sub(at + #'local NEWS = "', claude:find('"', at + #'local NEWS = "', true) - 1)
+    local whole = repoFile("deploy/setup.lua")
+    local from = whole:find("    claude = {", 1, true)
+    local app = from and whole:sub(from, whole:find("}", from, true)) or ""
+    local exists = news and io.open(PROJ .. "/" .. news, "rb")
+    if exists then exists:close() end
+    local ok = news ~= nil and exists ~= nil and app:find('"' .. news .. '"', 1, true) ~= nil
+    check("setup's claude app installs claude's news file (" .. tostring(news) .. ")", ok, (not ok) and app or nil)
+end
