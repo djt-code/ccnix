@@ -1405,6 +1405,27 @@ local c7, c8 = resultsIn(2).toolu_1, resultsIn(3).toolu_2
 check("no chat box: an error result saying why, nothing waited for",
     c7 and c7.is_error == true and c7.content:find("^couldn't ask in chat: .*chat_box") and c8 and c8.is_error == true
         and c8.content:find("^not said in chat: "), c7 and c7.content)
+local nlog = Mine.files["claude.log"] or ""
+check("...both failures logged and shown (ADR-0013 phase 1)",
+    nlog:find("chat, couldn't ask: [^\n]*chat_box") and nlog:find("chat: not said: [^\n]*chat_box")
+        and Mine.logHas("^%(not said in chat: .*chat_box"), nlog)
+
+-- with no turtle.player, T.report refuses: the refusal is logged and
+-- shown, not only the line said before it (ADR-0013 phase 1; whether the
+-- tool then speaks to everyone is D3's)
+chatFresh()
+SET32["turtle.player"] = nil
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Starting." }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("nobody set")
+SET32["turtle.player"] = "Steve"
+local c9 = resultsIn(2).toolu_1
+check("no player set: the chat tool's refusal is logged and shown",
+    c9 and c9.is_error == true and c9.content:find("no player to tell", 1, true)
+        and (Mine.files["claude.log"] or ""):find("chat: not said: no player to tell", 1, true)
+        and Mine.logHas("^%(not said in chat: no player to tell"), c9 and c9.content)
 
 chatFresh()
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }

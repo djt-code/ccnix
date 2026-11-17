@@ -1141,6 +1141,8 @@ local function chatTool(input)
         log("chat: " .. said)
         local ok, why = T.report.now(said, { plain = true })
         if ok then return "said in chat" end
+        say("orange", "(not said in chat: " .. tostring(why) .. ")")
+        log("chat: not said: " .. tostring(why))
         return "not said in chat: " .. tostring(why), true
     end
     local ttl = CACHE_SECONDS[opts.cache or "5m"]
@@ -1182,6 +1184,8 @@ local function chatTool(input)
         return string.format("%s (the wait stops short of the cache's %s; a longer timeout_s waits longer, and then the next call writes the conversation to the cache again)",
             failed, CACHE_TTLS[opts.cache or "5m"])
     end
+    say("orange", "(couldn't ask in chat: " .. tostring(failed) .. ")")
+    log("chat, couldn't ask: " .. tostring(failed))
     return "couldn't ask in chat: " .. tostring(failed) .. " (ask_user asks at the keyboard alone)", true
 end
 
