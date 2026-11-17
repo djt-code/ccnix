@@ -1,6 +1,9 @@
 # ADR-0013: What the turtle learned on 0.52: the cost of clearing, chat while it works, and building for the player, third pass
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-17): D1, D2 and D4 to D8 as recommended;
+D3 as option C (everything that reports speaks to everyone unless
+`turtle.player` is set); D2 with the longer-term path through ADR-0006;
+D6's light threshold checked against the game's code (below)
 **Date:** 2026-11-17
 **Deciders:** Dan Theisen
 
@@ -193,8 +196,9 @@ untested in game. `T.placeDir(d, text)` and `T.frameId` were never used.
    results together at a high mark (D1).
 2. **Chat heard while code runs:** the chat box stays on through a run,
    and the pickaxe comes back only when something digs (D2).
-3. **The chat tool speaks to everyone when no player is set**, as it
-   says, and a session says at its start that none is (D3).
+3. **Reports speak to everyone unless `turtle.player` is set:** the chat
+   tool, `T.report` and the programs that use it, and a claude session
+   says at its start that none is set (D3).
 4. **`max_tokens` 64,000.** A second cut-off in a goal ends the goal with
    the reason (D4).
 5. **Which tools are essential:** `T.cfg.tools` (D5).
@@ -264,7 +268,15 @@ untested in game. `T.placeDir(d, text)` and `T.frameId` were never used.
 
 **B.** It hears most of what's missed today and never touches the chunk
 controller (equip parks only tools, as in ADR-0012). It is all in this
-repo. C stays named for later, if B still misses too much. With B or C:
+repo. C stays named for later, if B still misses too much.
+
+**Accepted, and the better path is ADR-0006's** (the user, 2026-11-17):
+when turtled gains control of claude bots, an Opus (selectable) model
+drives Sonnet (selectable) agent bots, or other kinds of bot, and the
+player's chat reaches them over CC's `http` through the gateway (ADR-0006
+option 1), with no chat box on any turtle. That path is to work in NAT
+mode too, not only TUN. B is what a lone turtle has until then. With B
+or C:
 
 - every result says how long its run took ("took 91 s");
 - a `chatHeard()` in the code's world returns what was heard so far, so
@@ -279,9 +291,12 @@ repo. C stays named for later, if B still misses too much. With B or C:
 | What | the description says it needs `turtle.player` | `T.report.now{everyone = true}` from the chat tool (the ask path and the listener already do this); programs keep "no player to tell" | `T.report` broadcasts by default |
 | Blast radius | the model can't speak until someone sets it | claude's words reach everyone on the server when no player is set | mine and mow messages reach everyone |
 
-**B, with a start note.** When `turtle.player` is unset, the session's
-first result and the screen say so: "T.report says nothing; the chat
-tool speaks to everyone; `sysctl turtle.player=<name>`."
+**C (the user's choice), with a start note.** With `turtle.player`
+unset, everything that reports (the chat tool, `T.report`, and mine,
+farm and mow through it) speaks to everyone; set, only that player. A
+claude session with none set says so on screen and in its first result:
+"reports go to everyone; `sysctl turtle.player=<name>` makes them
+private".
 
 ### D4. `max_tokens`
 
@@ -318,9 +333,25 @@ the news says which.
      - what light passes through comes from the lint's kinds;
      - it yields;
    - the dark cells where mobs could spawn;
-   - the threshold is a parameter, to be checked in game. The model's
-     "Nether mobs need block light at most 11" is unverified, and
-     overworld monsters need 0 since 1.18.
+   - the threshold is a parameter, with defaults by dimension from the
+     game's code (Java 1.21.1, checked 2026-11-17):
+     - **Overworld:** block light 0 (`monster_spawn_block_light_limit`
+       0).
+     - **Nether:**
+       - skeletons, wither skeletons and endermen need a light level of
+         7 or less (the Nether's `monster_spawn_light_level` 7 since
+         22w46a);
+       - zombified piglins, piglins, hoglins and blazes need 11 or less
+         (the generic walk-target check that every pathfinding monster
+         passes, Mojira MC-156004, still open);
+       - ghasts and magma cubes ignore light (they aren't pathfinding
+         mobs): only the surface stops them.
+       - So the model's "11" holds for most Nether mobs: a cell lit to
+         12 or more is safe from all but ghasts and magma cubes, which
+         `T.darkCells` names apart ("spawnable whatever the light: a
+         slab or glass floor, or no room").
+     - Mods in a pack can change spawning, so the first in-game check
+       compares the dark cells with where mobs appeared.
    - About 80 lines, in a new `tl/light.lua`, with a new sim.
 2. **`T.attachedTo(x, y, z)`:**
    - what in the map hangs on or stands on a block: torches, redstone,
@@ -480,7 +511,8 @@ retry would double the worst case of a search that can't succeed.
 
 ### Later (named, not planned)
 
-- The mod's chat relay (D2 C).
+- The mod's chat relay (D2 C), or rather ADR-0006's bot control (the
+  D2 note), with its `http` path made to work in NAT mode.
 - A redstone-aware build: wiring as a blueprint.
 - `T.canEnter(name)`.
 - A stop flag a long run checks: "claude stop" in chat.
