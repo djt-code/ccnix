@@ -703,6 +703,32 @@ do
     ok, why = build(copy, { restart = true })
     check("...and that plan builds again", ok == true and has(0, 0, 4, "wall_torch", { facing = "south" }), tostring(why))
 
+    -- redstone dust: a plan names the block (redstone_wire), the turtle carries redstone
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE_)
+    know(-4, -3, -4, 4, 4, 6)
+    local wire = T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { r = "minecraft:redstone_wire" }, layers = { "rr" } })
+    check("a plan with redstone_wire reads", wire ~= nil)
+    if wire then
+        check("...and asks for the item, redstone", text.contains(T.blueprint.format(wire), "r = minecraft:redstone\n"), T.blueprint.format(wire))
+        ok, why = build(wire)
+        check("...short of it: the build says redstone, not redstone_wire", ok == nil and text.contains(tostring(why), "redstone: need 2, have 0"),
+            tostring(why))
+        W.give(1, "minecraft:redstone", 4)
+        ok, why = build(wire)
+        check("...with redstone on board: built as redstone dust, nothing dug back", ok == true and has(0, 0, 3, "redstone_wire")
+            and has(1, 0, 3, "redstone_wire") and (W.dug or 0) == 0 and W.carrying("minecraft:redstone") == 2, tostring(why))
+        diffs = T.verify(wire, { inspect = "all" })
+        check("...and verifies clean", diffs and #diffs == 0, diffs and diffs[1] and diffs[1].why or "nil")
+        copy = assert(T.blueprint.fromMap({ 0, 0, 3, 1, 0, 3 }))
+        local copied = T.blueprint.format(copy)
+        check("T.blueprint.fromMap writes redstone_wire as the item, redstone", text.contains(copied, "= minecraft:redstone")
+            and not text.contains(copied, "redstone_wire"), copied)
+    end
+    local sign = T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { s = "minecraft:oak_wall_sign[facing=south]" }, layers = { "s" } })
+    check("a plan with a wall sign asks for the sign it is (oak_sign, facing south)", sign ~= nil
+        and text.contains(T.blueprint.format(sign), "minecraft:oak_sign[facing=south]"), sign and T.blueprint.format(sign) or "nil")
+
     fresh()
     W.fill(-2, -1, 1, 2, -1, 5, STONE_)
     know(-4, -3, -4, 4, 4, 6)

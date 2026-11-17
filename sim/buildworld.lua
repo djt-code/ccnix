@@ -9,7 +9,8 @@
 --     (half, facing, shape, double), logs (axis), torches, signs (and their text), ladders, buttons and levers
 --     (what they hang on),
 --     doors (two blocks, a floor, hinge), trapdoors, fence gates, chests and furnaces, pistons, dispensers and
---     droppers, observers (each way, up and down too), repeaters and comparators (on a floor);
+--     droppers, observers (each way, up and down too), repeaters and comparators (on a floor); items that place
+--     a block of another name (redstone dust on a floor, seeds on farmland only);
 --   * a cell that cannot take the block, replaceable cells, entities, items that are not blocks, buckets;
 --   * digging (the drops, a door's two halves, what hung on a dug block popping off) and inspect;
 --   * the crafting grid and the workbench, a chest, and a furnace by its faces with the time it takes.
@@ -161,6 +162,16 @@ row("sign sideways turned east, only a floor: rotation 4", SI, "front", { stone(
 row("sign placeDown, a block below the target: standing", SI, "down", { DB }, { want(D, "oak_sign", { rotation = 0 }) })
 refused("sign sideways, nothing about: refused", SI, "front", {})
 refused("sign placeDown, nothing below: refused", SI, "down", {})
+
+-- Items that place a block of another name: redstone dust (RedStoneWireBlock: on a sturdy top, alone a cross) and seeds
+-- (CropBlock: on farmland only)
+local RS, SEEDS = "minecraft:redstone", "minecraft:wheat_seeds"
+row("redstone sideways, only a floor: redstone_wire, a lone cross, unpowered", RS, "front", { FU },
+    { want(F, "redstone_wire", { north = "side", east = "side", south = "side", west = "side", power = 0 }) })
+row("redstone placeDown, a block below the target: redstone_wire", RS, "down", { DB }, { want(D, "redstone_wire") })
+refused("redstone sideways, a block beyond and no floor: refused (nothing under it to hold it)", RS, "front", { FB })
+row("wheat seeds placeDown onto farmland: wheat at age 0", SEEDS, "down", { { 0, -2, 0, "minecraft:farmland" } }, { want(D, "wheat", { age = 0 }) })
+refused("wheat seeds placeDown onto stone: refused (a crop needs farmland)", SEEDS, "down", { DB })
 
 -- Ladders from above and below: on the first side in the looking order with a block to hold them (the heading first)
 row("ladder placeDown, a wall beyond the target the way the turtle faces: on it, facing back", LA, "down", { stone(0, -1, 1) }, { want(D, "ladder", { facing = "south" }) })

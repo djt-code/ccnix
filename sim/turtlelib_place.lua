@@ -282,6 +282,69 @@ end
 scene("a ladder on the block beyond, facing back", {
     item = "minecraft:ladder", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "front" })
+
+-- Blocks whose item has another name (one table, T.itemOfBlock and T.blockOfItem): redstone dust is redstone_wire,
+-- seeds make a crop, the wall forms by name and by ending
+do
+    fresh(nil, {})
+    local function call(name, ...)
+        if type(T[name]) ~= "function" then return "no T." .. name end
+        return T[name](...)
+    end
+    local ofBlock = {
+        { "redstone_wire", "redstone" }, { "tripwire", "string" }, { "wall_torch", "torch" }, { "soul_wall_torch", "soul_torch" },
+        { "redstone_wall_torch", "redstone_torch" }, { "oak_wall_sign", "oak_sign" }, { "cherry_wall_hanging_sign", "cherry_hanging_sign" },
+        { "red_wall_banner", "red_banner" }, { "skeleton_wall_skull", "skeleton_skull" }, { "creeper_wall_head", "creeper_head" },
+        { "dead_tube_coral_wall_fan", "dead_tube_coral_fan" }, { "wheat", "wheat_seeds" }, { "carrots", "carrot" },
+        { "cave_vines_plant", "glow_berries" }, { "kelp_plant", "kelp" }, { "attached_pumpkin_stem", "pumpkin_seeds" },
+        { "stone", "stone" }, { "oak_sign", "oak_sign" }, { "cobblestone_wall", "cobblestone_wall" },
+    }
+    local wrong = {}
+    for _, p in ipairs(ofBlock) do
+        local got = call("itemOfBlock", "minecraft:" .. p[1])
+        if got ~= "minecraft:" .. p[2] then wrong[#wrong + 1] = p[1] .. " -> " .. tostring(got) end
+    end
+    check("T.itemOfBlock: the item of a block whose item has another name, by name and by ending; any other block its own",
+        #wrong == 0, table.concat(wrong, "; "))
+    local ofItem = {
+        { "redstone", nil, "redstone_wire" }, { "glow_berries", nil, "cave_vines" }, { "wheat_seeds", nil, "wheat" },
+        { "torch", nil, "torch" }, { "stone", nil, "stone" }, { "torch", "wall", "wall_torch" }, { "redstone_torch", "wall", "redstone_wall_torch" },
+        { "oak_sign", "wall", "oak_wall_sign" }, { "oak_hanging_sign", "wall", "oak_wall_hanging_sign" },
+        { "zombie_head", "wall", "zombie_wall_head" }, { "stone", "wall", false }, { "redstone", "wall", false },
+    }
+    wrong = {}
+    for _, p in ipairs(ofItem) do
+        local got = call("blockOfItem", "minecraft:" .. p[1], p[2])
+        local want = p[3] and "minecraft:" .. p[3] or nil
+        if got ~= want then wrong[#wrong + 1] = p[1] .. " " .. tostring(p[2]) .. " -> " .. tostring(got) end
+    end
+    check("T.blockOfItem: the block an item places, and its wall form (nil for an item with none)", #wrong == 0, table.concat(wrong, "; "))
+
+    fresh(nil, { stone(0, -1, 3) })
+    knowAll()
+    W.give(1, "minecraft:redstone", 8)
+    local name, state, how = T.placeAt(0, 0, 3, "minecraft:redstone")
+    check("redstone dust on a floor: redstone_wire, taken as the redstone asked for, not dug back and tried again",
+        name == "minecraft:redstone_wire" and has(0, 0, 3, "redstone_wire") and (W.dug or 0) == 0 and type(how) == "table"
+        and how.tries == 1 and W.carrying("minecraft:redstone") == 7,
+        tostring(name) .. " " .. tostring(state) .. " " .. W.show(0, 0, 3) .. " dug " .. tostring(W.dug))
+    check("...and the map has the block", T.map.get(0, 0, 3) == "minecraft:redstone_wire", tostring(T.map.get(0, 0, 3)))
+    name, state, how = T.placeAt(0, 0, 3, "minecraft:redstone")
+    check("...asked again: already there", name == "minecraft:redstone_wire" and type(how) == "table" and how.approach == "already there",
+        tostring(name) .. " " .. tostring(state))
+    fresh(nil, {})
+    knowAll()
+    W.give(1, "minecraft:redstone", 8)
+    name, state = T.placeAt(0, 0, 3, "minecraft:redstone")
+    check("redstone dust with no floor: the game refuses it, nothing placed", name == nil and W.get(0, 0, 3) == nil, tostring(state))
+
+    fresh(nil, { { 0, -1, 3, "minecraft:farmland" } })
+    knowAll()
+    W.give(1, "minecraft:wheat_seeds", 8)
+    name, state, how = T.placeAt(0, 0, 3, "minecraft:wheat_seeds")
+    check("wheat seeds on farmland: a wheat crop, taken as the seeds asked for", name == "minecraft:wheat" and has(0, 0, 3, "wheat")
+        and (W.dug or 0) == 0 and type(how) == "table" and how.tries == 1, tostring(name) .. " " .. tostring(state) .. " " .. W.show(0, 0, 3))
+end
 -- Ladders from above and below: the turtle faces the wall the ladder goes on (the first side the game looks at)
 local LADDER = "minecraft:ladder"
 -- a shaft one cell wide at 0,y,3, its walls at y from y1 to y2, and stone at the cells named

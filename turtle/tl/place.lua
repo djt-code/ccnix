@@ -81,9 +81,56 @@ local FAMILY_SUFFIX = {
 }
 -- (a hanging sign is not a sign of the table's: it hangs under a block, and goes in as it comes)
 
--- The torches and signs that hang on a wall have a name of their own: a torch's by name, a sign's by its ending
-local WALL_NAME = { torch = "wall_torch", soul_torch = "soul_wall_torch", redstone_torch = "redstone_wall_torch" }
-local WALL_ENDING = { { "_sign", "_wall_sign" } }
+-- Blocks whose item has another name (vanilla Minecraft 1.21): the block, the item that places it, and the form.
+-- "placed" is what the item places; "wall" is the form that hangs on the side of a block (placeAt's block=wall); "also"
+-- is another form the block takes (the body of a vine, kelp or dripleaf, a stem that has made its fruit, bamboo grown
+-- from its shoot), still the item's.  T.itemOfBlock and T.blockOfItem read it, and tl.blueprint through them.
+-- (Left out: what a bucket places, which placeAt does not carry; blocks no item places.)
+local BLOCK_ITEM = {
+    { "redstone_wire", "redstone", "placed" },
+    { "tripwire", "string", "placed" },
+    { "wall_torch", "torch", "wall" },
+    { "soul_wall_torch", "soul_torch", "wall" },
+    { "redstone_wall_torch", "redstone_torch", "wall" },
+    { "wheat", "wheat_seeds", "placed" },
+    { "carrots", "carrot", "placed" },
+    { "potatoes", "potato", "placed" },
+    { "beetroots", "beetroot_seeds", "placed" },
+    { "torchflower_crop", "torchflower_seeds", "placed" },
+    { "pitcher_crop", "pitcher_pod", "placed" },
+    { "melon_stem", "melon_seeds", "placed" },
+    { "attached_melon_stem", "melon_seeds", "also" },
+    { "pumpkin_stem", "pumpkin_seeds", "placed" },
+    { "attached_pumpkin_stem", "pumpkin_seeds", "also" },
+    { "cocoa", "cocoa_beans", "placed" },
+    { "sweet_berry_bush", "sweet_berries", "placed" },
+    { "cave_vines", "glow_berries", "placed" },
+    { "cave_vines_plant", "glow_berries", "also" },
+    { "kelp_plant", "kelp", "also" },
+    { "twisting_vines_plant", "twisting_vines", "also" },
+    { "weeping_vines_plant", "weeping_vines", "also" },
+    { "big_dripleaf_stem", "big_dripleaf", "also" },
+    { "bamboo_sapling", "bamboo", "also" },
+}
+-- The same by the end of the name, for every wood, colour, coral and head: the block's ending and the item's, all
+-- wall forms.  (In order: a hanging sign's before a sign's, which would take it too going from item to block.)
+local BLOCK_ITEM_ENDING = {
+    { "_wall_hanging_sign", "_hanging_sign" },
+    { "_wall_sign", "_sign" },
+    { "_wall_banner", "_banner" },
+    { "_wall_skull", "_skull" },
+    { "_wall_head", "_head" },
+    { "_coral_wall_fan", "_coral_fan" },
+}
+local ITEM_OF_BLOCK, BLOCK_OF_ITEM = {}, {}
+for _, row in ipairs(BLOCK_ITEM) do
+    local block, item, form = row[1], row[2], row[3]
+    ITEM_OF_BLOCK[block] = item
+    if form ~= "also" then
+        BLOCK_OF_ITEM[item] = BLOCK_OF_ITEM[item] or {}
+        BLOCK_OF_ITEM[item][form] = block
+    end
+end
 
 -- A sign's text: lines of 15 characters at most, 4 lines at most (as CC:Tweaked writes it)
 local SIGN_WIDTH, SIGN_LINES = 15, 4
@@ -701,21 +748,9 @@ local function lookAtTarget(kind, h)
     return nil
 end
 
--- The name of the wall version of an item (a torch or a sign), or nil if it has none.
-local function wallNameOf(item)
-    local space, short = text.cut(item, ":")
-    if not short then space, short = "minecraft", item end
-    if WALL_NAME[short] then return space .. ":" .. WALL_NAME[short] end
-    for _, ending in ipairs(WALL_ENDING) do
-        local stem = text.stripSuffix(short, ending[1])
-        if stem then return space .. ":" .. stem .. ending[2] end
-    end
-    return nil
-end
-
--- Is the block the item's, or the wall version of it (a torch or a sign)?
+-- Is the block the item's: its own name, or one the item places or the block becomes (a wall torch, redstone dust)?
 local function isItem(item, name)
-    return name == item or (name ~= nil and name == wallNameOf(item))
+    return name ~= nil and (name == item or T.itemOfBlock(name) == item)
 end
 
 -- Does the block at the target have the item's name (or the wall version of it) and every state wanted?
@@ -732,14 +767,15 @@ end
 local function learnFrom(learned, famName, kind, row, h, base, item, name, state)
     local keys = {}
     for key in pairs(row.set) do keys[key] = true end
-    if wallNameOf(item) then keys.block = true end
+    local wallForm = T.blockOfItem(item, "wall")
+    if wallForm then keys.block = true end
     local id = rowId(famName, kind, row)
     local set = learned[id] or {}
     local changed = false
     for key in pairs(keys) do
         local seen
         if key == "block" then
-            seen = name == item and "item" or (isItem(item, name) and "wall") or nil
+            seen = (name == wallForm and "wall") or (isItem(item, name) and "item") or nil
         else
             seen = ruleOf(key, state[key], h, base)
         end
@@ -1175,6 +1211,51 @@ end
 --------------------------------------------------------------------------
 -- Placing a block with the state wanted
 --------------------------------------------------------------------------
+
+-- A name cut at its namespace: the part to put back before a short name ("minecraft:", or "" for a name without
+-- one) and the short name.
+local function namespaced(name)
+    local space, short = text.cut(name, ":")
+    if not short then return "", name end
+    return space .. ":", short
+end
+
+-- The item that places the block `name`: "minecraft:redstone" for "minecraft:redstone_wire", "minecraft:torch" for a
+-- wall_torch, a crop's seeds; any other block's name as it is.
+--
+-- Covers the vanilla 1.21 blocks whose item has another name: redstone dust, tripwire (string), the wall forms of
+-- torches, signs, hanging signs, banners, heads and skulls and coral fans, crops and stems, cocoa, sweet berries, glow
+-- berries, and the grown parts of kelp, vines and big dripleaf (not what a bucket places).  T.placeAt takes the block
+-- it finds as the item's by it, and a plan (tl.blueprint) names the item.
+function T.itemOfBlock(name)
+    if type(name) ~= "string" then return name end
+    local prefix, short = namespaced(name)
+    if ITEM_OF_BLOCK[short] then return prefix .. ITEM_OF_BLOCK[short] end
+    for _, row in ipairs(BLOCK_ITEM_ENDING) do
+        local stem = text.stripSuffix(short, row[1])
+        if stem then return prefix .. stem .. row[2] end
+    end
+    return name
+end
+
+-- The block the item `item` places ("minecraft:redstone_wire" for "minecraft:redstone", else the item's own name), or
+-- with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.
+--
+-- The other way round from T.itemOfBlock.  The wall forms are those of torches, signs, hanging signs, banners, heads
+-- and skulls, and coral fans ("minecraft:oak_wall_sign" for an oak_sign).
+function T.blockOfItem(item, form)
+    if type(item) ~= "string" then return nil end
+    local prefix, short = namespaced(item)
+    form = form or "placed"
+    local own = BLOCK_OF_ITEM[short]
+    if own and own[form] then return prefix .. own[form] end
+    if form ~= "wall" then return item end
+    for _, row in ipairs(BLOCK_ITEM_ENDING) do
+        local stem = text.stripSuffix(short, row[2])
+        if stem then return prefix .. stem .. row[1] end
+    end
+    return nil
+end
 
 -- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 --
