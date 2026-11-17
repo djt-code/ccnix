@@ -6,7 +6,8 @@
 --     iff there is a block under the target; placeUp the top half iff there is a block over it; in each of
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
---     reached by a route round the support) and standing; a sign and its text; a ladder (sideways, and from above
+--     reached by a route round the support) and standing (on top of a fence, a wall or a pane too, though none of
+--     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
 --   * the table wrong about a row: the retry gets it right, the wrong block is dug out (in a protected area too),
@@ -246,6 +247,26 @@ do
     local name, why = T.placeAt(0, 0, 3, TORCH, { facing = "south" })
     check("a torch will not be hung on a fence (clickable but nothing to hold it): no approach, no move",
         name == nil and why:find("no way to place", 1, true) and atCell(0, 0, 0) and W.get(0, 0, 3) == nil, tostring(why))
+end
+-- On top of a fence, a wall or a pane a torch stands, and so does a sign: a post in the middle holds them
+for _, post in ipairs({ "oak_fence", "cobblestone_wall", "glass_pane" }) do
+    scene("a torch on top of " .. post .. ": it stands there", {
+        item = TORCH, blocks = { { 0, -1, 3, "minecraft:" .. post } }, expect = { { 0, 0, 3, "torch" } } })
+end
+scene("a sign on top of a wall: it stands there", {
+    item = "minecraft:oak_sign", blocks = { { 0, -1, 3, "minecraft:cobblestone_wall" } }, opts = { text = "Mind the drop" },
+    expect = { { 0, 0, 3, "oak_sign" } } })
+check("...with its text", W.get(0, 0, 3) and W.get(0, 0, 3).text and W.get(0, 0, 3).text[2] == "Mind the drop")
+scene("a sign on top of a fence: it stands there", {
+    item = "minecraft:oak_sign", blocks = { { 0, -1, 3, "minecraft:oak_fence" } }, expect = { { 0, 0, 3, "oak_sign" } } })
+do
+    -- a fence beyond and nothing under: still nothing to hang a torch on
+    fresh(nil, { { 0, 0, 4, "minecraft:cobblestone_wall" }, { 0, -1, 3, "minecraft:cobblestone_wall" } })
+    knowAll()
+    W.give(1, TORCH, 4)
+    local name, state = T.placeAt(0, 0, 3, TORCH)
+    check("a torch beside a wall and on top of another: it stands on the one below, not hung on the side",
+        name == TORCH and has(0, 0, 3, "torch"), tostring(name) .. " " .. W.show(0, 0, 3))
 end
 scene("a ladder on the block beyond, facing back", {
     item = "minecraft:ladder", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },

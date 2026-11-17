@@ -123,18 +123,20 @@ local function rows(...)
 end
 
 -- A block with no state to speak of: any approach does, from any side
-local function plain(sturdy)
-    return { sturdy = sturdy, front = rows("always"), down = rows("always"), up = rows("always") }
+local function plain(sturdy, post)
+    return { sturdy = sturdy, post = post, front = rows("always"), down = rows("always"), up = rows("always") }
 end
 
 -- Per family.  hang: it hangs on or stands on a solid block (beyond and floor then mean a block that can hold it, not
--- just one that can be clicked); sturdy = false: nothing hangs on it; needs: what must be round the target;
--- alias: other names for a state key.  An approach with no rows can not place it.
+-- just one that can be clicked); onPost: standing, a post will hold it up too; sturdy = false: nothing hangs on it;
+-- post: a post in the middle (a fence, a wall, a pane), which nothing hangs on but holds up on its top what stands on
+-- a post (a torch, a standing sign); needs: what must be round the target; alias: other names for a state key.  An
+-- approach with no rows can not place it.
 local FAMILIES = {
     block = plain(true),
-    fence = plain(false),
-    pane = plain(false),
-    wall = plain(false),
+    fence = plain(false, true),
+    pane = plain(false, true),
+    wall = plain(false, true),
     -- a stair faces the way the placer looks; the half is the click's: a top face or the side's lower part is the
     -- bottom half, an underside the top; with only the turtle's own block to click it faces back at the turtle
     stairs = {
@@ -157,14 +159,14 @@ local FAMILIES = {
     },
     -- a torch hangs on the block beyond (a wall torch, facing the turtle), or stands on the floor or the block below
     torch = {
-        hang = true, sturdy = false,
+        hang = true, onPost = true, sturdy = false,
         front = rows("beyond block=wall facing=back", "floor"),
         down = rows("beyond"),
         up = {},
     },
     -- a sign as a torch: on the wall beyond (the wall form, facing the turtle), or standing on the floor
     sign = {
-        hang = true, sturdy = false,
+        hang = true, onPost = true, sturdy = false,
         front = rows("beyond block=wall facing=back", "floor"),
         down = rows("beyond"),
         up = {},
@@ -372,12 +374,23 @@ local function sturdy(name)
     return fam.sturdy ~= false
 end
 
--- A fact the table asks about, as true, false, or nil (the map has never seen the cell).
-local function factAbout(fam, name)
+-- Does the block hold up a block of family fam standing on its top: a whole face, or for a family that stands on a
+-- post (a torch, a standing sign) a fence's, a wall's or a pane's post?
+local function holdsOnTop(fam, name)
+    if sturdy(name) then return true end
+    return fam.onPost == true and clickable(name) and FAMILIES[familyOf(name)].post == true
+end
+
+-- A fact the table asks about, as true, false, or nil (the map has never seen the cell).  top: the block is the one
+-- under the target (a floor, or beyond a placing down), which holds up what stands on it.
+local function factAbout(fam, name, top)
     if name == nil then return nil end
-    if fam.hang then return sturdy(name) end
+    if fam.hang then return (top and holdsOnTop(fam, name)) or sturdy(name) end
     return clickable(name)
 end
+
+-- Which of the facts the table asks about is the block under the target, by approach
+local TOP_FACT = { front = "floor", down = "beyond" }
 
 -- The compass number of heading 0, from the world origin; nil with none set.
 local function compassBase()
@@ -423,9 +436,9 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
     local apps = {}
     -- A half slab of the item's own kind may be one the game takes as replaceable and skips (then it clicks the
     -- next block): not a fact to plan on for sure, nor to learn from.
-    local function fact(name)
+    local function fact(name, top)
         if famName == "slab" and name == item then return nil end
-        return factAbout(fam, name)
+        return factAbout(fam, name, top)
     end
     local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
@@ -433,8 +446,8 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
             if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
                 local sx, sy, sz = standFor(kind, h, tx, ty, tz)
                 local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
-                local facts = { beyond = fact(nameAt(bx, by, bz)) }
-                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz)) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
+                local facts = { beyond = fact(nameAt(bx, by, bz), TOP_FACT[kind] == "beyond") }
+                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz), true) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
                 local stand = nameAt(sx, sy, sz)
                 if not (stand and clickable(stand) and not dig) then
                     for _, c in ipairs(rowsFor(fam, kind, facts)) do
@@ -511,8 +524,8 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     local ax, ay, az = aheadOf(h, tx, ty, tz)
     local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz }, ahead = { ax, ay, az } }
     local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz), ahead = nameAt(ax, ay, az) }
-    local facts = { beyond = fact(names.beyond) }
-    if kind == "front" then facts.floor = fact(names.floor) else facts.ahead = fact(names.ahead) end
+    local facts = { beyond = fact(names.beyond, TOP_FACT[kind] == "beyond") }
+    if kind == "front" then facts.floor = fact(names.floor, true) else facts.ahead = fact(names.ahead) end
     local needed
     for _, row in ipairs(fam[kind]) do
         local f = row.when == "always" or facts[row.when]
@@ -536,9 +549,9 @@ end
 -- plan goes through them, each said once.
 local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
     local out, said = {}, {}
-    local function fact(name)
+    local function fact(name, top)
         if famName == "slab" and name == item then return nil end
-        return factAbout(fam, name)
+        return factAbout(fam, name, top)
     end
     local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
@@ -918,7 +931,8 @@ end
 --
 -- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
 -- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
--- type, which are the same); hang is true for a family that hangs or stands on a solid block; door is true for a
+-- type, which are the same); hang is true for a family that hangs or stands on a solid block (a torch or a standing
+-- sign stands on the post of a fence, a wall or a pane too, though nothing hangs on their sides); door is true for a
 -- family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
 function T.placeInfo(item)
     if type(item) ~= "string" or item == "" then return nil end

@@ -3,6 +3,7 @@
 -- tl.blueprint (ADR-0008 phase 3): plans, T.build, T.verify and T.replace on sim/lib/buildworld's mock world.
 --   * the format: text and table forms read the same, a plan written out and read back is the same plan, the errors
 --     name the line; fill, box, walls and fromMap make plans; put and at;
+--   * a railing of walls with a torch and a sign standing on top;
 --   * a small building (floor, walls, a stair bench, a torch, a door) built in the order the plan needs (walls before
 --     the stair and the torch, the door last in its layer), stopped midway with a limit, resumed after a restart of the
 --     computer, stopped by a Ctrl+T in the middle of a cell and resumed, then verified clean; the world is what
@@ -450,6 +451,19 @@ do
     check("a plan built over itself takes the map's word for a cell: a block that has gone since is not seen", ok == true and info.placed == 0 and has(2, 0, 5, nil), tostring(why) .. tostring(info.placed) .. tostring(has(2, 0, 5, nil)))
     ok, why, info = build(plan, { look = true })
     check("...opts.look goes to look at each cell, and puts the missing one back", ok == true and info.placed == 1 and has(2, 0, 5, "stone"), tostring(why))
+end
+do
+    -- a railing of walls with a torch and a sign standing on top (ADR-0013: two of a balcony's cells failed so)
+    fresh()
+    know(-1, -1, 0, 6, 3, 6)
+    W.give(1, "minecraft:cobblestone_wall", 3)
+    W.give(2, "minecraft:torch", 1)
+    W.give(3, "minecraft:oak_sign", 1)
+    local plan = "name: rail\nanchor: 2 0 3\nw = minecraft:cobblestone_wall\nt = minecraft:torch\ns = minecraft:oak_sign\n"
+        .. "layer 1:\nwww\nlayer 2:\nt s\n"
+    local ok, why = build(plan)
+    check("a railing of walls with a torch and a sign standing on top: all built", ok == true and has(2, 1, 3, "torch")
+        and has(4, 1, 3, "oak_sign") and has(3, 0, 3, "cobblestone_wall"), tostring(why))
 end
 do
     -- opts.retry = false leaves the failed cells alone
