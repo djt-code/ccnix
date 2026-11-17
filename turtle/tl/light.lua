@@ -233,6 +233,7 @@ local function flood(box, opts)
         with[key(x, y, z)] = { name = fullName(name), state = w.state or w[5] }
         found[#found + 1] = { x = x, y = y, z = z }
     end
+    local anyWith = next(with) ~= nil
     local info = { cells = cells, sources = 0, guessed = 0, cut = cut or nil }
     local class, glow, L = {}, {}, {}
     local function inside(x, y, z)
@@ -244,7 +245,7 @@ local function flood(box, opts)
         local i = id(x, y, z)
         local c = class[i]
         if c then return c end
-        local w = with[key(x, y, z)]
+        local w = anyWith and with[key(x, y, z)]
         local name, state
         if w then name, state = w.name, w.state else name, state = T.map.get(x, y, z) end
         if type(name) ~= "string" then
