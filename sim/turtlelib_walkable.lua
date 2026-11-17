@@ -6,7 +6,10 @@
 --     no floor; an exit into a wall and one out over an edge; railings meeting only on a diagonal, level and stepped,
 --     and closed by a corner piece; an unrailed drop of 4 (a drop of 3 is fine); a lantern at head height (one a block
 --     higher is fine); each warning names the cell and the rule;
---   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked.
+--   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
+--   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
+--     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
+--     info.warnings, and without it doesn't.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -212,4 +215,39 @@ do
     check("...stairs with no facing are counted as unchecked", info and info.unchecked == 1, tostring(info and info.unchecked))
     local nothing, why = T.lint("not a plan")
     check("...something that is neither a box nor a plan is refused with why", nothing == nil and type(why) == "string", tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- T.build and T.verify report the warnings
+--------------------------------------------------------------------------
+do
+    -- a pillar 5 high on a stone floor: its top is a walk cell over a drop of 5 on every side
+    local function pillarScene()
+        fresh(cube(-3, -1, -3, 5, -1, 5, STONE))
+        know(-3, -1, -3, 5, 6, 5)
+        W.give(1, STONE, 5)
+        for i = #PRINTED, 1, -1 do PRINTED[i] = nil end
+        return T.blueprint.fill(2, 0, 2, 2, 4, 2, STONE)
+    end
+    local plan = pillarScene()
+    local ok, info = T.build(plan, { name = "pillar" })
+    local drop = ofRule(info and info.warnings, "drop")
+    check("T.build finishes as before and reports the lint's warnings: the pillar's top over a drop of 5",
+        ok == true and info.finished and at(drop, 2, 5, 2) ~= nil and drop[1].text:find("drop of 5", 1, true) ~= nil,
+        tostring(ok) .. " " .. tostring(info) .. " " .. texts(info and info.warnings))
+    local said = table.concat(PRINTED, " | ")
+    check("...and prints them, a line a rule", #PRINTED == 1 and said:find("drop at 2,5,2", 1, true) ~= nil, said)
+    local diffs, vinfo = T.verify(plan, { player = true })
+    check("T.verify(plan, { player = true }): the build as planned, and the warnings", diffs and #diffs == 0 and at(ofRule(vinfo.warnings, "drop"), 2, 5, 2) ~= nil,
+        texts(vinfo and vinfo.warnings))
+    diffs, vinfo = T.verify(plan)
+    check("...without player = true, no lint", diffs and #diffs == 0 and vinfo.warnings == nil)
+
+    plan = pillarScene()
+    ok, info = T.build(plan, { name = "pillar", player = false })
+    check("T.build with player = false: no lint, nothing printed", ok == true and info.warnings == nil and #PRINTED == 0, table.concat(PRINTED, " | "))
+
+    plan = pillarScene()
+    ok, _, info = T.build(plan, { name = "pillar", limit = 2 })
+    check("...nor for a build stopped before every cell was tried", ok == false and info.warnings == nil and #PRINTED == 0, table.concat(PRINTED, " | "))
 end
