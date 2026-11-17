@@ -593,7 +593,7 @@ end
 
 -- T.report.ask (ADR-0011 D4): the question told through the chat box, the answer read from its chat events (AP's two
 -- layouts), only from the player and only after the prefix; a timer a second counts the wait, flushes the cooldown and
--- reminds; T.report.lastTold says when the player was last told anything
+-- reminds; the other messages go to T.hooks.heard; T.report.lastTold says when the player was last told anything
 do
     local EVENTS = {}
     os.startTimer = function() return 1 end
@@ -616,10 +616,15 @@ do
         { "chat", "Steve", "claudette yes", "uuid-s", false }, { "chat", "Steve", "$claude hidden", "uuid-s", true },
         { "chat", "0f00-11aa", "Steve", "Claude: the oak one", false } }
     local swaps = SWAPS
+    local passed = {}
+    T.hooks.heard = function(e) passed[#passed + 1] = e.player .. ": " .. e.text end
     text, who, at = T.report.ask("which stair?")
+    T.hooks.heard = nil
     check("the answer: the text after the prefix (any case, its colon off), the player and when",
         text == "the oak one" and who == "Steve" and at == 1000, tostring(text) .. " / " .. tostring(who) .. " / " .. tostring(at))
     check("...not another player's, nor a message without the prefix as a word of its own, nor a hidden one", #EVENTS == 0)
+    check("...those (the hidden one aside) handed to T.hooks.heard, the answer not (ADR-0013 D2)",
+        table.concat(passed, " | ") == "Alex: claude no | Steve: hello there | Steve: claudette yes", table.concat(passed, " | "))
     check("the question went to the player with how to answer", #SENT == 1 and SENT[1].player == "Steve"
         and SENT[1].message == 'which stair? (answer in chat: "claude <your answer>")', tostring(SENT[1] and SENT[1].message))
     check("the chat box aboard was equipped for the wait and put back", SWAPS - swaps == 2 and EQ.left == PICK and EQ.right == nil

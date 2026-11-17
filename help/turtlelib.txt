@@ -4,7 +4,7 @@ Usage in a program (same directory):
     local T = require("turtlelib")
 
 Provides:
-  * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right by the turtle API itself: loading this wraps the moves and turns (forward, back, up, down, turnLeft, turnRight) and the digs and places, once however many programs load it, so a move made straight through turtle.* is counted too; T.raw holds the originals
+  * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right by the turtle API itself: loading this wraps the moves and turns (forward, back, up, down, turnLeft, turnRight), the digs, places and attacks, once however many programs load it, so a move made straight through turtle.* is counted too; T.raw holds the originals
   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that no dig through the turtle API goes into, and a refusal to dig chests, barrels, shulker boxes, spawners and ComputerCraft blocks (T.cfg.digContainers lifts it)
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
@@ -182,6 +182,8 @@ T.findTool(suffix)
 
 T.usePrimaryTool(name)
     Equip `name` from the inventory if it isn't already, unequip any OTHER tool into the inventory, and return a function that restores the original arrangement. Errors if the tool is nowhere on the turtle.
+
+    The tool hook (T.hooks.tool) is called first.
 
 T.withTool(name, fn)
     Run fn with `name` as the only equipped tool, restoring the original tools afterwards even if fn errors (the error is re-thrown).
@@ -820,7 +822,7 @@ T.report.try(said, opts)
 T.report.ask(question, opts)
     Ask the player `question` in chat and wait for the answer: the text (the prefix taken off), the player who gave it and when (seconds since 1970); or nil and why ("no answer in 300 s", no chat box).
 
-    The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back after. An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from that player only (anyone's with none set). opts.timeout is the longest wait in seconds (default 300); opts.remind says the question again every so many seconds (default never). Ctrl+T stops the wait.
+    The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back after. An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from that player only (anyone's with none set). opts.timeout is the longest wait in seconds (default 300); opts.remind says the question again every so many seconds (default never). Ctrl+T stops the wait. The other chat messages it reads go to T.hooks.heard, when it is set (claude passes the player's on to the model).
 
 T.report.lastTold()
     When the player was last told something through T.report, T.report.now or T.report.ask: seconds since 1970, or nil if nothing has been told since the computer started.

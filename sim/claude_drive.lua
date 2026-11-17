@@ -13,6 +13,11 @@ local P = Mine.P
 local check = Mine.check
 
 textutils = M.textutilsApi()
+-- A clock that stands still unless a scenario moves it (a run's "took N s"
+-- is then the same on every run of the simulator)
+local STILL = os.time()
+local clockWas = os.time
+os.time = function(t) if t ~= nil then return clockWas(t) end return STILL end
 local HTTP = M.httpApi()
 http = HTTP.api
 local answers = M.consoleApi(Mine, {})
@@ -1189,12 +1194,12 @@ local countWas = turtle.getItemCount
 run("look at the status line")
 turtle.getItemCount = countWas
 local s30 = resultsIn(2).toolu_1
-check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it",
-    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above]",
+check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it, how long the run took",
+    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above; took 0 s]",
     s30 and tostring(s30.status))
 local e30 = resultsIn(3).toolu_2
 check("...an error result too", e30 and e30.is_error == true and e30.content == "error: stuck"
-    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above]", e30 and tostring(e30.status))
+    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above; took 0 s]", e30 and tostring(e30.status))
 local f30 = resultsIn(4).toolu_3
 check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
     f30 and tostring(f30.status))
@@ -1206,7 +1211,7 @@ Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
 HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("lava round it")
 local l30 = resultsIn(2).toolu_1
-check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
+check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above; took 0 s]",
     l30 and tostring(l30.status))
 end
 
@@ -1357,6 +1362,21 @@ check("...the chat box put back though the keyboard was still waiting, and the a
 check("...and the tool is offered: lua status run_program ask_user chat, then the API's",
     HTTP.requests[1].body.tools[5].name == "chat" and HTTP.requests[1].body.tools[5].input_schema.required[1] == "text"
         and HTTP.requests[1].body.tools[5].description:find("stops short of the cache's 5 minutes", 1, true))
+
+-- the player's other messages during the wait come with the next results
+-- (ADR-0013 D2: T.report.ask passes them on), the answer once
+chatFresh()
+SCRIPT = { { "chat", "Steve", "wait, the spruce", "u-s", false }, { "chat", "Steve", "claude: oak", "u-s", false } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Which wood?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask about wood")
+local ca, caTurn = resultsIn(2).toolu_1, select(2, resultsIn(2))
+local caText = caTurn and type(caTurn.content) == "table" and caTurn.content[2] and caTurn.content[2].text or ""
+check("chat ask: the player's other messages meanwhile come with the next results, the answer in the result alone",
+    ca and ca.content == "Steve answered in chat: oak" and caText:find("^Steve said in chat: wait, the spruce %(at %d%d:%d%d:%d%d UTC%)$") ~= nil,
+    caText)
 
 chatFresh()
 SCRIPT = { { "timer", 1 }, { "sim_read", "go left" } }
@@ -1576,14 +1596,19 @@ check("the real news file reads: its 0.51.0 lines, the note for people left out"
         and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
 end
 
--- 36. the chat listener (ADR-0012 D3): while the harness waits for the
---     model's reply, the chat box goes on the free side (never the chunk
---     controller's, nor another upgrade's) and the chat is heard; the
---     pickaxe is back before the code runs; what the player said comes
---     with the next results, or the next goal.  No free side or no chat
---     box: off, and the first results say why, once; claude.listen = false:
---     off, nothing said.  (A request waits for a "sim_http" event here, so
---     chat events can come meanwhile, as CC's http.post pulls events.)
+-- 36. the chat listener (ADR-0012 D3, ADR-0013 D2): while the harness
+--     waits for the model's reply, the chat box goes on the free side
+--     (never the chunk controller's, nor another upgrade's) and the chat is
+--     heard; it stays on through the code's run, the chat heard then too,
+--     until the first dig (the pickaxe back on, the run carrying on, the
+--     chat box on again only for the next request), run_program (the
+--     pickaxe first) or the goal's end; what the player said comes with
+--     the next results, or the next goal, or chatHeard() in the code; a run
+--     says how long it took, and a long one when chat went unheard.  No
+--     free side or no chat box: off, and the first results say why, once;
+--     claude.listen = false: off, nothing said.  (A request waits for a
+--     "sim_http" event here, so chat events can come meanwhile, as CC's
+--     http.post pulls events; the code waits for "sim_step".)
 do
 local CHAT = "advancedperipherals:chat_box"
 local CONTROLLER = "advancedperipherals:chunk_controller"
@@ -1670,8 +1695,9 @@ run("build the stairs")
 local r36 = resultsIn(2).toolu_1
 check("while the model thinks the chat box is on the pickaxe's side, the controller never moves",
     DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1] and DURING[3] == DURING[1], table.concat(DURING, ", "))
-check("...and the pickaxe is back before the code runs, the chat box in the inventory",
-    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. PICK and chatAboard() == 1 and EQ.right == PICK, r36 and r36.content)
+check("...and stays on through code that doesn't dig, the controller where it was; the pickaxe back when the goal ends",
+    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. CHAT and chatAboard() == 1 and EQ.right == PICK and EQ.left == CONTROLLER,
+    r36 and r36.content)
 local t36 = textsIn(2)
 check("what turtle.player said while the model thought comes with the next results (not another player's, not a hidden one)",
     t36:find("^Steve said in chat: claude use the oak stairs " .. CLOCK .. "$") ~= nil, t36)
@@ -1683,6 +1709,64 @@ check("heard during the last reply: it comes with the next goal",
 check("...shown, and in claude.log", Mine.logHas("^%(Steve said in chat: claude use the oak stairs " .. CLOCK .. "%)$")
     and (Mine.files["claude.log"] or ""):find("heard: Steve said in chat: thanks", 1, true) ~= nil)
 
+-- chat while code that doesn't dig runs: heard, and with the results;
+-- chatHeard() takes what's heard so far (it doesn't come again)
+listenFresh(CONTROLLER, PICK, true)
+SCRIPT = { { "sim_http" }, said("Steve", "careful by the lava"), { "sim_step" }, said("Steve", "and now left"), { "sim_step" },
+           { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "os.pullEvent('sim_step'); local h = chatHeard(); os.pullEvent('sim_step'); return #h, h[1]" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("walk about")
+local w36 = resultsIn(2).toolu_1
+check("chat while the code runs is heard: chatHeard() in the code takes what's heard so far",
+    w36 and w36.content:find("^%-> 1\n%-> Steve said in chat: careful by the lava " .. CLOCK .. "$") ~= nil, w36 and w36.content)
+check("...the rest comes with the results, what chatHeard() took not again",
+    textsIn(2):find("^Steve said in chat: and now left " .. CLOCK .. "$") ~= nil, textsIn(2))
+check("...and the run says how long it took", w36 and w36.status and w36.status:find("; took 0 s%]$") ~= nil, w36 and tostring(w36.status))
+
+-- a dig in the run: the pickaxe back on at once, the run carrying on; the
+-- chat box on again only for the next request (a second run in the same
+-- reply has the pickaxe); a run over a minute says when chat went unheard
+listenFresh(CONTROLLER, PICK, true)
+local timeWas36, sleepWas36, skipped36 = os.time, sleep, 0
+os.time = function(t) if t ~= nil then return timeWas36(t) end return timeWas36() + skipped36 end
+sleep = function(s) skipped36 = skipped36 + (tonumber(s) or 0) end
+SCRIPT = { { "sim_http" }, said("Steve", "before the dig"), { "sim_step" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "os.pullEvent('sim_step'); local was = turtle.getEquippedRight().name; local dug = turtle.dig(); sleep(70)"
+                .. "; return was, dug, turtle.getEquippedLeft().name, turtle.getEquippedRight().name" }),
+            toolUse("lua", { code = "return turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig one")
+os.time, sleep = timeWas36, sleepWas36
+local d36, d36b = resultsIn(2).toolu_1, resultsIn(2).toolu_2
+check("a dig mid-run: the pickaxe back on for it, the run carrying on, the controller where it was",
+    d36 and d36.content == "-> " .. CHAT .. "\n-> true\n-> " .. CONTROLLER .. "\n-> " .. PICK, d36 and d36.content)
+check("...the chat box not on again for the next run in the same reply, but for the next request",
+    d36b and d36b.content == "-> " .. PICK and DURING[2] == CONTROLLER .. " | " .. CHAT, (d36b and d36b.content or "") .. " " .. table.concat(DURING, ", "))
+check("...what was heard before the dig comes with the results",
+    textsIn(2):find("^Steve said in chat: before the dig " .. CLOCK .. "$") ~= nil, textsIn(2))
+check("...and a run over a minute says how long, and that chat went unheard after the dig",
+    d36 and d36.status and d36.status:find("; took 70 s, chat not heard for the last 70 s %(the pickaxe went back on for a dig%)%]$") ~= nil,
+    d36 and tostring(d36.status))
+
+-- run_program: the pickaxe back on before the program runs
+listenFresh(CONTROLLER, PICK, true)
+Mine.files["turtle/mine.lua"] = "-- mine"
+local progEQ
+local shellRunWas, ioWas36 = shell.run, io
+io = setmetatable({ stdout = false }, { __index = ioWas36 })
+shell.run = function() progEQ = (EQ.left or "-") .. " | " .. (EQ.right or "-"); return true end
+SCRIPT = { { "sim_http" }, { "sim_http" } }
+HTTP.queue = { reply({ toolUse("run_program", { program = "mine", args = "3 3 8" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("mine a little")
+shell.run, io = shellRunWas, ioWas36
+check("run_program: the pickaxe back on before the program runs, the controller where it was",
+    progEQ == CONTROLLER .. " | " .. PICK and DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1], tostring(progEQ))
+
 listenFresh(CONTROLLER, MODEM, true)
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
@@ -1692,7 +1776,7 @@ HTTP.queue = {
 run("no free side")
 check("no side free of upgrades: nothing moves, the first results say why",
     DURING[1] == CONTROLLER .. " | " .. MODEM and textsIn(2) == "The chat listener is off (neither side is free (left " .. CONTROLLER
-        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat while you think isn't heard.",
+        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat isn't heard.",
     textsIn(2))
 check("...once", textsIn(3) == "", textsIn(3))
 
@@ -1700,7 +1784,7 @@ listenFresh(CONTROLLER, PICK, false)
 HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("no chat box")
 check("no chat box aboard: off, and the first results say so",
-    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat while you think isn't heard.", textsIn(2))
+    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat isn't heard.", textsIn(2))
 
 listenFresh(CONTROLLER, PICK, true)
 SET36["claude.listen"] = false
@@ -1722,8 +1806,9 @@ HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 SCRIPT = { { "sim_http" } }
 run("what do you hear")
 local sys36 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
-check("the prompt says what the player says while it thinks comes with the next results",
-    sys36:find("What they say in chat while you think comes with your next results", 1, true) ~= nil)
+check("the prompt says what the player says comes with the next results, while it thinks and while the code runs until a dig, and chatHeard()",
+    sys36:find("What they say in chat comes with your next results: a chat box aboard listens on the pickaxe's side while you think and while your code runs", 1, true) ~= nil
+        and sys36:find("chatHeard()", 1, true) ~= nil and not sys36:find("is missed", 1, true))
 
 peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
 os.pullEvent, HTTP.api.post = pullWas, postWas

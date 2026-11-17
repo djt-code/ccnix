@@ -371,6 +371,8 @@ local function waitForAnswer(chat, question, opts, who)
                 local answer = answerIn(e.text, prefix)
                 if answer then return answer, e.player, nowSeconds() end
             end
+            -- what isn't the answer goes to whoever listens (T.hooks.heard: claude's listener)
+            if e and e.kind == "chat" and T.hooks and T.hooks.heard then T.hooks.heard(e) end
         end
     end
 end
@@ -382,7 +384,8 @@ end
 -- box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back
 -- after.  An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from
 -- that player only (anyone's with none set).  opts.timeout is the longest wait in seconds (default 300); opts.remind
--- says the question again every so many seconds (default never).  Ctrl+T stops the wait.
+-- says the question again every so many seconds (default never).  Ctrl+T stops the wait.  The other chat messages it
+-- reads go to T.hooks.heard, when it is set (claude passes the player's on to the model).
 function T.report.ask(question, opts)
     opts = opts or {}
     if type(question) ~= "string" or question == "" then return nil, "nothing to ask: give the question" end
