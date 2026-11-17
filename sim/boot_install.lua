@@ -489,7 +489,7 @@ do
     local setupText = listAt("local TURTLE = {") .. listAt("local TEXT = {")
     local missing = {}
     local files = { "turtle/turtlelib.lua" }
-    for _, m in ipairs({ "blueprint", "craft", "harvest", "journal", "path", "place", "store", "world" }) do
+    for _, m in ipairs({ "blueprint", "craft", "harvest", "journal", "lint", "path", "place", "store", "world" }) do
         files[#files + 1] = "turtle/tl/" .. m .. ".lua"
     end
     for _, file in ipairs(files) do

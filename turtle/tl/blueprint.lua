@@ -862,9 +862,11 @@ end
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
 -- false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart,
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
--- that name; only when no cell failed), order, fuelWatch.  Info is { name, done, total, failed = list of { n, x, y, z,
--- item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected,
--- short, order, fuel = { spent, estimate, perCell } }.
+-- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end).  Info is { name, done,
+-- total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in
+-- place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell }, warnings }.
+-- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
+-- info.warnings and printed, a line a rule ("player: headroom at 3,1,4: ..."); they never change the result.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
@@ -1007,6 +1009,15 @@ function T.build(plan, opts)
         info.protected = ok and area or nil
         if not ok then info.protectWhy = why end
     end
+    -- how a player meets the build, once every cell is tried: warnings beside the result, which they don't change
+    if job.done >= job.total and opts.player ~= false then
+        local ok, warnings, lint = pcall(T.lint, target)
+        if not ok and warnings == "Terminated" then error(warnings, 0) end
+        if ok and warnings then
+            info.warnings = warnings
+            for _, line in ipairs(lint.summary) do print("player: " .. line) end
+        end
+    end
     if info.finished then return true, info end
     if job.circling then
         local hint = job.order == "layer" and "order = \"column\" may cost less; " or ""
@@ -1053,7 +1064,8 @@ end
 -- at with T.inspectAll (opts.inspect = "all" looks at every cell); the rest is read from the map, which the
 -- build keeps right.  A cell that could not be looked at is listed too, with unverified = true.  An empty list means the
 -- build is as planned.  opts: at ({ x, y, z }), scan (true: scan the box with T.scanBox first), inspect, move
--- (for the walking), inside.
+-- (for the walking), inside, player (true: T.lint the plan's box of the map as well, after the look, for what stops a
+-- two-tall player: its warnings are info.warnings, and why it couldn't info.playerWhy).
 function T.verify(plan, opts)
     opts = opts or {}
     local p, why = planToUse(plan, opts)
@@ -1125,6 +1137,11 @@ function T.verify(plan, opts)
         if m.z ~= n.z then return m.z > n.z end
         return m.x < n.x
     end)
+    if opts.player then
+        local warnings, why = T.lint({ bp.extent(p) })
+        info.warnings = warnings
+        if not warnings then info.playerWhy = why end
+    end
     return diffs, info
 end
 

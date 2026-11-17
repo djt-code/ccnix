@@ -195,6 +195,10 @@ The undo journal:
 T.undoMark() - The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.
 T.undoClear() - Empty the undo journal. True.
 T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
+The lint:
+T.lint(what, opts) - What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lanterns at head height. A list of { rule, x, y, z, text }, and info.
+Walking:
+T.walkable(from, to, opts) - A way a two-tall player walks from one feet cell to another over the map (steps up 1, ladders, falls over 3 only if there's no other way): the path (feet cells after `from`, the last `to`) and { falls }; nil and why if none.
 The search:
 T.path(x, y, z, opts) - A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 Walking a route:
