@@ -157,6 +157,19 @@ ok = T.withPeripheral(SCANNER, function() during = { left = EQ.left, right = EQ.
 check("with another upgrade on one side and a tool on the other, the tool's side is used",
     ok and during.left == CHAT and during.right == SCANNER and EQ.right == PICK and EQ.left == CHAT)
 
+-- opts.free (ADR-0012 D3): only an empty side or a tool's; no upgrade comes off
+reset(SCANNER, PICK)
+put(1, CHAT)
+local fp, frestore = T.equipPeripheral(CHAT, { free = true })
+check("opts.free: the tool's side, not the scanner's", fp and EQ.left == SCANNER and EQ.right == CHAT
+    and frestore() and EQ.right == PICK and carrying(CHAT) == 1)
+reset(CONTROLLER, SCANNER)
+put(1, CHAT)
+fp, why = T.equipPeripheral(CHAT, { free = true })
+check("opts.free with the controller and the scanner on: nil and why, nothing moved",
+    fp == nil and why == "neither side is free (left " .. CONTROLLER .. ", right " .. SCANNER .. "; an upgrade stays on): nowhere to put the " .. CHAT
+        and EQ.left == CONTROLLER and EQ.right == SCANNER and carrying(CHAT) == 1, tostring(why))
+
 -- already on
 reset(CONTROLLER, SCANNER)
 ok, result = T.withPeripheral(SCANNER, function(q) return q.scanBlocks(8) end)

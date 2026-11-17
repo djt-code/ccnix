@@ -42,7 +42,7 @@ T.usePrimaryTool(name) - Equip `name` from the inventory if it isn't already, un
 T.withTool(name, fn) - Run fn with `name` as the only equipped tool, restoring the original tools afterwards even if fn errors (the error is re-thrown).
 T.equipTool(name, side) - Back-compat: equip `name` onto `side` from the inventory, if present.
 Peripheral upgrades:
-T.equipPeripheral(name) - Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for it to show up. Returns the peripheral and a function that puts back what was there, or nil and why.
+T.equipPeripheral(name, opts) - Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for it to show up. Returns the peripheral and a function that puts back what was there, or nil and why.
 T.withPeripheral(name, fn) - Run fn(peripheral) with the item `name` equipped as a peripheral, and put back what was on that side afterwards. Returns true and what fn returned, or nil and why it couldn't equip (see T.equipPeripheral).
 Low-level moves:
 T.up() - Move up one block, digging what T.diggable lists and attacking what's in the way (fuel first): true, or false and why. It stops at T.cfg.maxHeight, 16 above the start by default.

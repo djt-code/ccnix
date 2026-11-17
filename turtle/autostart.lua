@@ -4,7 +4,7 @@
 --         autostart --now    the same, without the 5 second wait
 --
 -- Runs the program named by the setting ccnix.autostart (mine, farm,
--- mow or autocompost; `sysctl ccnix.autostart=farm`, or
+-- mow, autocompost or claude; `sysctl ccnix.autostart=farm`, or
 -- `ccnix setup --autostart farm`).  A turtle reboots whenever its chunk
 -- loads again, so this is what keeps a job going.  It waits 5 seconds
 -- first: any key cancels, for the prompt.
@@ -22,6 +22,12 @@
 --                on repeat (mow.repeat > 0): mow.  Otherwise nothing: the
 --                lawn was mowed.
 --   autocompost  autocompost.
+--   claude       a goal it was working at when it went down
+--                (/claude/resume.txt), with claude.resume = true:
+--                `claude --resume`, which tells the model it was
+--                interrupted and carries on (API money spent with nobody
+--                there, so only when set).  Otherwise claude, waiting for
+--                a goal.
 --
 -- With init at boot (`ccnix setup init`), the job runs as a service of
 -- its own name instead (service mine: `autostart --now`, not started
@@ -34,11 +40,11 @@
 package.path = (ccnix and ccnix.lib or "") .. package.path    -- (ccnix's turtlelib, the updates' first)
 local T = require("turtlelib")
 
-local CHOICES = { mine = true, farm = true, mow = true, autocompost = true }
+local CHOICES = { mine = true, farm = true, mow = true, autocompost = true, claude = true }
 local prog = settings.get("ccnix.autostart", "")
 if prog == "" then return end
 if not CHOICES[prog] then
-    printError("autostart: can't start '" .. prog .. "' (mine, farm, mow or autocompost)")
+    printError("autostart: can't start '" .. prog .. "' (mine, farm, mow, autocompost or claude)")
     return
 end
 
@@ -77,6 +83,10 @@ local function plan()
         if away() then return { { "mow", "reset" }, { "mow" } } end
         if (settings.get("mow.repeat") or 0) > 0 then return { { "mow" } } end
         return nil, "the lawn was mowed (sysctl mow.repeat=<minutes> to keep mowing)"
+    elseif prog == "claude" then
+        -- (both settings on: a resume spends API money unattended)
+        if settings.get("claude.resume") == true and fs.exists("claude/resume.txt") then return { { "claude", "--resume" } } end
+        return { { "claude" } }
     end
     return { { prog } }
 end

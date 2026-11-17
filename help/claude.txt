@@ -4,7 +4,7 @@ Talks to the Claude API (Anthropic) from the turtle over HTTP and gives the mode
 
 Usage:
   claude [goal words...] [--model id] [--effort low|medium|high]
-         [--steps N] [--cache 5m|1h] [--confirm]
+         [--steps N] [--cache 5m|1h] [--confirm] [--resume]
 
   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
   claude                      asks for the goal
@@ -17,6 +17,8 @@ Usage:
       keep the conversation cached for an hour with no call reading it, not 5 minutes (for long pauses between goals: writing it costs more, 2x the input price, not 1.25x; reading it is cheap either way)
   --confirm
       show each piece of code and ask before running it (the model can ask that for one piece: review = true)
+  --resume
+      carry on with the goal in /claude/resume.txt, in a new conversation, with the options it was given (what autostart runs after a reboot; nothing there: it asks)
 
 When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit. Ctrl+T stops it (under T.run, so the saved position stays right).
 
@@ -32,9 +34,13 @@ What it costs: every round trip (one tool call) sends the whole conversation, so
 
 What's new: claude keeps the ccnix version it last ran with in /claude/.version.  When ccnix has been updated since, the first goal tells the model what changed for it (help/claude-news.txt, from doc/claude-news.txt: the lines for each version since).
 
+Resuming after a reboot: while a goal is under way /claude/resume.txt holds it (a first line of the session's options, then the goal, to which the model adds where it is), and it's removed when the goal ends or Ctrl+T stops claude.  With the settings ccnix.autostart = claude and claude.resume = true, a turtle that went down mid-goal (a server restart, its chunk unloaded) starts `claude --resume` at boot: the model is told it was interrupted and to read its memory and carry on. That spends API money with nobody at the turtle, so it's off unless set; with no goal to resume, autostart starts claude waiting for one.
+
 Keeping the player told: when claude.remindChat minutes (default 15, 0 for never) pass with no chat message to the player (T.report, the chat tool), the model is reminded after the next tool results.
 
-The log, claude.log beside the program: each entry with its time (UTC); the options a session started with, the goals, the code and what it did, the thinking, each call's tokens and how long it took, retries, clears, and each goal's tokens in all.  A call that writes many tokens to the cache after a long gap is the cache having run out (--cache 1h). At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1, replacing the older copy, and a new claude.log starts: one old copy kept.
+Hearing the player: while claude waits for the model's reply, a chat box aboard goes on the free side (an empty one or a tool's: never the chunk controller's or another upgrade's) and the chat is heard; what was there is back before the model's code runs.  What turtle.player says (anyone, when it isn't set) comes with the next results.  What's said while the code runs is missed.  claude.listen = false turns it off.
+
+The log, claude.log beside the program: each entry with its time (UTC); the options a session started with, the goals, the code and what it did, the thinking, each call's tokens and how long it took, retries, clears, and each goal's tokens in all.  A call that writes many tokens to the cache after a long gap is the cache having run out (--cache 1h). At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1, the older copies moving up to claude.log.3 (the setting claude.logKeep: that many kept, about 8 hours at 3), and a new claude.log starts.  On a disk with less than a quarter free (turtlelib's map, .map/, counted in) fewer are kept, the oldest going first; the current log always stays.
 
 Its helpers: functions it wants again are kept one to a file, each with keep(name, code) in its code, which runs the code (so it's defined at once) and writes it to /claude/helpers/<name>.lua; code that doesn't compile or run is refused and nothing is written.  At the start of each session /claude/helpers.lua (an older single file, which it can still write) and then each file in /claude/helpers/, in name order, is run in the code's own world, each on its own, so what they define is in scope for every chunk the model runs.  The files that fail are told to the model with its first goal, and the session goes on without them.  A call whose code declares a `local` at its top level (an unindented `local` line) gets a note: that name is gone when the call ends.
 

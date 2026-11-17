@@ -776,7 +776,7 @@ check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, l
 check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
 check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))
 
--- 21. The log rotates at claude.logSize, keeping one old copy; the helpers
+-- 21. The log rotates at claude.logSize, keeping one old copy (claude.logKeep 1: scenario 38 has more); the helpers
 --     the model keeps in /claude/helpers.lua are in its code's world; a
 --     broken helpers file is told to the model and the session goes on
 -- (loadfile reads the real disk in the sim: files in the mock's fs are read from it first)
@@ -789,7 +789,7 @@ loadfile = function(p, ...)
     end
     return realLoadfile(p, ...)
 end
-local SET = { ["claude.logSize"] = 600 }
+local SET = { ["claude.logSize"] = 600, ["claude.logKeep"] = 1 }
 settings = { define = function() end, get = function(n) return SET[n] end }
 fresh({ "" })
 HTTP.queue = {
@@ -802,7 +802,7 @@ run("fill the log")
 local cur, old = Mine.files["claude.log"], Mine.files["claude.log.1"]
 check("claude.log passes claude.logSize: the old log is kept as claude.log.1, a new one started",
     cur and old and #old >= 600 and cur:find("^%d+%-%d+%-%d+ %d+:%d+:%d+ ") ~= nil, tostring(cur and #cur) .. " / " .. tostring(old and #old))
-check("only one old copy: the first entries are gone from both", not (Mine.files["claude.log.2"])
+check("claude.logKeep 1: only one old copy, the first entries gone from both", not (Mine.files["claude.log.2"])
     and not (old or ""):find("start: claude", 1, true) and not (cur or ""):find("start: claude", 1, true))
 settings = nil
 
@@ -1469,4 +1469,304 @@ local n6 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] =
 check("the real news file reads: its 0.51.0 lines, the note for people left out",
     n6:find("updated from 0.50.2 to 0.51.0; what changed for you:\n- ", 1, true) and n6:find("- The chat tool says something", 1, true)
         and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
+end
+
+-- 36. the chat listener (ADR-0012 D3): while the harness waits for the
+--     model's reply, the chat box goes on the free side (never the chunk
+--     controller's, nor another upgrade's) and the chat is heard; the
+--     pickaxe is back before the code runs; what the player said comes
+--     with the next results, or the next goal.  No free side or no chat
+--     box: off, and the first results say why, once; claude.listen = false:
+--     off, nothing said.  (A request waits for a "sim_http" event here, so
+--     chat events can come meanwhile, as CC's http.post pulls events.)
+do
+local CHAT = "advancedperipherals:chat_box"
+local CONTROLLER = "advancedperipherals:chunk_controller"
+local MODEM = "computercraft:wireless_modem_advanced"
+local PICK = "minecraft:diamond_pickaxe"
+local chatBox = { sendMessage = function() return true end }
+local rawWrap, rawType = peripheral.wrap, peripheral.getType
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local SET36 = { ["turtle.player"] = "Steve" }
+settings = { define = function() end, get = function(n) return SET36[n] end }
+local SCRIPT, inParallel = {}, 0
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, postWas = os.pullEvent, HTTP.api.post
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+-- what was on each side while each request waited; a request in the
+-- listener's parallel waits for its "sim_http" event (STOP36: Ctrl+T then)
+local DURING, STOP36 = {}, false
+HTTP.api.post = function(...)
+    DURING[#DURING + 1] = (EQ.left or "-") .. " | " .. (EQ.right or "-")
+    if inParallel > 0 then
+        os.pullEvent("sim_http")
+        if STOP36 then error("Terminated", 0) end
+    end
+    return postWas(...)
+end
+-- (AP 0.8's chat event: the UUID, the name, the message, hidden: AP hides one starting with $)
+local function said(player, message) return { "chat", "uuid-" .. player, player, message, message:sub(1, 1) == "$" } end
+local function listenFresh(left, right, box)
+    fresh({ "" })
+    EQ = { left = left, right = right }
+    if box then Mine.inv[2] = { name = CHAT, count = 1 } end
+    DURING, SCRIPT, STOP36 = {}, {}, false
+end
+local function textsIn(n)
+    local _, turn = resultsIn(n)
+    local out = {}
+    for _, b in ipairs(type(turn.content) == "table" and turn.content or {}) do
+        if b.type == "text" then out[#out + 1] = b.text end
+    end
+    return table.concat(out, " | ")
+end
+local function chatAboard()
+    local n = 0
+    for s = 1, 16 do if Mine.inv[s] and Mine.inv[s].name == CHAT then n = n + Mine.inv[s].count end end
+    return n
+end
+local CLOCK = "%(at %d%d:%d%d:%d%d UTC%)"
+
+listenFresh(CONTROLLER, PICK, true)
+SCRIPT = { said("Steve", "claude use the oak stairs"), said("Alex", "hi all"), said("Steve", "$hidden"), { "sim_http" },
+           { "sim_http" }, said("Steve", "thanks"), { "sim_http" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return turtle.getEquippedLeft().name, turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+answers[1] = "next"
+answers[2] = ""
+run("build the stairs")
+local r36 = resultsIn(2).toolu_1
+check("while the model thinks the chat box is on the pickaxe's side, the controller never moves",
+    DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1] and DURING[3] == DURING[1], table.concat(DURING, ", "))
+check("...and the pickaxe is back before the code runs, the chat box in the inventory",
+    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. PICK and chatAboard() == 1 and EQ.right == PICK, r36 and r36.content)
+local t36 = textsIn(2)
+check("what turtle.player said while the model thought comes with the next results (not another player's, not a hidden one)",
+    t36:find("^Steve said in chat: claude use the oak stairs " .. CLOCK .. "$") ~= nil, t36)
+check("...and only once: the results after have nothing heard", textsIn(3) == "", textsIn(3))
+local g36 = HTTP.requests[4] and HTTP.requests[4].body.messages
+local next36 = g36 and g36[#g36].content
+check("heard during the last reply: it comes with the next goal",
+    type(next36) == "string" and next36:find("^next\n\n%[Steve said in chat: thanks " .. CLOCK .. "%]$") ~= nil, tostring(next36))
+check("...shown, and in claude.log", Mine.logHas("^%(Steve said in chat: claude use the oak stairs " .. CLOCK .. "%)$")
+    and (Mine.files["claude.log"] or ""):find("heard: Steve said in chat: thanks", 1, true) ~= nil)
+
+listenFresh(CONTROLLER, MODEM, true)
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("no free side")
+check("no side free of upgrades: nothing moves, the first results say why",
+    DURING[1] == CONTROLLER .. " | " .. MODEM and textsIn(2) == "The chat listener is off (neither side is free (left " .. CONTROLLER
+        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat while you think isn't heard.",
+    textsIn(2))
+check("...once", textsIn(3) == "", textsIn(3))
+
+listenFresh(CONTROLLER, PICK, false)
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("no chat box")
+check("no chat box aboard: off, and the first results say so",
+    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat while you think isn't heard.", textsIn(2))
+
+listenFresh(CONTROLLER, PICK, true)
+SET36["claude.listen"] = false
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("not listening")
+SET36["claude.listen"] = nil
+check("claude.listen = false: nothing swapped, nothing said", DURING[1] == CONTROLLER .. " | " .. PICK and textsIn(2) == "", textsIn(2))
+
+listenFresh(CONTROLLER, PICK, true)
+STOP36 = true
+SCRIPT = { { "sim_http" } }
+HTTP.queue = { reply({ text("Never.") }, "end_turn") }
+run("stopped while it thinks")
+check("Ctrl+T while the model thinks: the pickaxe is put back", EQ.left == CONTROLLER and EQ.right == PICK and chatAboard() == 1,
+    tostring(EQ.right))
+
+listenFresh(CONTROLLER, PICK, true)
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+SCRIPT = { { "sim_http" } }
+run("what do you hear")
+local sys36 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says what the player says while it thinks comes with the next results",
+    sys36:find("What they say in chat while you think comes with your next results", 1, true) ~= nil)
+
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+os.pullEvent, HTTP.api.post = pullWas, postWas
+parallel, settings = nil, nil
+end
+
+-- 37. resuming after a reboot (ADR-0012 D4): while a goal is under way
+--     /claude/resume.txt holds the session's options and the goal, and
+--     it's gone when the goal ends or Ctrl+T stops claude; --resume starts
+--     a new conversation telling the model it was interrupted, with the
+--     file's goal (what the model added too) and options, and keeps the
+--     file as it was; with no file it says so and asks for a goal
+do
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig the tunnel", "--steps", "400", "--cache", "1h")
+local k1 = resultsIn(2).toolu_1
+check("a goal under way: /claude/resume.txt holds the options given and the goal",
+    k1 and k1.content == "-> options: --steps 400 --cache 1h\ndig the tunnel\n", k1 and k1.content)
+check("...and it's gone when the goal ends", Mine.files["claude/resume.txt"] == nil)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Carried on.") }, "end_turn"),
+}
+run("--resume")
+local m37 = HTTP.requests[1] and HTTP.requests[1].body
+check("--resume: a new conversation whose first message says it was interrupted, with the file's goal and notes",
+    m37 and #m37.messages == 1 and m37.messages[1].content
+        == "You were interrupted (reboot); read your memory and resume: dig the tunnel\nat 0,0,5, 12 blocks left", m37 and m37.messages[1].content)
+check("...with the options the file kept (steps 3, cache 1h)", m37 and m37.cache_control.ttl == "1h"
+    and (Mine.files["claude.log"] or ""):find("start: claude --steps 3 --cache 1h (model claude-opus-5-5, effort medium, steps 3, cache 1h;", 1, true),
+    (Mine.files["claude.log"] or ""):sub(1, 200))
+local k2 = resultsIn(2).toolu_1
+check("...the file kept as it was meanwhile (not the interrupted message), and gone at the end",
+    k2 and k2.content == "-> options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n" and Mine.files["claude/resume.txt"] == nil,
+    k2 and k2.content)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3\ndig the tunnel\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("--resume", "--steps", "9")
+check("--resume: options given on the command line win over the file's",
+    (Mine.files["claude.log"] or ""):find("steps 9, cache 5m", 1, true) ~= nil)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "dig the tunnel, rewritten\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("--resume")
+local m37b = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+check("--resume with the options line gone: the whole file is the goal",
+    m37b == "You were interrupted (reboot); read your memory and resume: dig the tunnel, rewritten", tostring(m37b))
+
+fresh({ "" })
+run("--resume")
+check("--resume with nothing kept: it says so, asks for a goal, and sends nothing",
+    #HTTP.requests == 0 and Mine.logHas("^Nothing to resume: /claude/resume%.txt isn't there%.$") and Mine.logHas("^Goal: $"))
+
+fresh({ "" })
+HTTP.queue = { reply({ toolUse("lua", { code = "error('Terminated', 0)" }) }, "tool_use") }
+run("dig until stopped")
+check("Ctrl+T: the player's stop, so nothing is left to resume", Mine.files["claude/resume.txt"] == nil and #HTTP.requests == 1)
+
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("what about reboots")
+local sys37 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says /claude/resume.txt holds the goal, to add where it is",
+    sys37:find("While a goal is under way /claude/resume.txt holds it, for a resume after a reboot", 1, true) ~= nil)
+end
+
+-- 38. how much log is kept (ADR-0012 D5): past claude.logSize the log
+--     moves to claude.log.1, the older ones up to claude.log.<logKeep>
+--     (default 3); on a small disk old ones go, oldest first, until a
+--     quarter of it is free beside turtlelib's map (.map/); the current
+--     log never goes.  (The mock disk counts the logs and the map alone.)
+do
+local SET38 = { ["claude.logSize"] = 600 }
+settings = { define = function() end, get = function(n) return SET38[n] end }
+local CAP38
+fs.getCapacity = function() return CAP38 end
+fs.getFreeSpace = function()
+    local used = 0
+    for name, data in pairs(Mine.files) do
+        if name:find("^claude%.log") or name:find("^%.map/") then used = used + #data end
+    end
+    return CAP38 - used
+end
+-- eight calls, each result 400 of its own letter: a to h
+local function logRun(map)
+    fresh({ "" })
+    if map then Mine.files[".map/0_0_0"] = string.rep("m", map) end
+    HTTP.queue = {}
+    for i = 1, 8 do
+        HTTP.queue[i] = reply({ toolUse("lua", { code = "return string.rep('" .. string.char(96 + i) .. "', 400)" }) }, "tool_use")
+    end
+    HTTP.queue[9] = reply({ text("Done.") }, "end_turn")
+    run("fill the logs")
+end
+-- the old logs there are (1, 2, ...), and the first letter run in each
+local function olds()
+    local n, firsts = 0, {}
+    while Mine.files["claude.log." .. (n + 1)] do
+        n = n + 1
+        firsts[n] = Mine.files["claude.log." .. n]:match("%-> (%l)%l%l%l") or "?"
+    end
+    return n, table.concat(firsts)
+end
+
+CAP38 = 1000000
+logRun()
+local n1, f1 = olds()
+check("claude.logKeep 3 by default: claude.log, .1, .2 and .3, the newest first", n1 == 3 and f1 > "" and f1:sub(1, 1) > f1:sub(3, 3)
+    and Mine.files["claude.log"] ~= nil, n1 .. " " .. f1)
+
+SET38["claude.logKeep"] = 1
+logRun()
+local n2 = olds()
+check("claude.logKeep 1: one old copy, as before", n2 == 1, n2)
+SET38["claude.logKeep"] = nil
+
+CAP38 = 6000
+logRun(2500)
+local n3 = olds()
+check("a small disk: fewer old logs, so a quarter stays free beside the map",
+    n3 >= 1 and n3 < 3 and fs.getFreeSpace() >= CAP38 / 4, n3 .. " kept, " .. fs.getFreeSpace() .. " free")
+
+logRun(5000)
+local n4 = olds()
+check("the map alone leaves less than a quarter free: every old log goes, the current one stays",
+    n4 == 0 and Mine.files["claude.log"] ~= nil and Mine.files[".map/0_0_0"] ~= nil, n4)
+fs.getCapacity, fs.getFreeSpace = nil, nil
+settings = nil
+end
+
+-- 39. the prompt (ADR-0012 phase 1): the settings a session should have
+--     (T.keep, T.cfg) are kept in a keep() helper, since a session starts
+--     with turtlelib's defaults
+do
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("keep my settings")
+local sys39 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
+    sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
 end
