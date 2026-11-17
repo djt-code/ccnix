@@ -7,6 +7,8 @@
 --     and closed by a corner piece; an unrailed drop of 4 (a drop of 3 is fine); a lantern at head height (one a block
 --     higher is fine); each warning names the cell and the rule; (ADR-0013) a lone stair against a wall, or two side
 --     by side with no step up beyond, is a seat, not a flight (no warnings), and a lone stair up onto a ledge is still checked;
+--     a wall torch (soul, redstone) in a walk cell's head or feet cell, a flush light suggested (not one over head height,
+--     and a lantern at head height warned of by the lantern rule alone);
 --   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
 --   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
@@ -212,6 +214,25 @@ do
         and lantern[1].text:find("1,2,1", 1, true) ~= nil, texts(warnings))
     warnings = lintScene(add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 3, 1, "minecraft:soul_lantern", { hanging = "true" } } }), { 0, 0, 0, 2, 3, 2 })
     check("...one a block higher is not", #ofRule(warnings, "lantern") == 0, texts(warnings))
+
+    -- (ADR-0013) lights in a walkway: a wall torch in a walk cell's head or feet cell
+    local function lit(y, name)
+        return add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 1, 2, STONE }, { 1, 2, 2, STONE }, { 1, 3, 2, STONE },
+            { 1, y, 1, name, { facing = "south" } } })
+    end
+    warnings = lintScene(lit(2, "minecraft:wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    local light = ofRule(warnings, "light")
+    check("light: a wall torch at head height over a walk cell is warned of, with a flush light suggested", #light == 1 and at(light, 1, 1, 1) ~= nil
+        and light[1].text:find("1,2,1", 1, true) ~= nil and light[1].text:find("glowstone", 1, true) ~= nil, texts(warnings))
+    warnings = lintScene(lit(1, "minecraft:soul_wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    light = ofRule(warnings, "light")
+    check("...a soul torch on the wall at the feet too", #light == 1 and at(light, 1, 1, 1) ~= nil and light[1].text:find("soul_wall_torch", 1, true) ~= nil,
+        texts(warnings))
+    warnings = lintScene(lit(3, "minecraft:redstone_wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    check("...one over head height is not", #ofRule(warnings, "light") == 0, texts(warnings))
+    warnings = lintScene(add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 2, 1, "minecraft:lantern", { hanging = "true" } } }), { 0, 0, 0, 2, 2, 2 })
+    check("...a lantern at head height is the lantern rule's alone (no light warning too)", #ofRule(warnings, "lantern") == 1
+        and #ofRule(warnings, "light") == 0, texts(warnings))
 end
 
 --------------------------------------------------------------------------

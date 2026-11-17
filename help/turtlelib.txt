@@ -797,7 +797,7 @@ T.undo(n, opts)
 
     A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why, and stays marked stale. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
 
-tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lanterns, and paths
+tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths
 
 Loaded by turtlelib the first time T.lint or T.walkable is used.  Cells are the turtle's own (the frame it counts in).
 
@@ -814,6 +814,8 @@ The turtle is one block tall and the player two (1.8, stepping up a block at mos
       a walk cell (2 air over a floor) with an open side over a drop of more than 3, and no railing there
   lantern
       a lantern at head height over a walk cell: a player walks into it
+  light
+      a torch on a wall (soul and redstone too) in a walk cell's feet or head cell: it sticks into the way (a lantern at head height is the lantern rule's); glowstone or a shroomlight set flush, or a torch on a merlon or the wall's top, lights it as well
 A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll, T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is counted as unchecked and only its headroom is looked at.  A lone stair that climbs to nothing (a seat against a wall, a bench of stairs side by side) isn't a flight, and none of the stair rules is looked at for it.  A cell the map has never seen breaks no rule.
 
 T.walkable searches the map for a way a player walks from one cell to another (breadth first: fewest steps).  A player's place is the cell its feet are in, over a block to stand on (or on a ladder), and its height in half blocks (a bottom slab is half a block, a fence or wall one and a half).  A step goes to a side, up a block at most (a stair or a slab is a step like any other) or down any height; a climb goes up or down a ladder.  The body is 1.8 high, so a step up needs 3 air where it starts as well as 2 where it ends (the reason a stair needs 3 air).  Lava and fire are never walked into, water breaks a fall, and a fall over 3 is taken only when there is no way without one, and listed.
@@ -821,9 +823,9 @@ T.walkable searches the map for a way a player walks from one cell to another (b
 == The lint ==
 
 T.lint(what, opts)
-    What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lanterns at head height. A list of { rule, x, y, z, text }, and info.
+    What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lights in the way. A list of { rule, x, y, z, text }, and info.
 
-    `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own cells and states, the map for the cells it leaves alone and round it). The cells looked at are the box's and, for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too. A warning is { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop or lantern (see the overview), x, y, z the cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved. Warnings, not refusals: a design may break a rule on purpose. Nil and why if it can't start. Info is { cells, unchecked (stairs with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50), rules (a count by rule), summary (a line a rule: its first warning, and how many more) }. For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and around (the counts) and planSummary (the summary of the plan's own). T.build prints only those, and a count of the rest.
+    `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own cells and states, the map for the cells it leaves alone and round it). The cells looked at are the box's and, for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too. A warning is { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop, lantern or light (see the overview), x, y, z the cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved. Warnings, not refusals: a design may break a rule on purpose. Nil and why if it can't start. Info is { cells, unchecked (stairs with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50), rules (a count by rule), summary (a line a rule: its first warning, and how many more) }. For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and around (the counts) and planSummary (the summary of the plan's own). T.build prints only those, and a count of the rest.
 
 == Walking ==
 

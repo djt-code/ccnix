@@ -1,4 +1,4 @@
--- lint.lua -- a build as a two-tall player meets it: warnings about its stairs, railings, drops and lanterns, and paths
+-- lint.lua -- a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths
 --
 -- Loaded by turtlelib the first time T.lint or T.walkable is used.  Cells are the turtle's own (the frame it counts in).
 --
@@ -13,6 +13,9 @@
 --             height, don't join: a player slips between them; a railing or a block in either cell between closes it
 --   drop      a walk cell (2 air over a floor) with an open side over a drop of more than 3, and no railing there
 --   lantern   a lantern at head height over a walk cell: a player walks into it
+--   light     a torch on a wall (soul and redstone too) in a walk cell's feet or head cell: it sticks into the way (a
+--             lantern at head height is the lantern rule's); glowstone or a shroomlight set flush, or a torch on a merlon
+--             or the wall's top, lights it as well
 -- A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll,
 -- T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is
 -- counted as unchecked and only its headroom is looked at.  A lone stair that climbs to nothing (a seat against a wall,
@@ -33,7 +36,7 @@ local MAX_CELLS = 65536           -- the biggest box a lint reads
 local SAFE_FALL = 3               -- the most a player falls without a railing being wanted
 local DEEP = 64                   -- how far down a drop is measured
 -- The rules in the order the warnings come
-local RULES = { "headroom", "approach", "exit", "railing", "drop", "lantern" }
+local RULES = { "headroom", "approach", "exit", "railing", "drop", "lantern", "light" }
 local COMPASS_AT = { north = 0, east = 1, south = 2, west = 3 }
 local WALK_LIMIT = 20000          -- places a walk search visits at most (opts.limit)
 local WALK_MARGIN = 16            -- how far outside the box of the two ends it may go (opts.margin)
@@ -49,6 +52,7 @@ local KINDS = {
     gate    = { pass = true, rail = true },          -- a player opens it; shut, it is part of a railing
     railing = { rail = true, height = 3 },           -- 1.5 high: nobody steps up onto one
     lantern = { lantern = true, height = 1 },
+    walltorch = { pass = true, light = true },       -- the body goes through it, but it is in the way
     stairs  = { floor = true, stairs = true, height = 2 },
     slab    = { floor = true, slab = true, height = 1 },   -- a bottom slab (a top or double one is a full block)
     solid   = { floor = true, height = 2 },          -- anything else
@@ -59,6 +63,7 @@ local NAMES = {
     { "water", { "water", "flowing_water", "bubble_column" } },
     { "hot", { "lava", "flowing_lava", "fire", "soul_fire" } },
     { "lantern", { "lantern", "soul_lantern", "*copper_lantern" } },
+    { "walltorch", { "*wall_torch" } },
     { "gate", { "*_fence_gate" } },
     { "railing", { "*_fence", "*_wall", "*_pane", "*bars" } },
     { "open", { "*air", "light", "*torch", "*_sign", "*_button", "lever", "*_pressure_plate", "*_carpet", "*rail",
@@ -281,7 +286,7 @@ local function checkStair(view, warn, info, base, x, y, z, c)
 end
 
 --------------------------------------------------------------------------
--- Railings, drops and lanterns
+-- Railings, drops and lights
 --------------------------------------------------------------------------
 
 -- Is a cell open between two railings (known, the body goes through, not a railing itself)?
@@ -319,6 +324,9 @@ local function fallFrom(view, x, y, z)
     return depth, false
 end
 
+-- A walk cell's two cells, by height over its feet
+local PART = { [0] = "feet", [1] = "head" }
+
 -- The rules for a walk cell: feet at x, y, z (passable, over a floor).  (Its warnings count the floor among their cells.)
 local function checkWalk(view, warn, x, y, z)
     local head = view(x, y + 1, z)
@@ -329,6 +337,15 @@ local function checkWalk(view, warn, x, y, z)
         return
     end
     if not head.kind.pass then return end
+    for _, dy in ipairs({ 0, 1 }) do
+        local c = view(x, y + dy, z)
+        if c.kind.light then
+            warn("light", x, y, z, "the " .. c.name .. " at " .. key(x, y + dy, z) .. " sticks into this walk cell at "
+                .. PART[dy] .. " height (glowstone or a shroomlight set flush in the wall or floor, or a torch on a merlon "
+                .. "or the wall's top, lights it out of the way)", { { x, y + dy, z }, { x, y - 1, z } })
+            break
+        end
+    end
     for h = 0, 3 do
         local d = T.DELTA[h]
         local nx, nz = x + d[1], z + d[3]
@@ -368,12 +385,12 @@ local function ofPlan(w) return w.where == "plan" end
 local function roundIt(w) return w.where == "around" end
 
 -- What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and
--- exit, railings meeting on a diagonal, drops over 3, lanterns at head height.  A list of { rule, x, y, z, text }, and info.
+-- exit, railings meeting on a diagonal, drops over 3, lights in the way.  A list of { rule, x, y, z, text }, and info.
 --
 -- `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own
 -- cells and states, the map for the cells it leaves alone and round it).  The cells looked at are the box's and,
 -- for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too.  A warning is
--- { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop or lantern (see the overview), x, y, z the
+-- { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop, lantern or light (see the overview), x, y, z the
 -- cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved.  Warnings, not
 -- refusals: a design may break a rule on purpose.  Nil and why if it can't start.  Info is { cells, unchecked (stairs
 -- with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50),
