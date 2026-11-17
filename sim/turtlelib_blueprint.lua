@@ -25,7 +25,8 @@
 --     on carrying on, finished with opts.fuelWatch = false; the house is within it;
 --   * order hints: a top slab under a stair after the stair by default (layer and column order; a bottom slab not), a
 --     legend's after = { dx, dy, dz } in both orders, written in the text form and read back, hints in a circle or
---     at a cell not built let be, a hint that isn't three whole numbers refused.
+--     at a cell not built let be, a hint that isn't three whole numbers refused; a step on a floor: the slab fails
+--     without opts.digBelow (the floor untouched), and goes in when the build carries on with it.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -851,4 +852,22 @@ do
     local p, bad = T.blueprint.new({ anchor = { 0, 0, 0 }, legend = { C = { name = "cobblestone", after = { 1, "up", 0 } } }, layers = { "C" } })
     check("a hint that isn't three whole numbers is refused, naming the legend entry", p == nil and tostring(bad):find("legend C", 1, true) ~= nil
         and tostring(bad):find("after", 1, true) ~= nil, tostring(bad))
+end
+do
+    -- a step of a flight on a floor: the slab can only go in from where the floor is, so only with opts.digBelow
+    local step = { anchor = { 0, 0, 3 }, legend = { t = "oak_slab[type=top]", s = "oak_stairs[facing=north,half=bottom]" },
+                   layers = { "t", "s" } }
+    local floor = {}
+    for x = -1, 1 do for z = 2, 4 do floor[#floor + 1] = { x, -1, z, BRICKS } end end
+    fresh(floor)
+    know(-3, -3, 0, 3, 3, 6)
+    slabsAndStairs(W)
+    W.give(5, BRICKS, 1)
+    local ok, why, info = build(step)
+    check("a top slab on the floor under a stair: the stair goes in, the slab fails without opts.digBelow, the floor untouched",
+        ok == false and has(0, 1, 3, "oak_stairs") and W.get(0, 0, 3) == nil and has(0, -1, 3, "stone_bricks") and W.dug == nil
+        and info.failed[1] and tostring(info.failed[1].why):find("opts.digBelow = true", 1, true) ~= nil, tostring(why))
+    ok, why = build(nil, { digBelow = true })
+    check("...carried on with opts.digBelow: the floor dug, the slab placed from there, the floor put back", ok == true
+        and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "stone_bricks") and W.carrying(BRICKS) == 1, tostring(why))
 end

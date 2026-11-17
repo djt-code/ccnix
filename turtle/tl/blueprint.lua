@@ -846,8 +846,9 @@ end
 -- Building
 --------------------------------------------------------------------------
 
--- Put one cell in place: true, or false and why; the second answer is true when it was there already.
-local function putCell(cell, move, look)
+-- Put one cell in place: true, or false and why; the second answer is true when it was there already.  support: the
+-- build's opts that T.placeAt takes on (digBelow, temp).
+local function putCell(cell, move, look, support)
     local want, asked = wantsOf(cell.entry)
     if isDouble(cell.entry) then
         -- a double slab: a bottom half, then a second slab placed down onto it from above
@@ -881,7 +882,7 @@ local function putCell(cell, move, look)
             -- (nothing seen there: some other way in may do)
         end
     end
-    local opts = { move = move }
+    local opts = { move = move, digBelow = support.digBelow, temp = support.temp }
     for key, value in pairs(want) do opts[key] = value end
     local name, stateOrWhy, how = T.placeAt(cell.x, cell.y, cell.z, cell.name, opts)
     if not name then return false, stateOrWhy end
@@ -983,9 +984,11 @@ end
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
 -- false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart,
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
--- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end).  Info is { name, done,
--- total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in
--- place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell }, warnings }.
+-- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow and temp
+-- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow).
+-- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
+-- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
+-- warnings }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
 -- info.warnings and printed, a line a rule ("player: headroom at 3,1,4: ..."); they never change the result.
 function T.build(plan, opts)
@@ -1066,7 +1069,7 @@ function T.build(plan, opts)
     info.fuel = watch and { estimate = math.ceil(watch.approach), spent = 0, perCell = watch.perCell } or nil
 
     local function attempt(cell)
-        local good, extra = putCell(cell, move, opts.look)      -- (extra: already there, or why not)
+        local good, extra = putCell(cell, move, opts.look, opts)      -- (extra: already there, or why not)
         attempted = attempted + 1
         if good then
             job.failed[cell.n] = nil
