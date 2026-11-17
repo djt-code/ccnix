@@ -1875,3 +1875,30 @@ local sys39 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
     sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
 end
+
+-- 40. large notes (ADR-0013 phase 1): memory over 32 KB in all (its
+--     folders counted) is a start note, on the screen and with the first
+--     goal (and after /new), saying what it costs and where the old
+--     goes; under it, none
+do
+fresh({ "/new", "again", "" })
+fs.makeDir("claude/memories")
+fs.makeDir("claude/memories/old")
+Mine.files["claude/memories/notes.md"] = string.rep("x", 30 * 1024)
+Mine.files["claude/memories/old/done.md"] = string.rep("y", 10 * 1024)
+HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
+run("tidy up")
+local goal40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local NOTE40 = "Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: move what you no longer need to an archive file outside /memories (under /claude/, read with fs when it's wanted)."
+check("memory over 32 KB: a start note with the first goal and on the screen",
+    goal40 == "tidy up\n\n[" .. NOTE40 .. "]" and Mine.logHas("^Your notes in /memories are 40 KB"), goal40)
+local new40 = HTTP.requests[2] and HTTP.requests[2].body.messages[1].content or ""
+check("...and with the first goal after /new", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
+
+fresh({ "" })
+fs.makeDir("claude/memories")
+Mine.files["claude/memories/notes.md"] = string.rep("x", 20 * 1024)
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("small notes")
+check("...under it, no note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "small notes")
+end

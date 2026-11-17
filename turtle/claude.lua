@@ -216,6 +216,11 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
+-- Memory over MEMORY_LARGE bytes in all is a start note: a file viewed
+-- stays in the conversation, never cleared, so it is sent on every call
+-- (about BYTES_A_TOKEN bytes a token: the field's 80 KB notes.md came to
+-- about 28k tokens)
+local MEMORY_LARGE, BYTES_A_TOKEN = 32 * 1024, 3
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -1557,6 +1562,24 @@ local function whatsNew()
         table.concat(lines, "\n"))
 end
 
+-- The bytes in a folder and every folder in it
+local function folderSize(dir)
+    local total = 0
+    for _, name in ipairs(fs.exists(dir) and fs.isDir(dir) and fs.list(dir) or {}) do
+        local file = fs.combine(dir, name)
+        total = total + (fs.isDir(file) and folderSize(file) or fs.getSize(file))
+    end
+    return total
+end
+
+-- The note on memory grown past MEMORY_LARGE, or nil
+local function memoryNote()
+    local size = folderSize(MEMORY_DIR)
+    if size <= MEMORY_LARGE then return nil end
+    return string.format("Your notes in %s are %d KB, about %dk tokens on every call once viewed: move what you no longer need to an archive file outside %s (under /%s/, read with fs when it's wanted).",
+        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / BYTES_A_TOKEN / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
+end
+
 -- Keep the version the model has had the news for.
 local function keepVersion()
     if not newVersion then return end
@@ -2096,6 +2119,8 @@ local function newConversation()
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
     say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    local memory = memoryNote()
+    if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
 end
 
@@ -2122,6 +2147,12 @@ local function main()
         say("yellow", (text.cut(news, ";")) .. ": Claude is told what changed.")
         log("news: " .. news)
         startNotes[#startNotes + 1] = news
+    end
+    local memory = memoryNote()
+    if memory then
+        say("yellow", memory)
+        log("memory: " .. memory)
+        startNotes[#startNotes + 1] = memory
     end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
     if goal == "" then
