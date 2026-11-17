@@ -3,7 +3,8 @@
 **Status:** Accepted (2026-11-17): D1, D2 and D4 to D8 as recommended;
 D3 as option C (everything that reports speaks to everyone unless
 `turtle.player` is set); D2 with the longer-term path through ADR-0006;
-D6's light threshold checked against the game's code (below)
+D6's light threshold checked against the game's code (below); D9 added
+the same day (compaction and tidy notes), amending D1's deep clear
 **Date:** 2026-11-17
 **Deciders:** Dan Theisen
 
@@ -209,6 +210,9 @@ untested in game. `T.placeDir(d, text)` and `T.frameId` were never used.
    - chest categories and T.sortChests (D6).
 7. **digBelow's two-cell exit** on solid ground (D7).
 8. **No automatic search-limit retry** in T.travel (D8).
+9. **Compaction instead of the deep clear, and tidy notes** (D9, added
+   after the user's question: clearing is a bulldozer, and the turtle
+   did worse this round).
 9. **Phase 1 (defects and feedback, no decision):**
    - the map records what `T.look` and placeAt find;
    - torches and signs on top of walls and fences;
@@ -397,6 +401,59 @@ were, and only when the job asked for digBelow. About 50 lines.
 cut it off itself. Phase 2's "read the whole why" is the fix, and a
 retry would double the worst case of a search that can't succeed.
 
+### D9. Compaction and tidy notes (added 2026-11-17)
+
+The user asked for "context compaction" on the notes and the rest of the
+turtle's memory instead of clearing ("a bulldozer move"), having seen
+the turtle do worse this round.
+- Since 0.51 a clear deletes the model's own old code and thinking and
+  leaves placeholders, so mid-goal it loses the trail of what it tried
+  and why.
+- The log can't prove that's why it did worse, but Anthropic's
+  compaction docs say the same thing: "response quality degrades as a
+  conversation grows".
+
+**The API's on-demand compaction** (beta `compact-2026-09-04`, Opus 5.5
+and Sonnet 5.5 among its models):
+- It is a request of its own, carrying the conversation as it stands
+  and a `compaction` parameter.
+- The reply is one signed block: a summary the model writes, having read
+  everything, thinking included.
+- The block then goes first in `messages`, in place of what it
+  summarizes. Recent turns can be kept word for word. `instructions`
+  replace the summary prompt (up to 16,384 characters; they must say
+  "no tool calls").
+- `cache_control` on the block puts a breakpoint after it. The call is
+  billed as a request (`usage.iterations`).
+- It can't carry `context_management` itself.
+
+| | A: D1 as accepted (one deep clear at a mark) | B: compaction at goal boundaries, clearing as backstop | C: B, and compaction mid-goal too |
+|---|---|---|---|
+| What | thinking kept; at 180k, thinking and old tool results cleared | when a goal ends with the conversation over a mark (100k), the harness compacts it while it waits for the next goal, with our own summary prompt; D1's "keep all thinking" stays; a clear only at a hard high mark inside one long goal | also at the hard mark inside a goal, keeping the last few turns word for word |
+| What the model keeps | placeholders where its code, results and thinking were | a summary of everything: open tasks, the player's words and corrections, places, what's built and how, lessons, helper names | the same |
+| Cost a time | a rewrite of the floor (~100-200k weighted) | the summary call (~6k reading the conversation from the cache, ~5k written: ~30k weighted) and a small new prefix | the same, more often |
+| Lines | done in D1 | ~80 claude.lua, the claude_drive mock's compaction reply | +~40 (the keep-recent split) |
+
+**B (accepted).**
+- At a goal boundary nobody waits, since the harness is waiting for the
+  player anyway.
+- The model starts each goal on a summary instead of a heap of
+  placeholders.
+- Mid-goal compaction can come later if v4 shows long goals hitting the
+  backstop.
+
+**Tidy notes.** The memory file `notes.md` was 80 KB, about 28k tokens
+every session, and is never cleared. When the notes pass 32 KB at a
+session's start (#43 already warns), the session's first task is to tidy
+them:
+- the model rewrites `notes.md` as the current state (about 12 KB);
+- it moves the rest to `/claude/notes-archive/<date>.md`, which it can
+  read with `fs` and which isn't loaded.
+
+The model does it, not a cheaper summarizer, because it knows what
+matters. Nothing is lost. The task runs before the player's goal, or as
+`/tidy`.
+
 ## Trade-off analysis
 
 - **The spend:** the largest item (D1) is a harness setting with no
@@ -494,7 +551,7 @@ retry would double the worst case of a search that can't succeed.
 
 ### Phase 3: the decisions
 
-1. [ ] D1 to D8 as decided.
+1. [ ] D1 to D9 as decided.
 
 ### Phase 4: release and hand back
 
