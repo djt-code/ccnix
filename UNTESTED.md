@@ -10,6 +10,47 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
+## ADR-0013: compaction, skills, chat while code runs, building fixes (ccnix 0.53.0) (#90)
+
+In-game order: `/ccnix rom update`, then on the castle turtle give claude a goal like "read what's new, retire
+the helpers it names, tidy your notes, and keep /claude/report_harness_v4.md as you work". v4 should give the
+weighted cost a call and the rewrites a day (the log's new lines), whether chat was missed during runs, whether
+the dark cells matched where mobs spawned, and whether the lint's split quieted the noise.
+
+- **Tidy notes**: with /claude/memories over 32 KB the session's first task is the tidy: notes.md about 12 KB,
+  the rest in /claude/notes-archive/<date>.md, settled procedures as skills; `/tidy` on demand.
+- **Skills**: the first message lists the six shipped skills (and the model's own); a goal like "light the
+  courtyard" gets "Skills that may fit: light-an-area" and the model reads it; `skill(...)` writes its own;
+  `/skills` lists them.
+- **Compaction at a goal's end**: a goal ending over 100k logs "compacted: N messages into a summary of M
+  tokens"; the next goal starts on the summary and the skill list. Typing a goal while it runs waits for it.
+- **Compaction mid-goal**: a long goal reaching 250k compacts after a batch of results, keeping the last turns,
+  and carries on; no "bound to a different conversation" error. The log shows where the compaction call read
+  from the cache.
+- **Cost**: the log's "cache: written again" lines are rare (a compaction, a TTL gap), not every goal.
+- **Chat while code runs**: say something during a long travel or stow run: it comes with that run's results;
+  a dig mid-run brings the pickaxe back and the run carries on; `chatHeard()`; "took N s" on each result; the
+  chunk controller never moves; `T.withPeripheral` (the scanner) while the chat box holds the side.
+- **Reports with no player set**: with `turtle.player` unset, the chat tool, `T.report` and mine's messages
+  reach everyone, and claude's start says so.
+- **Long replies**: a 64000-token reply streams within CC's timeout; a cut-off says thinking or writing.
+- **Light**: `T.darkCells(box, {dimension = "nether"})` on a lit room: compare with where mobs actually appear
+  (mods may change spawning); honey, slime and packed ice floors; `T.light` through glass and slabs.
+- **Attachments**: `T.attachedTo` under a torch, a button, dust; `T.digCell(..., {attached = "refuse"})`
+  refuses and names them.
+- **Signs**: `opts.toward` on a wall and in the open (which way a standing sign placed by a turtle faces:
+  rotation 0 faces south); `T.signFor` in front of the player; a sign and a torch on top of a wall or fence.
+- **Item names**: redstone dust by `T.placeAt` and in a plan (`redstone_wire`); seeds on farmland; `T.undo`
+  takes both back.
+- **Facings**: a piston, observer, repeater and comparator placed by facing (first guesses, learnt).
+- **digBelow**: a soul-soil floor with none aboard; on solid ground the neighbour dug as a way out, both put
+  back, both in the undo journal.
+- **Lint and routes**: `player:` lines show the plan's own; a stair bench is quiet; a wall torch in a walkway
+  warned of; a route blocked by its own torches says where.
+- **Storage**: `T.cfg.tools = {"*_pickaxe"}` and `T.stow` puts looted swords away; `T.addChest(..., {holds})`,
+  `T.sortChests()`; a craft at a known chest re-reads it; `T.addChest` on a double chest's other half says so.
+- **setup**: `setup claude` installs help/claude-news.txt and turtle/skills/.
+
 ## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0) (#85)
 
 In-game order: `/ccnix rom update`, then on the castle turtle (chunk controller on one side) give claude a goal

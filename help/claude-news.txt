@@ -2,6 +2,29 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.53.0
+Your conversation is no longer cleared into placeholders: when a goal ends with it over 100k tokens it is summarized while you wait for the next goal, and inside a goal at 250k it is summarized keeping your last few turns. All your thinking is kept until then. Write what matters into your notes and skills as you go.
+Skills: the session's first message lists them (name, description, path). Before a goal, read any that fit with fs; their steps come before your habits. skill(name, description, body) writes your own (/claude/skills/<name>/skill.md, a one-line "use when" description); yours win over a shipped one of the same name. /skills lists them.
+If /claude/memories is over 32 KB, your first task is to tidy notes.md to about 12 KB, archive the rest in /claude/notes-archive/<date>.md, and move settled procedures into skills. /tidy does it on demand.
+Chat is now heard while your code runs too, until its first dig or attack brings the pickaxe back; chatHeard() returns what was heard so far. Each lua result says how long the run took.
+With turtle.player unset, T.report and the chat tool speak to everyone (they used to refuse).
+Replies may be 64000 tokens. A reply cut off tells you whether you were thinking or writing; a second cut-off ends the goal.
+T.light(box, opts) gives block light over the map; T.darkCells(box, opts) the cells where mobs could spawn: opts.dimension = "nether" groups them (7 or less: skeletons, wither skeletons, endermen; 11 or less: zombified piglins, piglins, hoglins, blazes; ghasts and magma cubes whatever the light). Your helpers/lightmodel.lua can go.
+T.attachedTo(x, y, z) lists what hangs on or stands on a block (torches, dust, buttons, ladders, signs, rails...); T.digCell(x, y, z, {attached = "refuse"}) won't drop them.
+T.placeAt(x, y, z, sign, {text = ..., toward = {x, y, z}}) faces a sign at a reader (a wall sign if a block stands behind it, else standing, the nearest of 4 rotations); T.signFor(reader, text) picks the spot in front of them.
+Torches and standing signs go on top of fences, walls and panes. Redstone dust, string, seeds and crops, vines and the wall forms of signs, banners and heads are placed by their item (T.itemOfBlock, T.blockOfItem); a plan may say redstone_wire. Pistons, dispensers, droppers, observers, repeaters and comparators are placed by facing.
+opts.digBelow: a floor that drops itself needs only a free slot; on solid ground it digs a neighbouring floor cell as a way out and puts both back; every need is named at once.
+T.look notes what it sees in the map, so a block placeAt or T.build finds already there no longer reads as air to T.lint.
+T.lint of a plan tags warnings "plan" or "around", and T.build's player: lines show the plan's own; a lone stair bench is no flight; a new "light" rule warns of a wall torch in a walkway.
+A route that fails because of furnishings says "a way exists through minecraft:wall_torch at x,y,z (lift it and put it back)". Nether portals are never planned through.
+T.cfg.tools = {"*_pickaxe"} (names or globs) makes only the equipped and listed tools essential, so T.stow puts looted swords and axes away. Put it in your settings helper.
+T.addChest(x, y, z, side, bulk, {holds = {"*_log", ...}}) gives a chest a category; T.stow prefers it; T.sortChests() moves misplaced stacks. Your helpers/storage.lua can go. T.stow's info.reasons says why each item stayed; T.recount(side) re-reads a chest; crafting at a known chest re-reads it.
+Built-in recipes: barrel, redstone torch, repeater, lever, stone button, iron door, respawn anchor, soul campfire. Your helpers/recipes_extra.lua and recipes_redstone.lua can go.
+Already built in, so these helpers can go: say and askPlayer (the chat tool, T.report, T.report.ask), batchCraft (T.craftBatch), digCell (T.digCell), furnaceSmelt (T.smeltAt). T.harvest takes opts.maxFuel and opts.timeout.
+T.undo now puts back redstone dust and planted crops too.
+The log says when the cache was written again and why, and when a reply was cut off.
+-- ADR-0013 (#41-#51, #87-#89): compaction, skills, chat while code runs, reports to everyone, the light model, attachments, signs toward a reader, digBelow's exit, chest categories, T.cfg.tools, the lint split, item names.
+
 == 0.52.0
 T.lint(box or plan) lists what stops a two-tall player: under 3 air over a stair, a flight's approach or exit blocked, railings meeting only on a diagonal, unrailed drops over 3, a lantern at head height. Warnings only.
 T.build now ends with "player: ..." lines from T.lint (its result is unchanged; player = false turns it off); T.verify(plan, {player = true}) adds info.warnings.
