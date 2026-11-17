@@ -1624,3 +1624,73 @@ peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
 os.pullEvent, HTTP.api.post = pullWas, postWas
 parallel, settings = nil, nil
 end
+
+-- 37. resuming after a reboot (ADR-0012 D4): while a goal is under way
+--     /claude/resume.txt holds the session's options and the goal, and
+--     it's gone when the goal ends or Ctrl+T stops claude; --resume starts
+--     a new conversation telling the model it was interrupted, with the
+--     file's goal (what the model added too) and options, and keeps the
+--     file as it was; with no file it says so and asks for a goal
+do
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig the tunnel", "--steps", "400", "--cache", "1h")
+local k1 = resultsIn(2).toolu_1
+check("a goal under way: /claude/resume.txt holds the options given and the goal",
+    k1 and k1.content == "-> options: --steps 400 --cache 1h\ndig the tunnel\n", k1 and k1.content)
+check("...and it's gone when the goal ends", Mine.files["claude/resume.txt"] == nil)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Carried on.") }, "end_turn"),
+}
+run("--resume")
+local m37 = HTTP.requests[1] and HTTP.requests[1].body
+check("--resume: a new conversation whose first message says it was interrupted, with the file's goal and notes",
+    m37 and #m37.messages == 1 and m37.messages[1].content
+        == "You were interrupted (reboot); read your memory and resume: dig the tunnel\nat 0,0,5, 12 blocks left", m37 and m37.messages[1].content)
+check("...with the options the file kept (steps 3, cache 1h)", m37 and m37.cache_control.ttl == "1h"
+    and (Mine.files["claude.log"] or ""):find("start: claude --steps 3 --cache 1h (model claude-opus-5-5, effort medium, steps 3, cache 1h;", 1, true),
+    (Mine.files["claude.log"] or ""):sub(1, 200))
+local k2 = resultsIn(2).toolu_1
+check("...the file kept as it was meanwhile (not the interrupted message), and gone at the end",
+    k2 and k2.content == "-> options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n" and Mine.files["claude/resume.txt"] == nil,
+    k2 and k2.content)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3\ndig the tunnel\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("--resume", "--steps", "9")
+check("--resume: options given on the command line win over the file's",
+    (Mine.files["claude.log"] or ""):find("steps 9, cache 5m", 1, true) ~= nil)
+
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "dig the tunnel, rewritten\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("--resume")
+local m37b = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+check("--resume with the options line gone: the whole file is the goal",
+    m37b == "You were interrupted (reboot); read your memory and resume: dig the tunnel, rewritten", tostring(m37b))
+
+fresh({ "" })
+run("--resume")
+check("--resume with nothing kept: it says so, asks for a goal, and sends nothing",
+    #HTTP.requests == 0 and Mine.logHas("^Nothing to resume: /claude/resume%.txt isn't there%.$") and Mine.logHas("^Goal: $"))
+
+fresh({ "" })
+HTTP.queue = { reply({ toolUse("lua", { code = "error('Terminated', 0)" }) }, "tool_use") }
+run("dig until stopped")
+check("Ctrl+T: the player's stop, so nothing is left to resume", Mine.files["claude/resume.txt"] == nil and #HTTP.requests == 1)
+
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("what about reboots")
+local sys37 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says /claude/resume.txt holds the goal, to add where it is",
+    sys37:find("While a goal is under way /claude/resume.txt holds it, for a resume after a reboot", 1, true) ~= nil)
+end

@@ -6,8 +6,9 @@
 -- going back there first if need be), a finished or self-stopped one is
 -- left alone, no tunnel starts one; a saved farm is farmed (home first),
 -- no farm is learned from the settings' size; a mow pass cut short is done
--- again, and a finished one only on repeat.  A key in the 5 seconds
--- cancels; a step that fails stops the rest.
+-- again, and a finished one only on repeat; claude resumes a goal cut
+-- short only with claude.resume on, else waits for one.  A key in the 5
+-- seconds cancels; a step that fails stops the rest.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -34,6 +35,7 @@ local function boot(name, set, have, opts)
     opts = opts or {}
     S.files, SET, runs, out, EVENTS, failOn = {}, set, {}, {}, opts.events or {}, opts.fail
     for k, v in pairs(have) do S.files[DIR .. k] = v end
+    for k, v in pairs(opts.root or {}) do S.files[k] = v end
     print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
     package.loaded.turtlelib = nil
     local ok, err = pcall(assert(loadfile(PROJ .. "/turtle/autostart.lua")), table.unpack(opts.args or {}))
@@ -90,8 +92,19 @@ check("mow cut short: mow reset, then mow", r == "mow reset; mow", r)
 
 r = boot("autocompost", { ["ccnix.autostart"] = "autocompost" }, {})
 check("autocompost: autocompost", r == "autocompost", r)
-r, o = boot("claude", { ["ccnix.autostart"] = "claude" }, {})
+r, o = boot("vi", { ["ccnix.autostart"] = "vi" }, {})
 check("a program it can't start on its own: refused", r == "" and o:find("can't start", 1, true) ~= nil, o)
+
+-- claude (ADR-0012 D4): a goal cut short is resumed only with claude.resume on
+local GOAL = { ["claude/resume.txt"] = "options: --steps 400 --cache 1h\ndig the tunnel\n" }
+r = boot("claude", { ["ccnix.autostart"] = "claude" }, {})
+check("claude, no goal kept: claude, waiting for one", r == "claude", r)
+r = boot("claude, a goal, resume off", { ["ccnix.autostart"] = "claude" }, {}, { root = GOAL })
+check("claude, a goal cut short but claude.resume off: claude, waiting (never a resume unasked)", r == "claude", r)
+r, o = boot("claude, a goal, resume on", { ["ccnix.autostart"] = "claude", ["claude.resume"] = true }, {}, { root = GOAL })
+check("claude, a goal cut short and claude.resume on: claude --resume, after the 5 s", r == "claude --resume" and o:find("in 5 s", 1, true) ~= nil, r)
+r = boot("claude, resume on, no goal", { ["ccnix.autostart"] = "claude", ["claude.resume"] = true }, {})
+check("claude.resume on but no goal kept: claude, waiting", r == "claude", r)
 
 r, o = boot("key", { ["ccnix.autostart"] = "farm" }, { ["farm.map"] = "x" }, { events = { { "key", 28 } } })
 check("a key in the 5 seconds cancels", r == "" and o:find("cancelled", 1, true) ~= nil, o)

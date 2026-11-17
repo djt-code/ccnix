@@ -4,7 +4,7 @@ Talks to the Claude API (Anthropic) from the turtle over HTTP and gives the mode
 
 Usage:
   claude [goal words...] [--model id] [--effort low|medium|high]
-         [--steps N] [--cache 5m|1h] [--confirm]
+         [--steps N] [--cache 5m|1h] [--confirm] [--resume]
 
   claude dig a 3 by 3 tunnel 20 blocks ahead and come back
   claude                      asks for the goal
@@ -17,6 +17,8 @@ Usage:
       keep the conversation cached for an hour with no call reading it, not 5 minutes (for long pauses between goals: writing it costs more, 2x the input price, not 1.25x; reading it is cheap either way)
   --confirm
       show each piece of code and ask before running it (the model can ask that for one piece: review = true)
+  --resume
+      carry on with the goal in /claude/resume.txt, in a new conversation, with the options it was given (what autostart runs after a reboot; nothing there: it asks)
 
 When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), or press Enter on an empty line to quit. Ctrl+T stops it (under T.run, so the saved position stays right).
 
@@ -31,6 +33,8 @@ Setup:
 What it costs: every round trip (one tool call) sends the whole conversation, so a long job is many calls; the conversation is cached (the API's prompt caching), so each call reads what came before from the cache, at a fraction of the price, and pays in full only for what's new.  When a goal ends its tokens are printed: those read from the cache, written to it and new, and what came out.
 
 What's new: claude keeps the ccnix version it last ran with in /claude/.version.  When ccnix has been updated since, the first goal tells the model what changed for it (help/claude-news.txt, from doc/claude-news.txt: the lines for each version since).
+
+Resuming after a reboot: while a goal is under way /claude/resume.txt holds it (a first line of the session's options, then the goal, to which the model adds where it is), and it's removed when the goal ends or Ctrl+T stops claude.  With the settings ccnix.autostart = claude and claude.resume = true, a turtle that went down mid-goal (a server restart, its chunk unloaded) starts `claude --resume` at boot: the model is told it was interrupted and to read its memory and carry on. That spends API money with nobody at the turtle, so it's off unless set; with no goal to resume, autostart starts claude waiting for one.
 
 Keeping the player told: when claude.remindChat minutes (default 15, 0 for never) pass with no chat message to the player (T.report, the chat tool), the model is reminded after the next tool results.
 
