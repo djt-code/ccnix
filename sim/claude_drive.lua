@@ -1470,3 +1470,157 @@ check("the real news file reads: its 0.51.0 lines, the note for people left out"
     n6:find("updated from 0.50.2 to 0.51.0; what changed for you:\n- ", 1, true) and n6:find("- The chat tool says something", 1, true)
         and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
 end
+
+-- 36. the chat listener (ADR-0012 D3): while the harness waits for the
+--     model's reply, the chat box goes on the free side (never the chunk
+--     controller's, nor another upgrade's) and the chat is heard; the
+--     pickaxe is back before the code runs; what the player said comes
+--     with the next results, or the next goal.  No free side or no chat
+--     box: off, and the first results say why, once; claude.listen = false:
+--     off, nothing said.  (A request waits for a "sim_http" event here, so
+--     chat events can come meanwhile, as CC's http.post pulls events.)
+do
+local CHAT = "advancedperipherals:chat_box"
+local CONTROLLER = "advancedperipherals:chunk_controller"
+local MODEM = "computercraft:wireless_modem_advanced"
+local PICK = "minecraft:diamond_pickaxe"
+local chatBox = { sendMessage = function() return true end }
+local rawWrap, rawType = peripheral.wrap, peripheral.getType
+peripheral.wrap = function(side) if EQ[side] == CHAT then return chatBox end return rawWrap(side) end
+peripheral.getType = function(side) if EQ[side] == CHAT then return "chat_box" end return rawType(side) end
+peripheral.find = function(kind)
+    for _, side in ipairs({ "left", "right" }) do
+        if peripheral.getType(side) == kind then return peripheral.wrap(side) end
+    end
+end
+local SET36 = { ["turtle.player"] = "Steve" }
+settings = { define = function() end, get = function(n) return SET36[n] end }
+local SCRIPT, inParallel = {}, 0
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, postWas = os.pullEvent, HTTP.api.post
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+-- what was on each side while each request waited; a request in the
+-- listener's parallel waits for its "sim_http" event (STOP36: Ctrl+T then)
+local DURING, STOP36 = {}, false
+HTTP.api.post = function(...)
+    DURING[#DURING + 1] = (EQ.left or "-") .. " | " .. (EQ.right or "-")
+    if inParallel > 0 then
+        os.pullEvent("sim_http")
+        if STOP36 then error("Terminated", 0) end
+    end
+    return postWas(...)
+end
+-- (AP 0.8's chat event: the UUID, the name, the message, hidden: AP hides one starting with $)
+local function said(player, message) return { "chat", "uuid-" .. player, player, message, message:sub(1, 1) == "$" } end
+local function listenFresh(left, right, box)
+    fresh({ "" })
+    EQ = { left = left, right = right }
+    if box then Mine.inv[2] = { name = CHAT, count = 1 } end
+    DURING, SCRIPT, STOP36 = {}, {}, false
+end
+local function textsIn(n)
+    local _, turn = resultsIn(n)
+    local out = {}
+    for _, b in ipairs(type(turn.content) == "table" and turn.content or {}) do
+        if b.type == "text" then out[#out + 1] = b.text end
+    end
+    return table.concat(out, " | ")
+end
+local function chatAboard()
+    local n = 0
+    for s = 1, 16 do if Mine.inv[s] and Mine.inv[s].name == CHAT then n = n + Mine.inv[s].count end end
+    return n
+end
+local CLOCK = "%(at %d%d:%d%d:%d%d UTC%)"
+
+listenFresh(CONTROLLER, PICK, true)
+SCRIPT = { said("Steve", "claude use the oak stairs"), said("Alex", "hi all"), said("Steve", "$hidden"), { "sim_http" },
+           { "sim_http" }, said("Steve", "thanks"), { "sim_http" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return turtle.getEquippedLeft().name, turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+answers[1] = "next"
+answers[2] = ""
+run("build the stairs")
+local r36 = resultsIn(2).toolu_1
+check("while the model thinks the chat box is on the pickaxe's side, the controller never moves",
+    DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1] and DURING[3] == DURING[1], table.concat(DURING, ", "))
+check("...and the pickaxe is back before the code runs, the chat box in the inventory",
+    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. PICK and chatAboard() == 1 and EQ.right == PICK, r36 and r36.content)
+local t36 = textsIn(2)
+check("what turtle.player said while the model thought comes with the next results (not another player's, not a hidden one)",
+    t36:find("^Steve said in chat: claude use the oak stairs " .. CLOCK .. "$") ~= nil, t36)
+check("...and only once: the results after have nothing heard", textsIn(3) == "", textsIn(3))
+local g36 = HTTP.requests[4] and HTTP.requests[4].body.messages
+local next36 = g36 and g36[#g36].content
+check("heard during the last reply: it comes with the next goal",
+    type(next36) == "string" and next36:find("^next\n\n%[Steve said in chat: thanks " .. CLOCK .. "%]$") ~= nil, tostring(next36))
+check("...shown, and in claude.log", Mine.logHas("^%(Steve said in chat: claude use the oak stairs " .. CLOCK .. "%)$")
+    and (Mine.files["claude.log"] or ""):find("heard: Steve said in chat: thanks", 1, true) ~= nil)
+
+listenFresh(CONTROLLER, MODEM, true)
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("no free side")
+check("no side free of upgrades: nothing moves, the first results say why",
+    DURING[1] == CONTROLLER .. " | " .. MODEM and textsIn(2) == "The chat listener is off (neither side is free (left " .. CONTROLLER
+        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat while you think isn't heard.",
+    textsIn(2))
+check("...once", textsIn(3) == "", textsIn(3))
+
+listenFresh(CONTROLLER, PICK, false)
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("no chat box")
+check("no chat box aboard: off, and the first results say so",
+    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat while you think isn't heard.", textsIn(2))
+
+listenFresh(CONTROLLER, PICK, true)
+SET36["claude.listen"] = false
+HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("not listening")
+SET36["claude.listen"] = nil
+check("claude.listen = false: nothing swapped, nothing said", DURING[1] == CONTROLLER .. " | " .. PICK and textsIn(2) == "", textsIn(2))
+
+listenFresh(CONTROLLER, PICK, true)
+STOP36 = true
+SCRIPT = { { "sim_http" } }
+HTTP.queue = { reply({ text("Never.") }, "end_turn") }
+run("stopped while it thinks")
+check("Ctrl+T while the model thinks: the pickaxe is put back", EQ.left == CONTROLLER and EQ.right == PICK and chatAboard() == 1,
+    tostring(EQ.right))
+
+listenFresh(CONTROLLER, PICK, true)
+HTTP.queue = { reply({ text("Done.") }, "end_turn") }
+SCRIPT = { { "sim_http" } }
+run("what do you hear")
+local sys36 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says what the player says while it thinks comes with the next results",
+    sys36:find("What they say in chat while you think comes with your next results", 1, true) ~= nil)
+
+peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
+os.pullEvent, HTTP.api.post = pullWas, postWas
+parallel, settings = nil, nil
+end

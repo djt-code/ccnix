@@ -1124,10 +1124,12 @@ end
 -- Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for
 -- it to show up.  Returns the peripheral and a function that puts back what was there, or nil and why.
 --
--- It prefers an empty side, then one with a tool, then another upgrade.  Call the returned function
+-- It prefers an empty side, then one with a tool, then another upgrade; opts.free = true takes only an
+-- empty side or a tool's, so no upgrade comes off (a modem, a scanner).  Call the returned function
 -- when done (calling it again does nothing).  The reasons for nil: not on board, a tool rather than a
 -- peripheral, both sides kept, no free slot for what comes off, or it never showed up.
-function T.equipPeripheral(name)
+function T.equipPeripheral(name, opts)
+    opts = opts or {}
     if T.isTool(name) then return nil, name .. " is a tool, not a peripheral (T.withTool)" end
     local before = { left = T.equipped("left"), right = T.equipped("right") }
     for _, side in ipairs(EQUIP_SIDES) do
@@ -1144,10 +1146,13 @@ function T.equipPeripheral(name)
         local held = before[s]
         if not upgradeKept(s, held) then
             local r = held == nil and 0 or (T.isTool(held) and 1 or 2)
-            if not rank or r < rank then side, rank = s, r end
+            if (not rank or r < rank) and not (opts.free and r == 2) then side, rank = s, r end
         end
     end
-    if not side then
+    if not side and opts.free then
+        return nil, string.format("neither side is free (left %s, right %s; an upgrade stays on): nowhere to put the %s",
+            before.left or "empty", before.right or "empty", name)
+    elseif not side then
         return nil, "both sides hold an upgrade to keep (a chunk controller or T.cfg.keepSide): nowhere to put the " .. name
     end
     local was = before[side]
