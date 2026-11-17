@@ -47,6 +47,11 @@
 --     flight's approach and exit, railings meeting only on a diagonal,
 --     unrailed drops, a lantern at head height; T.walkable finds a way a
 --     player walks from one cell to another
+--   * light (tl.light, loaded when first used): T.light floods block light
+--     over the map; T.darkCells lists the cells where a mob could spawn
+--   * what a block holds (tl.attach, loaded when first used): T.attachedTo
+--     names the torches, ladders, signs and the like a dig there would drop;
+--     T.digCell's opts.attached refuses or warns
 --   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the
 --     rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral
 --     (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short;
@@ -1751,11 +1756,17 @@ local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["m
 -- it anyway), checked before it goes and again when it is there.  It stands in a cell beside it the map (or what the
 -- turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default
 -- { path = true, scan = false }; digging is turned off).  The dig goes into the map as every dig does.  The turtle
--- stays beside the cell.
+-- stays beside the cell.  opts.attached looks first at what the block holds, from the map (T.attachedTo: a torch on it,
+-- a ladder or a sign on its side, a lantern under it): "refuse" refuses a dig that would drop any (a maybe too), naming
+-- them; "warn" digs, and returns them as a fourth value, { attached = the list }, named in the warning (those surely held
+-- go from the map as air).
 function T.digCell(x, y, z, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
         if not isWhole(n) then return false, "digCell wants a cell of whole numbers: x, y, z" end
+    end
+    if opts.attached ~= nil and opts.attached ~= "refuse" and opts.attached ~= "warn" then
+        return false, "opts.attached is \"refuse\" or \"warn\""
     end
     local cell = { x = x, y = y, z = z }
     local at = T.posKey(cell)
@@ -1768,6 +1779,14 @@ function T.digCell(x, y, z, opts)
     local function run()
         local why = refusal(knownAt(x, y, z))
         if why then return false, why end
+        local held, heldInfo
+        if opts.attached then
+            held, heldInfo = T.attachedTo(x, y, z)
+            if not held then return false, "can't tell what " .. at .. " holds: " .. tostring(heldInfo) end
+            if #held > 0 and opts.attached == "refuse" then
+                return false, heldInfo.summary .. " (opts.attached = \"warn\" digs anyway)"
+            end
+        end
         -- where to stand: beside it, the turtle's own cell first, then empty ones, then unseen ones, the nearest first
         local stands = {}
         for _, d in ipairs({ "up", "down", 0, 1, 2, 3 }) do
@@ -1809,7 +1828,14 @@ function T.digCell(x, y, z, opts)
         warnFalling(warn, cell)
         local dug, digWhy = T.digDir(d)
         if not dug then return false, "couldn't dig " .. name .. " at " .. at .. (digWhy and (": " .. tostring(digWhy)) or "") end
-        return true, name, warn[1] and ("warning: " .. warn[1]) or nil
+        if held and #held > 0 then
+            -- (what it surely held dropped with it)
+            for _, h in ipairs(held) do
+                if h.sure then pcall(T.map.set, h.x, h.y, h.z, "minecraft:air") end
+            end
+            warn[#warn + 1] = "dug " .. at .. ", which held " .. heldInfo.what
+        end
+        return true, name, warn[1] and ("warning: " .. table.concat(warn, "; ")) or nil, held and { attached = held } or nil
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()
@@ -3056,6 +3082,8 @@ T.registry = {
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
     alignMap = "tl.world", frameChanged = "tl.world", mergeScan = "tl.world",
+    -- tl.attach: what a block holds, which a dig would drop
+    attachedTo = "tl.attach",
     -- tl.path: routes
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
@@ -3063,7 +3091,9 @@ T.registry = {
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
     -- tl.lint: a build as a two-tall player meets it
-    lint = "tl.lint", walkable = "tl.lint",
+    lint = "tl.lint", walkable = "tl.lint", blockKind = "tl.lint",
+    -- tl.light: block light over the map, and where mobs could spawn
+    light = "tl.light", darkCells = "tl.light",
     -- tl.craft: recipes, crafting from a chest, and smelting
     craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",
