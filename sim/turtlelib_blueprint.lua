@@ -27,7 +27,8 @@
 --   * order hints: a top slab under a stair after the stair by default (layer and column order; a bottom slab not), a
 --     legend's after = { dx, dy, dz } in both orders, written in the text form and read back, hints in a circle or
 --     at a cell not built let be, a hint that isn't three whole numbers refused; a step on a floor: the slab fails
---     without opts.digBelow (the floor untouched), and goes in when the build carries on with it.
+--     without opts.digBelow (the floor untouched), and goes in when the build carries on with it; on solid ground (no
+--     free cell beside the floor) a floor cell beside it dug and put back too, and walled in, refused naming each.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -906,4 +907,35 @@ do
     ok, why = build(nil, { digBelow = true })
     check("...carried on with opts.digBelow: the floor dug, the slab placed from there, the floor put back", ok == true
         and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "stone_bricks") and W.carrying(BRICKS) == 1, tostring(why))
+end
+do
+    -- the same step on solid ground (ADR-0013 D7): no free cell beside the floor, so a floor cell beside it is dug too
+    local step = { anchor = { 0, 0, 3 }, legend = { t = "oak_slab[type=top]", s = "oak_stairs[facing=north,half=bottom]" },
+                   layers = { "t", "s" } }
+    local function ground(extra)
+        local blocks = {}
+        for x = -1, 1 do for z = 2, 4 do blocks[#blocks + 1] = { x, -1, z, BRICKS }; blocks[#blocks + 1] = { x, -2, z, STONE } end end
+        for _, b in ipairs(extra or {}) do blocks[#blocks + 1] = b end
+        fresh(blocks)
+        know(-3, -3, 0, 3, 3, 6)
+        slabsAndStairs(W)
+    end
+    local function floorAsItWas()
+        for x = -1, 1 do for z = 2, 4 do
+            if not has(x, -1, z, "stone_bricks") then return false end
+        end end
+        return true
+    end
+    ground()
+    local ok, why = build(step, { digBelow = true })
+    check("a top slab on solid ground under a stair, opts.digBelow: a floor cell beside it dug too, the slab placed, the floor as it was",
+        ok == true and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, 1, 3, "oak_stairs") and floorAsItWas() and W.carrying(BRICKS) == 0
+        and W.dug == 2, tostring(why) .. " " .. tostring(W.dug))
+    -- walled in: the cells beside the slab hold blocks, so no floor cell beside it has air above
+    ground({ { 1, 0, 3, STONE }, { -1, 0, 3, STONE }, { 0, 0, 2, STONE }, { 0, 0, 4, STONE } })
+    local info
+    ok, why, info = build(step, { digBelow = true })
+    check("...walled in: the slab fails, nothing dug, the reason naming each floor cell beside it", ok == false and W.get(0, 0, 3) == nil
+        and W.dug == nil and floorAsItWas() and info.failed[1] and tostring(info.failed[1].why):find("no free cell beside the floor", 1, true) ~= nil
+        and tostring(info.failed[1].why):find("0,-1,2: the map has minecraft:stone above it", 1, true) ~= nil, tostring(info.failed[1] and info.failed[1].why))
 end

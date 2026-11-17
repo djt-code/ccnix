@@ -215,6 +215,8 @@ T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .pl
 Placing a block with the state wanted:
 T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the block, its state and how; nil and why if it can't.
+A sign in front of a reader:
+T.signFor(reader, said, opts) - Put a sign in front of a reader standing at reader = { x, y, z }, its face toward them, with text on it: the sign's name, its state and how ({ at, look, toward, ... } as T.placeAt's); nil and why if it can't.
 Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 The list of chests, in a data file:
