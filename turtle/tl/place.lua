@@ -33,7 +33,8 @@
 -- file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is
 -- corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it
 -- and the cell above free; T.ignite lights a fire from above with flint and steel.  A sign takes its text
--- (opts.text), which the game writes when the turtle places it.
+-- (opts.text), which the game writes when the turtle places it, and opts.toward turns it to a reader (T.signFor finds
+-- the cell in front of one).
 
 local T = require("turtlelib")
 local text = require("text")
@@ -53,6 +54,11 @@ local RELATIVE = { heading = 0, right = 1, back = 2, left = 3 }
 local RELATIVE_NAMES = { "heading", "right", "back", "left" }
 -- The facings that are not a compass way (a piston's, an observer's)
 local VERTICAL = { up = true, down = true }
+-- A standing sign's rotation: sixteenths of a turn, 0 its face looking south, 4 west, 8 north, 12 east (Minecraft's
+-- StandingSignBlock, set from the placer's look turned half round: RotationSegment.convertToSegment(yaw + 180)).  A
+-- turtle's fake player looks along a compass way, so these four are the only ones a turtle gives.
+local ROTATION_FACING = { south = 0, west = 4, north = 8, east = 12 }
+local ROTATIONS = { 0, 4, 8, 12 }
 
 --------------------------------------------------------------------------
 -- Blocks by name: what family, what can be clicked, what holds a torch
@@ -172,11 +178,12 @@ local FAMILIES = {
         down = rows("beyond"),
         up = {},
     },
-    -- a sign as a torch: on the wall beyond (the wall form, facing the turtle), or standing on the floor
+    -- a sign as a torch: on the wall beyond (the wall form, facing the turtle), or standing on the floor, its face
+    -- turned back at the turtle (a rotation, see ROTATION_FACING)
     sign = {
         hang = true, onPost = true, sturdy = false,
-        front = rows("beyond block=wall facing=back", "floor"),
-        down = rows("beyond"),
+        front = rows("beyond block=wall facing=back", "floor rotation=back"),
+        down = rows("beyond rotation=back"),
         up = {},
     },
     -- a ladder hangs on a side: placed from above or below it goes on the side the turtle faces, if that holds it
@@ -255,7 +262,7 @@ local function keysOf(fam)
 end
 
 -- Keys a caller may name in opts, and the state key each one is for
-local WANTED = { "facing", "half", "axis", "face", "type" }
+local WANTED = { "facing", "half", "axis", "face", "type", "rotation" }
 
 --------------------------------------------------------------------------
 -- What the game found out, kept
@@ -316,10 +323,11 @@ end
 -- Rules and values
 --------------------------------------------------------------------------
 
--- The value a rule gives on an approach with heading h (a compass name, an axis or a plain word); nil if it needs the
--- compass (base: the compass number of heading 0) and there isn't one.
-local function valueOf(rule, h, base)
+-- The value a rule for the state key `key` gives on an approach with heading h (a compass name, a sign's rotation, an
+-- axis or a plain word); nil if it needs the compass (base: the compass number of heading 0) and there isn't one.
+local function valueOf(rule, h, base, key)
     local turns = RELATIVE[rule]
+    if turns and key == "rotation" then return base and tostring(ROTATION_FACING[COMPASS[(base + h + turns) % 4]]) end
     if turns then return base and COMPASS[(base + h + turns) % 4] end
     if rule == "along" then return base and AXIS_OF[COMPASS[(base + h) % 4]] end
     if rule == "across" then return base and AXIS_OF[COMPASS[(base + h + 1) % 4]] end
@@ -342,6 +350,14 @@ local function ruleOf(key, value, h, base)
         if value == "y" then return "y" end
         if not base then return nil end
         return value == AXIS_OF[COMPASS[(base + h) % 4]] and "along" or "across"
+    end
+    if key == "rotation" then
+        -- (a rotation between the four a turtle gives can't be told as a rule)
+        if not base then return nil end
+        for _, rule in ipairs(RELATIVE_NAMES) do
+            if ROTATION_FACING[COMPASS[(base + h + RELATIVE[rule]) % 4]] == tonumber(value) then return rule end
+        end
+        return nil
     end
     return value
 end
@@ -370,10 +386,15 @@ local function aheadOf(h, x, y, z)
     return x + v[1], y, z + v[3]
 end
 
+-- The state keys that follow the way the turtle faces
+local TURNING = { facing = true, axis = true, rotation = true }
+
 -- Does the way the turtle faces change what it gets: a state that follows the heading, or a family with rows that
 -- look at the side it faces (a ladder from above)?
 local function headingMatters(fam, want)
-    if want.facing ~= nil or want.axis ~= nil then return true end
+    for key in pairs(want) do
+        if TURNING[key] then return true end
+    end
     for _, kind in ipairs({ "down", "up" }) do
         for _, row in ipairs(fam[kind]) do
             if row.when == "ahead" then return true end
@@ -458,7 +479,7 @@ end
 local function gives(learned, famName, kind, row, want, h, base)
     local set = specOf(learned, famName, kind, row)
     for key, wanted in pairs(want) do
-        if set[key] == nil or valueOf(set[key], h, base) ~= wanted then return false end
+        if set[key] == nil or valueOf(set[key], h, base, key) ~= wanted then return false end
     end
     return true
 end
@@ -526,9 +547,6 @@ local function approachWords(kind, h, tx, ty, tz, base, turning)
     return words
 end
 
--- The state keys that follow the way the turtle faces
-local TURNING = { facing = true, axis = true }
-
 -- What a row gives of the keys wanted, where it differs: "half=bottom", and true if a key that follows the heading
 -- (facing, axis) is among them.
 local function givesWords(learned, famName, kind, row, want, h, base)
@@ -536,7 +554,7 @@ local function givesWords(learned, famName, kind, row, want, h, base)
     for key in pairs(want) do keys[#keys + 1] = key end
     table.sort(keys)
     for _, key in ipairs(keys) do
-        local got = set[key] and valueOf(set[key], h, base)
+        local got = set[key] and valueOf(set[key], h, base, key)
         if got ~= want[key] then
             parts[#parts + 1] = key .. "=" .. tostring(got or "none")
             turned = turned or TURNING[key] == true
@@ -631,6 +649,16 @@ local function wantsOf(item, famName, fam, opts)
     if want.facing and COMPASS_AT[want.facing] == nil and not (fam.vertical and VERTICAL[want.facing]) then
         return nil, fam.vertical and "facing is a compass name (north, east, south or west), up or down"
             or "facing is a compass name: north, east, south or west"
+    end
+    if want.rotation then
+        local n = tonumber(want.rotation)
+        local ok = false
+        for _, r in ipairs(ROTATIONS) do ok = ok or r == n end
+        if not ok then
+            return nil, "a turtle turns a standing sign only in quarter turns: rotation 0 (its face south), 4 (west), 8 (north) " ..
+                "or 12 (east); opts.toward picks the nearest to a reader"
+        end
+        want.rotation = tostring(math.floor(n))
     end
     return want
 end
@@ -971,6 +999,80 @@ local function supportWords(s)
 end
 
 --------------------------------------------------------------------------
+-- A sign turned toward a reader
+--------------------------------------------------------------------------
+
+-- A cell as { x, y, z } or { x =, y =, z = }: its x, y, z, or nil if it isn't one of whole numbers.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local xyz = { c.x or c[1], c.y or c[2], c.z or c[3] }
+    for i = 1, 3 do
+        if type(xyz[i]) ~= "number" or xyz[i] ~= math.floor(xyz[i]) then return nil end
+    end
+    return xyz[1], xyz[2], xyz[3]
+end
+
+-- The headings nearest the way dx, dz (in the turtle's frame) points: one, or two when it is a diagonal.
+local function headingsToward(dx, dz)
+    local hx, hz = dx > 0 and 1 or 3, dz > 0 and 0 or 2
+    if math.abs(dz) > math.abs(dx) then return { hz } end
+    if math.abs(dx) > math.abs(dz) then return { hx } end
+    return { hz, hx }
+end
+
+local atan2 = math.atan2 or math.atan       -- (Lua 5.2 has atan2; 5.3 on takes two numbers in atan)
+
+-- opts with opts.toward (the reader's cell) turned into the state that shows a sign's face to the reader: a wall sign's
+-- facing when the map shows a sturdy block behind the cell (on the far side from the reader), else a standing sign's
+-- rotation, the nearest of the four a turtle gives.  Returns the opts and what was decided: { form = "wall", facing,
+-- behind } or { form = "standing", rotation, wanted (the reader's way in sixteenths), off (degrees), note }; or nil and why.
+local function towardOpts(x, y, z, item, opts)
+    if familyOf(item) ~= "sign" then return nil, "opts.toward turns a sign toward a reader, and " .. item .. " is not one" end
+    if opts.facing ~= nil or opts.rotation ~= nil then
+        return nil, "opts.toward sets the sign's facing or rotation itself: leave those out"
+    end
+    local rx, _, rz = cellOf(opts.toward)
+    if not rx then return nil, "opts.toward is the reader's cell: { x, y, z }, whole numbers" end
+    local base = compassBase()
+    if not base then return nil, "opts.toward needs the world origin: T.setOrigin(x, y, z, facing)" end
+    local dx, dz = rx - x, rz - z
+    if dx == 0 and dz == 0 then
+        return nil, "the reader is straight above or below the sign at " .. x .. "," .. y .. "," .. z .. ": a sign can't face up or down"
+    end
+    local out = {}
+    for k, v in pairs(opts) do out[k] = v end
+    out.toward = nil
+    for _, h in ipairs(headingsToward(dx, dz)) do
+        local v = T.DELTA[h]
+        local bx, bz = x - v[1], z - v[3]
+        local behind = nameAt(bx, y, bz)
+        if behind and sturdy(behind) then
+            out.facing = COMPASS[(base + h) % 4]
+            return out, { form = "wall", facing = out.facing, behind = { x = bx, y = y, z = bz } }
+        end
+    end
+    -- the reader's way in quarter turns clockwise from north (heading 0 is +z, a right turn +x), then in sixteenths as
+    -- a rotation is counted (from south)
+    local turns = (base + atan2(dx, dz) / (math.pi / 2)) % 4
+    local ideal = (8 + 4 * turns) % 16
+    local best, off
+    for _, r in ipairs(ROTATIONS) do
+        local d = math.abs(ideal - r)
+        d = math.min(d, 16 - d)
+        if not off or d < off - 1e-9 then best, off = r, d end
+    end
+    out.rotation = best
+    local aim = { form = "standing", rotation = best, wanted = math.floor(ideal + 0.5) % 16, off = math.floor(off * 22.5 + 0.5) }
+    if aim.off > 0 then
+        local way
+        for name, r in pairs(ROTATION_FACING) do if r == best then way = name end end
+        aim.note = "a standing sign turned to rotation " .. best .. " (its face " .. way .. "), " .. aim.off .. " degrees off the " ..
+            "reader's way (rotation " .. aim.wanted .. "): a turtle turns one only in quarter turns"
+    end
+    return out, aim
+end
+
+--------------------------------------------------------------------------
 -- Placing a block with the state wanted
 --------------------------------------------------------------------------
 
@@ -1003,8 +1105,11 @@ end
 -- wrong digs the block and tries the next approach, learning what the game actually gave (see the overview).
 -- opts.facing is a compass name (north, east, south, west) and needs the world origin (up or down too for a piston,
 -- dispenser, dropper or observer, which need none; a repeater or comparator stands on a block); opts.half is bottom or top for a
--- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever.
--- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
+-- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever;
+-- opts.rotation is a standing sign's, 0 (its face south), 4 (west), 8 (north) or 12 (east): the only four a turtle
+-- gives.  opts.toward = { x, y, z }, the cell a reader stands in, turns a sign to them: a wall sign when the map shows a
+-- sturdy block behind the cell (on the far side from the reader), else a standing sign at the nearest of the four
+-- rotations (how.toward says which, and how many degrees off the reader's way it is).  Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
 -- newline starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
 -- (below).  A cell that already holds the item as wanted comes back as it is; one holding anything else is not
@@ -1015,7 +1120,8 @@ end
 -- when dug, as soul soil, planks or bricks do, and a slot is free for it).  Without digBelow the floor is never dug,
 -- and the failure says the option is there, with whatever else digging it would need.  Returns the block's name, its
 -- state, and { approach, from, heading, tries, lines, support } (approach is front, down or up; from the cell the
--- turtle stood in; lines a sign's text; support { temp, floor }: the names of the block put above and the floor dug).  A failure's why
+-- turtle stood in; lines a sign's text; support { temp, floor }: the names of the block put above and the floor dug;
+-- toward, with opts.toward: { form = "wall", facing, behind } or { form = "standing", rotation, wanted, off, note }).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
 -- the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 function T.placeAt(x, y, z, item, opts)
@@ -1025,13 +1131,21 @@ function T.placeAt(x, y, z, item, opts)
     end
     if type(item) ~= "string" or item == "" then return nil, "placeAt wants the item's name, like minecraft:oak_stairs" end
     if not text.contains(item, ":") then item = "minecraft:" .. item end
+    if opts.toward ~= nil then
+        local aimed, aim = towardOpts(x, y, z, item, opts)
+        if not aimed then return nil, aim end
+        local name, state, how = T.placeAt(x, y, z, item, aimed)
+        if name and type(how) == "table" then how.toward = aim end
+        return name, state, how
+    end
     local famName = familyOf(item)
     local fam = FAMILIES[famName]
     local want, why = wantsOf(item, famName, fam, opts)
     if not want then return nil, why end
     local base = compassBase()
-    if ((want.facing and not VERTICAL[want.facing]) or (want.axis and want.axis ~= "y")) and not base then
-        return nil, "a compass " .. (want.facing and "facing" or "axis") .. " needs the world origin: T.setOrigin(x, y, z, facing)"
+    if ((want.facing and not VERTICAL[want.facing]) or (want.axis and want.axis ~= "y") or want.rotation) and not base then
+        return nil, "a compass " .. (want.facing and "facing" or want.axis and "axis" or "rotation")
+            .. " needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local lines, message
     if opts.text ~= nil then
@@ -1139,6 +1253,119 @@ function T.placeAt(x, y, z, item, opts)
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()
+end
+
+--------------------------------------------------------------------------
+-- A sign in front of a reader
+--------------------------------------------------------------------------
+
+-- Where T.signFor puts a sign, in order: { cells in front of the reader, height above the reader's feet, what holds it }
+local SIGN_SPOTS = {
+    { 1, 1, "wall" }, { 2, 1, "wall" },          -- at eye level, on a wall behind it
+    { 1, 0, "floor" }, { 2, 0, "floor" },        -- standing on the floor in front
+    { 1, 1, "floor" }, { 2, 1, "floor" },        -- at eye level, standing on a block in front
+}
+local WALL_REACH = 3                             -- how far in front of the reader T.signFor looks for a wall
+
+-- The first sign on board (a standing or wall sign's item, not a hanging sign's): its name, or nil.
+local function signOnBoard()
+    local slot = T.findSlot(function(name) return familyOf(name) == "sign" end)
+    return slot and turtle.getItemDetail(slot).name or nil
+end
+
+-- The heading in which the map shows the nearest wall at the reader's eye level, 2 to WALL_REACH cells away (a sign
+-- goes on its face, between); ties go north, east, south, west.  nil and why if there is none.
+local function nearestWall(rx, ry, rz, base)
+    local best, bestAt
+    for c = 0, 3 do
+        local h = (c - base) % 4
+        local v = T.DELTA[h]
+        for d = 1, WALL_REACH do
+            local name = nameAt(rx + v[1] * d, ry + 1, rz + v[3] * d)
+            if name and clickable(name) then
+                if d >= 2 and sturdy(name) and (not bestAt or d < bestAt) then best, bestAt = h, d end
+                break
+            end
+        end
+    end
+    if best then return best end
+    return nil, "the map shows no wall 2 to " .. WALL_REACH .. " cells from the reader at " .. rx .. "," .. ry .. "," .. rz ..
+        " at eye level: opts.look names the way they look (north, east, south or west)"
+end
+
+-- Why a spot can't hold the sign, from the map: nil if it can.  c the cell, v the way the reader looks, mid the cell
+-- between it and the reader (a spot 2 cells away).
+local function spotWhyNot(cx, cy, cz, need, v, mid)
+    local here = nameAt(cx, cy, cz)
+    if here and not AIRS[here] then return "the map has " .. here .. " there" end
+    if mid then
+        local between = nameAt(mid[1], mid[2], mid[3])
+        if between and clickable(between) then return "the map has " .. between .. " in the way at " .. table.concat(mid, ",") end
+    end
+    if need == "wall" then
+        local bx, bz = cx + v[1], cz + v[3]
+        local behind = nameAt(bx, cy, bz)
+        if not (behind and sturdy(behind)) then
+            return "no wall behind it (the map has " .. tostring(behind or "nothing it knows") .. " at " .. bx .. "," .. cy .. "," .. bz .. ")"
+        end
+    else
+        local under = nameAt(cx, cy - 1, cz)
+        if not (under and holdsOnTop(FAMILIES.sign, under)) then
+            return "nothing to stand on (the map has " .. tostring(under or "nothing it knows") .. " at " .. cx .. "," .. (cy - 1) .. "," .. cz .. ")"
+        end
+    end
+    return nil
+end
+
+-- Put a sign in front of a reader standing at reader = { x, y, z }, its face toward them, with text on it: the sign's
+-- name, its state and how ({ at, look, toward, ... } as T.placeAt's); nil and why if it can't.
+--
+-- The way the reader looks is opts.look (a compass way), else toward the nearest wall the map shows at their eye level,
+-- 2 or 3 cells away.  The sign goes, the first the map allows: at eye level (the reader's y + 1) on a wall 1 or 2 cells
+-- in front, standing on the floor 1 or 2 cells in front, at eye level standing on a block in front; T.placeAt with
+-- opts.toward = reader places it (a wall sign facing them, or a standing one turned the nearest a turtle can).  The
+-- sign is opts.item, else the first on board.  Needs the world origin.  Other opts go to T.placeAt (move, inside,
+-- tries).  A refusal names each cell and why it wouldn't do.
+function T.signFor(reader, said, opts)
+    opts = opts or {}
+    local rx, ry, rz = cellOf(reader)
+    if not rx then return nil, "signFor wants the reader's cell: { x, y, z }, whole numbers" end
+    local base = compassBase()
+    if not base then return nil, "signFor needs the world origin: T.setOrigin(x, y, z, facing)" end
+    local item = opts.item or signOnBoard()
+    if not item then return nil, "no sign on board (oak_sign, spruce_sign, ...: not a hanging sign)" end
+    local h, why
+    if opts.look ~= nil then
+        if COMPASS_AT[opts.look] == nil then return nil, "opts.look is the compass way the reader looks: north, east, south or west" end
+        h = (COMPASS_AT[opts.look] - base) % 4
+    else
+        h, why = nearestWall(rx, ry, rz, base)
+        if not h then return nil, why end
+    end
+    local v, whys, tried = T.DELTA[h], {}, {}
+    local place = {}
+    for k, value in pairs(opts) do place[k] = value end
+    place.look, place.item, place.text, place.toward = nil, nil, said, { rx, ry, rz }
+    for _, spot in ipairs(SIGN_SPOTS) do
+        local d, up, need = spot[1], spot[2], spot[3]
+        local cx, cy, cz = rx + v[1] * d, ry + up, rz + v[3] * d
+        local at = cx .. "," .. cy .. "," .. cz
+        local mid = d == 2 and { rx + v[1], ry + up, rz + v[3] } or nil
+        local no = not tried[at] and spotWhyNot(cx, cy, cz, need, v, mid)
+        if no then
+            whys[#whys + 1] = at .. ": " .. no
+        elseif not tried[at] then
+            tried[at] = true
+            local name, state, how = T.placeAt(cx, cy, cz, item, place)
+            if name then
+                how.at, how.look = { x = cx, y = cy, z = cz }, COMPASS[(base + h) % 4]
+                return name, state, how
+            end
+            whys[#whys + 1] = at .. ": " .. tostring(state)
+        end
+    end
+    return nil, "no place for a sign in front of the reader at " .. rx .. "," .. ry .. "," .. rz .. " looking " .. COMPASS[(base + h) % 4]
+        .. ": " .. listed(whys)
 end
 
 --------------------------------------------------------------------------

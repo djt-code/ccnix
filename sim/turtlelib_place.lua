@@ -9,6 +9,10 @@
 --     reached by a route round the support) and standing (on top of a fence, a wall or a pane too, though none of
 --     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
+--   * signs toward a reader (opts.toward, ADR-0013 D6.3): a wall sign when a block stands behind the cell, else
+--     standing at the nearest of the four rotations a turtle gives (how far off said; in a world turned too; reached
+--     from above); opts.rotation; refusals (a rotation it can't give, not a sign, a facing too, no origin, a reader
+--     straight above, not a cell); T.signFor (the nearest wall, opts.look, no wall, nowhere in front, no sign, a bad look);
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
 --   * pistons, sticky pistons, dispensers, droppers and observers in each facing, up and down too (no origin needed for
 --     those); repeaters and comparators on a floor (refused without); a wrong row learnt, a vertical facing too;
@@ -358,6 +362,88 @@ do
     check("T.placeDir(d, text) writes the text on a sign", ok == true and signLines(0, 0, 1) == "|by hand||", signLines(0, 0, 1))
     local info = T.placeInfo(SIGN)
     check("placeInfo: a sign is its own family, hangs, placed by facing", info.family == "sign" and info.hang == true and info.keys.facing == true)
+end
+
+--------------------------------------------------------------------------
+-- Signs toward a reader (ADR-0013 D6.3): opts.toward, the reader's cell: a wall sign when a sturdy block stands behind
+-- the cell, else a standing sign turned to the nearest of the four rotations a turtle gives (0 south, 4 west, 8 north,
+-- 12 east: the way its face looks); T.signFor finds the cell in front of the reader
+--------------------------------------------------------------------------
+do
+    local function aimOf(how) return how and how.toward or {} end
+    local _, _, how = scene("toward a reader with a wall behind the cell: a wall sign whose face looks at the reader", {
+        item = SIGN, blocks = { stone(0, 0, 4), stone(0, -1, 3) }, opts = { toward = { 0, 0, 1 }, text = "Hello" },
+        expect = { { 0, 0, 3, "oak_wall_sign", { facing = "south" } } } })
+    check("...how.toward: a wall sign facing south, the block behind named", aimOf(how).form == "wall" and aimOf(how).facing == "south"
+        and aimOf(how).behind and aimOf(how).behind.z == 4 and signLines(0, 0, 3) == "|Hello||", tostring(aimOf(how).form))
+    _, _, how = scene("the reader on the wall's side: not behind the cell, so a standing sign, its face north (rotation 8), placed from above", {
+        item = SIGN, blocks = { stone(0, 0, 4), stone(0, -1, 3) }, opts = { toward = { 0, 0, 5 } },
+        expect = { { 0, 0, 3, "oak_sign", { rotation = 8 } } }, approach = "down" })
+    check("...how.toward: standing, rotation 8, nothing off", aimOf(how).form == "standing" and aimOf(how).rotation == 8 and aimOf(how).off == 0)
+    _, _, how = scene("a standing sign in open ground, the reader off to one side: the nearest of the four (east, rotation 12)", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { toward = { 2, 0, 4 } }, expect = { { 0, 0, 3, "oak_sign", { rotation = 12 } } } })
+    check("...how.toward says how far off: the reader's way is rotation 11, 27 degrees from it", aimOf(how).wanted == 11 and aimOf(how).off == 27
+        and tostring(aimOf(how).note):find("27 degrees", 1, true) ~= nil, tostring(aimOf(how).wanted) .. " " .. tostring(aimOf(how).off))
+    scene("...the same in a world whose heading 0 is east: the reader is mostly south, rotation 0", {
+        facing = "east", item = SIGN, blocks = { stone(0, -1, 3) }, opts = { toward = { 2, 0, 4 } },
+        expect = { { 0, 0, 3, "oak_sign", { rotation = 0 } } } })
+    scene("the reader straight in front, below the sign: its face south (rotation 0)", {
+        item = SIGN, blocks = { stone(0, 0, 3) }, at = { 0, 1, 3 }, opts = { toward = { 0, 0, 0 } },
+        expect = { { 0, 1, 3, "oak_sign", { rotation = 0 } } } })
+    scene("opts.rotation by itself: a standing sign turned so (4: its face west)", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { rotation = 4 }, expect = { { 0, 0, 3, "oak_sign", { rotation = 4 } } } })
+    check("placeInfo: a sign is placed by rotation too", T.placeInfo(SIGN).keys.rotation == true)
+    -- refusals, each before a move
+    local function refused(label, blocks, opts, words, item, origin)
+        fresh(nil, blocks, origin)
+        knowAll()
+        W.give(1, item or SIGN, 4)
+        local name, why = T.placeAt(0, 0, 3, item or SIGN, opts)
+        check(label, name == nil and tostring(why):find(words, 1, true) ~= nil and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    end
+    refused("opts.rotation a turtle can't give (6): refused, naming the four", { stone(0, -1, 3) }, { rotation = 6 }, "0 (its face south), 4")
+    refused("opts.toward on what is not a sign: refused", { stone(0, -1, 3) }, { toward = { 0, 0, 0 } }, "is not one", "minecraft:torch")
+    refused("opts.toward with a facing too: refused", { stone(0, -1, 3) }, { toward = { 0, 0, 0 }, facing = "north" }, "leave those out")
+    refused("opts.toward without the world origin: refused, naming T.setOrigin", { stone(0, -1, 3) }, { toward = { 0, 0, 0 } }, "T.setOrigin", nil, false)
+    refused("a reader straight above the sign: refused", { stone(0, -1, 3) }, { toward = { 0, 5, 3 } }, "straight above or below")
+    refused("opts.toward not a cell: refused", { stone(0, -1, 3) }, { toward = "me" }, "the reader's cell")
+
+    -- T.signFor: a wall 3 cells north of the reader at 0,0,0, a floor all round
+    local function room(extra)
+        local blocks = {}
+        for x = -3, 3 do for z = -3, 5 do blocks[#blocks + 1] = stone(x, -1, z) end end
+        for _, b in ipairs(extra or {}) do blocks[#blocks + 1] = b end
+        fresh(nil, blocks)
+        knowAll()
+        W.give(1, SIGN, 4)
+    end
+    local wall = {}
+    for x = -2, 2 do for y = 0, 2 do wall[#wall + 1] = stone(x, y, 3) end end
+    room(wall)
+    local name, state
+    name, state, how = T.signFor({ 0, 0, 0 }, "Shop")
+    check("T.signFor: the reader faces the nearest wall the map shows; the sign on it at eye level, its face toward them",
+        name ~= nil and has(0, 1, 2, "oak_wall_sign", { facing = "south" }) and signLines(0, 1, 2) == "|Shop||" and how.at
+        and how.at.y == 1 and how.look == "north", tostring(state) .. " " .. W.show(0, 1, 2))
+    room(wall)
+    name, state, how = T.signFor({ 0, 0, 0 }, "East", { look = "east" })
+    check("...opts.look east, no wall that way: standing on the floor in front, its face back at the reader (rotation 4)",
+        name ~= nil and has(1, 0, 0, "oak_sign", { rotation = 4 }) and how.look == "east", tostring(state) .. " " .. W.show(1, 0, 0))
+    room()
+    name, why = T.signFor({ 0, 0, 0 }, "Lost")
+    check("...no wall near and no opts.look: refused, saying to name the way", name == nil and tostring(why):find("opts.look", 1, true) ~= nil
+        and atCell(0, 0, 0), tostring(why))
+    room({ stone(0, 0, 1), stone(0, 1, 1) })
+    name, why = T.signFor({ 0, 0, 0 }, "Wall", { look = "north" })
+    check("...nowhere in front for one (a wall against the reader): refused, each cell's why named", name == nil
+        and tostring(why):find("0,1,1: the map has minecraft:stone there", 1, true) ~= nil, tostring(why))
+    room(wall)
+    W.give(1, nil)
+    name, why = T.signFor({ 0, 0, 0 }, "Shop")
+    check("...no sign on board: refused", name == nil and tostring(why):find("no sign on board", 1, true) ~= nil, tostring(why))
+    room(wall)
+    name, why = T.signFor({ 0, 0, 0 }, "Shop", { look = "up" })
+    check("...opts.look not a compass way: refused", name == nil and tostring(why):find("compass", 1, true) ~= nil, tostring(why))
 end
 
 --------------------------------------------------------------------------

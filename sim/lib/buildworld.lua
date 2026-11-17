@@ -262,7 +262,10 @@ end
 -- A torch, ladder, button or lever hangs where the first direction in the looking order has support.
 local function hangs(ctx, dir) return sturdy(ctx.near(dir), OPP[dir]) end
 
--- A standing sign's rotation (sixteenths of a turn from south), turned to face the placer: the placer's compass facing
+-- A standing sign's rotation (sixteenths of a turn, 0 its face looking south, 4 west, 8 north, 12 east), turned to face
+-- the placer, by the placer's compass facing: StandingSignBlock.getStateForPlacement, RotationSegment.convertToSegment(
+-- yaw + 180), with the turtle's fake player looking along its heading (placing down too).  UNVERIFIED in game (ADR-0013
+-- D6.3: tl.place's "rotation=back" rows and opts.toward rest on it).
 local SIGN_ROTATION = { north = 0, east = 4, south = 8, west = 12 }
 -- The wall form of a sign: oak_sign -> oak_wall_sign
 local function wallSign(item) return item:sub(1, #item - 5) .. "_wall_sign" end
