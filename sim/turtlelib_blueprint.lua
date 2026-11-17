@@ -22,7 +22,10 @@
 --     less fuel than layer by layer; the house's torch and door still after what holds them; the order kept with the
 --     progress so a resumed build goes on the same way; a bad order refused;
 --   * the fuel watch: posts far apart stop the build ("circling: N fuel for M cells, estimate E"), progress kept, again
---     on carrying on, finished with opts.fuelWatch = false; the house is within it.
+--     on carrying on, finished with opts.fuelWatch = false; the house is within it;
+--   * order hints: a top slab under a stair after the stair by default (layer and column order; a bottom slab not), a
+--     legend's after = { dx, dy, dz } in both orders, written in the text form and read back, hints in a circle or
+--     at a cell not built let be, a hint that isn't three whole numbers refused.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -790,4 +793,62 @@ do
     ok, why, info = buildFresh(HOUSE, nil, stock)
     check("the house, layer by layer, is within the watch: it reports the fuel against the estimate", ok == true and info.fuel and info.fuel.spent > 0
         and info.fuel.spent <= 3 * info.fuel.estimate, info.fuel and (info.fuel.spent .. " of " .. info.fuel.estimate) or "no info.fuel")
+end
+
+--------------------------------------------------------------------------
+-- Order hints: a legend entry's after = { dx, dy, dz } builds its cells after the cell that far from each; a top slab
+-- under a stair goes after the stair by default
+--------------------------------------------------------------------------
+-- Where each cell went in the order placed: { ["x,y,z"] = index }
+local function placedAt(order)
+    local at = {}
+    for i, e in ipairs(order) do at[e.x .. "," .. e.y .. "," .. e.z] = at[e.x .. "," .. e.y .. "," .. e.z] or i end
+    return at
+end
+local SLAB, STAIRS = "minecraft:oak_slab", "minecraft:oak_stairs"
+local function slabsAndStairs(world) world.give(1, SLAB, 16); world.give(2, STAIRS, 16); world.give(3, STONE, 16); world.give(4, "minecraft:cobblestone", 16) end
+do
+    -- a step of a flight in the air: a top slab with a stair on it
+    local step = { anchor = { 0, 0, 3 }, legend = { t = "oak_slab[type=top]", s = "oak_stairs[facing=north,half=bottom]" },
+                   layers = { "t", "s" } }
+    local ok, why, _, _, order = buildFresh(step, nil, slabsAndStairs)
+    local at = placedAt(order)
+    check("a top slab under a stair goes in after the stair by default (layer order)", ok == true and at["0,1,3"] and at["0,0,3"]
+        and at["0,1,3"] < at["0,0,3"], tostring(why))
+    check("...both as the plan says: the slab from below, against the stair", has(0, 0, 3, "oak_slab", { type = "top" })
+        and has(0, 1, 3, "oak_stairs", { facing = "north", half = "bottom" }), W.show(0, 0, 3) .. " " .. W.show(0, 1, 3))
+    ok, why, _, _, order = buildFresh(step, { order = "column" }, slabsAndStairs)
+    at = placedAt(order)
+    check("...and in column order", ok == true and at["0,1,3"] and at["0,0,3"] and at["0,1,3"] < at["0,0,3"], tostring(why))
+    -- a bottom slab under a stair keeps the plain order
+    local low = { anchor = { 0, 0, 3 }, legend = { b = "oak_slab[type=bottom]", s = "oak_stairs[facing=north,half=bottom]" }, layers = { "b", "s" } }
+    ok, why, _, _, order = buildFresh(low, nil, slabsAndStairs)
+    at = placedAt(order)
+    check("...a bottom slab under a stair goes first, as before", ok == true and at["0,0,3"] < at["0,1,3"], tostring(why))
+end
+do
+    -- an explicit hint: C after the cell east of it
+    local hinted = { anchor = { 0, 0, 3 }, legend = { C = { name = "cobblestone", after = { 1, 0, 0 } }, B = STONE }, layers = { "CB" } }
+    local ok, why, _, _, order = buildFresh(hinted, nil, slabsAndStairs)
+    local at = placedAt(order)
+    check("after = { 1, 0, 0 }: a cell goes in after the cell east of it", ok == true and at["1,0,3"] < at["0,0,3"], tostring(why))
+    ok, why, _, _, order = buildFresh(hinted, { order = "column" }, slabsAndStairs)
+    at = placedAt(order)
+    check("...in column order too", ok == true and at["1,0,3"] < at["0,0,3"], tostring(why))
+    local text_ = T.blueprint.format(hinted)
+    check("the hint is written in the text form: \"C = minecraft:cobblestone after 1,0,0\"",
+        text_ and text_:find("C = minecraft:cobblestone after 1,0,0\n", 1, true) ~= nil, tostring(text_))
+    local back = text_ and T.blueprint.parse(text_)
+    check("...and read back", back and back.legend.C.after and back.legend.C.after[1] == 1 and back.legend.C.after[2] == 0
+        and T.blueprint.format(back) == text_)
+    -- a cycle, and a hint at a cell the plan leaves alone: built all the same, in the plain order
+    local loop = { anchor = { 0, 0, 3 }, legend = { C = { name = "cobblestone", after = { 1, 0, 0 } }, D = { name = STONE, after = { -1, 0, 0 } },
+                                                     E = { name = STONE, after = { 0, 5, 0 } } }, layers = { "CD E" } }
+    ok, why = buildFresh(loop, nil, slabsAndStairs)
+    check("hints that go round in a circle, or at a cell the plan doesn't build, are let be: everything is built",
+        ok == true and has(0, 0, 3, "cobblestone") and has(1, 0, 3, "stone") and has(3, 0, 3, "stone"), tostring(why))
+    fresh()
+    local p, bad = T.blueprint.new({ anchor = { 0, 0, 0 }, legend = { C = { name = "cobblestone", after = { 1, "up", 0 } } }, layers = { "C" } })
+    check("a hint that isn't three whole numbers is refused, naming the legend entry", p == nil and tostring(bad):find("legend C", 1, true) ~= nil
+        and tostring(bad):find("after", 1, true) ~= nil, tostring(bad))
 end
