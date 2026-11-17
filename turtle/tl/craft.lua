@@ -1009,6 +1009,14 @@ local function atBench(side, products, what, run)
     return true
 end
 
+-- The chest on `side` read again into the chests' list (T.recount), if it is a chest the list knows: a craft there has
+-- taken from it and left in it.
+local function recount(side)
+    if not fs.exists(T.dataPath(".chests")) then return end
+    local again = T.need("recount")
+    if again then again(side) end
+end
+
 -- Is there a container on `side` that can be read and taken from?
 local function readable(side)
     local chest = peripheral.wrap(side)
@@ -1033,6 +1041,7 @@ local function craftAt(side, name, n, cands, opts)
         end) or why
     end)
     if not ran then return nil, benchWhy end
+    recount(side)
     if made > 0 then T.markCrafted(name) end
     if why then return false, why .. " (made " .. made .. " of " .. need * count .. ")", made end
     if left > 0 then
@@ -1096,7 +1105,8 @@ end
 --
 -- Returns true, made; or false, why, made (it made some, or could not carry them); or nil, why (nothing was touched):
 -- no recipe, short of an ingredient (the third value is the list from T.canCraft), no chest, no room in the chest, no
--- crafting table.  What it made is marked as crafted, so T.isJunk never says it is junk.
+-- crafting table.  What it made is marked as crafted, so T.isJunk never says it is junk.  A chest T.addChest knows is
+-- read again after (T.recount), so the chests' list says what the craft took and left.
 function T.craft(name, n, opts)
     opts = opts or {}
     if type(name) ~= "string" then return nil, "T.craft wants an item name, like minecraft:chest" end
@@ -1191,6 +1201,7 @@ local function batchAt(side, list, entries, opts)
         end)
     end)
     if not ran then return nil, benchWhy end
+    recount(side)
     if stashWhy then return false, stashWhy .. " (nothing crafted)", info end
     if #info.failed > 0 then
         local first = info.failed[1]
@@ -1214,7 +1225,8 @@ end
 -- the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or
 -- set of names) brings them aboard.  A recipe that can't be made is noted and the rest go on.  opts: chest, take,
 -- partial (craft what the ingredients allow), move.  Info is { crafted = { name = n }, failed = { { name, n, why } },
--- taken = { name = n }, left = { name = n } (made, but no room aboard) }.
+-- taken = { name = n }, left = { name = n } (made, but no room aboard) }.  A chest T.addChest knows is read again after
+-- (T.recount).
 function T.craftBatch(list, opts)
     opts = opts or {}
     local entries, why = entriesOf(list)

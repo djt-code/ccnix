@@ -655,12 +655,12 @@ T.craft(name, n, opts)
 
     It works from a chest: the container in front, above or below, or opts.chest (a side, or { x, y, z, side } to walk to), else the junk chest. The chest needs room for the whole inventory; that is checked first, and so are the ingredients (inventory plus chest) and a crafting table (on board, equipped or in the chest). Then the table goes on (a chunk controller stays on), everything is stashed in the chest, the grid is filled from it and crafted, round after round, and the inventory comes back with the product. n is rounded up to whole crafts. opts: chest, partial (craft what the ingredients allow), move (for T.moveTo).
 
-    Returns true, made; or false, why, made (it made some, or could not carry them); or nil, why (nothing was touched): no recipe, short of an ingredient (the third value is the list from T.canCraft), no chest, no room in the chest, no crafting table. What it made is marked as crafted, so T.isJunk never says it is junk.
+    Returns true, made; or false, why, made (it made some, or could not carry them); or nil, why (nothing was touched): no recipe, short of an ingredient (the third value is the list from T.canCraft), no chest, no room in the chest, no crafting table. What it made is marked as crafted, so T.isJunk never says it is junk. A chest T.addChest knows is read again after (T.recount), so the chests' list says what the craft took and left.
 
 T.craftBatch(list, opts)
     Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
 
-    The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts); a plan is its steps (one that is short is refused unless opts.partial). It works from a chest as T.craft does (the same opts.chest, and the junk chest by default), but stashes the inventory only once: the tools go in too, the crafting table goes on, and each recipe's ingredients come from the chest into the grid, are crafted, and the product goes back in the chest, where the next recipe can use it (planks, then sticks, then torches). At the end the inventory comes back as it was; the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or set of names) brings them aboard. A recipe that can't be made is noted and the rest go on. opts: chest, take, partial (craft what the ingredients allow), move. Info is { crafted = { name = n }, failed = { { name, n, why } }, taken = { name = n }, left = { name = n } (made, but no room aboard) }.
+    The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts); a plan is its steps (one that is short is refused unless opts.partial). It works from a chest as T.craft does (the same opts.chest, and the junk chest by default), but stashes the inventory only once: the tools go in too, the crafting table goes on, and each recipe's ingredients come from the chest into the grid, are crafted, and the product goes back in the chest, where the next recipe can use it (planks, then sticks, then torches). At the end the inventory comes back as it was; the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or set of names) brings them aboard. A recipe that can't be made is noted and the rest go on. opts: chest, take, partial (craft what the ingredients allow), move. Info is { crafted = { name = n }, failed = { { name, n, why } }, taken = { name = n }, left = { name = n } (made, but no room aboard) }. A chest T.addChest knows is read again after (T.recount).
 
 == Fuel and smelting ==
 
@@ -916,13 +916,13 @@ T.ignite(x, y, z, opts)
 
 tl.store: chests at home: where they are, what is in them, fetching from them and putting away
 
-Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue, T.where, T.fetch, T.stow, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
+Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue, T.where, T.fetch, T.stow, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
 
 A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known it takes the junk chest's trip instead (T.dumpJunk).  T.inventoryReport adds up what the chests and the turtle hold, and T.prepare readies the turtle for a job in one trip: what isn't needed put away, what is fetched, the room checked.
 
 A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at) is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which T.catalogue finds out from the halves' block states (by their facing when the world origin is known, else by two halves side by side holding the same).
 
-The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
+The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found out the next time it is visited.
 
 == The list of chests, in a data file ==
 
@@ -936,6 +936,13 @@ T.forgetChest(x, y, z, side)
 
 T.chests()
     The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
+
+== Going to a chest ==
+
+T.recount(side)
+    Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests. The chest as T.chests gives it, or nil and why.
+
+    T.fetch and T.stow do this as they go, and T.craft and T.craftBatch at a chest the list knows; call it after your own drops into a known chest or pulls from it, so T.where, T.inventoryReport and T.craftPlan count what is there now. Nothing moves.
 
 == Cataloguing ==
 

@@ -1,7 +1,7 @@
 -- store.lua -- chests at home: where they are, what is in them, fetching from them and putting away
 --
 -- Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue,
--- T.where, T.fetch, T.stow, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
+-- T.where, T.fetch, T.stow, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
 --
 -- A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the
 -- turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about
@@ -20,8 +20,9 @@
 -- The chests and what they held when last looked at are in the data file .chests, so every program on the turtle
 -- shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was
 -- read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name"
--- are what it held.  Fetching and stowing read the chest again
--- as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
+-- are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest
+-- (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found
+-- out the next time it is visited.
 
 local T = require("turtlelib")
 local text = require("text")
@@ -316,6 +317,35 @@ local function note(list, c, side)
         save(list)
     end
     return counts
+end
+
+-- The sides T.recount takes: the turtle's side to read (as peripheral.wrap wants it) and the way the chest is from the
+-- turtle (nil: the way it faces)
+local RECOUNT_SIDES = {
+    front = { side = "front" }, top = { side = "top", dir = "up" }, up = { side = "top", dir = "up" },
+    bottom = { side = "bottom", dir = "down" }, down = { side = "bottom", dir = "down" },
+}
+
+-- Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests.
+-- The chest as T.chests gives it, or nil and why.
+--
+-- T.fetch and T.stow do this as they go, and T.craft and T.craftBatch at a chest the list knows; call it after your
+-- own drops into a known chest or pulls from it, so T.where, T.inventoryReport and T.craftPlan count what is there now.
+-- Nothing moves.
+function T.recount(side)
+    local s = RECOUNT_SIDES[side]
+    if not s then return nil, "T.recount wants the side the chest is on: \"front\", \"top\" or \"bottom\", not " .. tostring(side) end
+    local v = T.DELTA[s.dir or T.dir]
+    local cell = { x = T.pos.x + v[1], y = T.pos.y + v[2], z = T.pos.z + v[3] }
+    local list = load()
+    local c = chestAt(list, cell)
+    if not c then
+        return nil, "no known chest on the " .. s.side .. " of " .. T.posKey(T.pos) .. " (T.addChest tells the turtle about one)"
+    end
+    if not note(list, c, s.side) then return nil, "can't read the chest on the " .. s.side .. " of " .. T.posKey(T.pos) end
+    local out = copyOf(c)
+    out.seen = out.seen or 0
+    return out
 end
 
 --------------------------------------------------------------------------

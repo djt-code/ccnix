@@ -15,6 +15,7 @@
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
 --     the why; nothing is ever dropped in the world;
 --   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
+--   * T.recount: the known chest on a side read again into the list, with the time; no known chest there, a bad side;
 --   * T.inventoryReport: every item across the chests and the turtle, totalled, with each count's age, as lines too,
 --     sorted by name or count, matched; it moves nothing;
 --   * T.prepare: one trip that puts away what isn't needed and fetches what is (home only at the end), refused before
@@ -534,6 +535,32 @@ do
     ok, why, info2 = T.stow()
     check("...gone, and no bulk chest: the item stays aboard, its reason what went wrong there", ok == false and carrying(COBBLE) == 10
         and info2.reasons[COBBLE] == "no chest on the front of 3,0,0; no bulk chest", tostring(info2 and info2.reasons and info2.reasons[COBBLE]))
+end
+
+--------------------------------------------------------------------------
+-- T.recount
+--------------------------------------------------------------------------
+do
+    -- the known chest on a side read again, as after the turtle's own drops or a craft there
+    setUp()
+    T.catalogue()
+    T.moveTo(3, 0, 0)
+    T.face(0)
+    fill(3, 0, 1, { [1] = { COBBLE, 8 } })
+    CLOCK = 1500
+    local c, why = T.recount("front")
+    check("T.recount reads the known chest in front again: the list is right, with the time", c and c.items[COBBLE] == 8 and c.items[PLANKS] == nil
+        and c.x == 3 and c.side == 0 and line(T.chests(), 3, 0, 0).items[COBBLE] == 8 and line(T.chests(), 3, 0, 0).seen == 1500, tostring(why))
+    T.moveTo(2, 0, -2)
+    fill(2, -1, -2, { [1] = { IRON, 1 } })
+    c = T.recount("down")
+    check("...below (\"bottom\" or \"down\")", c and c.items[IRON] == 1 and line(T.chests(), 2, -2, "down").items[IRON] == 1)
+    local none
+    none, why = T.recount("top")
+    check("no known chest on that side: nil and why", none == nil and type(why) == "string" and why:find("no known chest on the top", 1, true) ~= nil, tostring(why))
+    none, why = T.recount("left")
+    check("a side that is not front, top or bottom: nil and why", none == nil and type(why) == "string" and why:find("front", 1, true) ~= nil, tostring(why))
+    CLOCK = 1000
 end
 
 --------------------------------------------------------------------------

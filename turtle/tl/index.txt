@@ -214,6 +214,8 @@ The list of chests, in a data file:
 T.addChest(x, y, z, side, bulk) - Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
 T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
+Going to a chest:
+T.recount(side) - Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests. The chest as T.chests gives it, or nil and why.
 Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 Where an item is, and fetching it:

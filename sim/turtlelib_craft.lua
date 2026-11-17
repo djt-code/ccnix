@@ -16,7 +16,8 @@
 --   * T.craftPlan: torches down to logs, in order, with the base materials and what is short (coal or charcoal), what
 --     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
 --     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
---     it and opts.take brings the targets aboard, a short plan refused;
+--     it and opts.take brings the targets aboard, a short plan refused; T.craft and T.craftBatch at a chest the catalogue
+--     knows read it again (T.recount), so the list says what they took and left;
 --   * blocks of nine built in both ways, every one the game has (the mock's own list): coal from coal blocks, a bone block
 --     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
@@ -598,6 +599,23 @@ do
     local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
     check("with no chest named, the catalogue's chests and the inventory are what there is", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1",
         plan and countsLine(plan.base) .. " / " .. countsLine(plan.short))
+end
+
+do
+    -- crafting at a chest the catalogue knows reads it again (T.recount), so the list stays right
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
+    W.give(1, TABLE, 1)
+    T.addChest(0, 0, 0, 0)
+    T.catalogue()
+    local ok = T.craft("minecraft:oak_planks", 4)
+    local items = T.chests()[1].items
+    check("T.craft at a known chest: the chests' list says the 2 logs left, not the 3 it had", ok == true and items["minecraft:oak_log"] == 2
+        and items["minecraft:oak_planks"] == nil, tostring(items["minecraft:oak_log"]))
+    ok = T.craftBatch({ { "minecraft:oak_planks", 4 }, { "minecraft:stick", 4 } })
+    items = T.chests()[1].items
+    check("...and T.craftBatch: the products it left in the chest are in the list", ok == true and items["minecraft:oak_log"] == 1
+        and items["minecraft:oak_planks"] == 2 and items["minecraft:stick"] == 4, tostring(items["minecraft:stick"]))
 end
 
 --------------------------------------------------------------------------
