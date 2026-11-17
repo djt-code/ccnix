@@ -8,7 +8,8 @@
 --   * each family each way (sideways, placeDown, placeUp; with and without a block to click): stairs and slabs
 --     (half, facing, shape, double), logs (axis), torches, signs (and their text), ladders, buttons and levers
 --     (what they hang on),
---     doors (two blocks, a floor, hinge), trapdoors, fence gates, chests and furnaces;
+--     doors (two blocks, a floor, hinge), trapdoors, fence gates, chests and furnaces, pistons, dispensers and
+--     droppers, observers (each way, up and down too), repeaters and comparators (on a floor);
 --   * a cell that cannot take the block, replaceable cells, entities, items that are not blocks, buckets;
 --   * digging (the drops, a door's two halves, what hung on a dug block popping off) and inspect;
 --   * the crafting grid and the workbench, a chest, and a furnace by its faces with the time it takes.
@@ -205,6 +206,28 @@ local FG = "minecraft:oak_fence_gate"
 row("fence gate sideways: facing the heading", FG, "front", { FB }, { want(F, "oak_fence_gate", { facing = "north", in_wall = false, open = false }) })
 row("fence gate with nothing about: the placer faces back", FG, "front", {}, { want(F, "oak_fence_gate", { facing = "south" }) })
 row("fence gate between walls: in_wall", FG, "front", { FU, { 1, 0, 1, "minecraft:cobblestone_wall" } }, { want(F, "oak_fence_gate", { in_wall = true }) })
+
+-- Pistons, dispensers and droppers face back at the placer, observers the way it looks, up and down too (the way it looks
+-- most nearly: sideways level, onto a floor down, onto the turtle's own block back at the turtle; placeDown down, or
+-- up at the turtle with nothing below; placeUp the other way round); repeaters and comparators face back, on a floor
+local PI = "minecraft:piston"
+row("piston sideways onto a block beyond: facing back at the turtle", PI, "front", { FB }, { want(F, "piston", { facing = "south", extended = false }) })
+row("piston sideways onto the floor: the placer looks down, so it faces up", PI, "front", { FU }, { want(F, "piston", { facing = "up" }) })
+row("piston sideways with nothing about: the placer looks back at the turtle, so it faces away", PI, "front", {}, { want(F, "piston", { facing = "north" }) })
+row("piston placeDown onto a block: facing up", PI, "down", { DB }, { want(D, "piston", { facing = "up" }) })
+row("piston placeDown with nothing below: the placer looks up at the turtle, so it faces down", PI, "down", {}, { want(D, "piston", { facing = "down" }) })
+row("piston placeUp onto a ceiling: facing down", PI, "up", { UB }, { want(U, "piston", { facing = "down" }) })
+row("piston placeUp with nothing above: facing up", PI, "up", {}, { want(U, "piston", { facing = "up" }) })
+row("sticky piston as a piston", "minecraft:sticky_piston", "front", { FB }, { want(F, "sticky_piston", { facing = "south" }) })
+row("dispenser as a piston", "minecraft:dispenser", "front", { FB }, { want(F, "dispenser", { facing = "south" }) })
+row("dropper as a piston", "minecraft:dropper", "down", { DB }, { want(D, "dropper", { facing = "up" }) })
+row("observer sideways onto a block: its face looks the way the placer does", "minecraft:observer", "front", { FB }, { want(F, "observer", { facing = "north", powered = false }) })
+row("observer placeDown onto a block: facing down", "minecraft:observer", "down", { DB }, { want(D, "observer", { facing = "down" }) })
+row("observer sideways with nothing about: facing back at the turtle", "minecraft:observer", "front", {}, { want(F, "observer", { facing = "south" }) })
+row("repeater sideways onto a floor: facing back at the placer, delay 1", "minecraft:repeater", "front", { FU }, { want(F, "repeater", { facing = "south", delay = 1, locked = false }) })
+row("repeater with a block beyond and a floor: still facing back", "minecraft:repeater", "front", { FB, FU }, { want(F, "repeater", { facing = "south" }) })
+row("comparator placeDown onto a block: facing back, mode compare", "minecraft:comparator", "down", { DB }, { want(D, "comparator", { facing = "south", mode = "compare" }) })
+refused("repeater with no floor: refused", "minecraft:repeater", "front", { FB })
 
 -- Containers, and plain blocks
 row("a chest faces the placer", "minecraft:chest", "front", { FB }, { want(F, "chest", { facing = "south", type = "single" }) })

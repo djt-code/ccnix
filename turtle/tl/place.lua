@@ -11,9 +11,13 @@
 -- below the middle of a face, so what that gives is, in short:
 --   sideways     stairs and slabs bottom half, the stair facing the turtle's heading; a log lying along the heading
 --                with a block beyond (standing with only a floor); a torch, sign, ladder, button or lever hung on
---                the block beyond; a door, gate or chest facing as the turtle does
---   placeDown    stairs and slabs bottom half if there is a block under the target, else top half
---   placeUp      stairs and slabs top half if there is a block over the target, else bottom half
+--                the block beyond; a door, gate or chest facing as the turtle does; a piston, dispenser or dropper
+--                facing back at the turtle (an observer away from it), up onto a floor (an observer down); a
+--                repeater or comparator, on a floor, facing back at the turtle
+--   placeDown    stairs and slabs bottom half if there is a block under the target, else top half; a piston up
+--                onto a block, else down (an observer the other way)
+--   placeUp      stairs and slabs top half if there is a block over the target, else bottom half; a piston down
+--                onto a block, else up (an observer the other way)
 --   (from above or below a ladder hangs on the block beside the target the way the turtle faces)
 -- (With nothing to click but the turtle's own block, a sideways stair faces back at the turtle.)
 -- The table of what each approach yields is data (T.PLACE_TABLE): per family of block, per approach (front, down,
@@ -24,7 +28,7 @@
 -- T.placeAt(x, y, z, item, { facing, half, axis }) works out which approaches the table says give that state and
 -- the map (tl.world) says are possible, goes to the nearest, places, inspects, and if the state came out wrong digs
 -- the block and tries the next.  Facing is a compass name, so it needs the world origin (T.setOrigin: the
--- compass way the turtle's frame points); half and axis do not.  Where the map does not know what is beside the
+-- compass way the turtle's frame points); half and axis do not, nor a piston's or observer's facing up or down.  Where the map does not know what is beside the
 -- target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data
 -- file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is
 -- corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it
@@ -47,6 +51,8 @@ local AXIS_OF = { north = "z", south = "z", east = "x", west = "x" }
 -- Turns to the right from the heading, for a rule that is relative to it
 local RELATIVE = { heading = 0, right = 1, back = 2, left = 3 }
 local RELATIVE_NAMES = { "heading", "right", "back", "left" }
+-- The facings that are not a compass way (a piston's, an observer's)
+local VERTICAL = { up = true, down = true }
 
 --------------------------------------------------------------------------
 -- Blocks by name: what family, what can be clicked, what holds a torch
@@ -58,6 +64,8 @@ local FAMILY_EXACT = {
     chest = "chest", trapped_chest = "chest", furnace = "chest", blast_furnace = "chest", smoker = "chest",
     crimson_stem = "log", warped_stem = "log", hay_block = "log", bone_block = "log", basalt = "log",
     polished_basalt = "log", deepslate = "log",
+    piston = "piston", sticky_piston = "piston", dispenser = "piston", dropper = "piston", observer = "observer",
+    repeater = "diode", comparator = "diode",
 }
 local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
@@ -89,7 +97,7 @@ local function shortName(name)
 end
 
 -- The family a block or item is in: stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate,
--- chest, fence, pane, wall, or block (anything else).
+-- chest, piston, observer, diode, fence, pane, wall, or block (anything else).
 local function familyOf(name)
     local s = shortName(name)
     if FAMILY_EXACT[s] then return FAMILY_EXACT[s] end
@@ -123,18 +131,20 @@ local function rows(...)
 end
 
 -- A block with no state to speak of: any approach does, from any side
-local function plain(sturdy)
-    return { sturdy = sturdy, front = rows("always"), down = rows("always"), up = rows("always") }
+local function plain(sturdy, post)
+    return { sturdy = sturdy, post = post, front = rows("always"), down = rows("always"), up = rows("always") }
 end
 
 -- Per family.  hang: it hangs on or stands on a solid block (beyond and floor then mean a block that can hold it, not
--- just one that can be clicked); sturdy = false: nothing hangs on it; needs: what must be round the target;
--- alias: other names for a state key.  An approach with no rows can not place it.
+-- just one that can be clicked); onPost: standing, a post will hold it up too; sturdy = false: nothing hangs on it;
+-- post: a post in the middle (a fence, a wall, a pane), which nothing hangs on but holds up on its top what stands on
+-- a post (a torch, a standing sign); needs: what must be round the target; tall: two blocks (a door); vertical: it
+-- may face up or down too; alias: other names for a state key.  An approach with no rows can not place it.
 local FAMILIES = {
     block = plain(true),
-    fence = plain(false),
-    pane = plain(false),
-    wall = plain(false),
+    fence = plain(false, true),
+    pane = plain(false, true),
+    wall = plain(false, true),
     -- a stair faces the way the placer looks; the half is the click's: a top face or the side's lower part is the
     -- bottom half, an underside the top; with only the turtle's own block to click it faces back at the turtle
     stairs = {
@@ -157,14 +167,14 @@ local FAMILIES = {
     },
     -- a torch hangs on the block beyond (a wall torch, facing the turtle), or stands on the floor or the block below
     torch = {
-        hang = true, sturdy = false,
+        hang = true, onPost = true, sturdy = false,
         front = rows("beyond block=wall facing=back", "floor"),
         down = rows("beyond"),
         up = {},
     },
     -- a sign as a torch: on the wall beyond (the wall form, facing the turtle), or standing on the floor
     sign = {
-        hang = true, sturdy = false,
+        hang = true, onPost = true, sturdy = false,
         front = rows("beyond block=wall facing=back", "floor"),
         down = rows("beyond"),
         up = {},
@@ -181,7 +191,7 @@ local FAMILIES = {
     -- a door is two blocks: a solid block under it and the cell above free; it faces the way the placer does.
     -- It can only be placed sideways (from above or below the turtle is in the cell the upper half needs).
     door = {
-        sturdy = false, needs = { below = "sturdy", above = "free" },
+        sturdy = false, tall = true, needs = { below = "sturdy", above = "free" },
         front = rows("beyond facing=heading", "floor facing=heading", "always facing=back"),
         down = {}, up = {},
     },
@@ -203,6 +213,30 @@ local FAMILIES = {
         front = rows("beyond facing=back", "floor facing=back", "always facing=heading"),
         down = rows("always facing=back"),
         up = rows("always facing=back"),
+    },
+    -- a piston, sticky piston, dispenser or dropper faces back at the placer, the opposite of the way it looks most
+    -- nearly, up and down too: placing onto a floor or down onto a block it looks down; down with nothing below it
+    -- looks up at the turtle, and with nothing beyond sideways it looks back at the turtle
+    piston = {
+        vertical = true,
+        front = rows("beyond facing=back", "floor facing=up", "always facing=heading"),
+        down = rows("beyond facing=up", "always facing=down"),
+        up = rows("beyond facing=down", "always facing=up"),
+    },
+    -- an observer the other way round: its face looks where the placer looks
+    observer = {
+        vertical = true,
+        front = rows("beyond facing=heading", "floor facing=down", "always facing=back"),
+        down = rows("beyond facing=down", "always facing=up"),
+        up = rows("beyond facing=up", "always facing=down"),
+    },
+    -- a repeater or comparator stands on a block and faces back at the placer, level (its delay or mode is not the
+    -- turtle's to set); from below the turtle would be its floor
+    diode = {
+        sturdy = false, needs = { below = "sturdy" },
+        front = rows("beyond facing=back", "floor facing=back", "always facing=heading"),
+        down = rows("beyond facing=back"),
+        up = {},
     },
 }
 T.PLACE_TABLE = FAMILIES                 -- (a plain field: a sim, or a person, may correct a row)
@@ -297,6 +331,7 @@ local function ruleOf(key, value, h, base)
     if value == nil then return nil end
     value = tostring(value)
     if key == "facing" then
+        if VERTICAL[value] then return value end
         if not base then return nil end
         for _, rule in ipairs(RELATIVE_NAMES) do
             if COMPASS[(base + h + RELATIVE[rule]) % 4] == value then return rule end
@@ -372,12 +407,23 @@ local function sturdy(name)
     return fam.sturdy ~= false
 end
 
--- A fact the table asks about, as true, false, or nil (the map has never seen the cell).
-local function factAbout(fam, name)
+-- Does the block hold up a block of family fam standing on its top: a whole face, or for a family that stands on a
+-- post (a torch, a standing sign) a fence's, a wall's or a pane's post?
+local function holdsOnTop(fam, name)
+    if sturdy(name) then return true end
+    return fam.onPost == true and clickable(name) and FAMILIES[familyOf(name)].post == true
+end
+
+-- A fact the table asks about, as true, false, or nil (the map has never seen the cell).  top: the block is the one
+-- under the target (a floor, or beyond a placing down), which holds up what stands on it.
+local function factAbout(fam, name, top)
     if name == nil then return nil end
-    if fam.hang then return sturdy(name) end
+    if fam.hang then return (top and holdsOnTop(fam, name)) or sturdy(name) end
     return clickable(name)
 end
+
+-- Which of the facts the table asks about is the block under the target, by approach
+local TOP_FACT = { front = "floor", down = "beyond" }
 
 -- The compass number of heading 0, from the world origin; nil with none set.
 local function compassBase()
@@ -423,9 +469,9 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
     local apps = {}
     -- A half slab of the item's own kind may be one the game takes as replaceable and skips (then it clicks the
     -- next block): not a fact to plan on for sure, nor to learn from.
-    local function fact(name)
+    local function fact(name, top)
         if famName == "slab" and name == item then return nil end
-        return factAbout(fam, name)
+        return factAbout(fam, name, top)
     end
     local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
@@ -433,8 +479,8 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
             if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
                 local sx, sy, sz = standFor(kind, h, tx, ty, tz)
                 local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
-                local facts = { beyond = fact(nameAt(bx, by, bz)) }
-                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz)) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
+                local facts = { beyond = fact(nameAt(bx, by, bz), TOP_FACT[kind] == "beyond") }
+                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz), true) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
                 local stand = nameAt(sx, sy, sz)
                 if not (stand and clickable(stand) and not dig) then
                     for _, c in ipairs(rowsFor(fam, kind, facts)) do
@@ -511,8 +557,8 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     local ax, ay, az = aheadOf(h, tx, ty, tz)
     local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz }, ahead = { ax, ay, az } }
     local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz), ahead = nameAt(ax, ay, az) }
-    local facts = { beyond = fact(names.beyond) }
-    if kind == "front" then facts.floor = fact(names.floor) else facts.ahead = fact(names.ahead) end
+    local facts = { beyond = fact(names.beyond, TOP_FACT[kind] == "beyond") }
+    if kind == "front" then facts.floor = fact(names.floor, true) else facts.ahead = fact(names.ahead) end
     local needed
     for _, row in ipairs(fam[kind]) do
         local f = row.when == "always" or facts[row.when]
@@ -536,9 +582,9 @@ end
 -- plan goes through them, each said once.
 local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
     local out, said = {}, {}
-    local function fact(name)
+    local function fact(name, top)
         if famName == "slab" and name == item then return nil end
-        return factAbout(fam, name)
+        return factAbout(fam, name, top)
     end
     local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
@@ -582,8 +628,9 @@ local function wantsOf(item, famName, fam, opts)
             want[key] = tostring(value)
         end
     end
-    if want.facing and COMPASS_AT[want.facing] == nil then
-        return nil, "facing is a compass name: north, east, south or west"
+    if want.facing and COMPASS_AT[want.facing] == nil and not (fam.vertical and VERTICAL[want.facing]) then
+        return nil, fam.vertical and "facing is a compass name (north, east, south or west), up or down"
+            or "facing is a compass name: north, east, south or west"
     end
     return want
 end
@@ -742,6 +789,14 @@ end
 -- What a temporary block may be, the first found on board (opts.temp names another): plain blocks that come back as
 -- themselves when dug
 local TEMP_BLOCKS = { "cobblestone", "cobbled_deepslate", "dirt", "netherrack", "blackstone", "*_planks", "*bricks" }
+-- Floors that come back as themselves when dug (with a pickaxe), so digBelow can put back the one it dug: those, and
+-- these.  (Stone gives cobblestone, deepslate cobbled deepslate, grass dirt: those must be carried.)
+local SELF_DROPS = { "soul_soil", "soul_sand", "basalt", "polished_basalt", "smooth_basalt", "mossy_cobblestone",
+                     "andesite", "diorite", "granite", "polished_*", "tuff", "calcite", "end_stone", "smooth_stone",
+                     "sandstone", "red_sandstone", "terracotta", "*_terracotta", "*_concrete", "*_wool", "*_log", "*_wood",
+                     "*_stem", "*_hyphae", "quartz_block", "purpur_block", "obsidian", "crying_obsidian" }
+for _, g in ipairs(TEMP_BLOCKS) do SELF_DROPS[#SELF_DROPS + 1] = g end
+local dropsItself = T.nameTest(SELF_DROPS)
 local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
@@ -770,9 +825,9 @@ end
 -- list, for the message).  A top half (a slab, stair or trapdoor) is placed from below against a block above the
 -- target; with nothing there, a temporary block goes there first (opts.temp, or one of TEMP_BLOCKS on board) and is
 -- taken away after, from a free cell beside it.  With a floor under the target, only when opts.digBelow says so: the
--- floor is dug to stand in, and put back after with the same block (one must be on board, as the block dug may drop
--- something else) from a free cell beside it.  Each way is an approach as plan gives them, with support = { temp,
--- floor } (the names of the temporary block and of the floor dug).
+-- floor is dug to stand in, and put back after with the same block from a free cell beside it (one on board, or for a
+-- floor that drops itself a free slot for the one dug).  Each way is an approach as plan gives them, with support =
+-- { temp, floor } (the names of the temporary block and of the floor dug).  The notes say every need not met.
 local function supportPlans(famName, fam, item, learned, want, tx, ty, tz, base, tried, opts)
     local apps, notes = {}, {}
     local above, below = nameAt(tx, ty + 1, tz), nameAt(tx, ty - 1, tz)
@@ -788,15 +843,20 @@ local function supportPlans(famName, fam, item, learned, want, tx, ty, tz, base,
     end
     if next(rowFor) == nil then return apps, notes end
     local at = tx .. "," .. (ty - 1) .. "," .. tz
-    if floor and not opts.digBelow then
-        notes[#notes + 1] = "from below it needs to stand where the floor is (" .. below .. " at " .. at .. "): opts.digBelow = true " ..
-            "digs it, places from there and puts the same block back"
-    elseif floor and T.countItem(below) == 0 then
-        notes[#notes + 1] = "opts.digBelow puts the floor back with the same block: carry one " .. below ..
-            " (the one dug may drop something else)"
-    elseif floor and not freeBeside(tx, ty - 1, tz, "up") then
-        notes[#notes + 1] = "opts.digBelow needs a way out of the floor at " .. at .. " to put it back from, and the map shows " ..
-            "no free cell beside the floor"
+    if floor then
+        if not opts.digBelow then
+            notes[#notes + 1] = "from below it needs to stand where the floor is (" .. below .. " at " .. at .. "): opts.digBelow = true " ..
+                "digs it, places from there and puts the same block back"
+        end
+        local itself = dropsItself(below)
+        if T.countItem(below) == 0 and not (itself and T.freeSlots() > 0) then
+            notes[#notes + 1] = itself and ("opts.digBelow puts the floor back with the " .. below .. " it digs: free a slot for it (or carry one)")
+                or ("opts.digBelow puts the floor back with the same block: carry one " .. below .. " (the one dug may drop something else)")
+        end
+        if not freeBeside(tx, ty - 1, tz, "up") then
+            notes[#notes + 1] = "opts.digBelow needs a way out of the floor at " .. at .. " to put it back from, and the map shows " ..
+                "no free cell beside the floor"
+        end
     end
     local tempName = temp and tempBlock(item, opts.temp) or nil
     if temp and not tempName then
@@ -916,9 +976,11 @@ end
 
 -- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 --
--- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
+-- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, piston (and dispenser and
+-- dropper), observer, diode (a repeater or comparator), fence, pane, wall or block; keys is
 -- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
--- type, which are the same); hang is true for a family that hangs or stands on a solid block; door is true for a
+-- type, which are the same); hang is true for a family that hangs or stands on a solid block (a torch or a standing
+-- sign stands on the post of a fence, a wall or a pane too, though nothing hangs on their sides); door is true for a
 -- family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
 function T.placeInfo(item)
     if type(item) ~= "string" or item == "" then return nil end
@@ -929,7 +991,7 @@ function T.placeInfo(item)
     for name, key in pairs(fam.alias or {}) do
         if keys[key] then keys[name] = true end
     end
-    return { family = famName, keys = keys, hang = fam.hang == true, door = fam.needs ~= nil }
+    return { family = famName, keys = keys, hang = fam.hang == true, door = fam.tall == true }
 end
 
 
@@ -939,7 +1001,8 @@ end
 -- It works out from the table which approaches (placing sideways, from above or from below, from each side) give the
 -- state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is
 -- wrong digs the block and tries the next approach, learning what the game actually gave (see the overview).
--- opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a
+-- opts.facing is a compass name (north, east, south, west) and needs the world origin (up or down too for a piston,
+-- dispenser, dropper or observer, which need none; a repeater or comparator stands on a block); opts.half is bottom or top for a
 -- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever.
 -- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
@@ -948,8 +1011,9 @@ end
 -- touched.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
--- floor is dug to stand in and put back after with the same block (carry one: the one dug may drop something else).
--- Without digBelow the floor is never dug, and the failure says the option is there.  Returns the block's name, its
+-- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
+-- when dug, as soul soil, planks or bricks do, and a slot is free for it).  Without digBelow the floor is never dug,
+-- and the failure says the option is there, with whatever else digging it would need.  Returns the block's name, its
 -- state, and { approach, from, heading, tries, lines, support } (approach is front, down or up; from the cell the
 -- turtle stood in; lines a sign's text; support { temp, floor }: the names of the block put above and the floor dug).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
@@ -966,7 +1030,7 @@ function T.placeAt(x, y, z, item, opts)
     local want, why = wantsOf(item, famName, fam, opts)
     if not want then return nil, why end
     local base = compassBase()
-    if (want.facing or (want.axis and want.axis ~= "y")) and not base then
+    if ((want.facing and not VERTICAL[want.facing]) or (want.axis and want.axis ~= "y")) and not base then
         return nil, "a compass " .. (want.facing and "facing" or "axis") .. " needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local lines, message

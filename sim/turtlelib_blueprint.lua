@@ -3,13 +3,14 @@
 -- tl.blueprint (ADR-0008 phase 3): plans, T.build, T.verify and T.replace on sim/lib/buildworld's mock world.
 --   * the format: text and table forms read the same, a plan written out and read back is the same plan, the errors
 --     name the line; fill, box, walls and fromMap make plans; put and at;
+--   * a railing of walls with a torch and a sign standing on top; a repeater, an observer and a piston by facing;
 --   * a small building (floor, walls, a stair bench, a torch, a door) built in the order the plan needs (walls before
 --     the stair and the torch, the door last in its layer), stopped midway with a limit, resumed after a restart of the
 --     computer, stopped by a Ctrl+T in the middle of a cell and resumed, then verified clean; the world is what
 --     the plan says; no cell placed twice;
 --   * the materials: short is refused before the turtle moves (with what could be crafted if a craft module is
 --     there, loaded only then), partial builds what it can, a block in the way fails the cell and the build goes on, the
---     failed cell is tried again on the next run;
+--     failed cell is tried again on the next run; a block found in the way or already there goes in the map;
 --   * a build saved before a re-zero is not carried on: refused and marked stale, a plan given starts afresh (ADR-0012);
 --   * a different plan while one is unfinished is refused (restart starts it), the same plan after a finished build
 --     starts afresh; a facing without the world origin is refused; opts.protect keeps the finished build;
@@ -385,9 +386,17 @@ do
     check("a block in the way fails that cell, is not dug out, and the build goes on", ok == false and #info.failed == 1 and info.failed[1].why:find("minecraft:dirt is in the way", 1, true)
         and has(3, 0, 3, "dirt") and has(5, 0, 2, "stone") and info.placed == 7, tostring(why) .. info.placed .. tostring(has(3, 0, 3, "dirt")) .. tostring(has(5, 0, 2, "stone")))
     check("...the message names the cell and why", why:find("1 cells failed", 1, true) and why:find("3,0,3", 1, true), tostring(why))
+    check("...and the map has the block that was in the way", T.map.get(3, 0, 3) == "minecraft:dirt", tostring(T.map.get(3, 0, 3)))
     W.set(3, 0, 3, nil)
     ok, why = build()
     check("...cleared, the next run puts it in", ok == true and has(3, 0, 3, "stone"), tostring(why))
+    -- a plain block already there that the map has as air: taken as done, and the map put right
+    fresh({ { 3, 0, 3, STONE } })
+    T.map.set(3, 0, 3, "minecraft:air")
+    W.give(1, STONE, 20)
+    ok, why, info = build(plan)
+    check("a plain block already there, the map saying air: not placed again, and the map has it now", ok == true and info.placed == 7
+        and T.map.get(3, 0, 3) == STONE, tostring(why) .. " " .. tostring(T.map.get(3, 0, 3)))
 end
 do
     fresh()
@@ -442,6 +451,33 @@ do
     check("a plan built over itself takes the map's word for a cell: a block that has gone since is not seen", ok == true and info.placed == 0 and has(2, 0, 5, nil), tostring(why) .. tostring(info.placed) .. tostring(has(2, 0, 5, nil)))
     ok, why, info = build(plan, { look = true })
     check("...opts.look goes to look at each cell, and puts the missing one back", ok == true and info.placed == 1 and has(2, 0, 5, "stone"), tostring(why))
+end
+do
+    -- a railing of walls with a torch and a sign standing on top (ADR-0013: two of a balcony's cells failed so)
+    fresh()
+    know(-1, -1, 0, 6, 3, 6)
+    W.give(1, "minecraft:cobblestone_wall", 3)
+    W.give(2, "minecraft:torch", 1)
+    W.give(3, "minecraft:oak_sign", 1)
+    local plan = "name: rail\nanchor: 2 0 3\nw = minecraft:cobblestone_wall\nt = minecraft:torch\ns = minecraft:oak_sign\n"
+        .. "layer 1:\nwww\nlayer 2:\nt s\n"
+    local ok, why = build(plan)
+    check("a railing of walls with a torch and a sign standing on top: all built", ok == true and has(2, 1, 3, "torch")
+        and has(4, 1, 3, "oak_sign") and has(3, 0, 3, "cobblestone_wall"), tostring(why))
+end
+do
+    -- redstone parts by facing: a repeater on the floor, an observer facing down onto the floor, a piston facing east against the observer
+    fresh()
+    know(-1, -1, 0, 6, 3, 6)
+    W.give(1, STONE, 3)
+    W.give(2, "minecraft:repeater", 1)
+    W.give(3, "minecraft:observer", 1)
+    W.give(4, "minecraft:piston", 1)
+    local plan = "name: wiring\nanchor: 2 0 3\nS = minecraft:stone\nr = minecraft:repeater[facing=east]\no = minecraft:observer[facing=down]\np = minecraft:piston[facing=east]\n"
+        .. "layer 1:\nSSS\nlayer 2:\nrop\n"
+    local ok, why = build(plan)
+    check("a repeater, an observer and a piston in a plan go in facing as it says", ok == true and has(2, 1, 3, "repeater", { facing = "east" })
+        and has(3, 1, 3, "observer", { facing = "down" }) and has(4, 1, 3, "piston", { facing = "east" }), tostring(why))
 end
 do
     -- opts.retry = false leaves the failed cells alone

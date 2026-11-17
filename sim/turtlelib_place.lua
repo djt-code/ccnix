@@ -6,20 +6,24 @@
 --     iff there is a block under the target; placeUp the top half iff there is a block over it; in each of
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
---     reached by a route round the support) and standing; a sign and its text; a ladder (sideways, and from above
+--     reached by a route round the support) and standing (on top of a fence, a wall or a pane too, though none of
+--     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
+--   * pistons, sticky pistons, dispensers, droppers and observers in each facing, up and down too (no origin needed for
+--     those); repeaters and comparators on a floor (refused without); a wrong row learnt, a vertical facing too;
 --   * the table wrong about a row: the retry gets it right, the wrong block is dug out (in a protected area too),
 --     the correction is kept in .placements, used from then on and after a restart; a wrong guess on a map
 --     that does not know the surroundings is not learnt from; the table wrong about a facing rule;
 --   * what it refuses: a cell in use, no item, a state the family has no key for, a facing without the
---     world origin; a cell that already holds the block as wanted is left alone;
+--     world origin; a cell that already holds the block as wanted is left alone; what it finds there goes in the map;
 --   * support: a top slab with nothing above (placing from above refused) gets a temporary block above, is placed from
 --     below, and the block is taken away (opts.temp names it; none on board is refused, saying so);
 --   * opts.digBelow: a top slab on a floor refused without it (the floor untouched, the option named); with it the
 --     floor dug, the slab placed from there, the floor put back (a log floor the same way round), with a temporary
---     block above too when nothing is there; refused before digging with none of the floor's block on board, with no
---     way out of the floor's cell, in a protected area (unless opts.inside);
+--     block above too when nothing is there; a floor that drops itself (soul soil) needing none on board, only a free
+--     slot; refused before digging with none of the floor's block on board, with no way out of the floor's cell, in a
+--     protected area (unless opts.inside); every unmet need said at once;
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -247,6 +251,26 @@ do
     check("a torch will not be hung on a fence (clickable but nothing to hold it): no approach, no move",
         name == nil and why:find("no way to place", 1, true) and atCell(0, 0, 0) and W.get(0, 0, 3) == nil, tostring(why))
 end
+-- On top of a fence, a wall or a pane a torch stands, and so does a sign: a post in the middle holds them
+for _, post in ipairs({ "oak_fence", "cobblestone_wall", "glass_pane" }) do
+    scene("a torch on top of " .. post .. ": it stands there", {
+        item = TORCH, blocks = { { 0, -1, 3, "minecraft:" .. post } }, expect = { { 0, 0, 3, "torch" } } })
+end
+scene("a sign on top of a wall: it stands there", {
+    item = "minecraft:oak_sign", blocks = { { 0, -1, 3, "minecraft:cobblestone_wall" } }, opts = { text = "Mind the drop" },
+    expect = { { 0, 0, 3, "oak_sign" } } })
+check("...with its text", W.get(0, 0, 3) and W.get(0, 0, 3).text and W.get(0, 0, 3).text[2] == "Mind the drop")
+scene("a sign on top of a fence: it stands there", {
+    item = "minecraft:oak_sign", blocks = { { 0, -1, 3, "minecraft:oak_fence" } }, expect = { { 0, 0, 3, "oak_sign" } } })
+do
+    -- a fence beyond and nothing under: still nothing to hang a torch on
+    fresh(nil, { { 0, 0, 4, "minecraft:cobblestone_wall" }, { 0, -1, 3, "minecraft:cobblestone_wall" } })
+    knowAll()
+    W.give(1, TORCH, 4)
+    local name, state = T.placeAt(0, 0, 3, TORCH)
+    check("a torch beside a wall and on top of another: it stands on the one below, not hung on the side",
+        name == TORCH and has(0, 0, 3, "torch"), tostring(name) .. " " .. W.show(0, 0, 3))
+end
 scene("a ladder on the block beyond, facing back", {
     item = "minecraft:ladder", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "front" })
@@ -374,6 +398,75 @@ scene("a chest facing back at a turtle that comes from the south", {
     item = "minecraft:chest", blocks = { stone(0, -1, 3) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "chest", { facing = "south" } } } })
 scene("a plain block needs no state: placed", { item = STONE, expect = { { 0, 0, 3, "stone" } } })
+
+--------------------------------------------------------------------------
+-- Pistons, dispensers, droppers and observers by facing, up and down too; repeaters and comparators on a floor
+--------------------------------------------------------------------------
+local PISTON, OBSERVER, REPEATER = "minecraft:piston", "minecraft:observer", "minecraft:repeater"
+for _, f in ipairs({ "north", "east", "south", "west", "up", "down" }) do
+    scene("a piston facing " .. f .. " in the open", {
+        item = PISTON, opts = { facing = f }, expect = { { 0, 0, 3, "piston", { facing = f } } } })
+    scene("an observer facing " .. f .. " in the open", {
+        item = OBSERVER, opts = { facing = f }, expect = { { 0, 0, 3, "observer", { facing = f } } } })
+end
+scene("a piston facing up on a floor", {
+    item = PISTON, blocks = { stone(0, -1, 3) }, opts = { facing = "up" }, expect = { { 0, 0, 3, "piston", { facing = "up" } } } })
+scene("a sticky piston facing south against a wall beyond", {
+    item = "minecraft:sticky_piston", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
+    expect = { { 0, 0, 3, "sticky_piston", { facing = "south" } } } })
+scene("a dispenser facing down", { item = "minecraft:dispenser", opts = { facing = "down" }, expect = { { 0, 0, 3, "dispenser", { facing = "down" } } } })
+scene("a dropper facing west with a floor and a block beyond (with only a floor sideways looks down at it: up)", {
+    item = "minecraft:dropper", blocks = { stone(0, -1, 3), stone(1, 0, 3) }, opts = { facing = "west" },
+    expect = { { 0, 0, 3, "dropper", { facing = "west" } } } })
+for _, f in ipairs({ "north", "east", "south", "west" }) do
+    scene("a repeater on a floor facing " .. f, {
+        item = REPEATER, blocks = { stone(0, -1, 3) }, opts = { facing = f }, expect = { { 0, 0, 3, "repeater", { facing = f } } } })
+end
+scene("a comparator facing west in a world whose heading 0 is east", {
+    facing = "east", item = "minecraft:comparator", blocks = { stone(0, -1, 3) }, opts = { facing = "west" },
+    expect = { { 0, 0, 3, "comparator", { facing = "west" } } } })
+do
+    fresh(nil, {})
+    knowAll()
+    W.give(1, REPEATER, 2)
+    local name, why = T.placeAt(0, 0, 3, REPEATER, { facing = "north" })
+    check("a repeater with no floor: refused for that, without moving", name == nil and why:find("solid block under", 1, true) ~= nil
+        and atCell(0, 0, 0) and W.get(0, 0, 3) == nil, tostring(why))
+    W.give(2, PISTON, 2)
+    name, why = T.placeAt(0, 0, 3, PISTON, { facing = "sideways" })
+    check("a piston's facing is a compass name, up or down", name == nil and why:find("up or down", 1, true) ~= nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, REPEATER, { facing = "up" })
+    check("...a repeater's only a compass name", name == nil and why:find("compass name", 1, true) ~= nil
+        and not why:find("up or down", 1, true), tostring(why))
+    fresh(nil, {}, false)
+    W.give(1, PISTON, 2)
+    name, why = T.placeAt(0, 0, 3, PISTON, { facing = "up" })
+    check("a piston facing up needs no world origin", name ~= nil and has(0, 0, 3, "piston", { facing = "up" }), tostring(why))
+    -- the table wrong about a row: what the game gives, up included, is learnt
+    fresh(nil, {})
+    knowAll()
+    W.give(1, PISTON, 4)
+    T.need("placeAt")
+    T.PLACE_TABLE.piston.front[3].set.facing = "back"
+    local state
+    name, state = T.placeAt(0, 0, 3, PISTON, { facing = "north" })
+    check("a wrong piston row: the first try comes out the other way, is dug out, and the retry faces north",
+        name == PISTON and state.facing == "north" and has(0, 0, 3, "piston", { facing = "north" }) and W.carrying(PISTON) == 3, tostring(name))
+    check("...the rule learnt relative to the heading", learnedText() == "piston front always facing=heading\n", tostring(learnedText()))
+    fresh(nil, { stone(0, -1, 3) })
+    knowAll()
+    W.give(1, PISTON, 4)
+    T.need("placeAt")
+    T.PLACE_TABLE.piston.front[2].set.facing = "back"
+    name = T.placeAt(0, 0, 3, PISTON, { facing = "north" })
+    check("...and a row that gives up where the table said a compass way: learnt as up", learnedText() == "piston front floor facing=up\n"
+        and W.get(0, 0, 3) == nil, tostring(learnedText()))
+    local info = T.placeInfo(PISTON)
+    check("placeInfo: a piston, a dispenser and a dropper are one family, an observer and a repeater their own, each by facing",
+        info.family == "piston" and info.keys.facing and T.placeInfo("minecraft:dropper").family == "piston"
+        and T.placeInfo(OBSERVER).family == "observer" and T.placeInfo(REPEATER).family == "diode"
+        and T.placeInfo("minecraft:comparator").keys.facing and T.placeInfo(REPEATER).door == false)
+end
 
 --------------------------------------------------------------------------
 -- A table that is wrong about a row: corrected by the retry, remembered
@@ -505,6 +598,7 @@ do
     name, why = T.placeAt(0, 0, 3, ST, { half = "bottom" })
     check("...also when the map has never seen it: found when the turtle gets there, and still left alone",
         name == nil and why:find("in the way", 1, true) and has(0, 0, 3, "stone"), tostring(why))
+    check("...and the map has the block it found", T.map.get(0, 0, 3) == STONE, tostring(T.map.get(0, 0, 3)))
     fresh(nil, {})
     knowAll()
     name, why = T.placeAt(0, 0, 3, ST, { half = "bottom" })
@@ -538,6 +632,15 @@ do
         and W.placed == 0 and W.carrying(ST) == 4, tostring(how and how.approach))
     name, state = T.placeAt(0, 0, 3, ST, { facing = "south", half = "bottom" })
     check("...but one facing the other way is not touched: it is in the way", name == nil and has(0, 0, 3, "oak_stairs", { facing = "north" }))
+    -- the map out of date: it says air where the stair is
+    fresh(nil, { { 0, 0, 3, ST, { facing = "north", half = "bottom", shape = "straight", waterlogged = false } } })
+    knowAll()
+    T.map.set(0, 0, 3, "minecraft:air")
+    W.give(1, ST, 4)
+    name, state, how = T.placeAt(0, 0, 3, ST, { facing = "north", half = "bottom" })
+    local mapName, mapState = T.map.get(0, 0, 3)
+    check("a stair already there that the map had as air: found, and the map has it now, with its state", name == ST
+        and how.approach == "already there" and mapName == ST and mapState and mapState.facing == "north", tostring(mapName))
 end
 do
     -- the position follows the placement; the map is told what is there
@@ -634,12 +737,31 @@ do
         name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "oak_log", { axis = "y" }) and W.get(0, 1, 3) == nil
         and how.support and how.support.temp == COBBLE and W.carrying(COBBLE) == 1 and W.carrying("minecraft:oak_log") == 1,
         tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, -1, 3) .. " " .. W.show(0, 1, 3))
+    -- a floor that comes back as itself when dug needs none on board, only a free slot for the one dug (ADR-0013)
+    floorScene({ "minecraft:soul_soil" }, { STAIR_ON })
+    W.give(1, SL, 4)
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("a soul soil floor and none on board: dug, the slab placed from there, the floor put back with the soil dug",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "soul_soil") and W.carrying("minecraft:soul_soil") == 0
+        and how and how.support and how.support.floor == "minecraft:soul_soil", tostring(state) .. " " .. W.show(0, -1, 3))
+    floorScene({ "minecraft:soul_soil" }, { STAIR_ON })
+    W.give(1, SL, 4)
+    for slot = 2, 16 do W.give(slot, "minecraft:dirt", 64) end
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...but with no free slot for the soil dug: refused, nothing dug, saying so", name == nil and W.dug == nil
+        and has(0, -1, 3, "soul_soil") and why:find("free a slot", 1, true) ~= nil, tostring(why))
     -- refusals before anything is dug
-    floorScene({ FLOOR }, { STAIR_ON })
+    floorScene({ STONE }, { STAIR_ON })
     W.give(1, SL, 4)
     name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
-    check("opts.digBelow with none of the floor's block on board: refused, nothing dug, saying to carry one",
-        name == nil and W.dug == nil and has(0, -1, 3, "stone_bricks") and why:find("carry one minecraft:stone_bricks", 1, true) ~= nil, tostring(why))
+    check("opts.digBelow on a floor that drops something else, with none of it on board: refused, nothing dug, saying to carry one",
+        name == nil and W.dug == nil and has(0, -1, 3, "stone") and why:find("carry one minecraft:stone", 1, true) ~= nil, tostring(why))
+    floorScene({ STONE }, { STAIR_ON, stone(0, -2, 3) })
+    W.give(1, SL, 4)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("every need of a dug floor said at once: the option, a block to carry, a way out",
+        name == nil and W.dug == nil and why:find("opts.digBelow = true", 1, true) ~= nil and why:find("carry one minecraft:stone", 1, true) ~= nil
+        and why:find("no free cell beside the floor", 1, true) ~= nil, tostring(why))
     floorScene({ FLOOR }, { STAIR_ON, stone(0, -2, 3) })
     W.give(1, SL, 4)
     W.give(2, FLOOR, 1)

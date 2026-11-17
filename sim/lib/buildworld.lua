@@ -15,7 +15,8 @@
 --   * turtle.place* as CC:Tweaked 1.120.2 runs it (TurtlePlaceCommand.deploy, read from the source, see
 --     "The order" below), and Minecraft's own rules for each family of block (stairs, slabs, logs and
 --     pillars, torches, signs, ladders, buttons and levers, doors, trapdoors, fence gates, chests and
---     furnaces; everything else is a plain full block).  The rules are DATA, in FAMILIES below.
+--     furnaces, pistons, dispensers and droppers, observers, repeaters and comparators; everything else is a plain
+--     full block).  The rules are DATA, in FAMILIES below.
 --   * A sign's text: turtle.place(text) on a sign writes it as CC:Tweaked does (TurtlePlaceCommand.setSignText:
 --     the lines between newlines, at most 15 characters each, four at most; one or two lines start on the
 --     second); the block keeps it as w.get(...).text, four strings.
@@ -57,7 +58,8 @@
 -- ladder, button or lever with no support on the side clicked.  UNVERIFIED in game.
 --
 -- Simplifications (what it leaves out): waterlogging (always false), double chests, fence and wall
--- connections, redstone, blocks falling, fluids flowing, entities moving.  A bucket of water or lava
+-- connections, redstone (a repeater's delay, a piston pushing, a dispenser's slots), blocks falling, fluids flowing,
+-- entities moving.  A bucket of water or lava
 -- places a source block in the target cell; an empty one placed on a source in the target cell takes it
 -- up (the bucket comes back full, in the selected slot as CC puts it) and does nothing on flowing liquid.  Flint and steel puts a fire in the cell
 -- the click lands in (an empty one with something solid under it); the item is not used up.
@@ -110,6 +112,8 @@ local FAMILY_EXACT = {
     turtle_normal = "turtle", turtle_advanced = "turtle", ladder = "ladder", lever = "lever", chest = "chest", trapped_chest = "chest", furnace = "furnace",
     crimson_stem = "log", warped_stem = "log", hay_block = "log", bone_block = "log", basalt = "log",
     polished_basalt = "log", deepslate = "log",
+    piston = "piston", sticky_piston = "piston", dispenser = "piston", dropper = "piston", observer = "observer",
+    repeater = "diode", comparator = "diode",
     short_grass = "plant", tall_grass = "plant", fern = "plant", large_fern = "plant", dead_bush = "plant",
     vine = "plant", seagrass = "plant", fire = "plant", snow = "plant",
 }
@@ -209,7 +213,8 @@ end
 --   passable                                    a turtle can move into it (no collision)
 --   inventory                                   a container: its slot count
 -- ctx: w, x y z (where it goes), face (the clicked face), clicked (that block), replaceClicked,
--- horizontal (the placer's compass facing), look (the order above), hitRel (the click's height above
+-- horizontal (the placer's compass facing), look (the order above), nearest (the first of the placer's own order,
+-- before the clicked face is moved to the front: getNearestLookingDirection), hitRel (the click's height above
 -- the cell it goes into), item (the item's name), below/above/near(dir) (the blocks around it).
 --------------------------------------------------------------------------
 local function stairShape(w, x, y, z, st)
@@ -420,6 +425,24 @@ FAMILIES = {
             return { facing = OPP[ctx.horizontal], half = ctx.face == "up" and "bottom" or "top", open = false,
                      powered = false, waterlogged = false }
         end,
+    },
+
+    -- a piston, dispenser or dropper faces back at the placer: the opposite of the way it looks most nearly, up and
+    -- down too (PistonBaseBlock, DispenserBlock: getNearestLookingDirection().getOpposite())
+    piston = { place = function(ctx) return { facing = OPP[ctx.nearest], extended = false } end },
+    -- an observer the other way: its face looks where the placer looks (ObserverBlock)
+    observer = { place = function(ctx) return { facing = ctx.nearest, powered = false } end },
+    -- a repeater or comparator: facing back at the placer, level (DiodeBlock: getHorizontalDirection().getOpposite()),
+    -- on a block with a whole top face; its delay or mode as it comes
+    diode = {
+        sturdy = no, full = no,
+        place = function(ctx)
+            if not sturdy(ctx.near("down"), "up") then return nil end
+            local st = { facing = OPP[ctx.horizontal], powered = false }
+            if short(ctx.item) == "comparator" then st.mode = "compare" else st.delay, st.locked = 1, false end
+            return st
+        end,
+        survives = function(w, x, y, z) return sturdy(w.near(x, y, z, "down"), "up") end,
     },
 
     -- a fence gate: facing the placer's, set into a wall when walls stand to its sides
@@ -801,7 +824,7 @@ function B.new(opts)
         local ctx = {
             w = w, x = px, y = py, z = pz, face = face, clicked = clicked, replaceClicked = replaceClicked,
             horizontal = facing, item = item, hitRel = cy + rel - py,
-            look = lookOrder(facing, pitch, face, replaceClicked),
+            look = lookOrder(facing, pitch, face, replaceClicked), nearest = pitch or facing,
         }
         function ctx.near(dir) return (w.near(px, py, pz, dir)) end
         local state, name = fam.place(ctx)
