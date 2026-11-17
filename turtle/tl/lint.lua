@@ -409,19 +409,19 @@ function T.lint(what, opts)
     local limit = opts.limit or LIMIT
     local found, info = {}, { cells = cells, unchecked = 0, more = 0, rules = {}, summary = {} }
     for _, rule in ipairs(RULES) do found[rule] = {} end
-    local bp = T.blueprint
+    local bp = plan and T.blueprint      -- (a box's lint never loads tl.blueprint)
     -- (a warning is the plan's when its own cell or one of the cells it names is)
-    local function where(x, y, z, cells)
+    local function where(x, y, z, named)
         if bp.at(plan, x, y, z) then return "plan" end
-        for _, c in ipairs(cells) do
+        for _, c in ipairs(named) do
             if bp.at(plan, c[1], c[2], c[3]) then return "plan" end
         end
         return "around"
     end
-    local function warn(rule, x, y, z, words, cells)
+    local function warn(rule, x, y, z, words, named)
         local list = found[rule]
         list[#list + 1] = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words,
-                            where = plan and where(x, y, z, cells or {}) or nil }
+                            where = plan and where(x, y, z, named or {}) or nil }
     end
     for y = y1, y2 + 1 do
         for z = z1, z2 do
