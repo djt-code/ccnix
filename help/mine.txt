@@ -21,6 +21,8 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
 
 --origin gives the world cell of the start (what F3 shows for the block the turtle stands in) and the compass way it faces, north, east, south or west (left out, it is worked out from a Geo Scanner scan), for a run from the start.  The map then knows where it is in the world (T.toWorld, T.toLocal), for claude and the other programs.
 
+A tunnel saved before a re-zero that moved the start (another program started away from home, T.clearPos) is in the old frame: --resume, haul and reset refuse it, say why and mark it stale; a fresh tunnel replaces it.
+
 width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 height = blocks UP from the turtle (negative = DOWN)
 length = blocks the tunnel runs ahead; leave it out to keep going until the turtle can't (out of chests or fuel, a full chest, bedrock)

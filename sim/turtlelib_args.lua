@@ -53,13 +53,15 @@ check("keyXZ: not two whole numbers, nil", T.keyXZ("1,2,3") == nil and T.keyXZ("
 local JOB = "ccnix/turtle/mine.job"
 check("no job file: no job", not T.hasMineJob() and T.loadMineJob() == nil)
 T.saveMineJob({ width = -3, height = 3, length = nil, spacing = 16, homes = 2, state = "active" })
-check("a job is saved as mine always wrote it (length 0: no end)", S.files[JOB] == "-3 3 0 16 2 active", S.files[JOB])
+check("a job is saved as mine writes it, the frame it was made in before the state (length 0: no end)", S.files[JOB] == "-3 3 0 16 2 0 active",
+    S.files[JOB])
 local job = T.loadMineJob()
 check("and read back", job and job.width == -3 and job.height == 3 and job.length == nil and job.spacing == 16
-    and job.homes == 2 and job.state == "active")
+    and job.homes == 2 and job.frame == 0 and job.state == "active" and job.stale == nil)
 S.files[JOB] = "3 3 40 16 2 done\n"
 job = T.loadMineJob()
-check("a length", job and job.length == 40 and job.state == "done")
+check("a length; a job from before frames (no frame word) still reads, with no frame", job and job.length == 40 and job.state == "done"
+    and job.frame == nil and job.stale == nil)
 S.files[JOB] = "3 x 40 16 2 done"
 check("a job that isn't one: there, but nil", T.hasMineJob() and T.loadMineJob() == nil)
 

@@ -9,7 +9,8 @@
 --   * the undo journal: off by default (nothing written), on with T.cfg.undo; two placed blocks and a dug one put back by T.undo;
 --     a dug stair put back facing as it was (through T.placeAt); a mark and T.undo(nil, { since }); an entry that cannot be undone
 --     stays and is told (no item aboard, the cell holds something else), one whose cell is empty already is done; nothing the undo
---     does is written down; the journal is cut at undo.max; the numbering goes on after a restart;
+--     does is written down; the journal is cut at undo.max; the numbering goes on after a restart; an entry from before a
+--     re-zero refused and marked stale (ADR-0012), the frame numbered anew by a re-zero, not by reset --here;
 --   * T.report: the text with the position (the world cell), fuel and the job's progress; the chat box equipped for the moment and
 --     the pickaxe put back; a chat box on a side used as it is; the cooldown retried and given up on; no player, no chat box, a
 --     bad text; T.report.every(n) telling the player once in every n steps.
@@ -357,6 +358,26 @@ do
     W.set(0, 0, 1, nil)
     ok2, info = T.undo()
     check("...an empty cell is done already", ok2 == true and lines(".undo") == 0 and not has(0, 0, 1))
+
+    -- a re-zero since (ADR-0012): the journal's cells are in the frame they were written in
+    fresh()
+    T.cfg.undo = true
+    local f0 = T.frameId()
+    T.setHomeHere()
+    check("reset --here (T.setHomeHere) keeps the frame: the turtle is at home as it was", T.frameId() == f0, tostring(T.frameId()))
+    W.set(0, 0, 1, STONE)
+    turtle.dig()
+    T.forward()
+    T.startAtHome(true)                             -- the cell it moved to is 0,0,0 from now on
+    check("a re-zero that moves where 0,0,0 is numbers a new frame", T.frameId() == f0 + 1, f0 .. " -> " .. T.frameId())
+    ok2, why, info = T.undo()
+    check("an entry from before the re-zero is refused, saying why, and nothing is put back", ok2 == false and contains(why, "re-zeroed")
+        and info.undone == 0 and lines(".undo") == 1 and not has(0, 0, 2) and not has(0, 0, 1) and carrying(STONE) == 1, tostring(why))
+    check("...and marked stale in the journal", contains(readFile(".undo"), " stale"), tostring(readFile(".undo")))
+    W.set(0, 0, 2, COBBLE)
+    turtle.dig()
+    ok2, why = T.undo(1)
+    check("...a new entry, from this frame, is undone as before", ok2 == true and has(0, 0, 2, COBBLE) and lines(".undo") == 1, tostring(why))
 
     -- a placed torch (the item's name is not the block's)
     fresh()

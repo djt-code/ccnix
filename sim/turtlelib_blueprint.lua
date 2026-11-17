@@ -10,6 +10,7 @@
 --   * the materials: short is refused before the turtle moves (with what could be crafted if a craft module is
 --     there, loaded only then), partial builds what it can, a block in the way fails the cell and the build goes on, the
 --     failed cell is tried again on the next run;
+--   * a build saved before a re-zero is not carried on: refused and marked stale, a plan given starts afresh (ADR-0012);
 --   * a different plan while one is unfinished is refused (restart starts it), the same plan after a finished build
 --     starts afresh; a facing without the world origin is refused; opts.protect keeps the finished build;
 --   * T.verify: a deliberately wrong stair found by state, a wrong plain block found only when looking at every cell, a
@@ -399,6 +400,23 @@ do
     check("T.build() then carries on the new one: it is finished", ok == true and fileText(".build"):find("name: second", 1, true), tostring(why))
     ok, why = build(a)
     check("a different plan after a finished build is simply built", ok == true and has(5, 0, 2, "stone"), tostring(why))
+    -- a re-zero while a build is unfinished (ADR-0012): its cells are in the old frame
+    fresh()
+    W.give(1, STONE, 40)
+    build(a, { limit = 3 })
+    local placed = W.placed
+    T.up()
+    T.startAtHome(true)                             -- where it stands is 0,0,0 from now on
+    ok, why = build()
+    check("T.build() after a re-zero refuses to carry on, saying why, and places nothing", ok == nil and why:find("can't be carried on", 1, true)
+        and why:find("re-zeroed", 1, true) and W.placed == placed, tostring(why))
+    check("...and marks the saved build stale", (fileText(".build.progress") or ""):find("frame stale", 1, true) ~= nil, tostring(fileText(".build.progress")))
+    ok, why = build()
+    check("...so asking again says so", ok == nil and why:find("stale", 1, true), tostring(why))
+    local info
+    ok, why, info = build(b, { limit = 1 })
+    check("...and a plan given is started afresh, no restart = true needed", not (why or ""):find("is unfinished", 1, true) and info and not info.resumed,
+        tostring(why))
     fresh()
     ok, why = build()
     check("T.build() with nothing saved says so", ok == nil and why:find("no build in progress", 1, true), tostring(why))

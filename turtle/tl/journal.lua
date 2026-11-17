@@ -457,14 +457,16 @@ local function stateOf(word)
     return next(state) and state or nil
 end
 
--- The entries of the journal file, oldest first: { seq, kind = "dig" | "place", x, y, z, name, state }.
+-- The entries of the journal file, oldest first: { seq, kind = "dig" | "place", x, y, z, name, state, frame } (frame: the
+-- T.frameId it was written in, "stale" once found in another, nil in a line from before frames were numbered).
 local function loadUndo()
     local list = {}
     for _, line in ipairs(text.lines(fileio.read(T.dataPath(UNDO_FILE)) or "")) do
         local w = text.words(line)
         local seq, x, y, z = convert.toInteger(w[1] or ""), convert.toInteger(w[3] or ""), convert.toInteger(w[4] or ""), convert.toInteger(w[5] or "")
         if seq and x and y and z and (w[2] == "dig" or w[2] == "place") and w[6] then
-            list[#list + 1] = { seq = seq, kind = w[2], x = x, y = y, z = z, name = w[6], state = stateOf(w[7]) }
+            local frame = w[8] == "stale" and "stale" or convert.toInteger(w[8] or "")
+            list[#list + 1] = { seq = seq, kind = w[2], x = x, y = y, z = z, name = w[6], state = stateOf(w[7]), frame = frame }
         end
     end
     return list
@@ -472,7 +474,7 @@ end
 
 -- One entry as a line of the file.
 local function undoLine(e)
-    return string.format("%d %s %d %d %d %s %s", e.seq, e.kind, e.x, e.y, e.z, e.name, stateText(e.state))
+    return string.format("%d %s %d %d %d %s %s %s", e.seq, e.kind, e.x, e.y, e.z, e.name, stateText(e.state), tostring(e.frame or T.frameId()))
 end
 
 -- Write the journal file from a list of entries.  True, or nil and why.
@@ -629,7 +631,8 @@ end
 -- A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that
 -- was placed is dug out if it is still there.  The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a
 -- protected area the job may work in).  An entry that was done leaves the journal; one that could not stays, and info.failed lists
--- it: { seq, kind, x, y, z, name, why }.  info.undone is how many went.  It does nothing to what the turtle did since to those cells
+-- it: { seq, kind, x, y, z, name, why }.  An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why,
+-- and stays marked stale.  info.undone is how many went.  It does nothing to what the turtle did since to those cells
 -- except as said, and it writes nothing to the journal itself.
 function T.undo(n, opts)
     opts = opts or {}
@@ -657,7 +660,12 @@ function T.undo(n, opts)
         local run = function()
             for _, e in ipairs(picked) do
                 local good, why
-                if e.kind == "dig" then good, why = putBack(e, opts) else good, why = takeOut(e, opts) end
+                local stale = T.frameStale(e.frame)
+                if stale then
+                    -- (its cell is in the frame it was written in: undone now it would be somewhere else)
+                    e.frame = "stale"
+                    good, why = false, "not undone here: " .. stale
+                elseif e.kind == "dig" then good, why = putBack(e, opts) else good, why = takeOut(e, opts) end
                 if good then
                     info.undone = info.undone + 1
                     gone[e.seq] = true

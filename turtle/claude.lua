@@ -1108,6 +1108,7 @@ local function status()
     if job then
         lines[#lines + 1] = string.format("mine job under way: %d wide, %d high, %s long, spacing %d, %s",
             job.width, job.height, job.length and tostring(job.length) or "no end", job.spacing, job.state)
+            .. (job.stale and job.state ~= "stale" and " (stale: saved in another frame)" or "")
     end
     local addrs = {}
     local S = rawget(_G, "ccnet")

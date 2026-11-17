@@ -3,6 +3,8 @@ T.dataPath(name) - The path of a data file kept next to the running program (/cc
 T.savePos() - Write T.pos, T.dir and T.mode to the position file, so a stop or a reboot can still find the way home. Raises "Terminated" if a Ctrl+T was held back (see T.run).
 T.run(fn, ...) - Run fn(...) so that Ctrl+T can't leave the saved position wrong: one that comes during a turtle command is held back until the move or turn is saved.
 T.loadPos() - The saved position as { x, y, z, dir, mode }, or nil if there is none.
+T.frameId() - The number of the frame the turtle counts in: one more at each re-zero that moves 0,0,0 (0 before the first).
+T.frameStale(stamp) - Why a job saved in frame `stamp` can't be carried on now (a re-zero since), or nil if it can.
 T.clearPos() - Delete the saved position file: the next job starts from home as (0,0,0).
 T.startAtHome(force) - Call at the start of a job: the turtle is at home, facing forward. If a saved position says otherwise, returns it instead of resetting so the program can warn the user.
 The turtle API, wrapped once:
@@ -97,8 +99,8 @@ T.requireHome(force, prog) - Start a job: startAtHome, but when the saved positi
 T.setting(name, default, description) - A setting from CC's settings (`sysctl mine.width=5` at the prompt), defined here so `sysctl -d` describes it with its description; its default where there is no settings API.
 T.saveSettings(values) - Keep values given on the command line ({ [name] = value }) as the settings, so the next run without them (or the autostart) uses them.
 T.options(args, long) - Parse a program's command-line `args` with lib/getopt, options and operands in any order. Returns the options table and the operands, or nil and why.
-T.loadMineJob() - The job: { width, height, length (nil: no end), spacing, homes, state }, or nil if there's none or it isn't one.
-T.saveMineJob(job) - Save a job as loadMineJob reads it back.
+T.loadMineJob() - The job: { width, height, length (nil: no end), spacing, homes, frame, state, stale }, or nil if there's none or it isn't one.
+T.saveMineJob(job) - Save a job as loadMineJob reads it back, stamped with the frame it was made in (job.frame, else this one).
 T.hasMineJob() - Whether a mine.job file is there at all (a job that can't be read still counts: mine was given one).
 Plans:
 T.serpentine(width, length) - Serpentine over the grid: columns along x, rows alternating in z. Tiles are counted OUT from the start: x = 1..w, z = 1..l (signed), so the start tile (0,0) is never part of the plan.
