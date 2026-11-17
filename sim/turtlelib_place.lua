@@ -28,6 +28,10 @@
 --     block above too when nothing is there; a floor that drops itself (soul soil) needing none on board, only a free
 --     slot; refused before digging with none of the floor's block on board, with no way out of the floor's cell, in a
 --     protected area (unless opts.inside); every unmet need said at once;
+--   * opts.digBelow on solid ground (ADR-0013 D7): a floor cell beside the floor with air above dug and stood in, the
+--     floor dug sideways, both put back as they were (blocks that drop themselves, and carried stone), both digs in the
+--     undo journal; refused before digging with no neighbour with air above, the only one protected (unless
+--     opts.inside) or with lava beside it, and with the blocks for both missing (named at once);
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -842,13 +846,15 @@ do
     name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
     check("opts.digBelow on a floor that drops something else, with none of it on board: refused, nothing dug, saying to carry one",
         name == nil and W.dug == nil and has(0, -1, 3, "stone") and why:find("carry one minecraft:stone", 1, true) ~= nil, tostring(why))
-    floorScene({ STONE }, { STAIR_ON, stone(0, -2, 3) })
+    -- (walled in: the cells beside the target hold blocks, so no floor cell beside it has air above, ADR-0013 D7)
+    local WALLED = { stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 2), stone(0, 0, 4) }
+    floorScene({ STONE }, { STAIR_ON, stone(0, -2, 3), table.unpack(WALLED) })
     W.give(1, SL, 4)
     name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
     check("every need of a dug floor said at once: the option, a block to carry, a way out",
         name == nil and W.dug == nil and why:find("opts.digBelow = true", 1, true) ~= nil and why:find("carry one minecraft:stone", 1, true) ~= nil
         and why:find("no free cell beside the floor", 1, true) ~= nil, tostring(why))
-    floorScene({ FLOOR }, { STAIR_ON, stone(0, -2, 3) })
+    floorScene({ FLOOR }, { STAIR_ON, stone(0, -2, 3), table.unpack(WALLED) })
     W.give(1, SL, 4)
     W.give(2, FLOOR, 1)
     name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
@@ -863,6 +869,89 @@ do
         and why:find("protected", 1, true) ~= nil, tostring(why))
     name = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true, inside = "hall" })
     check("...unless the job owns it (opts.inside)", name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "stone_bricks"))
+end
+
+--------------------------------------------------------------------------
+-- digBelow on solid ground (ADR-0013 D7): no free cell beside the floor, so a floor cell beside it with air above is
+-- dug too, stood in, the floor dug sideways and stood in, the item placed up, and both put back as they were
+--------------------------------------------------------------------------
+do
+    local STAIR_ON = { 0, 1, 3, ST, { facing = "north", half = "bottom", shape = "straight", waterlogged = false } }
+    local ANDESITE = "minecraft:polished_andesite"
+    -- the floor at 0,-1,3 with solid ground under it and the neighbours given (all four the same block, or a list by
+    -- 0,-1,2 / 1,-1,3 / -1,-1,3 / 0,-1,4), and what else is named
+    local function solidScene(floorName, beside, extra)
+        local cells = { { 0, -1, 2 }, { 1, -1, 3 }, { -1, -1, 3 }, { 0, -1, 4 } }
+        local blocks = { { 0, -1, 3, floorName }, stone(0, -2, 3), STAIR_ON }
+        for i, c in ipairs(cells) do
+            blocks[#blocks + 1] = { c[1], c[2], c[3], type(beside) == "table" and beside[i] or beside }
+        end
+        for _, b in ipairs(extra or {}) do blocks[#blocks + 1] = b end
+        fresh(nil, blocks)
+        knowAll()
+        W.give(1, SL, 4)
+    end
+    -- blocks over three of the neighbours, so only 0,-1,2 has air above it
+    local OVER3 = { stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 4) }
+    local function allBack(floorName, besideName)
+        return has(0, -1, 3, floorName) and has(0, -1, 2, besideName) and has(1, -1, 3, besideName) and has(-1, -1, 3, besideName)
+            and has(0, -1, 4, besideName)
+    end
+
+    solidScene(FLOOR, ANDESITE)
+    local name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("digBelow on solid ground: a neighbour dug and stood in, the floor dug sideways, the slab placed up, both floors back",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and allBack("stone_bricks", "polished_andesite") and how and how.support
+        and how.support.exit and how.support.exit.x == 0 and how.support.exit.z == 2, tostring(state) .. " " .. W.show(0, -1, 3) .. " " .. W.show(0, -1, 2))
+    check("...nothing carried before or after (both drop themselves), two digs, the map with both floors", W.carrying(FLOOR) == 0
+        and W.carrying(ANDESITE) == 0 and W.dug == 2 and T.map.get(0, -1, 3) == FLOOR and T.map.get(0, -1, 2) == ANDESITE,
+        tostring(W.dug) .. " " .. W.carrying(FLOOR) .. " " .. tostring(T.map.get(0, -1, 2)))
+
+    -- floors that drop something else: two carried; with the undo journal on, both digs written down
+    solidScene(STONE, STONE)
+    W.give(2, STONE, 2)
+    package.loaded["tl.journal"] = nil
+    T.cfg.undo = true
+    name, state = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    local f = fs.open(T.dataPath(".undo"), "r")
+    local journal = f and f.readAll() or ""
+    if f then f.close() end
+    T.cfg.undo = false
+    -- (the mock's stone drops itself, the game's cobblestone: either way two come back)
+    check("...stone floors (in game they drop cobblestone): put back with the two carried, both as they were",
+        name ~= nil and allBack("stone", "stone") and W.carrying(STONE) + W.carrying("minecraft:cobblestone") == 2,
+        W.carrying(STONE) .. " " .. W.carrying("minecraft:cobblestone") .. " " .. W.show(0, -1, 3) .. " " .. W.show(0, -1, 2) .. " " .. W.show(0, 0, 3))
+    check("...with T.cfg.undo on, both digs are in the undo journal", journal:find(" dig 0 -1 2 minecraft:stone", 1, true) ~= nil
+        and journal:find(" dig 0 -1 3 minecraft:stone", 1, true) ~= nil, journal)
+
+    -- refusals, before anything is dug
+    solidScene(FLOOR, ANDESITE, { stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 2), stone(0, 0, 4) })
+    local why
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...no neighbour with air above it: refused, nothing dug, each neighbour's why named", name == nil and W.dug == nil
+        and why:find("no free cell beside the floor", 1, true) ~= nil and why:find("0,-1,2: the map has minecraft:stone above it", 1, true) ~= nil,
+        tostring(why))
+    solidScene(FLOOR, ANDESITE, OVER3)
+    T.protect("edge", 0, -1, 2, 0, -1, 2)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...the only neighbour in a protected area: refused, nothing dug, the area named", name == nil and W.dug == nil
+        and why:find("0,-1,2: in the protected area edge", 1, true) ~= nil, tostring(why))
+    name = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true, inside = "edge" })
+    check("...unless the job owns it (opts.inside)", name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and allBack("stone_bricks", "polished_andesite"))
+    solidScene(FLOOR, ANDESITE, { stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 4), { 0, -1, 1, "minecraft:lava" } })
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...lava beside the only neighbour: refused, nothing dug, the lava named", name == nil and W.dug == nil
+        and why:find("0,-1,2: minecraft:lava beside it at 0,-1,1", 1, true) ~= nil, tostring(why))
+    solidScene(STONE, STONE)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("...every need named at once: the option, and two stone to carry (the floor and the neighbour)", name == nil and W.dug == nil
+        and why:find("opts.digBelow = true", 1, true) ~= nil and why:find("carry two minecraft:stone", 1, true) ~= nil, tostring(why))
+    solidScene(STONE, { "minecraft:soul_soil", STONE, STONE, STONE }, OVER3)
+    for slot = 2, 16 do W.give(slot, "minecraft:dirt", 64) end
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...a stone floor beside soul soil, nothing carried and no free slot: both needs named at once, nothing dug", name == nil
+        and W.dug == nil and why:find("carry one minecraft:stone", 1, true) ~= nil and why:find("free a slot", 1, true) ~= nil
+        and why:find("soul_soil", 1, true) ~= nil, tostring(why))
 end
 
 --------------------------------------------------------------------------
