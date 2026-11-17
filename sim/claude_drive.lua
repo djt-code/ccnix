@@ -2036,52 +2036,6 @@ check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way t
         and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
 end
 
--- 42. context editing for the cache (ADR-0013 D1): while the last call's
---     input is under 180k a request keeps all thinking and clears no tool
---     call; once one reaches it, the next request clears deep (the
---     thinking of all but the turn in progress, every tool call but the
---     last 6, the memory tool's never, the code with its result), logged;
---     the requests after it ask for that same clear and no more: the API
---     edits what each request sends and keeps nothing, so the counts kept
---     grow with what came since (a tool call, a new goal's turn), and
---     nothing cleared comes back.  (The hard clear is 3c's.)
-do
-fresh({ "and more", "" })
-local function inp(n)
-    return { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = n - 100, cache_creation_input_tokens = 0 } }
-end
-HTTP.queue = {
-    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inp(120000)),
-    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inp(185000)),
-    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inp(100000)),
-    reply({ toolUse("lua", { code = "return 4" }) }, "tool_use", inp(101000)),
-    reply({ text("Done.") }, "end_turn", inp(99000)),
-    reply({ text("More.") }, "end_turn", inp(99500)),
-}
-run("grow")
-local function edits42(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {} end
-local function keepsAll(n) local e = edits42(n); return #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all" end
--- the thinking turns and the tool calls a request keeps, as "turns/calls"
-local function kept(n)
-    local e = edits42(n)
-    if not (e[1] and e[2] and type(e[1].keep) == "table") then return textutils.serialiseJSON(e) end
-    return e[1].keep.value .. "/" .. e[2].keep.value
-end
-check("under the mark: every request keeps all thinking and clears no tool call", keepsAll(1) and keepsAll(2),
-    textutils.serialiseJSON(edits42(2)))
-local mark = edits42(3)
-check("at the mark (the last call had 185k in): one request clears both, the thinking edit first",
-    #mark == 2 and mark[1].type == "clear_thinking_20251015" and mark[1].keep.type == "thinking_turns" and mark[1].keep.value == 1
-        and mark[2].type == "clear_tool_uses_20250919" and mark[2].trigger.type == "input_tokens" and mark[2].trigger.value <= 185000
-        and mark[2].keep.type == "tool_uses" and mark[2].keep.value == 6 and mark[2].clear_at_least.value == 0
-        and mark[2].clear_tool_inputs == true and mark[2].exclude_tools[1] == "memory", textutils.serialiseJSON(mark))
-check("...and the log says so", (Mine.files["claude.log"] or ""):find("context: a deep clear at 185000 tokens in", 1, true) ~= nil)
-check("after it: the same clear, the counts grown by what came since (a lua call; the memory tool's not counted; a new goal's turn)",
-    kept(4) == "1/7" and kept(5) == "1/8" and kept(6) == "2/8", kept(4) .. " " .. kept(5) .. " " .. kept(6))
-local _, marks = (Mine.files["claude.log"] or ""):gsub("context: a deep clear", "")
-check("...and under the mark again, no second deep clear", marks == 1, marks)
-end
-
 -- The calls' usage for the scenarios on compaction: n tokens in, all but
 -- 100 of them read from the cache
 local function inTokens(n)
@@ -2096,6 +2050,31 @@ end
 local function hasBeta(n)
     local h = HTTP.requests[n] and HTTP.requests[n].headers or {}
     return tostring(h["anthropic-beta"] or ""):find("compact-2026-09-04", 1, true) ~= nil
+end
+
+-- 42. context editing for the cache (ADR-0013 D1, as D9 amends it): every
+--     request keeps all thinking and clears no tool call, past 180k too
+--     (D1's mark is gone: compaction keeps the conversation in bounds, 44;
+--     the deep clear stands in when no summary comes, 45; the hard clear
+--     is 3c's)
+do
+fresh({ "and more", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(120000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(185000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(240000)),
+    reply({ text("Done.") }, "end_turn", inTokens(99000)),
+    reply({ text("More.") }, "end_turn", inTokens(99500)),
+}
+run("grow")
+local keepsAll = true
+for n = 1, 5 do
+    local e = HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {}
+    keepsAll = keepsAll and #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all"
+end
+check("every request keeps all thinking and clears no tool call, at 185k and 240k too", keepsAll and #HTTP.requests == 5,
+    #HTTP.requests)
+check("...and no deep clear is logged", not (Mine.files["claude.log"] or ""):find("deep clear", 1, true))
 end
 
 -- 43. compaction at a goal's end (ADR-0013 D9): a goal that ends with the
@@ -2249,4 +2228,113 @@ check("a goal ended on a tool call: the summary leaves that turn out, kept after
     c3b.compaction and #c3b.messages == 3 and blockOf(4) and m4b[2].role == "assistant" and kept4[1] and kept4[1].type == "tool_use"
         and answered.type == "tool_result" and answered.tool_use_id == kept4[1].id and answered.is_error == true,
     #(c3b.messages or {}))
+end
+
+-- 44. compaction inside a goal (ADR-0013 D9): once a call's input reaches
+--     250k, right after its tool results the conversation is summarized
+--     but for the last 3 turns (a reply and its results each): the
+--     compaction request ends where an earlier request ended (results, not
+--     a reply waiting on them); the next request is the block, then the
+--     kept turns word for word (their thinking too), nothing else; the
+--     goal carries on; compacting again in the goal sends only the newest
+--     block; under 250k in a goal, none; logged and shown
+do
+fresh({ "" })
+local function step(n, at) return reply({ thinking(), toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
+HTTP.queue = {
+    step(1, 200000), step(2, 220000), step(3, 240000), step(4, 255000),
+    M.compactionReply("Mid summary."),
+    step(5, 260000),
+    M.compactionReply("Mid two."),
+    reply({ text("Done.") }, "end_turn", inTokens(42000)),
+}
+run("long job")
+local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
+local last5 = c5.messages and c5.messages[#c5.messages] or {}
+check("under 250k in a goal no compaction; at 255k one, right after that call's results",
+    c5.compaction and not HTTP.requests[4].body.compaction and #HTTP.requests == 8, #HTTP.requests)
+check("...of what came before the last 3 turns: the goal and the first turn, ending on its results",
+    #(c5.messages or {}) == 3 and last5.role == "user" and type(last5.content) == "table" and last5.content[1].type == "tool_result"
+        and last5.content[1].tool_use_id == "toolu_1", #(c5.messages or {}))
+local m6 = HTTP.requests[6] and HTTP.requests[6].body.messages or {}
+local was = HTTP.requests[5].body.messages        -- (the turns as they were sent before)
+local r4 = HTTP.requests[4].body.messages
+check("the next request: the block, then the 3 turns as they were, thinking and all, then nothing else",
+    blockOf(6) and blockOf(6).content == "Mid summary." and #m6 == 7 and m6[2].role == "assistant"
+        and m6[2].content[1].type == "thinking" and m6[2].content[1].signature == "sig" and m6[2].content[2].id == "toolu_2"
+        and textutils.serialiseJSON(m6[3]) == textutils.serialiseJSON(r4[3 + 2])
+        and m6[7].role == "user" and m6[7].content[1].tool_use_id == "toolu_4" and hasBeta(6), #m6)
+local c7 = HTTP.requests[7] and HTTP.requests[7].body or {}
+check("compacting again in the goal: from the block on, the last 3 turns kept; then only the newest block",
+    c7.compaction and blockOf(7) and blockOf(7).content == "Mid summary." and #c7.messages == 3
+        and blockOf(8) and blockOf(8).content == "Mid two." and #HTTP.requests[8].body.messages == 7, #(c7.messages or {}))
+local log44 = Mine.files["claude.log"] or ""
+check("logged: where it was compacted, what was kept, and what came of it",
+    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 255000 tokens in", 1, true)
+        and log44:find("compacted: 3 messages into a summary of 1200 tokens (12 characters)", 1, true), log44:match("compacting[^\n]*"))
+check("...and shown", Mine.logHas("^%(the conversation, 255k tokens, is summarized; the last 3 turns kept%)"))
+check("the goal carried on to its end", Mine.logHas("^Done%.$"))
+end
+
+-- 45. when no summary comes (ADR-0013 D9, D1's deep clear as the
+--     fallback): a summary cut off at its max_tokens is asked for again
+--     with twice as many; one that brings none has the next request clear
+--     deep (the thinking of all but the turn in progress, all but the last
+--     6 tool calls, the memory tool's never), logged, and no second try in
+--     that goal; the requests after it ask for the same clear, the counts
+--     grown; a summary at a goal's end that brings none has the next
+--     goal's first request clear deep
+do
+fresh({ "" })
+local function step(n, at) return reply({ toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
+HTTP.queue = {
+    step(1, 100000),
+    step(2, 255000),
+    M.compactionReply(nil, nil, "max_tokens"),
+    M.compactionReply("Second try."),
+    reply({ text("Done.") }, "end_turn", inTokens(30000)),
+}
+run("cut short")
+check("a summary cut off at max_tokens: asked again with twice the tokens, and that one taken",
+    HTTP.requests[3].body.max_tokens == 16000 and HTTP.requests[4].body.compaction and HTTP.requests[4].body.max_tokens == 32000
+        and blockOf(5) and blockOf(5).content == "Second try."
+        and (Mine.files["claude.log"] or ""):find("compaction: no summary (stop_reason max_tokens); asked again with 32000 tokens", 1, true),
+    tostring(HTTP.requests[4].body.max_tokens))
+
+fresh({ "" })
+local function edits45(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management and HTTP.requests[n].body.context_management.edits or {} end
+local function kept(n)
+    local e = edits45(n)
+    if not (e[1] and e[2] and type(e[1].keep) == "table") then return textutils.serialiseJSON(e) end
+    return e[1].keep.value .. "/" .. e[2].keep.value
+end
+HTTP.queue = {}
+for n = 1, 7 do HTTP.queue[n] = step(n, 100000 + n) end
+HTTP.queue[8] = reply({ toolUse("lua", { code = "return 8" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(255000))
+HTTP.queue[9] = M.compactionReply(nil)
+HTTP.queue[10] = step(9, 256000)
+HTTP.queue[11] = reply({ text("Done.") }, "end_turn", inTokens(50000))
+run("no summary")
+local deep = edits45(10)
+check("no summary: the next request clears deep, the thinking edit first (1 turn kept), all but the last 6 tool calls, the memory tool's never",
+    #deep == 2 and deep[1].keep.value == 1 and deep[2].type == "clear_tool_uses_20250919" and deep[2].keep.value == 6
+        and deep[2].clear_at_least.value == 0 and deep[2].clear_tool_inputs == true and deep[2].exclude_tools[1] == "memory"
+        and deep[2].trigger.value <= 255000, textutils.serialiseJSON(deep))
+local log45 = Mine.files["claude.log"] or ""
+check("...logged: no summary, then the deep clear",
+    log45:find("compaction: no summary (stop_reason end_turn)\n", 1, true)
+        and log45:find("context: a deep clear at 255000 tokens in (the last call's), as no summary came", 1, true))
+check("...no second try in that goal at 256k, and the request after it asks for the same clear, a call more kept",
+    #HTTP.requests == 11 and not HTTP.requests[11].body.compaction and kept(11) == "1/7", kept(11))
+
+fresh({ "next", "" })
+HTTP.queue = {}
+for n = 1, 7 do HTTP.queue[n] = step(n, 50000 + n) end
+HTTP.queue[8] = reply({ text("Done.") }, "end_turn", inTokens(120000))
+HTTP.queue[9] = M.compactionReply(nil, nil, "refusal")
+HTTP.queue[10] = reply({ text("Next done.") }, "end_turn", inTokens(30000))
+run("refused summary")
+check("a summary at a goal's end that brings none (a refusal): the next goal's first request clears deep",
+    HTTP.requests[9].body.compaction and kept(10) == "1/6" and not blockOf(10)
+        and (Mine.files["claude.log"] or ""):find("compaction: no summary (stop_reason refusal)\n", 1, true), kept(10))
 end

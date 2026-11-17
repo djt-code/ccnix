@@ -155,20 +155,21 @@
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
 -- Old tool calls (the code and its results) and old thinking are kept
--- while the conversation grows, and cleared in one go once a call's input
--- reaches 180k tokens (the API's context editing): all but the last 6
--- calls, the memory tool's kept, and the thinking before the turn in
--- progress.  Each clear has the cache written again, so one deep clear
--- pays for many calls.  When the API says the conversation is too long
--- all the same, it's sent again with more of it cleared.  A reply paused
--- partway through its web searches is carried on.
--- Summaries (the API's compaction): when a goal ends with the last call's
--- input over 100k tokens, the conversation is summarized while you type
--- the next goal (if you're quicker, the goal waits for it; a /new or an
--- empty line doesn't).  The model writes the summary, having read all of
--- it: the goal and how far it got, what you said, places, what's built,
--- lessons, its helpers; and it goes on from that in place of what it
--- summarized.  /new is cheaper still between unrelated goals.
+-- while the conversation grows, and it's summarized (the API's
+-- compaction) to keep it in bounds: when a goal ends with the last call's
+-- input over 100k tokens, while you type the next goal (if you're
+-- quicker, the goal waits for it; a /new or an empty line doesn't); and
+-- inside a long goal once a call's input reaches 250k, right after the
+-- code's results, the last 3 turns kept word for word.  The model writes
+-- the summary, having read all of it: the goal and how far it got, what
+-- you said, places, what's built, lessons, its helpers; and it goes on
+-- from that in place of what it summarized.  /new is cheaper still
+-- between unrelated goals.  When no summary comes, the next call clears
+-- deep instead (the API's context editing): all but the last 6 calls, the
+-- memory tool's kept, and the thinking before the turn in progress.  When
+-- the API says the conversation is too long all the same, it's sent
+-- again with more of it cleared.  A reply paused partway through its web
+-- searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
@@ -256,15 +257,17 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 -- there on.  Clearing a little at a time (the last 3 thinking turns kept,
 -- tool results from 100k) cost 41 rewrites in a day, most of the spend.
 -- So all thinking and every tool call are kept while the conversation
--- grows, and once a call's input reaches CLEAR.mark the next request clears
--- deep: the thinking of all but the turn in progress, and every tool call
--- but the last CLEAR.keep.  One rewrite down to the floor buys many cheap
--- calls after it.  The requests after it ask for the same clear and no
--- more (its keep counts grow with what came since): asking for less would
--- send back what was cleared, the API being stateless.  CLEAR.trigger is
--- the tool edit's: under any conversation that reached the mark, so the
--- clear applies to all a request sends.  (The functions are by the API's.)
-local CLEAR = { mark = 180000, keep = 6, trigger = 100000 }
+-- grows, and compaction (below, ADR-0013 D9) keeps it in bounds.  Clearing
+-- is the fallback: when a compaction brings no summary, the next request
+-- clears deep (CLEAR.deep: due, with the last call's input for the log):
+-- the thinking of all but the turn in progress, and every tool call but
+-- the last CLEAR.keep.  One rewrite down to the floor buys many cheap calls
+-- after it.  The requests after it ask for the same clear and no more (its
+-- keep counts grow with what came since): asking for less would send back
+-- what was cleared, the API being stateless.  CLEAR.trigger is the tool
+-- edit's: under any conversation a compaction is asked for, so the clear
+-- applies to all a request sends.  (The functions are by the API's.)
+local CLEAR = { keep = 6, trigger = 100000 }
 -- The harder clear once the API has said the prompt is too long, for the
 -- rest of the conversation: sooner, fewer results kept, whatever it frees,
 -- and the thinking of the last 3 turns kept
@@ -275,11 +278,14 @@ local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
 -- goes on from a summary of everything, not from a clear's placeholders.
 -- When a goal ends with the last call's input over COMPACT.boundary, the
 -- conversation is summarized while the player types the next goal (and
--- before it's sent, if they're quicker).  The summary call may think too,
+-- before it's sent, if they're quicker).  Inside a goal, once a call's
+-- input reaches COMPACT.mid, it's summarized right after a batch of tool
+-- results, the last COMPACT.keep turns (a reply and its results each) kept
+-- word for word after the summary.  The summary call may think too,
 -- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
 -- INSTRUCTIONS replace the API's own summary prompt (at most 16384
 -- characters, and they must say not to call tools).
-local COMPACT = { boundary = 100000, maxTokens = 16000, beta = "compact-2026-09-04",
+local COMPACT = { boundary = 100000, mid = 250000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
     INSTRUCTIONS = table.concat({
         "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
         "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
@@ -1875,18 +1881,18 @@ function CLEAR.calls()
     return n
 end
 
--- The deep clear's edits, when the last call's input (lastInput, nil after
--- a web search, whose usage adds up its passes) reached CLEAR.mark and
--- there's more than the kept calls to clear since the last one; else nil.
--- Where it was is kept in CLEAR.at for the requests after it.  (This is the
--- one place that decides the mark: a compaction step could stand here.)
-function CLEAR.atMark(lastInput)
-    if not lastInput or lastInput < CLEAR.mark then return nil end
+-- The deep clear's edits, when one is due (`due`: CLEAR.deep, the last
+-- call's input when a compaction brought no summary) and there's more than
+-- the kept calls to clear since the last one; else nil.  Where it was is
+-- kept in CLEAR.at for the requests after it.
+function CLEAR.atMark(due)
+    if not due then return nil end
+    CLEAR.deep = nil
     local calls = CLEAR.calls()
     if CLEAR.at and calls - CLEAR.at.calls <= CLEAR.keep then return nil end
     CLEAR.at = { turns = CLEAR.turns(), calls = calls }
-    log(string.format("context: a deep clear at %d tokens in (the last call's): the old thinking, and all but the last %d tool calls",
-        lastInput, CLEAR.keep))
+    log(string.format("context: a deep clear at %d tokens in (the last call's), as no summary came: the old thinking, and all but the last %d tool calls",
+        due, CLEAR.keep))
     return CLEAR.since()
 end
 
@@ -1898,11 +1904,12 @@ function CLEAR.since()
 end
 
 -- The context edits a request sends: the hard clear once the API has said
--- the conversation is too long; a deep clear at the mark and the same
--- after it; before it, all thinking kept and no tool call cleared.
+-- the conversation is too long; a deep clear when a compaction brought no
+-- summary, and the same after it; else all thinking kept and no tool call
+-- cleared.
 local function contextEdits()
     if hardClear then return { edits = CLEAR.edits(HARD_THINKING, HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST) } end
-    local edits = CLEAR.atMark(CLEAR.lastInput) or (CLEAR.at and CLEAR.since())
+    local edits = CLEAR.atMark(CLEAR.deep) or (CLEAR.at and CLEAR.since())
     return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
 
@@ -2196,7 +2203,7 @@ local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
 -- A new conversation: no clears seen, nothing to compare with
 function replyLog.reset()
     replyLog.cleared, replyLog.last = {}, nil
-    CLEAR.lastInput, CLEAR.at = nil, nil
+    CLEAR.lastInput, CLEAR.at, CLEAR.deep = nil, nil, nil
 end
 
 -- Log what changed in `reply` (asked for at `started`)
@@ -2259,9 +2266,15 @@ function COMPACT.swap(cut, block)
 end
 
 -- Summarize messages 1 to cut (`why` for the log), keeping the rest word
--- for word after the summary: true once the conversation starts with it,
--- false (logged) when no summary came.
+-- for word after the summary: true once the conversation starts with it;
+-- false (logged) when no summary came, and the next request clears deep.
 function COMPACT.run(cut, why)
+    local done = COMPACT.ask(cut, why)
+    if not done then CLEAR.deep = CLEAR.lastInput or 0 end
+    return done
+end
+
+function COMPACT.ask(cut, why)
     local part = {}
     for i = 1, cut do part[i] = messages[i] end
     log(string.format("compacting at %s: %d messages, %d kept as they are; the last call had %d tokens in",
@@ -2330,6 +2343,26 @@ function COMPACT.whileAsking(label)
     return w.line
 end
 
+-- Inside a goal, right after a batch of tool results: once the last call's
+-- input reached COMPACT.mid, the conversation is summarized but for its
+-- last COMPACT.keep turns, kept word for word.  The cut falls where a
+-- request already sent ended (the player's message or results, then the
+-- reply to it), so the kept turns' thinking stays good and no tool call is
+-- left without its result.  Once one brought no summary, not again in
+-- this goal (COMPACT.failed): the deep clear has done the work.
+function COMPACT.inGoal()
+    if (CLEAR.lastInput or 0) < COMPACT.mid or COMPACT.failed then return end
+    for k = COMPACT.keep, 1, -1 do
+        local cut = #messages - 2 * k
+        if cut >= 2 and messages[cut].role == "user" and messages[cut + 1].role == "assistant" then
+            say("grey", string.format("(the conversation, %dk tokens, is summarized; the last %d turns kept)",
+                math.floor(CLEAR.lastInput / 1000 + 0.5), k))
+            COMPACT.failed = not COMPACT.run(cut, "a goal's middle")
+            return
+        end
+    end
+end
+
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -2337,6 +2370,7 @@ local function converse(goal)
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
     local quietSince = now()             -- (the goal's start, then each reminder: the player's last word is T.report's)
+    COMPACT.failed = nil
     while true do
         local started = now()
         local reply, err = listen.around(request)
@@ -2396,6 +2430,7 @@ local function converse(goal)
                 log("reminded: " .. quiet)
             end
             messages[#messages + 1] = { role = "user", content = results }
+            COMPACT.inGoal()
         elseif reply.stop_reason == "max_tokens" then
             -- thinking, when all it put out was thinking or it stopped in a thinking block
             local u, last = reply.usage or {}, reply.content[#reply.content]
