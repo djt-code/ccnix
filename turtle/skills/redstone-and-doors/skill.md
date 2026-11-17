@@ -40,10 +40,10 @@ door is reachable only another way. Every test of an input is the player's: plan
      hinge comes from the blocks beside it, not from placeAt: inspect it after;
    - piston, observer, dispenser, dropper: `{ facing = "up" }` and the like (no origin needed
      for up and down);
-   - dust: the item (`minecraft:redstone`) and the block (`redstone_wire`) differ, which
-     `T.placeAt` and `T.build` don't handle: go above the cell (`T.moveTo(x, y + 1, z, { path =
-     true })`), `T.selectItem("minecraft:redstone")`, `T.placeDir("down")`, then
-     `T.inspectAt(x, y, z)`. In a blueprint leave dust cells as " " and lay them by hand.
+   - dust: `T.placeAt(x, y, z, "minecraft:redstone")` lays it (the block is `redstone_wire`,
+     taken as the redstone asked for; it needs a sturdy block under it). In a blueprint name
+     the block, `minecraft:redstone_wire`: `T.build` carries and places redstone for it. Then
+     `T.inspectAt(x, y, z)`: its connections come from its neighbours, not from placeAt.
    In a blueprint, name only the states the turtle sets: no `delay`, no dust connections, or
    `T.verify` lists them as differing.
 7. **Check**: `T.inspectAll` every cell you placed and compare with the design (facing, face,
