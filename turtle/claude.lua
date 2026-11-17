@@ -30,8 +30,19 @@
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
--- helpers are loaded again), /tidy to have it tidy its notes (below), or
--- press Enter on an empty line to quit.
+-- helpers are loaded again), /tidy to have it tidy its notes (below),
+-- /skills to see its skills (below), or press Enter on an empty line to
+-- quit.
+--
+-- Its skills: procedures for kinds of goal, a folder each holding
+-- skill.md (a name and a one-line description on top, then the steps).
+-- ccnix ships some in turtle/skills/; the model writes its own with
+-- skill(name, description, body) in its code, to /claude/skills/<name>/,
+-- and its own win over a shipped one of the same name.  The session's
+-- first message lists each one's name and description (and again after
+-- each summary), and the model reads one with fs when a goal fits it; a
+-- goal that shares words with a description comes with "Skills that may
+-- fit: ...".
 --
 -- Its notes: the memory tool's files (/claude/memories) are read whole
 -- and sent on every call after.  When they're over 32 KB at a session's
@@ -256,6 +267,23 @@ local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is k
 -- on every call (about NOTES.bytesAToken bytes a token: the field's 80 KB
 -- notes.md came to about 28k tokens)
 local NOTES = { large = 32 * 1024, bytesAToken = 3, tidyTo = 12 * 1024, archive = "claude/notes-archive" }
+-- Skills (ADR-0013 D10): a folder each, its skill.md a name and a one-line
+-- description between "---" lines, then the procedure.  Shipped ones are
+-- in turtle/skills/ where ccnix's files are (the ROM, its updates or the
+-- checkout), the model's own in /claude/skills/, which win over a shipped
+-- one of the same name.  (skill.md, not Claude Code's SKILL.md: the mod's
+-- ROM is a data pack, whose paths take no capitals.)  A name is lowercase
+-- letters, digits and "-", a description one line.  STOP: the words a
+-- goal's nudge doesn't match on.
+local SKILLS = { shipped = "turtle/skills", own = "claude/skills", file = "skill.md", maxName = 40, maxDescription = 200,
+    nameChar = function(c) return scan.isLower(c) or scan.isDigit(c) or c == "-" end,
+    STOP = {} }
+for _, w in ipairs(text.words("the and for with from into onto that this these those then than when what where which who whom "
+    .. "use using used your you our all any some can could please make get put set let now too also more most out off over "
+    .. "under about its are was were been has have had not but how why one two each every there here them they their will "
+    .. "would should just like need want keep turtle player claude")) do
+    SKILLS.STOP[w] = true
+end
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -281,7 +309,7 @@ local CLEAR = { keep = 6, trigger = 100000 }
 -- The harder clear once the API has said the prompt is too long, for the
 -- rest of the conversation: sooner, fewer results kept, whatever it frees,
 -- and the thinking of the last 3 turns kept
-local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
+CLEAR.HARD = { trigger = 50000, keep = 2, atLeast = 0, thinking = 3 }
 -- Compaction (ADR-0013 D9).  On request (the beta header COMPACT.beta) the
 -- API summarizes the conversation, its thinking included, into one signed
 -- block that then stands first in place of what it summarized: the model
@@ -472,6 +500,8 @@ Programs: run_program runs ccnix's own turtle programs, tested and careful about
 
 Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
+Skills: a skill is a procedure for a kind of goal, a folder holding skill.md (a name and a one-line description between "---" lines, then the steps). The first message lists them, the shipped ones and yours, with where each is. Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits. When a task taught you a procedure worth repeating, write a skill: skill(name, description, body) in your code writes /claude/skills/<name>/skill.md (the name lowercase letters, digits and -; the description one line saying when to use it, "use when ..."); yours win over a shipped one of the same name, and are listed from the next session on.
+
 Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, ask: the chat tool with ask = true reaches the player in the game, ask_user only the keyboard. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
 -- (the session's TTL: the prompt stays the same for the whole session, so
@@ -481,7 +511,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = {
@@ -1009,6 +1039,42 @@ API.keep = function(name, code)
     fs.makeDir(HELPERS_DIR)
     local saved, notSaved = fileio.write(file, code)
     if not saved then error("keep: " .. tostring(notSaved), 2) end
+    return true, "/" .. file
+end
+
+-- Why skill() refuses these, or nil
+function SKILLS.refuse(name, description, body)
+    if type(name) ~= "string" or name == "" or #name > SKILLS.maxName or not scan.isLower(name:sub(1, 1))
+        or not scan.all(name, SKILLS.nameChar) then
+        return "the name is lowercase letters, digits and -, starting with a letter, at most " .. SKILLS.maxName .. " characters (it names the folder)"
+    end
+    if type(description) ~= "string" or text.trim(description) == "" then
+        return "a skill needs a description: one line saying when to use it (\"use when ...\")"
+    end
+    if #description > SKILLS.maxDescription or text.contains(description, "\n") then
+        return "the description is one line of at most " .. SKILLS.maxDescription .. " characters, saying when to use it"
+    end
+    if type(body) ~= "string" or text.trim(body) == "" then
+        return "the body is the procedure: the steps, the checks, the pitfalls, the T calls to use"
+    end
+    return nil
+end
+
+-- skill(name, description, body) in the code: a skill of the model's own
+-- (ADR-0013 D10), written to /claude/skills/<name>/skill.md with its name
+-- and description on top; it wins over a shipped one of the same name, and
+-- is listed from the next session (or summary) on.  What's refused is an
+-- error, and nothing is written.  Returns true and the file.
+API.skill = function(name, description, body)
+    local why = SKILLS.refuse(name, description, body)
+    if why then error("skill: " .. why .. "; nothing was written", 2) end
+    local dir = SKILLS.own .. "/" .. name
+    fs.makeDir(dir)
+    local file = dir .. "/" .. SKILLS.file
+    local saved, notSaved = fileio.write(file, "---\nname: " .. name .. "\ndescription: " .. text.trim(description) .. "\n---\n"
+        .. body .. (text.endsWith(body, "\n") and "" or "\n"))
+    if not saved then error("skill: " .. tostring(notSaved), 2) end
+    log("skill written: /" .. file)
     return true, "/" .. file
 end
 
@@ -1811,18 +1877,111 @@ function NOTES.note()
         MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
 end
 
+-- A skill's description: its skill.md's "description:" line between the
+-- "---" lines at its top (quotes round it taken off), or nil
+function SKILLS.describe(file)
+    local lines = text.lines(fileio.read(file) or "")
+    if text.trim(lines[1] or "") ~= "---" then return nil end
+    for i = 2, #lines do
+        local key, value = text.cut(text.trim(lines[i]), ":")
+        if key == "---" then return nil end
+        if value and text.trim(key) == "description" then
+            value = text.trim(value)
+            local q = value:sub(1, 1)
+            if #value > 1 and (q == "\"" or q == "'") and text.endsWith(value, q) then value = value:sub(2, -2) end
+            return value ~= "" and value or nil
+        end
+    end
+    return nil
+end
+
+-- The skills there are, by name: { name, description, file, own }.  The
+-- shipped ones from each of ccnix's layers (ccnix.roots: the updates, then
+-- the ROM; else where findFile finds the folder), the first layer's of a
+-- name winning, then the model's own over them.
+function SKILLS.all()
+    local places, byName, out = {}, {}, {}
+    local roots = ccnix and ccnix.roots
+    if roots then
+        for i = #roots, 1, -1 do places[#places + 1] = { dir = roots[i] .. "/" .. SKILLS.shipped } end
+    else
+        places[1] = { dir = findFile(SKILLS.shipped) }
+    end
+    places[#places + 1] = { dir = SKILLS.own, own = true }
+    for _, place in ipairs(places) do
+        if place.dir and fs.isDir(place.dir) then
+            for _, name in ipairs(fs.list(place.dir)) do
+                local file = fs.combine(place.dir .. "/" .. name .. "/" .. SKILLS.file, "")
+                if fs.exists(file) and not fs.isDir(file) then
+                    byName[name] = { name = name, description = SKILLS.describe(file), file = "/" .. file, own = place.own }
+                end
+            end
+        end
+    end
+    for _, name in ipairs(tables.sortedKeys(byName)) do out[#out + 1] = byName[name] end
+    return out
+end
+
+-- The list for the model, a line a skill (its name, whose, what it's for,
+-- where), or nil when there are none
+function SKILLS.note()
+    local lines = {}
+    for _, s in ipairs(SKILLS.all()) do
+        lines[#lines + 1] = string.format("- %s%s: %s (%s)", s.name, s.own and " (yours)" or "",
+            s.description or "no description", s.file)
+    end
+    if #lines == 0 then return nil end
+    return "Your skills, procedures for kinds of goal: before a goal, read with fs any that fit it.\n" .. table.concat(lines, "\n")
+end
+
+-- The words of s to match on, as a set: lowercased, split at anything
+-- but letters and digits, STOP's and those under 3 letters left out, a
+-- plural's "s" taken off
+function SKILLS.words(s)
+    local chars, set = {}, {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        chars[i] = scan.isAlnum(c) and c:lower() or " "
+    end
+    for _, w in ipairs(text.words(table.concat(chars))) do
+        if not SKILLS.STOP[w] then
+            if #w > 3 and text.endsWith(w, "s") and not text.endsWith(w, "ss") then w = w:sub(1, -2) end
+            if #w >= 3 and not SKILLS.STOP[w] then set[w] = true end
+        end
+    end
+    return set
+end
+
+-- The nudge for a goal: the skills whose name or description shares a
+-- word with it, as a line, or nil
+function SKILLS.fit(goal)
+    local want, fits = SKILLS.words(goal), {}
+    for _, s in ipairs(SKILLS.all()) do
+        local has = SKILLS.words(s.name .. " " .. (s.description or ""))
+        for w in pairs(want) do
+            if has[w] then fits[#fits + 1] = s.name; break end
+        end
+    end
+    if #fits == 0 then return nil end
+    return "Skills that may fit: " .. table.concat(fits, ", ")
+end
+
 -- The goal the harness gives the model to tidy its notes (the session's
 -- first task when they're large, or /tidy): notes.md rewritten as the
 -- current state, about NOTES.tidyTo bytes, the rest moved to an archive
--- file of the day's, which the model reads with fs and isn't loaded
+-- file of the day's, which the model reads with fs and isn't loaded; the
+-- procedures that have settled made skills (ADR-0013 D10).  The goal is
+-- kept in NOTES.given (no skills nudge for it).
 function NOTES.tidyGoal()
     local size = NOTES.size(MEMORY_DIR)
-    return string.format("A task from the harness, before the player's next goal: tidy your notes. %s holds %d KB, about %dk tokens on every call once a file is viewed. "
+    NOTES.given = string.format("A task from the harness, before the player's next goal: tidy your notes. %s holds %d KB, about %dk tokens on every call once a file is viewed. "
         .. "Rewrite %s/notes.md as the current state, about %d KB: where things are, what's built, jobs under way, the player's preferences, the lessons that still matter. "
         .. "Move the rest, as it was, to /%s/%s.md with fs (append if it's there): it isn't loaded, and you can read it with fs when it's wanted. "
-        .. "Do the same with the other files in %s that are history. Don't touch the world. When done, say in a line what you kept and what you moved.",
+        .. "Do the same with the other files in %s that are history. Procedures that have settled (how you do a kind of job) become skills, with skill(name, description, body) in your code. "
+        .. "Don't touch the world. When done, say in a line what you kept, what you moved and what became a skill.",
         MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5),
         MEMORY_ROOT, math.floor(NOTES.tidyTo / 1024), NOTES.archive, os.date("!%Y-%m-%d", now()), MEMORY_ROOT)
+    return NOTES.given
 end
 
 -- Keep the version the model has had the news for.
@@ -1932,7 +2091,7 @@ end
 -- summary, and the same after it; else all thinking kept and no tool call
 -- cleared.
 local function contextEdits()
-    if hardClear then return { edits = CLEAR.edits(HARD_THINKING, HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST) } end
+    if hardClear then return { edits = CLEAR.edits(CLEAR.HARD.thinking, CLEAR.HARD.trigger, CLEAR.HARD.keep, CLEAR.HARD.atLeast) } end
     local edits = CLEAR.atMark(CLEAR.deep) or (CLEAR.at and CLEAR.since())
     return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
@@ -2111,7 +2270,7 @@ local function request(compact)
             hardClear = true
             say("orange", "API: the conversation is too long; trying again with more of it cleared.")
             log(string.format("API: %s; trying again with a harder clear (from %d tokens, the last %d tool uses kept)",
-                detail, HARD_TRIGGER, HARD_KEEP))
+                detail, CLEAR.HARD.trigger, CLEAR.HARD.keep))
         elseif not again or attempt > RETRIES then
             local failure = string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
             log(failure)
@@ -2277,7 +2436,10 @@ end
 -- The conversation from the summary on: the block first, as an assistant
 -- message of its own (with the cache's mark after it), in place of the
 -- messages it summarized, then the ones kept as they were.  What was
--- cleared or counted of the old conversation goes with it.
+-- cleared or counted of the old conversation goes with it.  The skills'
+-- list, which the summary would swallow, goes with the next message
+-- (ADR-0013 D10): onto the results not yet sent, inside a goal; with the
+-- next goal, at a goal's end.
 function COMPACT.swap(cut, block)
     block.cache_control = CACHE
     local kept = {}
@@ -2287,6 +2449,12 @@ function COMPACT.swap(cut, block)
     for _, m in ipairs(kept) do messages[#messages + 1] = m end
     hardClear = false
     replyLog.reset()
+    local skills, last = SKILLS.note(), messages[#messages]
+    if skills and last.role == "user" and type(last.content) == "table" then
+        last.content[#last.content + 1] = { type = "text", text = skills }
+    elseif skills then
+        startNotes[#startNotes + 1] = skills
+    end
 end
 
 -- Summarize messages 1 to cut (`why` for the log), keeping the rest word
@@ -2498,6 +2666,7 @@ local function newConversation()
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
     say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    startNotes[#startNotes + 1] = SKILLS.note()
     local memory = NOTES.note()
     if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
@@ -2508,7 +2677,10 @@ end
 -- the player's goals start a conversation of their own, without the old
 -- notes it viewed whole, told what the session's start told the first.
 function NOTES.firstTask()
-    local told = tables.copy(startNotes)
+    local told = {}
+    for _, note in ipairs(startNotes) do
+        if note ~= SKILLS.listed then told[#told + 1] = note end      -- (the skills listed afresh after it)
+    end
     local before = tables.copy(usage)
     converse(NOTES.tidyGoal())
     listen.putBack()
@@ -2519,7 +2691,17 @@ function NOTES.firstTask()
     hardClear = false
     replyLog.reset()
     startNotes = told
+    startNotes[#startNotes + 1] = SKILLS.note()
     startNotes[#startNotes + 1] = "Your notes were tidied in a conversation before this one, which was put aside: view /memories afresh."
+end
+
+-- /skills at the prompt: the skills there are, shown (not sent)
+function SKILLS.show()
+    local all = SKILLS.all()
+    if #all == 0 then say("yellow", "No skills: the shipped ones are in " .. SKILLS.shipped .. "/, Claude's own in /" .. SKILLS.own .. "/.") end
+    for _, s in ipairs(all) do
+        say("yellow", s.name .. (s.own and " (Claude's own): " or ": ") .. (s.description or "no description"))
+    end
 end
 
 -- The commands at the prompt: each gives the next line, or the goal the
@@ -2527,6 +2709,7 @@ end
 local COMMANDS = {
     ["/new"] = function() newConversation(); return ask("Goal: ") end,
     ["/tidy"] = function() return NOTES.tidyGoal() end,
+    ["/skills"] = function() SKILLS.show(); return ask("> ") end,
 }
 
 local function main()
@@ -2564,6 +2747,13 @@ local function main()
         say("yellow", nobody)
         startNotes[#startNotes + 1] = nobody
     end
+    -- (ADR-0013 D10: the skills listed in the first message, not the system
+    -- prompt, so one written in the session leaves the cache alone)
+    SKILLS.listed = SKILLS.note()
+    if SKILLS.listed then
+        startNotes[#startNotes + 1] = SKILLS.listed
+        log(string.format("skills: %d listed", text.count(SKILLS.listed, "\n")))
+    end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
     if memory then NOTES.firstTask() end
     if goal == "" then
@@ -2578,6 +2768,12 @@ local function main()
             fs.makeDir(WRITE_DIR)
             fileio.write(resume.file, resume.prefix .. " " .. resume.given .. "\n" .. (resume.goal or goal) .. "\n")
             resume.goal = nil
+            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own)
+            local fit = goal ~= NOTES.given and SKILLS.fit(goal)
+            if fit then
+                startNotes[#startNotes + 1] = fit
+                log(fit)
+            end
             local before = tables.copy(usage)
             converse(goal)
             listen.putBack()            -- (the chat box off till the next goal's first request)

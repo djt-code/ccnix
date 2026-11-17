@@ -20,7 +20,9 @@ Usage:
   --resume
       carry on with the goal in /claude/resume.txt, in a new conversation, with the options it was given (what autostart runs after a reboot; nothing there: it asks)
 
-When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), /tidy to have it tidy its notes (below), or press Enter on an empty line to quit.
+When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), /tidy to have it tidy its notes (below), /skills to see its skills (below), or press Enter on an empty line to quit.
+
+Its skills: procedures for kinds of goal, a folder each holding skill.md (a name and a one-line description on top, then the steps). ccnix ships some in turtle/skills/; the model writes its own with skill(name, description, body) in its code, to /claude/skills/<name>/, and its own win over a shipped one of the same name.  The session's first message lists each one's name and description (and again after each summary), and the model reads one with fs when a goal fits it; a goal that shares words with a description comes with "Skills that may fit: ...".
 
 Its notes: the memory tool's files (/claude/memories) are read whole and sent on every call after.  When they're over 32 KB at a session's start, its first task, before your goal, is to tidy them: notes.md rewritten as the current state (about 12 KB), the rest moved to /claude/notes-archive/<date>.md, which it reads with fs when it needs to and isn't sent.  Your goals then start a conversation of their own. Ctrl+T stops it (under T.run, so the saved position stays right).
 

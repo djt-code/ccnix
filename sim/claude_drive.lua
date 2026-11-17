@@ -2359,3 +2359,121 @@ check("a summary at a goal's end that brings none (a refusal): the next goal's f
     HTTP.requests[9].body.compaction and kept(10) == "1/6" and not blockOf(10)
         and (Mine.files["claude.log"] or ""):find("compaction: no summary (stop_reason refusal)\n", 1, true), kept(10))
 end
+
+-- 46. skills (ADR-0013 D10): the session's first message lists each skill
+--     (its name, whose, its description, where), the shipped ones
+--     (turtle/skills/, where ccnix's files are) and the model's own
+--     (/claude/skills/), its own winning over a shipped one of the same
+--     name; not the system prompt, which says how to use them; skill() in
+--     the code writes one (its name and description on top) and refuses a
+--     bad name, a missing or overlong description, an empty body; /skills
+--     shows them; a goal sharing words with a description comes with
+--     "Skills that may fit: ..." (none when nothing does); after a
+--     summary the list comes again, at a goal's end with the next goal,
+--     inside a goal onto the results; with ccnix's layers (ccnix.roots)
+--     the updates' skill wins over the ROM's, and each layer's own show
+do
+local function skillFile(path, name, description)
+    local dir = path .. "/" .. name
+    fs.makeDir(path)
+    fs.makeDir(dir)
+    Mine.files[dir .. "/skill.md"] = "---\nname: " .. name .. "\ndescription: " .. description .. "\n---\n# " .. name .. "\n1. Do it.\n"
+end
+local function shipped()
+    skillFile("turtle/skills", "storage", "Set up and keep the chests at home: categories, sorting, stowing.")
+    skillFile("turtle/skills", "light-an-area", "Light a place so mobs can't spawn.")
+    skillFile("turtle/skills", "build-for-player", "\"Stairs, walkways and rooms a two-tall player uses.\"")
+    Mine.files["turtle/skills/readme.md"] = "# Skills for claude\n"
+end
+fresh({ "/skills", "light the farm", "" })
+shipped()
+fs.makeDir("claude")
+skillFile("claude/skills", "light-an-area", "Use when lighting a farm or a base: my own way.")
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+local out = {}
+local function try(...) local ok, a, b = pcall(skill, ...); out[#out + 1] = tostring(ok) .. " " .. tostring(a) .. " " .. tostring(b) end
+try("dig-stairs", "Use when digging a staircase down.", "1. Dig.\n2. Place stairs.")
+try("Bad Name", "Use when x.", "body")
+try("ok-name", "  ", "body")
+try("ok-name", string.rep("x", 201), "body")
+try("ok-name", "Use when x.", "   ")
+try("ok-name", "line one\nline two", "body")
+return table.concat(out, "\n")]] }) }, "tool_use"),
+    reply({ text("Sorted.") }, "end_turn", inTokens(120000)),
+    M.compactionReply("S."),
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(100000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(255000)),
+    M.compactionReply("S2."),
+    reply({ text("Lit.") }, "end_turn", inTokens(30000)),
+}
+run("sort the chests")
+local first = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local LIST = "Your skills, procedures for kinds of goal: before a goal, read with fs any that fit it.\n"
+    .. "- build-for-player: Stairs, walkways and rooms a two-tall player uses. (/turtle/skills/build-for-player/skill.md)\n"
+    .. "- light-an-area (yours): Use when lighting a farm or a base: my own way. (/claude/skills/light-an-area/skill.md)\n"
+    .. "- storage: Set up and keep the chests at home: categories, sorting, stowing. (/turtle/skills/storage/skill.md)"
+check("the first message lists the skills, a line each, the model's own winning over the shipped one of its name (the readme isn't one)",
+    first:find("[" .. LIST .. "]", 1, true) ~= nil, first)
+check("...and the goal comes with the skills it may fit", first:find("\n[Skills that may fit: storage]", 1, true) ~= nil, first)
+local sys46 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the system prompt says how to use them, and lists none",
+    sys46:find("Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits.", 1, true)
+        and sys46:find("skill(name, description, body) in your code writes /claude/skills/<name>/skill.md", 1, true)
+        and not sys46:find("build-for-player", 1, true))
+local wrote = resultsIn(2).toolu_1
+local lines46 = {}
+for l in tostring(wrote and wrote.content or ""):gmatch("[^\n]+") do lines46[#lines46 + 1] = l end
+check("skill() writes /claude/skills/<name>/skill.md, its name and description on top",
+    lines46[1] == "-> true true /claude/skills/dig-stairs/skill.md"
+        and Mine.files["claude/skills/dig-stairs/skill.md"] == "---\nname: dig-stairs\ndescription: Use when digging a staircase down.\n---\n1. Dig.\n2. Place stairs.\n",
+    lines46[1])
+check("...and refuses a bad name, a blank description, an overlong one, an empty body, a description of two lines",
+    lines46[2] and lines46[2]:find("^false skill: the name is lowercase letters, digits and %-") and lines46[3]:find("^false skill: a skill needs a description")
+        and lines46[4]:find("^false skill: the description is one line of at most 200") and lines46[5]:find("^false skill: the body is the procedure")
+        and lines46[6]:find("^false skill: the description is one line") and not Mine.files["claude/skills/ok-name/skill.md"],
+    tostring(wrote and wrote.content))
+check("/skills shows them on the screen, the one written in the session too",
+    Mine.logHas("^dig%-stairs %(Claude's own%): Use when digging a staircase down%.$") and Mine.logHas("^storage: Set up and keep the chests")
+        and Mine.logHas("^light%-an%-area %(Claude's own%): Use when lighting a farm"))
+local m4 = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+local next46 = m4[2] and m4[2].content or ""
+check("after a summary at a goal's end, the next goal brings the list again (the new skill in it), and the skills it may fit",
+    blockOf(4) and next46:find("^light the farm\n\n%[") and next46:find("- dig-stairs (yours): Use when digging a staircase down. (/claude/skills/dig-stairs/skill.md)", 1, true)
+        and next46:find("[Skills that may fit: light-an-area]", 1, true), next46)
+local m7 = HTTP.requests[7] and HTTP.requests[7].body.messages or {}
+local last7 = m7[#m7] and m7[#m7].content or {}
+check("after a summary inside a goal (2 turns kept: the goal's own), the list goes onto the results",
+    blockOf(7) and type(last7) == "table" and last7[1].type == "tool_result" and last7[#last7].type == "text"
+        and last7[#last7].text:find("Your skills, procedures for kinds of goal", 1, true) == 1
+        and last7[#last7].text:find("- dig-stairs (yours)", 1, true), textutils.serialiseJSON(last7))
+local log46 = Mine.files["claude.log"] or ""
+check("the log: how many listed, the nudge, the skill written",
+    log46:find("skills: 3 listed\n", 1, true) and log46:find("Skills that may fit: storage\n", 1, true)
+        and log46:find("skill written: /claude/skills/dig-stairs/skill.md\n", 1, true))
+
+fresh({ "" })
+shipped()
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("say hello")
+local hello = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("a goal sharing no words with a description: no nudge", hello:find("[Your skills", 1, true) and not hello:find("may fit", 1, true), hello)
+
+-- ccnix's layers: the updates (/ccnix) over the ROM (/rom/ccnix)
+fresh({ "" })
+skillFile("rom/ccnix/turtle/skills", "storage", "The ROM's storage.")
+skillFile("rom/ccnix/turtle/skills", "big-jobs", "Scope and batches for long jobs.")
+skillFile("ccnix/turtle/skills", "storage", "The update's storage.")
+skillFile("ccnix/turtle/skills", "new-one", "Only in the update.")
+ccnix = { roots = { "/ccnix", "/rom/ccnix" }, find = function(rel)
+    for _, r in ipairs({ "ccnix", "rom/ccnix" }) do if fs.exists(r .. "/" .. rel) then return "/" .. r .. "/" .. rel end end
+end }
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("layers")
+ccnix = nil
+local layers = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("with ccnix's layers, each one's skills listed, the update's winning over the ROM's of a name",
+    layers:find("- big-jobs: Scope and batches for long jobs. (/rom/ccnix/turtle/skills/big-jobs/skill.md)\n", 1, true)
+        and layers:find("- new-one: Only in the update. (/ccnix/turtle/skills/new-one/skill.md)\n", 1, true)
+        and layers:find("- storage: The update's storage. (/ccnix/turtle/skills/storage/skill.md)]", 1, true), layers)
+end
