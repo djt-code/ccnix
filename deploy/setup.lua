@@ -118,6 +118,7 @@ end
 -- What each app needs.  A path ending in / is a whole folder.
 -- (turtle/tl/ holds turtlelib's modules, loaded when first used, and the index claude reads)
 -- (lib/mc: tl.journal's T.report, which mine.report, farm.report and mow.report use)
+-- (turtle/skills/ holds the procedures claude lists for the model, one folder a skill)
 local TURTLE = { "turtle/turtlelib.lua", "turtle/tl/", "lib/mc.lua", "turtle/home.lua", "turtle/autostart.lua" }
 local NET = { "bin/ip.lua", "bin/ping.lua", "bin/traceroute.lua", "bin/nc.lua", "bin/host.lua", "bin/netstat.lua", "bin/tcpdump.lua", "bin/curl.lua", "lib/net.lua",
               "lib/netdb.lua", "lib/httpc.lua", "lib/cu.lua", "help/network.txt" }
@@ -129,7 +130,7 @@ local APPS = {
     farm = { "turtle/farm.lua", TURTLE },
     mow = { "turtle/mow.lua", TURTLE },
     autocompost = { "turtle/autocompost.lua", TURTLE },
-    claude = { "turtle/claude.lua", TURTLE },
+    claude = { "turtle/claude.lua", "turtle/skills/", TURTLE },
     coreutils = { "bin/", "lib/" },
     ccsh = { "bin/ccsh.lua", "lib/readline.lua", "lib/sysenv.lua" },
     diskclone = { "pc/diskclone.lua" },
