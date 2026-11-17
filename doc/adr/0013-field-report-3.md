@@ -4,7 +4,8 @@
 D3 as option C (everything that reports speaks to everyone unless
 `turtle.player` is set); D2 with the longer-term path through ADR-0006;
 D6's light threshold checked against the game's code (below); D9 added
-the same day (compaction and tidy notes), amending D1's deep clear
+the same day (compaction and tidy notes), amending D1's deep clear; D10
+added the same day (skills)
 **Date:** 2026-11-17
 **Deciders:** Dan Theisen
 
@@ -213,6 +214,8 @@ untested in game. `T.placeDir(d, text)` and `T.frameId` were never used.
 9. **Compaction instead of the deep clear, and tidy notes** (D9, added
    after the user's question: clearing is a bulldozer, and the turtle
    did worse this round).
+10. **Skills:** shipped procedures and the turtle's own, listed by name
+    and read when a goal needs them (D10).
 9. **Phase 1 (defects and feedback, no decision):**
    - the map records what `T.look` and placeAt find;
    - torches and signs on top of walls and fences;
@@ -454,6 +457,60 @@ The model does it, not a cheaper summarizer, because it knows what
 matters. Nothing is lost. The task runs before the player's goal, or as
 `/tidy`.
 
+### D10. Skills (added 2026-11-17)
+
+The user asked to give the turtle skills, and to let it write its own.
+
+**Today** there are two half-measures:
+- `keep(name, code)` keeps Lua helpers that load every session.
+- The model writes plans and lessons to loose files (`bunker.md`, an
+  install plan, a job-errors report). It finds them again only if its
+  notes point there, and their lessons never reach the next session's
+  first thought.
+
+**A skill** is a folder holding `SKILL.md`, the same shape as Claude
+Code's skills:
+- the frontmatter has a `name` and a one-line `description`;
+- the body is a procedure: steps, rules, pitfalls, which `T` calls to
+  use;
+- it may name helpers kept with `keep()`.
+
+**Two sources:**
+- **Shipped in the ROM** (`turtle/skills/<name>/SKILL.md`), written from
+  the field reports. The first set:
+  - `build-for-player`: headroom, railings, top slabs, T.lint and
+    T.walkable;
+  - `light-an-area`: T.darkCells, flush lights, the Nether spawn groups;
+  - `redstone-and-doors`: restate the ask, T.attachedTo before a dig,
+    verify states, the player tests buttons;
+  - `big-jobs`: a box not a filter, estimate first, batches, budgets
+    (its own rules after the runaway harvest);
+  - `storage`: categories and T.sortChests;
+  - `field-report`: keeping `report_harness_vN.md`.
+- **Its own** (`/claude/skills/<name>/SKILL.md`):
+  - `skill(name, description, body)` in the code's world writes one, as
+    `keep()` writes a helper, and refuses a bad name or a missing
+    description;
+  - its own skill of the same name wins over a shipped one, so it can
+    refine ours;
+  - the prompt says to write one when a task taught a procedure worth
+    repeating. D9's notes tidy is when stable procedures move out of the
+    notes into skills.
+
+**Loading:**
+- Only names and descriptions are listed, about 20 tokens a skill.
+- The list goes in the session's first message, not the system prompt,
+  so a skill written mid-session doesn't break the cache.
+- The model reads a body with `fs` when a goal fits it.
+- Procedural paragraphs of today's system prompt can move into shipped
+  skills, which makes every call cheaper.
+
+**Not the API's own Skills.** Those run in Anthropic's code-execution
+sandbox, which can't reach the turtle.
+
+**Accepted.** About 100 lines in claude.lua, a claude_drive scenario, and
+the seed skills as text.
+
 ## Trade-off analysis
 
 - **The spend:** the largest item (D1) is a harness setting with no
@@ -551,7 +608,7 @@ matters. Nothing is lost. The task runs before the player's goal, or as
 
 ### Phase 3: the decisions
 
-1. [ ] D1 to D9 as decided.
+1. [ ] D1 to D10 as decided.
 
 ### Phase 4: release and hand back
 
