@@ -461,6 +461,21 @@ check("a tool call cut off at max_tokens is answered (not run), then told to car
     cr and cr[1].type == "tool_result" and cr[1].tool_use_id == "toolu_1" and cr[1].is_error == true
         and cr[2].type == "text" and cr[2].text:find("cut off") and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
 
+-- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1),
+--      the second as the first (what a second one does is D4's)
+fresh({ "" })
+HTTP.queue = {
+    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000, cache_read_input_tokens = 50,
+        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 31800 } } }),
+    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000,
+        cache_read_input_tokens = 50, cache_creation_input_tokens = 25 } }),
+}
+run("think hard")
+local klog = Mine.files["claude.log"] or ""
+check("a cut-off at max_tokens is logged with the tokens out and thinking, each time",
+    #HTTP.requests == 2 and klog:find("cut off at max_tokens (32000 out, 31800 thinking)", 1, true)
+        and klog:find("cut off at max_tokens (32000 out)\n", 1, true), klog)
+
 -- 14. a request that fails after tool results: the results stay, and the
 --     next goal goes on from them in the same turn
 fresh({ "try again", "" })

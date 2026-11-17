@@ -2030,6 +2030,11 @@ local function converse(goal)
         for _, b in ipairs(reply.content) do
             if b.type == "server_tool_use" then lastCall = nil end
         end
+        if reply.stop_reason == "max_tokens" then
+            local thought = (u.output_tokens_details or {}).thinking_tokens
+            log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
+                thought and string.format(", %d thinking", thought) or ""))
+        end
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):
             -- sent back as it is, it carries on where it was

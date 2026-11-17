@@ -672,7 +672,8 @@ function M.sse(msg)
         ev({ type = "content_block_stop", index = idx })
     end
     ev({ type = "message_delta", delta = { stop_reason = msg.stop_reason, stop_details = msg.stop_details },
-         usage = { output_tokens = msg.usage and msg.usage.output_tokens }, context_management = msg.context_management })
+         usage = { output_tokens = u.output_tokens, output_tokens_details = u.output_tokens_details },
+         context_management = msg.context_management })
     ev({ type = "message_stop" })
     return table.concat(out)
 end
