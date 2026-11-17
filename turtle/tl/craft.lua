@@ -99,6 +99,7 @@ end
 
 local PLANKS = each(PLANK_WOODS, "{}_planks")
 local LOG_PLANKS = each(LOG_WOODS, "{}_planks")
+local WOODEN_SLABS = each(PLANK_WOODS, "{}_slab")       -- the game's #wooden_slabs (not the bamboo mosaic's)
 -- Everything planks are made from: logs and wood, stripped or not; the nether's stems and hyphae
 local LOGS = joined(each(LOG_WOODS, "{}_log"), each(LOG_WOODS, "{}_wood"), each(LOG_WOODS, "stripped_{}_log"),
     each(LOG_WOODS, "stripped_{}_wood"), each(STEM_WOODS, "{}_stem"), each(STEM_WOODS, "{}_hyphae"),
@@ -345,12 +346,13 @@ local function define(spec)
     rows[#rows + 1] = rowOf(spec)
 end
 
--- The built-in recipes: vanilla's building and tool basics.
+-- The built-in recipes: vanilla's building and tool basics, and the redstone a build wants.
 -- Wood
 define { out = "{}_planks", count = 4, shape = { "L" }, of = "L", from = LOGS }
 define { out = "stick", count = 4, shape = { "P", "P" }, key = { P = "*_planks" }, mixed = true }
 define { out = "crafting_table", shape = { "PP", "PP" }, key = { P = "*_planks" }, mixed = true }
 define { out = "chest", shape = { "PPP", "P.P", "PPP" }, key = { P = "*_planks" }, mixed = true }
+define { out = "barrel", shape = { "PSP", "P.P", "PSP" }, key = { P = "*_planks", S = WOODEN_SLABS }, mixed = true }
 define { out = "ladder", count = 3, shape = { "S.S", "SSS", "S.S" }, key = { S = "stick" } }
 define { out = "{}_door", count = 3, shape = { "XX", "XX", "XX" }, of = "X", from = PLANKS }
 define { out = "{}_trapdoor", count = 2, shape = { "XXX", "XXX" }, of = "X", from = PLANKS }
@@ -387,6 +389,15 @@ define { out = "iron_bars", count = 16, shape = { "III", "III" }, key = { I = "i
 define { out = "glass_pane", count = 16, shape = { "GGG", "GGG" }, key = { G = "glass" } }
 define { out = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" } }
 define { out = "nether_brick_fence", count = 6, shape = { "NIN", "NIN" }, key = { N = "nether_bricks", I = "nether_brick" } }
+define { out = "iron_door", count = 3, shape = { "II", "II", "II" }, key = { I = "iron_ingot" } }
+define { out = "soul_campfire", shape = { ".S.", "SXS", "LLL" }, key = { S = "stick", X = { "soul_sand", "soul_soil" }, L = LOGS },
+         mixed = true }
+define { out = "respawn_anchor", shape = { "OOO", "GGG", "OOO" }, key = { O = "crying_obsidian", G = "glowstone" } }
+-- Redstone
+define { out = "redstone_torch", shape = { "R", "S" }, key = { R = "redstone", S = "stick" } }
+define { out = "repeater", shape = { "TRT", "SSS" }, key = { T = "redstone_torch", R = "redstone", S = "stone" } }
+define { out = "lever", shape = { "S", "C" }, key = { S = "stick", C = "cobblestone" } }
+define { out = "stone_button", shape = { "S" }, key = { S = "stone" } }
 -- Blocks of nine, each way (coal blocks into coal, bone meal into a bone block, nuggets into an ingot)
 for _, block in ipairs(tables.sortedKeys(BLOCK_OF_NINE)) do
     local item = BLOCK_OF_NINE[block]
@@ -1009,6 +1020,14 @@ local function atBench(side, products, what, run)
     return true
 end
 
+-- The chest on `side` read again into the chests' list (T.recount), if it is a chest the list knows: a craft there has
+-- taken from it and left in it.
+local function recount(side)
+    if not fs.exists(T.dataPath(".chests")) then return end
+    local again = T.need("recount")
+    if again then again(side) end
+end
+
 -- Is there a container on `side` that can be read and taken from?
 local function readable(side)
     local chest = peripheral.wrap(side)
@@ -1033,6 +1052,7 @@ local function craftAt(side, name, n, cands, opts)
         end) or why
     end)
     if not ran then return nil, benchWhy end
+    recount(side)
     if made > 0 then T.markCrafted(name) end
     if why then return false, why .. " (made " .. made .. " of " .. need * count .. ")", made end
     if left > 0 then
@@ -1096,7 +1116,8 @@ end
 --
 -- Returns true, made; or false, why, made (it made some, or could not carry them); or nil, why (nothing was touched):
 -- no recipe, short of an ingredient (the third value is the list from T.canCraft), no chest, no room in the chest, no
--- crafting table.  What it made is marked as crafted, so T.isJunk never says it is junk.
+-- crafting table.  What it made is marked as crafted, so T.isJunk never says it is junk.  A chest T.addChest knows is
+-- read again after (T.recount), so the chests' list says what the craft took and left.
 function T.craft(name, n, opts)
     opts = opts or {}
     if type(name) ~= "string" then return nil, "T.craft wants an item name, like minecraft:chest" end
@@ -1191,6 +1212,7 @@ local function batchAt(side, list, entries, opts)
         end)
     end)
     if not ran then return nil, benchWhy end
+    recount(side)
     if stashWhy then return false, stashWhy .. " (nothing crafted)", info end
     if #info.failed > 0 then
         local first = info.failed[1]
@@ -1214,7 +1236,8 @@ end
 -- the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or
 -- set of names) brings them aboard.  A recipe that can't be made is noted and the rest go on.  opts: chest, take,
 -- partial (craft what the ingredients allow), move.  Info is { crafted = { name = n }, failed = { { name, n, why } },
--- taken = { name = n }, left = { name = n } (made, but no room aboard) }.
+-- taken = { name = n }, left = { name = n } (made, but no room aboard) }.  A chest T.addChest knows is read again after
+-- (T.recount).
 function T.craftBatch(list, opts)
     opts = opts or {}
     local entries, why = entriesOf(list)

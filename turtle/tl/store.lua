@@ -1,7 +1,7 @@
 -- store.lua -- chests at home: where they are, what is in them, fetching from them and putting away
 --
 -- Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue,
--- T.where, T.fetch, T.stow, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
+-- T.where, T.fetch, T.stow, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
 --
 -- A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the
 -- turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about
@@ -20,8 +20,9 @@
 -- The chests and what they held when last looked at are in the data file .chests, so every program on the turtle
 -- shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was
 -- read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name"
--- are what it held.  Fetching and stowing read the chest again
--- as they go, so the list stays right; a chest someone else emptied is found out the next time it is visited.
+-- are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest
+-- (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found
+-- out the next time it is visited.
 
 local T = require("turtlelib")
 local text = require("text")
@@ -191,11 +192,13 @@ local function find(list, c)
 end
 
 -- Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top",
--- "down"/"bottom", or a heading 0 to 3 as T.dir counts them).  True, or nil and why.
+-- "down"/"bottom", or a heading 0 to 3 as T.dir counts them).  True (and a note if it was known), or nil and why.
 --
 -- Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
 -- puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again).  Adding a chest
--- again, from this stand or another, keeps the one record and what was written down of it.  Kept in the data file .chests.
+-- again, from this stand or another, or the other half of a known double chest, keeps the one record and what was
+-- written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1,
+-- reached from 3,0,0 side 0").  Kept in the data file .chests.
 function T.addChest(x, y, z, side, bulk)
     for _, n in ipairs({ x, y, z }) do
         if not whole(n) then return nil, "a chest's place is x, y, z: whole numbers" end
@@ -205,7 +208,13 @@ function T.addChest(x, y, z, side, bulk)
     local list = load()
     local want = { x = x, y = y, z = z, side = d }
     local c = find(list, want) or chestAt(list, cellOf(want))
-    if not c then
+    local known
+    if c then
+        local own, at = cellOf(c), cellOf(want)
+        local same = own.x == at.x and own.y == at.y and own.z == at.z
+        known = "already known: " .. (same and "the chest at " or "the other half of the double chest at ") .. T.posKey(own) ..
+            ", reached from " .. T.posKey(c) .. " side " .. tostring(c.side)
+    else
         c = { x = x, y = y, z = z, side = d, items = {} }
         list[#list + 1] = c
     end
@@ -213,7 +222,9 @@ function T.addChest(x, y, z, side, bulk)
         for _, q in ipairs(list) do q.bulk = false end
         c.bulk = true
     end
-    return save(list)
+    local ok, why = save(list)
+    if not ok then return nil, why end
+    return true, known
 end
 
 -- Forget the chest at this place (as T.addChest was given it, or another stand for the same chest).  True, or false and why.
@@ -316,6 +327,35 @@ local function note(list, c, side)
         save(list)
     end
     return counts
+end
+
+-- The sides T.recount takes: the turtle's side to read (as peripheral.wrap wants it) and the way the chest is from the
+-- turtle (nil: the way it faces)
+local RECOUNT_SIDES = {
+    front = { side = "front" }, top = { side = "top", dir = "up" }, up = { side = "top", dir = "up" },
+    bottom = { side = "bottom", dir = "down" }, down = { side = "bottom", dir = "down" },
+}
+
+-- Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests.
+-- The chest as T.chests gives it, or nil and why.
+--
+-- T.fetch and T.stow do this as they go, and T.craft and T.craftBatch at a chest the list knows; call it after your
+-- own drops into a known chest or pulls from it, so T.where, T.inventoryReport and T.craftPlan count what is there now.
+-- Nothing moves.
+function T.recount(side)
+    local s = RECOUNT_SIDES[side]
+    if not s then return nil, "T.recount wants the side the chest is on: \"front\", \"top\" or \"bottom\", not " .. tostring(side) end
+    local v = T.DELTA[s.dir or T.dir]
+    local cell = { x = T.pos.x + v[1], y = T.pos.y + v[2], z = T.pos.z + v[3] }
+    local list = load()
+    local c = chestAt(list, cell)
+    if not c then
+        return nil, "no known chest on the " .. s.side .. " of " .. T.posKey(T.pos) .. " (T.addChest tells the turtle about one)"
+    end
+    if not note(list, c, s.side) then return nil, "can't read the chest on the " .. s.side .. " of " .. T.posKey(T.pos) end
+    local out = copyOf(c)
+    out.seen = out.seen or 0
+    return out
 end
 
 --------------------------------------------------------------------------
@@ -639,6 +679,38 @@ local function candidates(list, name, tried)
     return out
 end
 
+-- What the game says when a drop finds no room in the container (any other failure is said as it is)
+local NO_ROOM = { ["No space for items"] = true }
+
+-- The chest c as a reason's words begin: "chest at x,y,z" or "bulk chest at x,y,z" (the chest's own cell).
+local function chestWords(c)
+    return (c.bulk and "bulk chest at " or "chest at ") .. T.posKey(cellOf(c))
+end
+
+-- Why each item left aboard stayed, from the notes T.stow made at the chests it was tried at: { name = reason }, and
+-- the sentence that says them, the items with the same reason together ("64 cobblestone, 5 dirt (bulk chest at
+-- 0,0,-3 full)").
+local function leftWords(left, notes, list)
+    local hasBulk = false
+    for _, c in ipairs(list) do hasBulk = hasBulk or c.bulk == true end
+    local reasons, groups, order = {}, {}, {}
+    for _, name in ipairs(tables.sortedKeys(left)) do
+        local why
+        if notes[name] then
+            why = table.concat(notes[name], ", ") .. (hasBulk and "" or "; no bulk chest")
+        else
+            why = "no chest holds it and no bulk chest"
+        end
+        reasons[name] = why
+        if not groups[why] then groups[why] = {}; order[#order + 1] = why end
+        local g = groups[why]
+        g[#g + 1] = left[name] .. " " .. (text.stripPrefix(name, NS) or name)
+    end
+    local parts = {}
+    for i, why in ipairs(order) do parts[i] = table.concat(groups[why], ", ") .. " (" .. why .. ")" end
+    return reasons, "some stayed aboard: " .. table.concat(parts, "; ")
+end
+
 -- Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest.
 -- Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
 --
@@ -646,8 +718,10 @@ end
 -- a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or
 -- a peripheral.  It goes to the nearest chest that wants something, drops what that chest should have, reads it again
 -- for the list and goes on, then comes back facing as before.  What no chest holds, with no bulk chest, or what does
--- not fit, stays aboard.  Info is { stowed, chests, left = { name = count } }.  opts: move (T.moveTo's), keep (names,
--- a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
+-- not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
+-- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
+-- and no bulk chest"), and the why returned says them all.  opts: move (T.moveTo's), keep (names, a list or set, globs
+-- too, that stay aboard whatever), stay (stay at the last chest).
 function T.stow(opts)
     opts = opts or {}
     local move = opts.move or MOVE
@@ -659,9 +733,15 @@ function T.stow(opts)
         local it = turtle.getItemDetail(slot)
         if it and stowable(it.name, opts, keep) then names[it.name] = true end
     end
-    local info = { stowed = 0, chests = 0, left = {} }
+    local info = { stowed = 0, chests = 0, left = {}, reasons = {} }
     if next(names) == nil then return true, info end
-    local tried, bad = {}, {}
+    local tried, notes = {}, {}
+    -- note, for the item name, what happened at a chest it was tried at
+    local function noteFor(name, said)
+        notes[name] = notes[name] or {}
+        local l = notes[name]
+        l[#l + 1] = said
+    end
     round(move, function()
         while true do
             local best, bestAt
@@ -687,33 +767,36 @@ function T.stow(opts)
                 info.chests = info.chests + 1
                 local sel = turtle.getSelectedSlot()
                 for _, name in ipairs(wanted) do
+                    local said
                     for slot = 1, 16 do
                         local it = turtle.getItemDetail(slot)
                         if it and it.name == name then
                             turtle.select(slot)
-                            T.dropSide(side, it.count)
-                            info.stowed = info.stowed + it.count - turtle.getItemCount(slot)
+                            local dropped, err = T.dropSide(side, it.count)
+                            local left = turtle.getItemCount(slot)
+                            info.stowed = info.stowed + it.count - left
+                            if left > 0 and not said then
+                                said = chestWords(best) .. ((dropped or NO_ROOM[err]) and " full" or ": " .. tostring(err))
+                            end
                         end
                     end
+                    if said then noteFor(name, said) end
                 end
                 turtle.select(sel)
                 note(list, best, side)
             else
-                bad[keyOf(best)] = reason
+                for _, name in ipairs(wanted) do noteFor(name, reason) end
             end
             for _, name in ipairs(wanted) do tried[keyOf(best) .. name] = true end
         end
     end, opts.stay)
-    local why
     for name in pairs(names) do
         local n = T.countItem(name)
         if n > 0 then info.left[name] = n end
     end
     if next(info.left) then
-        local k = tables.sortedKeys(info.left)[1]
-        why = "some stayed aboard (" .. info.left[k] .. " " .. k .. ", ...): no chest holds it and no bulk chest, or no room"
-        local bads = tables.sortedKeys(bad)
-        if #bads > 0 then why = why .. "; " .. bad[bads[1]] end
+        local reasons, why = leftWords(info.left, notes, list)
+        info.reasons = reasons
         return false, why, info
     end
     return true, info

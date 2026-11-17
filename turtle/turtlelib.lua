@@ -3012,7 +3012,7 @@ T.registry = {
     -- tl.store: the chests at home, what is in them, putting away and fetching
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
     fetch = "tl.store", stow = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
-    inventoryReport = "tl.store", prepare = "tl.store",
+    inventoryReport = "tl.store", prepare = "tl.store", recount = "tl.store",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
     -- tl.journal: the job journal, the undo journal and reports to the player

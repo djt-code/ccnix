@@ -16,7 +16,11 @@
 --   * T.craftPlan: torches down to logs, in order, with the base materials and what is short (coal or charcoal), what
 --     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
 --     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
---     it and opts.take brings the targets aboard, a short plan refused;
+--     it and opts.take brings the targets aboard, a short plan refused; T.craft and T.craftBatch at a chest the catalogue
+--     knows read it again (T.recount), so the list says what they took and left;
+--   * the redstone and the rest the turtle's model wrote for itself (ADR-0013): a barrel from mixed planks and wooden slabs,
+--     a soul campfire from nether stems, a repeater's plan through redstone torches, a lever, a stone button and iron
+--     doors in one batch, a respawn anchor's recipe (the mock's rows written apart from the game's recipe files);
 --   * blocks of nine built in both ways, every one the game has (the mock's own list): coal from coal blocks, a bone block
 --     from bone meal;
 --   * the fuel and smelting tables against the mock's (nether woods do not burn), and T.smelt: a furnace set up in front
@@ -394,6 +398,8 @@ do
         "minecraft:cobbled_deepslate_wall", "minecraft:mud_brick_slab", "minecraft:bamboo_door",
         "minecraft:coal_block", "minecraft:coal", "minecraft:iron_block", "minecraft:iron_ingot", "minecraft:iron_nugget",
         "minecraft:bone_block", "minecraft:bone_meal", "minecraft:gold_nugget", "minecraft:lapis_block",
+        "minecraft:barrel", "minecraft:redstone_torch", "minecraft:repeater", "minecraft:lever", "minecraft:stone_button",
+        "minecraft:iron_door", "minecraft:respawn_anchor", "minecraft:soul_campfire",
     }
     local compared, wrong, notKnown = 0, {}, {}
     for _, out in ipairs(outs) do
@@ -417,7 +423,7 @@ do
             end
         end
     end
-    check("the recipe table agrees with the game's rules (the mock's own table) on name and count for every one it knows", #wrong == 0 and compared >= 23,
+    check("the recipe table agrees with the game's rules (the mock's own table) on name and count for every one it knows", #wrong == 0 and compared >= 45,
         table.concat(wrong, "; ") .. " (compared " .. compared .. ", unknown to the mock: " .. table.concat(notKnown, " ") .. ")")
     -- a block with no stairs, a family built from a name nobody listed
     check("an item with no stairs has no stair recipe (dirt, iron blocks)", T.recipe("minecraft:dirt_stairs") == nil and T.recipe("minecraft:iron_block_stairs") == nil)
@@ -598,6 +604,61 @@ do
     local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
     check("with no chest named, the catalogue's chests and the inventory are what there is", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1",
         plan and countsLine(plan.base) .. " / " .. countsLine(plan.short))
+end
+
+do
+    -- crafting at a chest the catalogue knows reads it again (T.recount), so the list stays right
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
+    W.give(1, TABLE, 1)
+    T.addChest(0, 0, 0, 0)
+    T.catalogue()
+    local ok = T.craft("minecraft:oak_planks", 4)
+    local items = T.chests()[1].items
+    check("T.craft at a known chest: the chests' list says the 2 logs left, not the 3 it had", ok == true and items["minecraft:oak_log"] == 2
+        and items["minecraft:oak_planks"] == nil, tostring(items["minecraft:oak_log"]))
+    ok = T.craftBatch({ { "minecraft:oak_planks", 4 }, { "minecraft:stick", 4 } })
+    items = T.chests()[1].items
+    check("...and T.craftBatch: the products it left in the chest are in the list", ok == true and items["minecraft:oak_log"] == 1
+        and items["minecraft:oak_planks"] == 2 and items["minecraft:stick"] == 4, tostring(items["minecraft:stick"]))
+end
+
+--------------------------------------------------------------------------
+-- Redstone and the rest the model wrote for itself (ADR-0013)
+--------------------------------------------------------------------------
+do
+    -- a barrel from any planks and any wooden slabs, mixed, as the game takes them
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:spruce_planks", 4 }, [2] = { "minecraft:oak_planks", 2 }, [3] = { "minecraft:birch_slab", 1 },
+        [4] = { "minecraft:crimson_slab", 1 } })
+    W.give(1, TABLE, 1)
+    local ok, made = T.craft("minecraft:barrel", 1)
+    check("a barrel from spruce and oak planks and a birch and a crimson slab", ok == true and made == 1 and carrying("minecraft:barrel") == 1
+        and W.crafted and W.crafted["minecraft:barrel"] == 1, tostring(ok) .. " " .. tostring(made) .. " / " .. chestLine())
+    -- a soul campfire from the nether's stems on soul soil
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:crimson_stem", 2 }, [2] = { "minecraft:warped_hyphae", 1 }, [3] = { "minecraft:stick", 3 },
+        [4] = { "minecraft:soul_soil", 1 } })
+    W.give(1, TABLE, 1)
+    ok, made = T.craft("minecraft:soul_campfire", 1)
+    check("a soul campfire from crimson stems and warped hyphae over soul soil", ok == true and carrying("minecraft:soul_campfire") == 1,
+        tostring(ok) .. " " .. tostring(made) .. " / " .. chestLine())
+    -- the redstone tree: a repeater needs two redstone torches, made first
+    local plan = T.craftPlan({ ["minecraft:repeater"] = 1 }, { stock = { redstone = 3, stick = 2, stone = 3 } })
+    check("a repeater's plan: two redstone torches first, then the repeater", plan and plan.ok and stepsLine(plan) == "redstone_torch 2 (2), repeater 1 (1)"
+        and countsLine(plan.base) == "redstone 3, stick 2, stone 3", plan and stepsLine(plan))
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:redstone", 3 }, [2] = { "minecraft:stick", 3 }, [3] = { "minecraft:stone", 4 },
+        [4] = { "minecraft:cobblestone", 1 }, [5] = { "minecraft:iron_ingot", 6 } })
+    W.give(1, TABLE, 1)
+    local done, info = T.craftBatch({ { "minecraft:redstone_torch", 2 }, { "minecraft:repeater", 1 }, { "minecraft:lever", 1 },
+        { "minecraft:stone_button", 1 }, { "minecraft:iron_door", 3 } })
+    check("redstone torches, a repeater, a lever, a stone button and iron doors in one batch", done == true and info.crafted["minecraft:repeater"] == 1
+        and info.crafted["minecraft:lever"] == 1 and info.crafted["minecraft:stone_button"] == 1 and info.crafted["minecraft:iron_door"] == 3
+        and chestHas("minecraft:redstone_torch") == 0 and chestHas("minecraft:stone") == 0, tostring(done) .. " / " .. chestLine())
+    local anchor = T.recipe("minecraft:respawn_anchor")
+    check("a respawn anchor: crying obsidian over and under three glowstone", anchor and anchor.shape[1] == "OOO" and anchor.shape[2] == "GGG"
+        and anchor.key.O == "crying_obsidian" and anchor.key.G == "glowstone" and anchor.count == 1)
 end
 
 --------------------------------------------------------------------------
