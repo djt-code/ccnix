@@ -1397,7 +1397,7 @@ end
 -- Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 --
 -- What it sees is remembered a while (the last 256 cells), so T.liquidNear knows of lava the turtle looked at even
--- with no map.
+-- with no map; and with the map module loaded and a map on disk, it goes in the map too (a look never starts one).
 function T.look(d)
     local ok, data
     if d == "up" then ok, data = turtle.inspectUp()
@@ -1409,7 +1409,12 @@ function T.look(d)
     local v = T.DELTA[d]
     if v then
         local seenOk = ok and type(data) == "table" and data.name
-        noteSeen(T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3], seenOk and data.name or "minecraft:air", seenOk and data.state or nil)
+        local x, y, z = T.pos.x + v[1], T.pos.y + v[2], T.pos.z + v[3]
+        local name = seenOk and data.name or "minecraft:air"
+        noteSeen(x, y, z, name, seenOk and data.state or nil)
+        local map = rawget(T, "map")
+        -- (a block's state replaces the one the map had: {} when it has none)
+        if map and fs.exists(T.dataPath(T.MAP_DIR)) then pcall(map.set, x, y, z, name, seenOk and (data.state or {}) or nil) end
     end
     return ok, data
 end

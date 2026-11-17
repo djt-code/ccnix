@@ -258,7 +258,7 @@ T.dirTo(p)
 T.look(d)
     Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 
-    What it sees is remembered a while (the last 256 cells), so T.liquidNear knows of lava the turtle looked at even with no map.
+    What it sees is remembered a while (the last 256 cells), so T.liquidNear knows of lava the turtle looked at even with no map; and with the map module loaded and a map on disk, it goes in the map too (a look never starts one).
 
 T.digDir(d)
     Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected area holds. Returns turtle.dig's results (false and why if it can't).

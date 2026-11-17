@@ -13,7 +13,7 @@
 --     the correction is kept in .placements, used from then on and after a restart; a wrong guess on a map
 --     that does not know the surroundings is not learnt from; the table wrong about a facing rule;
 --   * what it refuses: a cell in use, no item, a state the family has no key for, a facing without the
---     world origin; a cell that already holds the block as wanted is left alone;
+--     world origin; a cell that already holds the block as wanted is left alone; what it finds there goes in the map;
 --   * support: a top slab with nothing above (placing from above refused) gets a temporary block above, is placed from
 --     below, and the block is taken away (opts.temp names it; none on board is refused, saying so);
 --   * opts.digBelow: a top slab on a floor refused without it (the floor untouched, the option named); with it the
@@ -505,6 +505,7 @@ do
     name, why = T.placeAt(0, 0, 3, ST, { half = "bottom" })
     check("...also when the map has never seen it: found when the turtle gets there, and still left alone",
         name == nil and why:find("in the way", 1, true) and has(0, 0, 3, "stone"), tostring(why))
+    check("...and the map has the block it found", T.map.get(0, 0, 3) == STONE, tostring(T.map.get(0, 0, 3)))
     fresh(nil, {})
     knowAll()
     name, why = T.placeAt(0, 0, 3, ST, { half = "bottom" })
@@ -538,6 +539,15 @@ do
         and W.placed == 0 and W.carrying(ST) == 4, tostring(how and how.approach))
     name, state = T.placeAt(0, 0, 3, ST, { facing = "south", half = "bottom" })
     check("...but one facing the other way is not touched: it is in the way", name == nil and has(0, 0, 3, "oak_stairs", { facing = "north" }))
+    -- the map out of date: it says air where the stair is
+    fresh(nil, { { 0, 0, 3, ST, { facing = "north", half = "bottom", shape = "straight", waterlogged = false } } })
+    knowAll()
+    T.map.set(0, 0, 3, "minecraft:air")
+    W.give(1, ST, 4)
+    name, state, how = T.placeAt(0, 0, 3, ST, { facing = "north", half = "bottom" })
+    local mapName, mapState = T.map.get(0, 0, 3)
+    check("a stair already there that the map had as air: found, and the map has it now, with its state", name == ST
+        and how.approach == "already there" and mapName == ST and mapState and mapState.facing == "north", tostring(mapName))
 end
 do
     -- the position follows the placement; the map is told what is there

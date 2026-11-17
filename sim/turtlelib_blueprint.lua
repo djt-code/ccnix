@@ -9,7 +9,7 @@
 --     the plan says; no cell placed twice;
 --   * the materials: short is refused before the turtle moves (with what could be crafted if a craft module is
 --     there, loaded only then), partial builds what it can, a block in the way fails the cell and the build goes on, the
---     failed cell is tried again on the next run;
+--     failed cell is tried again on the next run; a block found in the way or already there goes in the map;
 --   * a build saved before a re-zero is not carried on: refused and marked stale, a plan given starts afresh (ADR-0012);
 --   * a different plan while one is unfinished is refused (restart starts it), the same plan after a finished build
 --     starts afresh; a facing without the world origin is refused; opts.protect keeps the finished build;
@@ -385,9 +385,17 @@ do
     check("a block in the way fails that cell, is not dug out, and the build goes on", ok == false and #info.failed == 1 and info.failed[1].why:find("minecraft:dirt is in the way", 1, true)
         and has(3, 0, 3, "dirt") and has(5, 0, 2, "stone") and info.placed == 7, tostring(why) .. info.placed .. tostring(has(3, 0, 3, "dirt")) .. tostring(has(5, 0, 2, "stone")))
     check("...the message names the cell and why", why:find("1 cells failed", 1, true) and why:find("3,0,3", 1, true), tostring(why))
+    check("...and the map has the block that was in the way", T.map.get(3, 0, 3) == "minecraft:dirt", tostring(T.map.get(3, 0, 3)))
     W.set(3, 0, 3, nil)
     ok, why = build()
     check("...cleared, the next run puts it in", ok == true and has(3, 0, 3, "stone"), tostring(why))
+    -- a plain block already there that the map has as air: taken as done, and the map put right
+    fresh({ { 3, 0, 3, STONE } })
+    T.map.set(3, 0, 3, "minecraft:air")
+    W.give(1, STONE, 20)
+    ok, why, info = build(plan)
+    check("a plain block already there, the map saying air: not placed again, and the map has it now", ok == true and info.placed == 7
+        and T.map.get(3, 0, 3) == STONE, tostring(why) .. " " .. tostring(T.map.get(3, 0, 3)))
 end
 do
     fresh()

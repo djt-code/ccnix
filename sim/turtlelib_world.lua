@@ -5,8 +5,8 @@
 --     refused unless forced; the scanner is asked again while it cools down; the fuel it cost is told;
 --   * a cube is written as a text header and 4096 bytes, and read back byte for byte, from a file written by
 --     hand too; the map is written in batches, not for every cell;
---   * digs, placements and moves note themselves in the map, without a world function ever having been called
---     once a map is on disk;
+--   * digs, placements, moves and T.look note themselves in the map, without a world function ever having been
+--     called once a map is on disk (a look never starts one);
 --   * the map survives T.setHomeHere (the transform is updated) and a heading correction, and says it is
 --     unaligned when the position was lost, until T.alignMap;
 --   * the world: T.setOrigin from the player, from GPS, and the facing from a scan, in each of the four ways the
@@ -204,6 +204,10 @@ T.startAtHome(true)
 check("...and starting at home does not make one", not S.dirs[".map"] and package.loaded["tl.world"] == nil)
 turtle.forward()
 check("...nor does a move", not S.dirs[".map"] and package.loaded["tl.world"] == nil)
+T.need("map")
+put(0, 0, 2, DIRT)
+T.look(0)
+check("...nor a look with the module loaded: a look notes only into a map that is kept", not S.dirs[".map"])
 
 --------------------------------------------------------------------------
 -- A scan from each heading
@@ -394,6 +398,14 @@ tp(T, 0, 0, 0, 0)
 put(0, 0, 1, DIRT)
 turtle.dig()
 check("...and a dig is noted though no function of it was called", T.map.get(0, 0, 1) == "minecraft:air")
+-- what the turtle looks at goes in the map too (it may have changed since the map saw it)
+put(0, 0, 1, "minecraft:oak_stairs", { facing = "east", half = "top" })
+T.look(0)
+nm, st = T.map.get(0, 0, 1)
+check("T.look notes what it saw in the map, with its state", nm == "minecraft:oak_stairs" and st and st.facing == "east" and st.half == "top")
+put(0, 0, 1, nil)
+T.look(0)
+check("...and air where it saw nothing", T.map.get(0, 0, 1) == "minecraft:air")
 
 --------------------------------------------------------------------------
 -- Frames: --here, a corrected heading, a lost position
