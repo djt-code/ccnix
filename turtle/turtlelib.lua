@@ -27,7 +27,8 @@
 --     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
 --     for block states; a re-zeroed frame (--here) keeps the map right
 --   * routes (tl.path, loaded when first used): T.path, A* over the map round
---     lava, fire and doors and through protected areas only where the map
+--     lava, fire, doors and the player's furnishings (ladders, signs, torches,
+--     ...) and through protected areas only where the map
 --     knows they are empty (nothing in one is dug), and T.travel, which walks one
 --     along a clear layer (or the search), planning again at a block it did
 --     not expect; T.moveTo's opts.path asks for it
@@ -1430,8 +1431,13 @@ end
 local AXIS = { x = { "x", 1, 3 }, y = { "y", "up", "down" }, z = { "z", 0, 2 } }
 
 -- What moveTo goes round by default: lava, fire and doors (a turtle
--- can't open one)
-local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door" }
+-- can't open one), and the player's furnishings, which a run that may
+-- dig would otherwise dig on its way: ladders, trapdoors, fence gates,
+-- signs (standing, on a wall, hanging), lanterns, torches (on a wall,
+-- soul and redstone too) and rails.  (Not sea lanterns or jack
+-- o'lanterns: those are blocks to build with.)
+local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door",
+    "*ladder", "*_trapdoor", "*_fence_gate", "*_sign", "lantern", "soul_lantern", "torch", "*_torch", "*rail*" }
 T.DEFAULT_AVOID = DEFAULT_AVOID           -- (tl.path routes round the same by default)
 
 -- Blocks a turtle moves into without digging them
@@ -1601,7 +1607,9 @@ end
 --           the only cells it may dig (whatever block is there, unless
 --           opts.dig says which); any other block stops it
 --   avoid   a glob, a list or a set: blocks it stops at rather than enter
---           (default: lava, fire and doors); {} avoids nothing
+--           (default: lava, fire, doors and the player's furnishings:
+--           ladders, trapdoors, fence gates, signs, lanterns, torches,
+--           rails); {} avoids nothing
 --   inside  the name of a protected area the move may dig in, or a list of
 --           names (see T.inside)
 --   liquid  true: dig a cell even when lava or a water source is beside it

@@ -2,7 +2,8 @@
 --
 -- T.moveTo (ADR-0008): a move to a cell in three dimensions, in the order
 -- of axes asked for, that says why it stopped: blocked by a block, a
--- protected area, lava (or fire, or a door), a chest, an unbreakable block,
+-- protected area, lava (or fire, or a door, or the player's furnishings), a
+-- chest, an unbreakable block,
 -- something in the way, no fuel; digging only what it may; and asking a
 -- route finder for a way when a straight run is blocked.
 local PROJ = ...
@@ -198,10 +199,29 @@ clearWorld(); home()
 set(1, 0, 0, block("minecraft:oak_door"))
 ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
 check("a door is avoided, and not dug", not ok and why == "avoiding minecraft:oak_door at 1,0,0" and get(1, 0, 0), tostring(why))
+-- the player's furnishings: a run that may dig goes no further than one, rather than dig it (ADR-0012)
+local FURNISHINGS = { "minecraft:ladder", "minecraft:oak_trapdoor", "minecraft:iron_trapdoor", "minecraft:oak_fence_gate",
+    "minecraft:oak_sign", "minecraft:oak_wall_sign", "minecraft:oak_hanging_sign", "minecraft:oak_wall_hanging_sign",
+    "minecraft:lantern", "minecraft:soul_lantern", "minecraft:torch", "minecraft:wall_torch", "minecraft:soul_torch",
+    "minecraft:soul_wall_torch", "minecraft:redstone_torch", "minecraft:redstone_wall_torch", "minecraft:rail",
+    "minecraft:powered_rail", "minecraft:detector_rail", "minecraft:activator_rail" }
+local dug = {}
+for _, f in ipairs(FURNISHINGS) do
+    clearWorld(); home()
+    set(1, 0, 0, block(f))
+    ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+    if ok or why ~= "avoiding " .. f .. " at 1,0,0" or not get(1, 0, 0) then dug[#dug + 1] = f .. ": " .. tostring(why) end
+end
+check("ladders, trapdoors, fence gates, signs (on a wall, hanging), lanterns, torches (wall, soul, redstone) and rails: avoided with dig = true, not dug",
+    #dug == 0, table.concat(dug, "; "))
 clearWorld(); home()
-set(1, 0, 0, block("minecraft:oak_trapdoor"))
-ok, why = T.moveTo(3, 0, 0, { order = "x" })
-check("a trapdoor is not a door (just a block)", not ok and why == "blocked by minecraft:oak_trapdoor at 1,0,0", tostring(why))
+set(1, 0, 0, block("minecraft:sea_lantern")); set(2, 0, 0, block("minecraft:jack_o_lantern"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true })
+check("...but a sea lantern and a jack o'lantern are blocks like any other: dug", ok and not get(1, 0, 0) and not get(2, 0, 0), tostring(why))
+clearWorld(); home()
+set(1, 0, 0, block("minecraft:ladder"))
+ok, why = T.moveTo(3, 0, 0, { order = "x", dig = true, avoid = {} })
+check("...and avoid = {} digs a ladder too", ok and not get(1, 0, 0), tostring(why))
 
 --------------------------------------------------------------------------
 -- Something in the way, fuel

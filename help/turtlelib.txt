@@ -9,7 +9,7 @@ Provides:
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
-  * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire and doors and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
+  * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire, doors and the player's furnishings (ladders, signs, torches, ...) and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
@@ -290,7 +290,9 @@ T.moveTo(x, y, z, opts)
               the only cells it may dig (whatever block is there, unless
               opts.dig says which); any other block stops it
       avoid   a glob, a list or a set: blocks it stops at rather than enter
-              (default: lava, fire and doors); {} avoids nothing
+              (default: lava, fire, doors and the player's furnishings:
+              ladders, trapdoors, fence gates, signs, lanterns, torches,
+              rails); {} avoids nothing
       inside  the name of a protected area the move may dig in, or a list of
               names (see T.inside)
       liquid  true: dig a cell even when lava or a water source is beside it
@@ -796,8 +798,8 @@ T.path finds a route: A* in three dimensions over the map (tl.world), with a bin
   a cell never seen
       a move and a dig when digging everything is allowed; otherwise a move and a penalty, so a route through the unseen is possible but the known is preferred (it is checked as it is walked)
   a wall
-      never: a cell of a protected area the map doesn't know to be empty (a block, or never seen: nothing in an area is dug, except in the one opts.inside names; its known air and water are crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
-The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
+      never: a cell of a protected area the map doesn't know to be empty (a block, or never seen: nothing in an area is dug, except in the one opts.inside names; its known air and water are crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire, doors and the player's furnishings: ladders, trapdoors, fence gates, signs, lanterns, torches, rails; unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
+The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava, ladders, ...) it met, which no longer search gets through.
 
 T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits bastion ceilings): up, across, down.  If the map doesn't know enough it scans the route's box first; if there is no layer it uses the search.  Then it walks the route.  A block it didn't expect stops a step: it notes the block in the map and plans again from where it is, a few times.
 
@@ -809,7 +811,8 @@ T.path(x, y, z, opts)
     It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
       dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
       digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
-      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire, doors and furnishings, as
+                 T.moveTo; {} avoids nothing)
       inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
       liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
       avoidCells a list of { x, y, z } cells a route may not use

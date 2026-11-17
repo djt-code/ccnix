@@ -3,7 +3,7 @@
 -- tl.path (ADR-0008): routes over the map, and walking them.
 --   * T.path: a route through known air; through a protected box's known air, round its solid cells (and through those
 --     with opts.inside), round lava, fire,
---     doors and chests; through a wall only where digging is allowed (and only the blocks opts.dig names); through
+--     doors, the player's furnishings (ladders, signs, torches, ...) and chests; through a wall only where digging is allowed (and only the blocks opts.dig names); through
 --     cells never seen, at a cost, with the unseen counted in the info; the cells opts.avoidCells lists; a goal that
 --     is a wall says why; a sealed goal says no route; the node limit says so; a map in another frame; an unaligned map;
 --   * the search reads cubes as strings (no T.map.get), and gives the computer a turn on a clock;
@@ -283,6 +283,17 @@ box(-6, -3, 2, 6, 3, 2, DOOR); put(6, 0, 2, nil); put(6, 1, 2, nil); put(6, 2, 2
 learn(T, -6, -3, 2, 6, 3, 2)
 route = T.path(0, 0, 4, { margin = 8 })
 check("doors are walls: the way round is by the one gap", route and not has(route, 0, 0, 2) and has(route, 6, 0, 2))
+-- the player's furnishings (ADR-0012): a route that may dig goes round a ladder in a stone wall, through the stone
+T = fresh()
+learn(T, -3, 0, 0, 3, 0, 6)
+box(-3, 0, 3, 3, 0, 3, STONE); put(0, 0, 3, "minecraft:ladder"); put(1, 0, 3, "minecraft:oak_wall_sign")
+learn(T, -3, 0, 3, 3, 0, 3)
+route = T.path(0, 0, 5, { dig = true, margin = 1 })
+check("furnishings are walls to a route that may dig: through the stone beside the ladder and the sign", route and not has(route, 0, 0, 3)
+    and not has(route, 1, 0, 3) and has(route, -1, 0, 3), route and #route or "nil")
+box(-3, 0, 3, 3, 0, 3, "minecraft:wall_torch"); learn(T, -3, 0, 3, 3, 0, 3)
+route, why = T.path(0, 0, 5, { dig = true, margin = 0 })
+check("...a row of torches: no route, and the reason names them", route == nil and tostring(why):find("minecraft:wall_torch", 1, true), tostring(why))
 T = fresh()
 learn(T, -2, -2, -2, 2, 2, 8)
 put(0, 0, 3, "minecraft:fire"); T.map.set(0, 0, 3, "minecraft:fire")

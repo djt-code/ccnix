@@ -13,13 +13,14 @@
 --                        (it is checked as it is walked)
 --   a wall               never: a cell of a protected area the map doesn't know to be empty (a block, or never seen:
 --                        nothing in an area is dug, except in the one opts.inside names; its known air and water are
---                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says
+--                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire, doors and the player's
+--                        furnishings: ladders, trapdoors, fence gates, signs, lanterns, torches, rails; unless it says
 --                        otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
 -- memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds
 -- without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled
--- off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
+-- off, it names the protected areas and the avoided blocks (doors, lava, ladders, ...) it met, which no longer search gets through.
 --
 -- T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be
 -- empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits
@@ -254,7 +255,7 @@ end
 -- The search
 --------------------------------------------------------------------------
 
--- What the search met that walls a route off for good (the protected areas and the blocks it avoids, doors and lava),
+-- What the search met that walls a route off for good (the protected areas and the blocks it avoids, doors, lava, ...),
 -- in words, from the cells it searched: "the protected area keep, minecraft:oak_door", or nil if nothing.
 local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
     local seen, n = {}, 0
@@ -402,7 +403,8 @@ end
 -- looked at, the route's cost, and how many of its cells need a dig or were never seen.  Nothing moves.  opts (all optional):
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
 --   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
---   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+--   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire, doors and furnishings, as
+--              T.moveTo; {} avoids nothing)
 --   inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
 --   liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
 --   avoidCells a list of { x, y, z } cells a route may not use
