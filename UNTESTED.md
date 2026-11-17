@@ -5,6 +5,42 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
+## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0)
+
+In-game order: `/ccnix rom update`, then on the castle turtle (chunk controller on one side) give claude a goal
+like "read what's new, then build a short staircase with a top slab under each stair and a railing, and keep
+/claude/report_harness_v3.md as you work" (v3 is still the report this ADR's Later list waits on).
+
+- **What's new**: the first goal carries the 0.52.0 lines of `help claude-news`.
+- **Chat while it thinks**: say something in chat while claude is waiting on the model; it comes back in the
+  model's next results as "(<name> said in chat: ...)". The pickaxe is back before code runs; the chunk
+  controller never moves. With no chat box aboard, the first results say why. `claude.listen = false` turns
+  it off.
+- **Resume**: `sysctl ccnix.autostart=claude` and `claude.resume=true`, then reboot mid-goal (or restart the
+  server): claude starts with "You were interrupted (reboot)..." and the goal, with the session's --steps and
+  --cache. With resume off it just waits for a goal; Ctrl+T leaves nothing to resume.
+- **Log**: claude.log keeps claude.log.1 to .3 (`claude.logKeep`) on a roomy disk, fewer on a nearly full one;
+  claude.log itself is never deleted.
+- **The lint**: `T.lint` on a staircase the player built: do the headroom, approach and exit warnings match
+  what the player would say (the top stair with a level exit needs only 2 air)? A diagonal fence pair, and a
+  stepped one, warned of; a corner piece or a post on top silences it. A drop over 3 and a lantern at head
+  height warned of. A finished `T.build` prints `player:` lines and still returns true; `T.verify(plan,
+  {player = true})` gives `info.warnings`.
+- **Walking**: `T.walkable` up the keep stairs; a flight with 2 air gives "no walk" naming the block; a ladder
+  tower climbs; a fall over 3 is listed.
+- **Signs**: `T.placeAt(x, y, z, "minecraft:oak_sign", {text = ...})` on a wall and standing, text wrapped to
+  4 lines of 15 (the mock's limit; check it against the game), longer refused; `T.placeDir(d, text)`.
+- **Ladders** placed from above and from below, a column up a shaft.
+- **Top slabs**: a top slab under a stair built after the stair; a top slab with nothing above it (a temporary
+  block appears and goes); `opts.digBelow = true` on a floor: the floor dug, the slab placed, the same floor
+  block back (through `T.build` too); without it, the failure names the option.
+- **Routes**: `T.moveTo` / `T.travel` with `dig = true` into a ladder, wall sign, wall torch, trapdoor or
+  rail stops with "avoiding ..." and leaves it; a route into a room of doors fails at once with "walled in
+  by ..."; `T.harvest` on a block with every side solid names `opts.move = {dig = true}`.
+- **Frames**: stop `mine` mid-tunnel, re-zero (a program started with `--here` away from home), then
+  `mine --resume`: refused with "re-zeroed ... (frame N, now M)" and marked stale, and autostart leaves it.
+  The same for a half-built `T.build` and `T.undo`.
+
 ## ADR-0011: what the turtle learned, second pass (ccnix 0.51.0)
 
 In-game order: on the castle turtle, after `/ccnix rom update`, give claude a goal like "read what's new,
