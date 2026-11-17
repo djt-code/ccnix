@@ -521,10 +521,12 @@ local function shortOf(name)
     return short or name
 end
 
--- Is the block one the item places: the same name, or one ending in _<item> (a torch makes a wall_torch)?
+-- Is the block one the item places: the same name, one ending in _<item> (a torch makes a wall_torch), or one whose
+-- item has another name (tl.place's table: redstone makes redstone_wire, wheat_seeds a wheat crop)?
 local function madeBy(block, item)
     local want, found = shortOf(item), shortOf(block)
-    return found == want or text.endsWith(found, "_" .. want)
+    if found == want or text.endsWith(found, "_" .. want) then return true end
+    return shortOf(T.itemOfBlock(block)) == want
 end
 
 -- Hear a dig or a placement (T.cfg.undo on, and not while undoing) and write it down.
@@ -533,7 +535,8 @@ local function heard(e)
     if e.kind == "dig" and e.was then
         record({ kind = "dig", x = e.x, y = e.y, z = e.z, name = e.was, state = e.state })
     elseif e.kind == "place" and e.item and (not e.block or madeBy(e.block, e.item)) then
-        -- (an item used on a block, bone meal or seeds, made no block of its own: nothing to undo)
+        -- (an item used on a block, like bone meal, made no block of its own: nothing to undo; seeds make a crop,
+        -- and redstone its dust, which are undone like any block)
         record({ kind = "place", x = e.x, y = e.y, z = e.z, name = e.item })
     end
 end

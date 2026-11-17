@@ -8,7 +8,8 @@
 --     is not even loaded);
 --   * the undo journal: off by default (nothing written), on with T.cfg.undo; two placed blocks and a dug one put back by T.undo;
 --     a dug stair put back facing as it was (through T.placeAt); a mark and T.undo(nil, { since }); an entry that cannot be undone
---     stays and is told (no item aboard, the cell holds something else), one whose cell is empty already is done; nothing the undo
+--     stays and is told (no item aboard, the cell holds something else), one whose cell is empty already is done; a planted
+--     crop and redstone dust (blocks whose item has another name) written down and undone; nothing the undo
 --     does is written down; the journal is cut at undo.max; the numbering goes on after a restart; an entry from before a
 --     re-zero refused and marked stale (ADR-0012), the frame numbered anew by a re-zero, not by reset --here;
 --   * T.report: the text with the position (the world cell), fuel and the job's progress; the chat box equipped for the moment and
@@ -298,7 +299,7 @@ do
     ok2, why2 = T.undo()
     check("a faced block with no origin: the undo says what placeAt said", ok2 == false and contains(why2, "T.setOrigin"), tostring(why2))
 
-    -- seeds and bone meal make no block of their own: nothing to undo
+    -- seeds make a crop, a block of their own: it's written down, and the undo takes it out and the seeds back
     fresh()
     T.cfg.undo = true
     T.undoClear()
@@ -314,7 +315,27 @@ do
     T.up()
     T.forward()
     local planted = turtle.placeDown()
-    check("seeds planted with the journal on write nothing to undo", planted and lines(".undo") == 0, tostring(readFile(".undo")))
+    check("seeds planted with the journal on are written down (a wheat crop is theirs)", planted and lines(".undo") == 1,
+        tostring(readFile(".undo")))
+    -- (the stand-in placeDown above leaves the seed aboard; the dug crop gives one more)
+    local seedsBefore = T.countItem("minecraft:wheat_seeds")
+    local okSeeds, infoSeeds = T.undo()
+    check("...and T.undo takes the crop out, the seeds back aboard", okSeeds == true and not has(0, 0, 1)
+        and T.countItem("minecraft:wheat_seeds") == seedsBefore + 1, tostring(infoSeeds and infoSeeds.undone) .. " " .. T.countItem("minecraft:wheat_seeds"))
+
+    -- redstone makes redstone_wire: placed with the journal on, it's written down and undone
+    fresh()
+    T.cfg.undo = true
+    T.undoClear()
+    W.set(0, -1, 1, STONE)
+    W.give(1, "minecraft:redstone", 2)
+    turtle.select(1)
+    local dusted = turtle.place()
+    check("redstone dust placed with the journal on is written down", dusted and has(0, 0, 1, "minecraft:redstone_wire")
+        and lines(".undo") == 1, tostring(readFile(".undo")))
+    local okDust = T.undo()
+    check("...and T.undo takes the dust out, the redstone back aboard", okDust == true and not has(0, 0, 1)
+        and T.countItem("minecraft:redstone") == 2, T.countItem("minecraft:redstone"))
 
     -- a top-half stair too
     fresh()
