@@ -135,7 +135,7 @@ end
 
 local function mapRead(x, y, z) return T.map.get(x, y, z) end
 
--- The view and the box for a box or a plan: view, x1, y1, z1, x2, y2, z2; or nil and why.
+-- The view and the box for a box or a plan: view, x1, y1, z1, x2, y2, z2, and the plan (nil for a box); or nil and why.
 local function viewOf(what)
     if type(what) == "table" and (what.x1 ~= nil or type(what[1]) == "number") then
         local v = what
@@ -151,11 +151,12 @@ local function viewOf(what)
         local plan, why = bp.new(what)
         if not plan then return nil, why end
         -- (the plan's own cells; the map for those it leaves alone and round it)
+        local x1, y1, z1, x2, y2, z2 = bp.extent(plan)
         return newView(function(x, y, z)
             local name, state = bp.at(plan, x, y, z)
             if name then return name, state end
             return mapRead(x, y, z)
-        end), bp.extent(plan)
+        end), x1, y1, z1, x2, y2, z2, plan
     end
     return nil, "lint wants a box { x1, y1, z1, x2, y2, z2 } or a plan"
 end
@@ -187,7 +188,7 @@ local function headroom(view, warn, x, y, z, need)
         if not c then return end
         if not c.kind.pass then
             warn("headroom", x, y, z, "the stair has " .. (k - 1) .. " air above it; a two-tall player walking up needs " .. need
-                .. " (" .. c.name .. " at " .. key(x, y + k, z) .. ")")
+                .. " (" .. c.name .. " at " .. key(x, y + k, z) .. ")", { { x, y + k, z } })
             return
         end
     end
@@ -201,18 +202,19 @@ local function approach(view, warn, x, y, z, dx, dz)
         if not c then return end
         if not c.kind.pass then
             warn("approach", x, y, z, "the first stair of a flight has no free approach: " .. c.name .. " at " .. key(ax, y + k, az)
-                .. " is in the way (a player needs a floor and 3 air in front of the first stair)")
+                .. " is in the way (a player needs a floor and 3 air in front of the first stair)", { { ax, y + k, az } })
             return
         end
     end
     local feet = view(ax, y, az)
     if not feet then return end
     if not feet.kind.pass and not feet.kind.floor then
-        warn("approach", x, y, z, "the first stair of a flight has no free approach: " .. feet.name .. " at " .. key(ax, y, az) .. " is in the way")
+        warn("approach", x, y, z, "the first stair of a flight has no free approach: " .. feet.name .. " at " .. key(ax, y, az) .. " is in the way",
+            { { ax, y, az } })
     elseif feet.kind.pass then
         local floor = view(ax, y - 1, az)
         if floor and floor.kind.pass then
-            warn("approach", x, y, z, "the cell in front of the first stair, " .. key(ax, y, az) .. ", has no floor")
+            warn("approach", x, y, z, "the cell in front of the first stair, " .. key(ax, y, az) .. ", has no floor", { { ax, y, az } })
         end
     end
 end
@@ -225,18 +227,21 @@ local function exit(view, warn, x, y, z, dx, dz)
     if not (feet and head) then return 3 end
     if feet.kind.pass then
         if not head.kind.pass then
-            warn("exit", x, y, z, "beyond the last stair of the flight, " .. head.name .. " at " .. key(ex, y + 2, ez) .. " is at head height")
+            warn("exit", x, y, z, "beyond the last stair of the flight, " .. head.name .. " at " .. key(ex, y + 2, ez) .. " is at head height",
+                { { ex, y + 2, ez } })
             return 3
         end
         local floor = view(ex, y, ez)
         if floor and floor.kind.pass then
-            warn("exit", x, y, z, "the flight runs out over an edge: no floor beyond its last stair, under " .. key(ex, y + 1, ez))
+            warn("exit", x, y, z, "the flight runs out over an edge: no floor beyond its last stair, under " .. key(ex, y + 1, ez),
+                { { ex, y + 1, ez } })
         end
         return 2
     end
     -- (a half step up, or the next flight turning, goes on; anything else is a wall)
     if not ((feet.kind.slab and heightOf(feet) == 1) or walkStair(view, ex, y + 1, ez)) then
-        warn("exit", x, y, z, "the flight runs into " .. feet.name .. " at " .. key(ex, y + 1, ez) .. ": a player needs a landing beyond the last stair")
+        warn("exit", x, y, z, "the flight runs into " .. feet.name .. " at " .. key(ex, y + 1, ez) .. ": a player needs a landing beyond the last stair",
+            { { ex, y + 1, ez } })
     end
     return 3
 end
@@ -279,7 +284,8 @@ local function checkRailing(view, warn, x, y, z)
             local a, b = d.between[1], d.between[2]
             if gapAt(view, x + a[1], y + a[2], z + a[3]) and gapAt(view, x + b[1], y + b[2], z + b[3]) then
                 warn("railing", x, y, z, "the railings at " .. key(x, y, z) .. " and " .. key(px, py, pz) .. " meet only on a diagonal, "
-                    .. "so they don't join: a player slips between them (a railing at " .. key(x + b[1], y + b[2], z + b[3]) .. " closes it)")
+                    .. "so they don't join: a player slips between them (a railing at " .. key(x + b[1], y + b[2], z + b[3]) .. " closes it)",
+                    { { px, py, pz }, { x + b[1], y + b[2], z + b[3] } })
             end
         end
     end
@@ -298,13 +304,13 @@ local function fallFrom(view, x, y, z)
     return depth, false
 end
 
--- The rules for a walk cell: feet at x, y, z (passable, over a floor).
+-- The rules for a walk cell: feet at x, y, z (passable, over a floor).  (Its warnings count the floor among their cells.)
 local function checkWalk(view, warn, x, y, z)
     local head = view(x, y + 1, z)
     if not head then return end
     if head.kind.lantern then
         warn("lantern", x, y, z, "the " .. head.name .. " at " .. key(x, y + 1, z) .. " hangs at head height over this walk cell: "
-            .. "a player walks into it (hang it a block higher)")
+            .. "a player walks into it (hang it a block higher)", { { x, y + 1, z }, { x, y - 1, z } })
         return
     end
     if not head.kind.pass then return end
@@ -315,7 +321,7 @@ local function checkWalk(view, warn, x, y, z)
             local depth, found = fallFrom(view, nx, y - 1, nz)
             if depth > SAFE_FALL then
                 warn("drop", x, y, z, "an open side at " .. key(nx, y, nz) .. " with a drop of " .. (found and "" or "at least ") .. depth
-                    .. " below it and no railing: a player can fall")
+                    .. " below it and no railing: a player can fall", { { nx, y, nz }, { x, y - 1, z } })
                 return
             end
         end
@@ -325,6 +331,26 @@ end
 --------------------------------------------------------------------------
 -- The lint
 --------------------------------------------------------------------------
+
+-- A line a rule for the warnings found (a list a rule) that keep(w) passes: its first, and how many more.
+local function summaryOf(found, keep)
+    local lines = {}
+    for _, rule in ipairs(RULES) do
+        local first, n = nil, 0
+        for _, w in ipairs(found[rule]) do
+            if keep(w) then
+                n = n + 1
+                first = first or w
+            end
+        end
+        if first then lines[#lines + 1] = first.text .. (n > 1 and (" (and " .. (n - 1) .. " more like it)") or "") end
+    end
+    return lines
+end
+
+local function always() return true end
+local function ofPlan(w) return w.where == "plan" end
+local function roundIt(w) return w.where == "around" end
 
 -- What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and
 -- exit, railings meeting on a diagonal, drops over 3, lanterns at head height.  A list of { rule, x, y, z, text }, and info.
@@ -337,9 +363,12 @@ end
 -- refusals: a design may break a rule on purpose.  Nil and why if it can't start.  Info is { cells, unchecked (stairs
 -- with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50),
 -- rules (a count by rule), summary (a line a rule: its first warning, and how many more) }.
+-- For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is
+-- one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and
+-- around (the counts) and planSummary (the summary of the plan's own).  T.build prints only those, and a count of the rest.
 function T.lint(what, opts)
     opts = opts or {}
-    local view, x1, y1, z1, x2, y2, z2 = viewOf(what)
+    local view, x1, y1, z1, x2, y2, z2, plan = viewOf(what)
     if not view then return nil, x1 end
     local cells = (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
     if cells > MAX_CELLS then return nil, "the box is " .. cells .. " cells; a lint reads " .. MAX_CELLS .. " at most" end
@@ -348,9 +377,19 @@ function T.lint(what, opts)
     local limit = opts.limit or LIMIT
     local found, info = {}, { cells = cells, unchecked = 0, more = 0, rules = {}, summary = {} }
     for _, rule in ipairs(RULES) do found[rule] = {} end
-    local function warn(rule, x, y, z, words)
+    local bp = T.blueprint
+    -- (a warning is the plan's when its own cell or one of the cells it names is)
+    local function where(x, y, z, cells)
+        if bp.at(plan, x, y, z) then return "plan" end
+        for _, c in ipairs(cells) do
+            if bp.at(plan, c[1], c[2], c[3]) then return "plan" end
+        end
+        return "around"
+    end
+    local function warn(rule, x, y, z, words, cells)
         local list = found[rule]
-        list[#list + 1] = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words }
+        list[#list + 1] = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words,
+                            where = plan and where(x, y, z, cells or {}) or nil }
     end
     for y = y1, y2 + 1 do
         for z = z1, z2 do
@@ -371,15 +410,26 @@ function T.lint(what, opts)
     end
     local warnings = {}
     for _, rule in ipairs(RULES) do
-        local list = found[rule]
-        if #list > 0 then
-            info.rules[rule] = #list
-            local line = list[1].text
-            if #list > 1 then line = line .. " (and " .. (#list - 1) .. " more like it)" end
-            info.summary[#info.summary + 1] = line
-        end
-        for _, w in ipairs(list) do
-            if #warnings < limit then warnings[#warnings + 1] = w else info.more = info.more + 1 end
+        if #found[rule] > 0 then info.rules[rule] = #found[rule] end
+    end
+    info.summary = summaryOf(found, always)
+    -- (a plan's own warnings first, so the limit cuts those round it)
+    local passes = { always }
+    if plan then
+        passes = { ofPlan, roundIt }
+        info.planSummary = summaryOf(found, ofPlan)
+        info.inPlan, info.around = 0, 0
+    end
+    for _, keep in ipairs(passes) do
+        for _, rule in ipairs(RULES) do
+            for _, w in ipairs(found[rule]) do
+                if keep(w) then
+                    if plan then
+                        if w.where == "plan" then info.inPlan = info.inPlan + 1 else info.around = info.around + 1 end
+                    end
+                    if #warnings < limit then warnings[#warnings + 1] = w else info.more = info.more + 1 end
+                end
+            end
         end
     end
     return warnings, info

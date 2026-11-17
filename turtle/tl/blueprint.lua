@@ -990,7 +990,9 @@ end
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
 -- warnings }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
--- info.warnings and printed, a line a rule ("player: headroom at 3,1,4: ..."); they never change the result.
+-- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
+-- at 3,1,4: ..."), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never
+-- change the result.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
@@ -1139,7 +1141,8 @@ function T.build(plan, opts)
         if not ok and warnings == "Terminated" then error(warnings, 0) end
         if ok and warnings then
             info.warnings = warnings
-            for _, line in ipairs(lint.summary) do print("player: " .. line) end
+            for _, line in ipairs(lint.planSummary or lint.summary) do print("player: " .. line) end
+            if (lint.around or 0) > 0 then print("player: " .. lint.around .. " more round it (T.lint(box) lists them)") end
         end
     end
     if info.finished then return true, info end
