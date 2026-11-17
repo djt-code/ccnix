@@ -628,7 +628,10 @@ end
 -- A scripted http: each post takes the next reply off H.queue and keeps
 -- the request (its decoded body and headers) in H.requests.  A reply is
 -- { code = 200, body = <table> }, or { fail = "reason" } for no
--- connection; an empty queue is an error.
+-- connection; an empty queue is an error.  A Messages API request that
+-- asks for a compaction, or carries a compaction block, in a way the API
+-- refuses gets the API's 400 with what's wrong ("mock: ..."), and takes
+-- nothing off the queue (M.compactionProblem).
 --------------------------------------------------------------------------
 -- A Messages API reply as the server-sent events of a streamed response:
 -- text, thinking and tool input in small deltas, a ping between blocks.
@@ -672,10 +675,66 @@ function M.sse(msg)
         ev({ type = "content_block_stop", index = idx })
     end
     ev({ type = "message_delta", delta = { stop_reason = msg.stop_reason, stop_details = msg.stop_details },
-         usage = { output_tokens = u.output_tokens, output_tokens_details = u.output_tokens_details },
+         usage = { output_tokens = u.output_tokens, output_tokens_details = u.output_tokens_details, iterations = u.iterations },
          context_management = msg.context_management })
     ev({ type = "message_stop" })
     return table.concat(out)
+end
+
+-- On-demand compaction (beta): what the API refuses in a request that asks
+-- for one (`compaction`) or carries a block, as its docs have it, or nil:
+-- the beta header on both; at most one block, and first (its own message's
+-- first block, or the first message's); on a compaction request no
+-- context_management, stop_sequences, tool_choice "any" or "tool", or
+-- output_config.format, something to summarize, and no assistant turn at
+-- the end with tool calls that have no results.
+M.COMPACT_BETA = "compact-2026-09-04"
+function M.compactionProblem(body, headers)
+    if type(body) ~= "table" then return nil end
+    local msgs, blocks = body.messages or {}, 0
+    for i, m in ipairs(msgs) do
+        for j, b in ipairs(type(m.content) == "table" and m.content or {}) do
+            if b.type == "compaction" then
+                blocks = blocks + 1
+                if i ~= 1 or j ~= 1 then return "compaction_block_misplaced: a compaction block at message " .. i end
+            end
+        end
+    end
+    if body.compaction == nil and blocks == 0 then return nil end
+    if not tostring(headers and headers["anthropic-beta"] or ""):find(M.COMPACT_BETA, 1, true) then
+        return "no " .. M.COMPACT_BETA .. " beta header"
+    end
+    if blocks > 1 then return "more than one compaction block" end
+    if body.compaction == nil then return nil end
+    local c = body.compaction
+    if type(c) ~= "table" or c.type ~= "summarize" then return "compaction is { type = \"summarize\" }" end
+    if c.instructions ~= nil and (type(c.instructions) ~= "string" or #c.instructions > 16384 or c.instructions:find("^%s*$")) then
+        return "instructions: a non-blank string of at most 16384 characters"
+    end
+    if body.context_management ~= nil then return "compaction with context_management" end
+    if body.stop_sequences ~= nil then return "compaction with stop_sequences" end
+    if body.tool_choice and (body.tool_choice.type == "any" or body.tool_choice.type == "tool") then return "compaction with tool_choice " .. body.tool_choice.type end
+    if body.output_config and body.output_config.format ~= nil then return "compaction with output_config.format" end
+    if #msgs == 0 then return "compaction_nothing_to_summarize" end
+    local last = msgs[#msgs]
+    for _, b in ipairs(last.role == "assistant" and type(last.content) == "table" and last.content or {}) do
+        if b.type == "tool_use" then return "the last assistant turn ends in a tool call with no result" end
+    end
+    return nil
+end
+
+-- A compaction reply: the summary's block (signed "csig"), or with summary
+-- nil none, with stop_reason `stop` (the call's own, "end_turn" by
+-- default); the call's usage in usage.iterations (`it`: its counts, a
+-- default otherwise), the top-level counts 0, as the API has it.
+function M.compactionReply(summary, it, stop)
+    it = it or { input_tokens = 5000, cache_read_input_tokens = 90000, cache_creation_input_tokens = 0, output_tokens = 1200 }
+    it.type = "compaction"
+    return { code = 200, body = { id = "msg_compact", type = "message", role = "assistant", model = "claude-opus-5-5",
+        content = summary and { { type = "compaction", content = summary, signature = "csig" } } or M.EMPTY_ARRAY,
+        stop_reason = summary and "compaction" or stop or "end_turn",
+        usage = { input_tokens = 0, output_tokens = 0, cache_read_input_tokens = 0, cache_creation_input_tokens = 0,
+                  iterations = { it } } } }
 end
 
 function M.httpApi()
@@ -697,6 +756,11 @@ function M.httpApi()
                 body, headers = req.body, req.headers; req = req.url
             end
             H.requests[#H.requests + 1] = { url = req, headers = headers, body = json.decode(body) }
+            local problem = M.compactionProblem(H.requests[#H.requests].body, headers)
+            if problem then
+                return nil, "HTTP 400", handle(400, json.encode({ type = "error",
+                    error = { type = "invalid_request_error", message = "mock: " .. problem } }))
+            end
             local r = table.remove(H.queue, 1)
             if not r then error("http.post with nothing scripted for it (request " .. #H.requests .. ")") end
             if r.fail then return nil, r.fail, nil end

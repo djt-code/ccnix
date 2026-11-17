@@ -99,8 +99,11 @@ if vf then
     if version == "" then version = nil end
     if h then h.close() end
 end
+-- (roots: the layers in the order find looks, for what lists a folder
+-- across them, as claude does its shipped skills)
 _G.ccnix = { find = find, lib = table.concat(lib), version = version or "unversioned",
-             updates = roots[1] == OVER and romMode }   -- (whether this boot took the updates)
+             updates = roots[1] == OVER and romMode,    -- (whether this boot took the updates)
+             roots = roots }
 
 -- CC's keys table has no Esc: in the game the key closes the computer's
 -- screen, so it never came.  It does now (the ccnix mod's client gives it

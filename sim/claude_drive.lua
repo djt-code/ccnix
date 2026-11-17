@@ -1985,31 +1985,52 @@ check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
     sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
 end
 
--- 40. large notes (ADR-0013 phase 1): memory over 32 KB in all (its
---     folders counted) is a start note, on the screen and with the first
---     goal (and after /new), saying what it costs and where the old
---     goes; under it, none
+-- 40. large notes (ADR-0013 phase 1, D9): memory over 32 KB in all (its
+--     folders counted) at a session's start is its first task, a goal of
+--     the harness's before the player's: notes.md rewritten as the current
+--     state (about 12 KB), the rest moved to /claude/notes-archive/<the
+--     day>.md; the player's goal then starts a conversation of its own,
+--     told the notes were tidied; after /new it's a note, saying what they
+--     cost and where the old goes; under 32 KB, neither
 do
 fresh({ "/new", "again", "" })
 fs.makeDir("claude/memories")
 fs.makeDir("claude/memories/old")
 Mine.files["claude/memories/notes.md"] = string.rep("x", 30 * 1024)
 Mine.files["claude/memories/old/done.md"] = string.rep("y", 10 * 1024)
-HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
+HTTP.queue = { reply({ text("Tidied.") }, "end_turn"), reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
 run("tidy up")
-local goal40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local tidy40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("memory over 32 KB: the session's first task is to tidy it, before the player's goal",
+    tidy40:find("^A task from the harness, before the player's next goal: tidy your notes%. /memories holds 40 KB, about 14k tokens on every call")
+        and tidy40:find("Rewrite /memories/notes.md as the current state, about 12 KB", 1, true)
+        and tidy40:find("to /claude/notes-archive/" .. os.date("!%Y-%m-%d") .. ".md with fs", 1, true)
+        and #HTTP.requests[1].body.messages == 1, tidy40:sub(1, 60))
+check("...and the screen says so", Mine.logHas("^Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: .* Claude tidies them first%.$"))
+local goal40 = HTTP.requests[2] and HTTP.requests[2].body.messages or {}
+check("...then the player's goal starts a conversation of its own, told the notes were tidied",
+    #goal40 == 1 and goal40[1].content == "tidy up\n\n[Your notes were tidied in a conversation before this one, which was put aside: view /memories afresh.]",
+    goal40[1] and goal40[1].content)
+check("...logged", (Mine.files["claude.log"] or ""):find("\n[^\n]* tidy done: %[") ~= nil)
 local NOTE40 = "Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: move what you no longer need to an archive file outside /memories (under /claude/, read with fs when it's wanted)."
-check("memory over 32 KB: a start note with the first goal and on the screen",
-    goal40 == "tidy up\n\n[" .. NOTE40 .. "]" and Mine.logHas("^Your notes in /memories are 40 KB"), goal40)
-local new40 = HTTP.requests[2] and HTTP.requests[2].body.messages[1].content or ""
-check("...and with the first goal after /new", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
+local new40 = HTTP.requests[3] and HTTP.requests[3].body.messages[1].content or ""
+check("...and after /new, a note with the first goal", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
 
 fresh({ "" })
 fs.makeDir("claude/memories")
 Mine.files["claude/memories/notes.md"] = string.rep("x", 20 * 1024)
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("small notes")
-check("...under it, no note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "small notes")
+check("...under it, no tidy and no note", #HTTP.requests == 1 and HTTP.requests[1].body.messages[1].content == "small notes")
+
+-- /tidy at the prompt: the same task, on demand, in the conversation as it is
+fresh({ "/tidy", "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Tidied.") }, "end_turn") }
+run("small notes")
+local m2 = HTTP.requests[2] and HTTP.requests[2].body.messages or {}
+check("/tidy: the harness's tidy task as the next goal, in the same conversation",
+    #m2 == 3 and type(m2[3].content) == "string" and m2[3].content:find("^A task from the harness, before the player's next goal: tidy your notes%."),
+    m2[3] and tostring(m2[3].content):sub(1, 60))
 end
 
 -- 41. the prompt and the manual (ADR-0013 phase 2): what a turtle can't
@@ -2036,48 +2057,423 @@ check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way t
         and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
 end
 
--- 42. context editing for the cache (ADR-0013 D1): while the last call's
---     input is under 180k a request keeps all thinking and clears no tool
---     call; once one reaches it, the next request clears deep (the
---     thinking of all but the turn in progress, every tool call but the
---     last 6, the memory tool's never, the code with its result), logged;
---     the requests after it ask for that same clear and no more: the API
---     edits what each request sends and keeps nothing, so the counts kept
---     grow with what came since (a tool call, a new goal's turn), and
---     nothing cleared comes back.  (The hard clear is 3c's.)
-do
-fresh({ "and more", "" })
-local function inp(n)
+-- The calls' usage for the scenarios on compaction: n tokens in, all but
+-- 100 of them read from the cache
+local function inTokens(n)
     return { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = n - 100, cache_creation_input_tokens = 0 } }
 end
+-- The compaction block request n starts with, or nil
+local function blockOf(n)
+    local first = HTTP.requests[n] and HTTP.requests[n].body.messages[1]
+    local b = first and type(first.content) == "table" and first.content[1]
+    return b and b.type == "compaction" and b or nil, first
+end
+local function hasBeta(n)
+    local h = HTTP.requests[n] and HTTP.requests[n].headers or {}
+    return tostring(h["anthropic-beta"] or ""):find("compact-2026-09-04", 1, true) ~= nil
+end
+
+-- 42. context editing for the cache (ADR-0013 D1, as D9 amends it): every
+--     request keeps all thinking and clears no tool call, past 180k too
+--     (D1's mark is gone: compaction keeps the conversation in bounds, 44;
+--     the deep clear stands in when no summary comes, 45; the hard clear
+--     is 3c's)
+do
+fresh({ "and more", "" })
 HTTP.queue = {
-    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inp(120000)),
-    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inp(185000)),
-    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inp(100000)),
-    reply({ toolUse("lua", { code = "return 4" }) }, "tool_use", inp(101000)),
-    reply({ text("Done.") }, "end_turn", inp(102000)),
-    reply({ text("More.") }, "end_turn", inp(103000)),
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(120000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(185000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(240000)),
+    reply({ text("Done.") }, "end_turn", inTokens(99000)),
+    reply({ text("More.") }, "end_turn", inTokens(99500)),
 }
 run("grow")
-local function edits42(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {} end
-local function keepsAll(n) local e = edits42(n); return #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all" end
--- the thinking turns and the tool calls a request keeps, as "turns/calls"
+local keepsAll = true
+for n = 1, 5 do
+    local e = HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {}
+    keepsAll = keepsAll and #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all"
+end
+check("every request keeps all thinking and clears no tool call, at 185k and 240k too", keepsAll and #HTTP.requests == 5,
+    #HTTP.requests)
+check("...and no deep clear is logged", not (Mine.files["claude.log"] or ""):find("deep clear", 1, true))
+end
+
+-- 43. compaction at a goal's end (ADR-0013 D9): a goal that ends with the
+--     last call's input over 100k has the conversation summarized before
+--     the next goal is sent: a request of its own, the conversation as it
+--     stands with our summary prompt (no tool calls, text only), several
+--     thousand tokens, no context edits, the beta header; the next goal's
+--     request starts with the block, an assistant message of its own with
+--     the cache's mark after it, in place of all it summarized; later
+--     requests carry the header too; compacting again starts from the
+--     block, and only the newest is sent; under 100k, none; logged
+do
+fresh({ "and the next", "and a third", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(90000)),
+    reply({ text("Done.") }, "end_turn", inTokens(120000)),
+    M.compactionReply("Summary one: dug at 0,0,2."),
+    reply({ text("Next done.") }, "end_turn", inTokens(130000)),
+    M.compactionReply("Summary two: one and the next."),
+    reply({ text("Third done.") }, "end_turn", inTokens(50000)),
+}
+run("grow big")
+local c3 = HTTP.requests[3] and HTTP.requests[3].body or {}
+check("a goal ending over 100k: the next request is a compaction of the conversation as it stands (4 messages, the last the reply)",
+    c3.compaction and c3.compaction.type == "summarize" and #c3.messages == 4 and c3.messages[4].role == "assistant"
+        and c3.messages[1].content == "grow big", textutils.serialiseJSON(c3.compaction or {}))
+check("...with our own summary prompt: the goal, the player's words, places, lessons, helpers and skills; no tool calls, text only",
+    c3.compaction and c3.compaction.instructions:find("the player's own words", 1, true) and c3.compaction.instructions:find("coordinates", 1, true)
+        and c3.compaction.instructions:find("lessons and mistakes", 1, true) and c3.compaction.instructions:find("skills", 1, true)
+        and c3.compaction.instructions:find("Do not call any tool: answer with the summary text only.", 1, true) and #c3.compaction.instructions <= 16384)
+check("...the same model, system prompt, tools and thinking; several thousand tokens; no context edits, no fallback model; the beta header",
+    c3.model == HTTP.requests[2].body.model and c3.system[1].text == HTTP.requests[2].body.system[1].text
+        and #c3.tools == #HTTP.requests[2].body.tools and c3.thinking.type == "adaptive" and c3.max_tokens == 16000
+        and c3.context_management == nil and c3.fallbacks == nil and hasBeta(3) and not hasBeta(2), tostring(c3.max_tokens))
+local b4, first4 = blockOf(4)
+local m4 = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+check("the next goal's request starts with the block, as returned, an assistant message of its own, the cache's mark after it; then the goal alone",
+    b4 and b4.content == "Summary one: dug at 0,0,2." and b4.signature == "csig" and #first4.content == 1 and first4.role == "assistant"
+        and b4.cache_control and b4.cache_control.type == "ephemeral" and #m4 == 2 and m4[2].role == "user"
+        and m4[2].content == "and the next", textutils.serialiseJSON(m4))
+check("...with the beta header, and its usual context edit (all thinking kept)", hasBeta(4)
+    and HTTP.requests[4].body.context_management.edits[1].keep == "all")
+local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
+check("compacting again: the request starts with the current block and has the rest after it",
+    c5.compaction and blockOf(5) and blockOf(5).content == "Summary one: dug at 0,0,2." and #c5.messages == 3, #(c5.messages or {}))
+local m6 = HTTP.requests[6] and HTTP.requests[6].body.messages or {}
+local blocks6 = 0
+for _, m in ipairs(m6) do
+    for _, b in ipairs(type(m.content) == "table" and m.content or {}) do if b.type == "compaction" then blocks6 = blocks6 + 1 end end
+end
+check("...and then only the newest block is sent", blocks6 == 1 and blockOf(6) and blockOf(6).content == "Summary two: one and the next."
+    and #m6 == 2 and hasBeta(6), blocks6)
+check("a goal ending under 100k: no compaction (six calls in all)", #HTTP.requests == 6, #HTTP.requests)
+local log43 = Mine.files["claude.log"] or ""
+check("the log: what was compacted and into what",
+    log43:find("compacting at a goal's end: 4 messages, 0 kept as they are; the last call had 120000 tokens in", 1, true)
+        and log43:find("compacted: 4 messages into a summary of 1200 tokens (26 characters); the call read 95000 tokens, 90000 of them from the cache", 1, true),
+    log43:match("compacted[^\n]*"))
+check("...and the summary call's tokens counted in the session's (210040, then its 96200, then 130020: 436260)",
+    Mine.logHas("^%[130000 tokens in: 129900 from the cache, 0 written to it, 100 new; 20 out; 436260 in all%]"))
+check("...and the screen says it's summarized while the player types", Mine.logHas("^%(the conversation, 120k tokens, is summarized while you type%)"))
+end
+
+-- 43b. the summary at a goal's end runs beside the prompt (CC's parallel:
+--      each scripted event goes to the routines waiting for it; read()
+--      waits for "sim_read", the summary's request for "sim_http"): the
+--      player typing first has their goal wait for the summary and go
+--      after it; the summary done first, the prompt goes on; a /new isn't
+--      kept waiting (nothing more is sent for it).  And a goal that ended
+--      on a reply with a tool call (a second cut-off) leaves that turn out
+--      of the summary, kept after the block, its call answered.
+do
+local SCRIPT, inParallel, ORDER = {}, 0, {}
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, readWas, postWas = os.pullEvent, read, HTTP.api.post
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+peripheral.find = function() return nil end         -- (no chat box: the listener has nothing to do)
+read = function()
+    if inParallel == 0 then return readWas() end
+    local _, line = os.pullEvent("sim_read")
+    ORDER[#ORDER + 1] = "typed"
+    return line
+end
+HTTP.api.post = function(...)
+    if inParallel > 0 then
+        os.pullEvent("sim_http")
+        ORDER[#ORDER + 1] = "summarized"
+    end
+    return postWas(...)
+end
+local function big(n) return reply({ text("Done.") }, "end_turn", inTokens(n)) end
+
+fresh({ "" })
+SCRIPT, ORDER = { { "sim_read", "the next goal" }, { "sim_http" } }, {}
+HTTP.queue = { big(120000), M.compactionReply("S1."), big(50000) }
+run("typed first")
+local m3 = HTTP.requests[3] and HTTP.requests[3].body.messages or {}
+check("the player typing first: their goal waits for the summary, then goes after it",
+    table.concat(ORDER, " ") == "typed summarized" and HTTP.requests[2].body.compaction and blockOf(3)
+        and m3[2] and m3[2].content:sub(1, 15) == "the next goal\n\n", table.concat(ORDER, " "))
+
+fresh({ "" })
+SCRIPT, ORDER = { { "sim_http" }, { "sim_read", "go on" } }, {}
+HTTP.queue = { big(120000), M.compactionReply("S1."), big(50000) }
+run("summary first")
+check("the summary done first: the prompt goes on, and the goal goes after it",
+    table.concat(ORDER, " ") == "summarized typed" and blockOf(3) and #HTTP.requests == 3, table.concat(ORDER, " "))
+
+fresh({ "", "" })
+SCRIPT, ORDER = { { "sim_read", "/new" } }, {}
+HTTP.queue = { big(120000) }
+run("then new")
+check("a /new isn't kept waiting for the summary, and nothing is sent for it",
+    #HTTP.requests == 1 and table.concat(ORDER, " ") == "typed" and Mine.logHas("^A new conversation"), #HTTP.requests)
+
+os.pullEvent, read, HTTP.api.post = pullWas, readWas, postWas
+parallel, peripheral.find = nil, nil
+
+fresh({ "go on", "" })
+local cutUsage = inTokens(120000)
+cutUsage.usage.output_tokens = 64000
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "max_tokens", cutUsage),
+    reply({ toolUse("lua", { code = "return 2" }) }, "max_tokens", cutUsage),
+    M.compactionReply("S2."),
+    big(50000),
+}
+run("cut twice")
+local c3b = HTTP.requests[3] and HTTP.requests[3].body or {}
+local m4b = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+local kept4 = m4b[2] and m4b[2].content or {}
+local answered = m4b[3] and type(m4b[3].content) == "table" and m4b[3].content[1] or {}
+check("a goal ended on a tool call: the summary leaves that turn out, kept after the block, its call answered with the next goal",
+    c3b.compaction and #c3b.messages == 3 and blockOf(4) and m4b[2].role == "assistant" and kept4[1] and kept4[1].type == "tool_use"
+        and answered.type == "tool_result" and answered.tool_use_id == kept4[1].id and answered.is_error == true,
+    #(c3b.messages or {}))
+end
+
+-- 44. compaction inside a goal (ADR-0013 D9): once a call's input reaches
+--     250k, right after its tool results the conversation is summarized
+--     but for the last 3 turns (a reply and its results each): the
+--     compaction request ends where an earlier request ended (results, not
+--     a reply waiting on them); the next request is the block, then the
+--     kept turns word for word (their thinking too), nothing else; the
+--     goal carries on; compacting again in the goal sends only the newest
+--     block; under 250k in a goal, none; logged and shown
+do
+fresh({ "" })
+local function step(n, at) return reply({ thinking(), toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
+HTTP.queue = {
+    step(1, 200000), step(2, 220000), step(3, 240000), step(4, 255000),
+    M.compactionReply("Mid summary."),
+    step(5, 260000),
+    M.compactionReply("Mid two."),
+    reply({ text("Done.") }, "end_turn", inTokens(42000)),
+}
+run("long job")
+local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
+local last5 = c5.messages and c5.messages[#c5.messages] or {}
+check("under 250k in a goal no compaction; at 255k one, right after that call's results",
+    c5.compaction and not HTTP.requests[4].body.compaction and #HTTP.requests == 8, #HTTP.requests)
+check("...of what came before the last 3 turns: the goal and the first turn, ending on its results",
+    #(c5.messages or {}) == 3 and last5.role == "user" and type(last5.content) == "table" and last5.content[1].type == "tool_result"
+        and last5.content[1].tool_use_id == "toolu_1", #(c5.messages or {}))
+local m6 = HTTP.requests[6] and HTTP.requests[6].body.messages or {}
+local was = HTTP.requests[5].body.messages        -- (the turns as they were sent before)
+local r4 = HTTP.requests[4].body.messages
+check("the next request: the block, then the 3 turns as they were, thinking and all, then nothing else",
+    blockOf(6) and blockOf(6).content == "Mid summary." and #m6 == 7 and m6[2].role == "assistant"
+        and m6[2].content[1].type == "thinking" and m6[2].content[1].signature == "sig" and m6[2].content[2].id == "toolu_2"
+        and textutils.serialiseJSON(m6[3]) == textutils.serialiseJSON(r4[3 + 2])
+        and m6[7].role == "user" and m6[7].content[1].tool_use_id == "toolu_4" and hasBeta(6), #m6)
+local c7 = HTTP.requests[7] and HTTP.requests[7].body or {}
+check("compacting again in the goal: from the block on, the last 3 turns kept; then only the newest block",
+    c7.compaction and blockOf(7) and blockOf(7).content == "Mid summary." and #c7.messages == 3
+        and blockOf(8) and blockOf(8).content == "Mid two." and #HTTP.requests[8].body.messages == 7, #(c7.messages or {}))
+local log44 = Mine.files["claude.log"] or ""
+check("logged: where it was compacted, what was kept, and what came of it",
+    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 255000 tokens in", 1, true)
+        and log44:find("compacted: 3 messages into a summary of 1200 tokens (12 characters)", 1, true), log44:match("compacting[^\n]*"))
+check("...and shown", Mine.logHas("^%(the conversation, 255k tokens, is summarized; the last 3 turns kept%)"))
+check("the goal carried on to its end", Mine.logHas("^Done%.$"))
+end
+
+-- 45. when no summary comes (ADR-0013 D9, D1's deep clear as the
+--     fallback): a summary cut off at its max_tokens is asked for again
+--     with twice as many; one that brings none has the next request clear
+--     deep (the thinking of all but the turn in progress, all but the last
+--     6 tool calls, the memory tool's never), logged, and no second try in
+--     that goal; the requests after it ask for the same clear, the counts
+--     grown; a summary at a goal's end that brings none has the next
+--     goal's first request clear deep
+do
+fresh({ "" })
+local function step(n, at) return reply({ toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
+HTTP.queue = {
+    step(1, 100000),
+    step(2, 255000),
+    M.compactionReply(nil, nil, "max_tokens"),
+    M.compactionReply("Second try."),
+    reply({ text("Done.") }, "end_turn", inTokens(30000)),
+}
+run("cut short")
+check("a summary cut off at max_tokens: asked again with twice the tokens, and that one taken",
+    HTTP.requests[3].body.max_tokens == 16000 and HTTP.requests[4].body.compaction and HTTP.requests[4].body.max_tokens == 32000
+        and blockOf(5) and blockOf(5).content == "Second try."
+        and (Mine.files["claude.log"] or ""):find("compaction: no summary (stop_reason max_tokens); asked again with 32000 tokens", 1, true),
+    tostring(HTTP.requests[4].body.max_tokens))
+
+fresh({ "" })
+local function edits45(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management and HTTP.requests[n].body.context_management.edits or {} end
 local function kept(n)
-    local e = edits42(n)
+    local e = edits45(n)
     if not (e[1] and e[2] and type(e[1].keep) == "table") then return textutils.serialiseJSON(e) end
     return e[1].keep.value .. "/" .. e[2].keep.value
 end
-check("under the mark: every request keeps all thinking and clears no tool call", keepsAll(1) and keepsAll(2),
-    textutils.serialiseJSON(edits42(2)))
-local mark = edits42(3)
-check("at the mark (the last call had 185k in): one request clears both, the thinking edit first",
-    #mark == 2 and mark[1].type == "clear_thinking_20251015" and mark[1].keep.type == "thinking_turns" and mark[1].keep.value == 1
-        and mark[2].type == "clear_tool_uses_20250919" and mark[2].trigger.type == "input_tokens" and mark[2].trigger.value <= 185000
-        and mark[2].keep.type == "tool_uses" and mark[2].keep.value == 6 and mark[2].clear_at_least.value == 0
-        and mark[2].clear_tool_inputs == true and mark[2].exclude_tools[1] == "memory", textutils.serialiseJSON(mark))
-check("...and the log says so", (Mine.files["claude.log"] or ""):find("context: a deep clear at 185000 tokens in", 1, true) ~= nil)
-check("after it: the same clear, the counts grown by what came since (a lua call; the memory tool's not counted; a new goal's turn)",
-    kept(4) == "1/7" and kept(5) == "1/8" and kept(6) == "2/8", kept(4) .. " " .. kept(5) .. " " .. kept(6))
-local _, marks = (Mine.files["claude.log"] or ""):gsub("context: a deep clear", "")
-check("...and under the mark again, no second deep clear", marks == 1, marks)
+HTTP.queue = {}
+for n = 1, 7 do HTTP.queue[n] = step(n, 100000 + n) end
+HTTP.queue[8] = reply({ toolUse("lua", { code = "return 8" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(255000))
+HTTP.queue[9] = M.compactionReply(nil)
+HTTP.queue[10] = step(9, 256000)
+HTTP.queue[11] = reply({ text("Done.") }, "end_turn", inTokens(50000))
+run("no summary")
+local deep = edits45(10)
+check("no summary: the next request clears deep, the thinking edit first (1 turn kept), all but the last 6 tool calls, the memory tool's never",
+    #deep == 2 and deep[1].keep.value == 1 and deep[2].type == "clear_tool_uses_20250919" and deep[2].keep.value == 6
+        and deep[2].clear_at_least.value == 0 and deep[2].clear_tool_inputs == true and deep[2].exclude_tools[1] == "memory"
+        and deep[2].trigger.value <= 255000, textutils.serialiseJSON(deep))
+local log45 = Mine.files["claude.log"] or ""
+check("...logged: no summary, then the deep clear",
+    log45:find("compaction: no summary (stop_reason end_turn)\n", 1, true)
+        and log45:find("context: a deep clear at 255000 tokens in (the last call's), as no summary came", 1, true))
+check("...no second try in that goal at 256k, and the request after it asks for the same clear, a call more kept",
+    #HTTP.requests == 11 and not HTTP.requests[11].body.compaction and kept(11) == "1/7", kept(11))
+
+fresh({ "next", "" })
+HTTP.queue = {}
+for n = 1, 7 do HTTP.queue[n] = step(n, 50000 + n) end
+HTTP.queue[8] = reply({ text("Done.") }, "end_turn", inTokens(120000))
+HTTP.queue[9] = M.compactionReply(nil, nil, "refusal")
+HTTP.queue[10] = reply({ text("Next done.") }, "end_turn", inTokens(30000))
+run("refused summary")
+check("a summary at a goal's end that brings none (a refusal): the next goal's first request clears deep",
+    HTTP.requests[9].body.compaction and kept(10) == "1/6" and not blockOf(10)
+        and (Mine.files["claude.log"] or ""):find("compaction: no summary (stop_reason refusal)\n", 1, true), kept(10))
+end
+
+-- 46. skills (ADR-0013 D10): the session's first message lists each skill
+--     (its name, whose, its description, where), the shipped ones
+--     (turtle/skills/, where ccnix's files are) and the model's own
+--     (/claude/skills/), its own winning over a shipped one of the same
+--     name; not the system prompt, which says how to use them; skill() in
+--     the code writes one (its name and description on top) and refuses a
+--     bad name, a missing or overlong description, an empty body; /skills
+--     shows them; a goal sharing words with a description comes with
+--     "Skills that may fit: ..." (none when nothing does); after a
+--     summary the list comes again, at a goal's end with the next goal,
+--     inside a goal onto the results; with ccnix's layers (ccnix.roots)
+--     the updates' skill wins over the ROM's, and each layer's own show
+do
+local function skillFile(path, name, description)
+    local dir = path .. "/" .. name
+    fs.makeDir(path)
+    fs.makeDir(dir)
+    Mine.files[dir .. "/skill.md"] = "---\nname: " .. name .. "\ndescription: " .. description .. "\n---\n# " .. name .. "\n1. Do it.\n"
+end
+local function shipped()
+    skillFile("turtle/skills", "storage", "Set up and keep the chests at home: categories, sorting, stowing.")
+    skillFile("turtle/skills", "light-an-area", "Light a place so mobs can't spawn.")
+    skillFile("turtle/skills", "build-for-player", "\"Stairs, walkways and rooms a two-tall player uses.\"")
+    Mine.files["turtle/skills/readme.md"] = "# Skills for claude\n"
+end
+fresh({ "/skills", "light the farm", "" })
+shipped()
+fs.makeDir("claude")
+skillFile("claude/skills", "light-an-area", "Use when lighting a farm or a base: my own way.")
+HTTP.queue = {
+    reply({ toolUse("lua", { code = [[
+local out = {}
+local function try(...) local ok, a, b = pcall(skill, ...); out[#out + 1] = tostring(ok) .. " " .. tostring(a) .. " " .. tostring(b) end
+try("dig-stairs", "Use when digging a staircase down.", "1. Dig.\n2. Place stairs.")
+try("Bad Name", "Use when x.", "body")
+try("ok-name", "  ", "body")
+try("ok-name", string.rep("x", 201), "body")
+try("ok-name", "Use when x.", "   ")
+try("ok-name", "line one\nline two", "body")
+return table.concat(out, "\n")]] }) }, "tool_use"),
+    reply({ text("Sorted.") }, "end_turn", inTokens(120000)),
+    M.compactionReply("S."),
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(100000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(255000)),
+    M.compactionReply("S2."),
+    reply({ text("Lit.") }, "end_turn", inTokens(30000)),
+}
+run("sort the chests")
+local first = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local LIST = "Your skills, procedures for kinds of goal: before a goal, read with fs any that fit it.\n"
+    .. "- build-for-player: Stairs, walkways and rooms a two-tall player uses. (/turtle/skills/build-for-player/skill.md)\n"
+    .. "- light-an-area (yours): Use when lighting a farm or a base: my own way. (/claude/skills/light-an-area/skill.md)\n"
+    .. "- storage: Set up and keep the chests at home: categories, sorting, stowing. (/turtle/skills/storage/skill.md)"
+check("the first message lists the skills, a line each, the model's own winning over the shipped one of its name (the readme isn't one)",
+    first:find("[" .. LIST .. "]", 1, true) ~= nil, first)
+check("...and the goal comes with the skills it may fit", first:find("\n[Skills that may fit: storage]", 1, true) ~= nil, first)
+local sys46 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the system prompt says how to use them, and lists none",
+    sys46:find("Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits.", 1, true)
+        and sys46:find("skill(name, description, body) in your code writes /claude/skills/<name>/skill.md", 1, true)
+        and not sys46:find("build-for-player", 1, true))
+local wrote = resultsIn(2).toolu_1
+local lines46 = {}
+for l in tostring(wrote and wrote.content or ""):gmatch("[^\n]+") do lines46[#lines46 + 1] = l end
+check("skill() writes /claude/skills/<name>/skill.md, its name and description on top",
+    lines46[1] == "-> true true /claude/skills/dig-stairs/skill.md"
+        and Mine.files["claude/skills/dig-stairs/skill.md"] == "---\nname: dig-stairs\ndescription: Use when digging a staircase down.\n---\n1. Dig.\n2. Place stairs.\n",
+    lines46[1])
+check("...and refuses a bad name, a blank description, an overlong one, an empty body, a description of two lines",
+    lines46[2] and lines46[2]:find("^false skill: the name is lowercase letters, digits and %-") and lines46[3]:find("^false skill: a skill needs a description")
+        and lines46[4]:find("^false skill: the description is one line of at most 200") and lines46[5]:find("^false skill: the body is the procedure")
+        and lines46[6]:find("^false skill: the description is one line") and not Mine.files["claude/skills/ok-name/skill.md"],
+    tostring(wrote and wrote.content))
+check("/skills shows them on the screen, the one written in the session too",
+    Mine.logHas("^dig%-stairs %(Claude's own%): Use when digging a staircase down%.$") and Mine.logHas("^storage: Set up and keep the chests")
+        and Mine.logHas("^light%-an%-area %(Claude's own%): Use when lighting a farm"))
+local m4 = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+local next46 = m4[2] and m4[2].content or ""
+check("after a summary at a goal's end, the next goal brings the list again (the new skill in it), and the skills it may fit",
+    blockOf(4) and next46:find("^light the farm\n\n%[") and next46:find("- dig-stairs (yours): Use when digging a staircase down. (/claude/skills/dig-stairs/skill.md)", 1, true)
+        and next46:find("[Skills that may fit: light-an-area]", 1, true), next46)
+local m7 = HTTP.requests[7] and HTTP.requests[7].body.messages or {}
+local last7 = m7[#m7] and m7[#m7].content or {}
+check("after a summary inside a goal (2 turns kept: the goal's own), the list goes onto the results",
+    blockOf(7) and type(last7) == "table" and last7[1].type == "tool_result" and last7[#last7].type == "text"
+        and last7[#last7].text:find("Your skills, procedures for kinds of goal", 1, true) == 1
+        and last7[#last7].text:find("- dig-stairs (yours)", 1, true), textutils.serialiseJSON(last7))
+local log46 = Mine.files["claude.log"] or ""
+check("the log: how many listed, the nudge, the skill written",
+    log46:find("skills: 3 listed\n", 1, true) and log46:find("Skills that may fit: storage\n", 1, true)
+        and log46:find("skill written: /claude/skills/dig-stairs/skill.md\n", 1, true))
+
+fresh({ "" })
+shipped()
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("say hello")
+local hello = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("a goal sharing no words with a description: no nudge", hello:find("[Your skills", 1, true) and not hello:find("may fit", 1, true), hello)
+
+-- ccnix's layers: the updates (/ccnix) over the ROM (/rom/ccnix)
+fresh({ "" })
+skillFile("rom/ccnix/turtle/skills", "storage", "The ROM's storage.")
+skillFile("rom/ccnix/turtle/skills", "big-jobs", "Scope and batches for long jobs.")
+skillFile("ccnix/turtle/skills", "storage", "The update's storage.")
+skillFile("ccnix/turtle/skills", "new-one", "Only in the update.")
+ccnix = { roots = { "/ccnix", "/rom/ccnix" }, find = function(rel)
+    for _, r in ipairs({ "ccnix", "rom/ccnix" }) do if fs.exists(r .. "/" .. rel) then return "/" .. r .. "/" .. rel end end
+end }
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("layers")
+ccnix = nil
+local layers = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("with ccnix's layers, each one's skills listed, the update's winning over the ROM's of a name",
+    layers:find("- big-jobs: Scope and batches for long jobs. (/rom/ccnix/turtle/skills/big-jobs/skill.md)\n", 1, true)
+        and layers:find("- new-one: Only in the update. (/ccnix/turtle/skills/new-one/skill.md)\n", 1, true)
+        and layers:find("- storage: The update's storage. (/ccnix/turtle/skills/storage/skill.md)]", 1, true), layers)
 end

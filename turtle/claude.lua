@@ -30,7 +30,26 @@
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
--- helpers are loaded again), or press Enter on an empty line to quit.
+-- helpers are loaded again), /tidy to have it tidy its notes (below),
+-- /skills to see its skills (below), or press Enter on an empty line to
+-- quit.
+--
+-- Its skills: procedures for kinds of goal, a folder each holding
+-- skill.md (a name and a one-line description on top, then the steps).
+-- ccnix ships some in turtle/skills/; the model writes its own with
+-- skill(name, description, body) in its code, to /claude/skills/<name>/,
+-- and its own win over a shipped one of the same name.  The session's
+-- first message lists each one's name and description (and again after
+-- each summary), and the model reads one with fs when a goal fits it; a
+-- goal that shares words with a description comes with "Skills that may
+-- fit: ...".
+--
+-- Its notes: the memory tool's files (/claude/memories) are read whole
+-- and sent on every call after.  When they're over 32 KB at a session's
+-- start, its first task, before your goal, is to tidy them: notes.md
+-- rewritten as the current state (about 12 KB), the rest moved to
+-- /claude/notes-archive/<date>.md, which it reads with fs when it needs
+-- to and isn't sent.  Your goals then start a conversation of their own.
 -- Ctrl+T stops it (under T.run, so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
@@ -155,13 +174,21 @@
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
 -- Old tool calls (the code and its results) and old thinking are kept
--- while the conversation grows, and cleared in one go once a call's input
--- reaches 180k tokens (the API's context editing): all but the last 6
--- calls, the memory tool's kept, and the thinking before the turn in
--- progress.  Each clear has the cache written again, so one deep clear
--- pays for many calls.  When the API says the conversation is too long
--- all the same, it's sent again with more of it cleared.  A reply paused
--- partway through its web searches is carried on.
+-- while the conversation grows, and it's summarized (the API's
+-- compaction) to keep it in bounds: when a goal ends with the last call's
+-- input over 100k tokens, while you type the next goal (if you're
+-- quicker, the goal waits for it; a /new or an empty line doesn't); and
+-- inside a long goal once a call's input reaches 250k, right after the
+-- code's results, the last 3 turns kept word for word.  The model writes
+-- the summary, having read all of it: the goal and how far it got, what
+-- you said, places, what's built, lessons, its helpers; and it goes on
+-- from that in place of what it summarized.  /new is cheaper still
+-- between unrelated goals.  When no summary comes, the next call clears
+-- deep instead (the API's context editing): all but the last 6 calls, the
+-- memory tool's kept, and the thinking before the turn in progress.  When
+-- the API says the conversation is too long all the same, it's sent
+-- again with more of it cleared.  A reply paused partway through its web
+-- searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
@@ -233,11 +260,30 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
--- Memory over NOTES.large bytes in all is a start note: a file viewed
--- stays in the conversation, never cleared, so it is sent on every call
--- (about NOTES.bytesAToken bytes a token: the field's 80 KB notes.md came
--- to about 28k tokens)
-local NOTES = { large = 32 * 1024, bytesAToken = 3 }
+-- Memory over NOTES.large bytes in all at a session's start is its first
+-- task: the model tidies it (ADR-0013 D9), notes.md down to about
+-- NOTES.tidyTo bytes and the rest to NOTES.archive; after /new it's a note.
+-- A file viewed stays in the conversation, never cleared, so it is sent
+-- on every call (about NOTES.bytesAToken bytes a token: the field's 80 KB
+-- notes.md came to about 28k tokens)
+local NOTES = { large = 32 * 1024, bytesAToken = 3, tidyTo = 12 * 1024, archive = "claude/notes-archive" }
+-- Skills (ADR-0013 D10): a folder each, its skill.md a name and a one-line
+-- description between "---" lines, then the procedure.  Shipped ones are
+-- in turtle/skills/ where ccnix's files are (the ROM, its updates or the
+-- checkout), the model's own in /claude/skills/, which win over a shipped
+-- one of the same name.  (skill.md, not Claude Code's SKILL.md: the mod's
+-- ROM is a data pack, whose paths take no capitals.)  A name is lowercase
+-- letters, digits and "-", a description one line.  STOP: the words a
+-- goal's nudge doesn't match on.
+local SKILLS = { shipped = "turtle/skills", own = "claude/skills", file = "skill.md", maxName = 40, maxDescription = 200,
+    nameChar = function(c) return scan.isLower(c) or scan.isDigit(c) or c == "-" end,
+    STOP = {} }
+for _, w in ipairs(text.words("the and for with from into onto that this these those then than when what where which who whom "
+    .. "use using used your you our all any some can could please make get put set let now too also more most out off over "
+    .. "under about its are was were been has have had not but how why one two each every there here them they their will "
+    .. "would should just like need want keep turtle player claude")) do
+    SKILLS.STOP[w] = true
+end
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -249,19 +295,50 @@ local PAUSES = 5                -- times a paused reply (pause_turn) is carried 
 -- there on.  Clearing a little at a time (the last 3 thinking turns kept,
 -- tool results from 100k) cost 41 rewrites in a day, most of the spend.
 -- So all thinking and every tool call are kept while the conversation
--- grows, and once a call's input reaches CLEAR.mark the next request clears
--- deep: the thinking of all but the turn in progress, and every tool call
--- but the last CLEAR.keep.  One rewrite down to the floor buys many cheap
--- calls after it.  The requests after it ask for the same clear and no
--- more (its keep counts grow with what came since): asking for less would
--- send back what was cleared, the API being stateless.  CLEAR.trigger is
--- the tool edit's: under any conversation that reached the mark, so the
--- clear applies to all a request sends.  (The functions are by the API's.)
-local CLEAR = { mark = 180000, keep = 6, trigger = 100000 }
+-- grows, and compaction (below, ADR-0013 D9) keeps it in bounds.  Clearing
+-- is the fallback: when a compaction brings no summary, the next request
+-- clears deep (CLEAR.deep: due, with the last call's input for the log):
+-- the thinking of all but the turn in progress, and every tool call but
+-- the last CLEAR.keep.  One rewrite down to the floor buys many cheap calls
+-- after it.  The requests after it ask for the same clear and no more (its
+-- keep counts grow with what came since): asking for less would send back
+-- what was cleared, the API being stateless.  CLEAR.trigger is the tool
+-- edit's: under any conversation a compaction is asked for, so the clear
+-- applies to all a request sends.  (The functions are by the API's.)
+local CLEAR = { keep = 6, trigger = 100000 }
 -- The harder clear once the API has said the prompt is too long, for the
 -- rest of the conversation: sooner, fewer results kept, whatever it frees,
 -- and the thinking of the last 3 turns kept
-local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
+CLEAR.HARD = { trigger = 50000, keep = 2, atLeast = 0, thinking = 3 }
+-- Compaction (ADR-0013 D9).  On request (the beta header COMPACT.beta) the
+-- API summarizes the conversation, its thinking included, into one signed
+-- block that then stands first in place of what it summarized: the model
+-- goes on from a summary of everything, not from a clear's placeholders.
+-- When a goal ends with the last call's input over COMPACT.boundary, the
+-- conversation is summarized while the player types the next goal (and
+-- before it's sent, if they're quicker).  Inside a goal, once a call's
+-- input reaches COMPACT.mid, it's summarized right after a batch of tool
+-- results, the last COMPACT.keep turns (a reply and its results each) kept
+-- word for word after the summary.  The summary call may think too,
+-- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
+-- INSTRUCTIONS replace the API's own summary prompt (at most 16384
+-- characters, and they must say not to call tools).
+local COMPACT = { boundary = 100000, mid = 250000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
+    INSTRUCTIONS = table.concat({
+        "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
+        "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
+        "the current goal, the plan, and how far it got (what's done, what's next);",
+        "open tasks and anything promised to the player;",
+        "the player's own words that matter (requests, preferences, corrections), quoted;",
+        "places and coordinates (the turtle's frame and the world origin if set, the base, the chests, builds, hazards);",
+        "what was built and how (blueprints, materials, protected areas);",
+        "lessons and mistakes not to repeat;",
+        "the names of kept helpers (keep) and skills, and what each is for;",
+        "the T calls and code that worked, briefly.",
+        "Leave out what is finished and no longer matters, raw tool output, and what the notes in /memories already hold.",
+        "Keep it short: a few hundred words, at most about 1500.",
+        "Do not call any tool: answer with the summary text only.",
+    }, " ") }
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
@@ -421,7 +498,9 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories (a file you view is sent on every call after, so keep notes.md short). web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+
+Skills: a skill is a procedure for a kind of goal, a folder holding skill.md (a name and a one-line description between "---" lines, then the steps). The first message lists them, the shipped ones and yours, with where each is. Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits. When a task taught you a procedure worth repeating, write a skill: skill(name, description, body) in your code writes /claude/skills/<name>/skill.md (the name lowercase letters, digits and -; the description one line saying when to use it, "use when ..."); yours win over a shipped one of the same name, and are listed from the next session on.
 
 Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, ask: the chat tool with ask = true reaches the player in the game, ask_user only the keyboard. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
@@ -432,7 +511,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = {
@@ -960,6 +1039,42 @@ API.keep = function(name, code)
     fs.makeDir(HELPERS_DIR)
     local saved, notSaved = fileio.write(file, code)
     if not saved then error("keep: " .. tostring(notSaved), 2) end
+    return true, "/" .. file
+end
+
+-- Why skill() refuses these, or nil
+function SKILLS.refuse(name, description, body)
+    if type(name) ~= "string" or name == "" or #name > SKILLS.maxName or not scan.isLower(name:sub(1, 1))
+        or not scan.all(name, SKILLS.nameChar) then
+        return "the name is lowercase letters, digits and -, starting with a letter, at most " .. SKILLS.maxName .. " characters (it names the folder)"
+    end
+    if type(description) ~= "string" or text.trim(description) == "" then
+        return "a skill needs a description: one line saying when to use it (\"use when ...\")"
+    end
+    if #description > SKILLS.maxDescription or text.contains(description, "\n") then
+        return "the description is one line of at most " .. SKILLS.maxDescription .. " characters, saying when to use it"
+    end
+    if type(body) ~= "string" or text.trim(body) == "" then
+        return "the body is the procedure: the steps, the checks, the pitfalls, the T calls to use"
+    end
+    return nil
+end
+
+-- skill(name, description, body) in the code: a skill of the model's own
+-- (ADR-0013 D10), written to /claude/skills/<name>/skill.md with its name
+-- and description on top; it wins over a shipped one of the same name, and
+-- is listed from the next session (or summary) on.  What's refused is an
+-- error, and nothing is written.  Returns true and the file.
+API.skill = function(name, description, body)
+    local why = SKILLS.refuse(name, description, body)
+    if why then error("skill: " .. why .. "; nothing was written", 2) end
+    local dir = SKILLS.own .. "/" .. name
+    fs.makeDir(dir)
+    local file = dir .. "/" .. SKILLS.file
+    local saved, notSaved = fileio.write(file, "---\nname: " .. name .. "\ndescription: " .. text.trim(description) .. "\n---\n"
+        .. body .. (text.endsWith(body, "\n") and "" or "\n"))
+    if not saved then error("skill: " .. tostring(notSaved), 2) end
+    log("skill written: /" .. file)
     return true, "/" .. file
 end
 
@@ -1762,6 +1877,113 @@ function NOTES.note()
         MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
 end
 
+-- A skill's description: its skill.md's "description:" line between the
+-- "---" lines at its top (quotes round it taken off), or nil
+function SKILLS.describe(file)
+    local lines = text.lines(fileio.read(file) or "")
+    if text.trim(lines[1] or "") ~= "---" then return nil end
+    for i = 2, #lines do
+        local key, value = text.cut(text.trim(lines[i]), ":")
+        if key == "---" then return nil end
+        if value and text.trim(key) == "description" then
+            value = text.trim(value)
+            local q = value:sub(1, 1)
+            if #value > 1 and (q == "\"" or q == "'") and text.endsWith(value, q) then value = value:sub(2, -2) end
+            return value ~= "" and value or nil
+        end
+    end
+    return nil
+end
+
+-- The skills there are, by name: { name, description, file, own }.  The
+-- shipped ones from each of ccnix's layers (ccnix.roots: the updates, then
+-- the ROM; else where findFile finds the folder), the first layer's of a
+-- name winning, then the model's own over them.
+function SKILLS.all()
+    local places, byName, out = {}, {}, {}
+    local roots = ccnix and ccnix.roots
+    if roots then
+        for i = #roots, 1, -1 do places[#places + 1] = { dir = roots[i] .. "/" .. SKILLS.shipped } end
+    else
+        places[1] = { dir = findFile(SKILLS.shipped) }
+    end
+    places[#places + 1] = { dir = SKILLS.own, own = true }
+    for _, place in ipairs(places) do
+        if place.dir and fs.isDir(place.dir) then
+            for _, name in ipairs(fs.list(place.dir)) do
+                local file = fs.combine(place.dir .. "/" .. name .. "/" .. SKILLS.file, "")
+                if fs.exists(file) and not fs.isDir(file) then
+                    byName[name] = { name = name, description = SKILLS.describe(file), file = "/" .. file, own = place.own }
+                end
+            end
+        end
+    end
+    for _, name in ipairs(tables.sortedKeys(byName)) do out[#out + 1] = byName[name] end
+    return out
+end
+
+-- The list for the model, a line a skill (its name, whose, what it's for,
+-- where), or nil when there are none
+function SKILLS.note()
+    local lines = {}
+    for _, s in ipairs(SKILLS.all()) do
+        lines[#lines + 1] = string.format("- %s%s: %s (%s)", s.name, s.own and " (yours)" or "",
+            s.description or "no description", s.file)
+    end
+    if #lines == 0 then return nil end
+    return "Your skills, procedures for kinds of goal: before a goal, read with fs any that fit it.\n" .. table.concat(lines, "\n")
+end
+
+-- The words of s to match on, as a set: lowercased, split at anything
+-- but letters and digits, STOP's and those under 3 letters left out, a
+-- plural's "s" taken off
+function SKILLS.words(s)
+    local chars, set = {}, {}
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        chars[i] = scan.isAlnum(c) and c:lower() or " "
+    end
+    for _, w in ipairs(text.words(table.concat(chars))) do
+        if not SKILLS.STOP[w] then
+            if #w > 3 and text.endsWith(w, "s") and not text.endsWith(w, "ss") then w = w:sub(1, -2) end
+            if #w >= 3 and not SKILLS.STOP[w] then set[w] = true end
+        end
+    end
+    return set
+end
+
+-- The nudge for a goal: the skills whose name or description shares a
+-- word with it, as a line, or nil
+function SKILLS.fit(goal)
+    local want, fits = SKILLS.words(goal), {}
+    for _, s in ipairs(SKILLS.all()) do
+        local has = SKILLS.words(s.name .. " " .. (s.description or ""))
+        for w in pairs(want) do
+            if has[w] then fits[#fits + 1] = s.name; break end
+        end
+    end
+    if #fits == 0 then return nil end
+    return "Skills that may fit: " .. table.concat(fits, ", ")
+end
+
+-- The goal the harness gives the model to tidy its notes (the session's
+-- first task when they're large, or /tidy): notes.md rewritten as the
+-- current state, about NOTES.tidyTo bytes, the rest moved to an archive
+-- file of the day's, which the model reads with fs and isn't loaded; the
+-- procedures that have settled made skills (ADR-0013 D10).  The goal is
+-- kept in NOTES.given (no skills nudge for it).
+function NOTES.tidyGoal()
+    local size = NOTES.size(MEMORY_DIR)
+    NOTES.given = string.format("A task from the harness, before the player's next goal: tidy your notes. %s holds %d KB, about %dk tokens on every call once a file is viewed. "
+        .. "Rewrite %s/notes.md as the current state, about %d KB: where things are, what's built, jobs under way, the player's preferences, the lessons that still matter. "
+        .. "Move the rest, as it was, to /%s/%s.md with fs (append if it's there): it isn't loaded, and you can read it with fs when it's wanted. "
+        .. "Do the same with the other files in %s that are history. Procedures that have settled (how you do a kind of job) become skills, with skill(name, description, body) in your code. "
+        .. "Don't touch the world. When done, say in a line what you kept, what you moved and what became a skill.",
+        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5),
+        MEMORY_ROOT, math.floor(NOTES.tidyTo / 1024), NOTES.archive, os.date("!%Y-%m-%d", now()), MEMORY_ROOT)
+    return NOTES.given
+end
+
 -- Keep the version the model has had the news for.
 local function keepVersion()
     if not newVersion then return end
@@ -1842,18 +2064,18 @@ function CLEAR.calls()
     return n
 end
 
--- The deep clear's edits, when the last call's input (lastInput, nil after
--- a web search, whose usage adds up its passes) reached CLEAR.mark and
--- there's more than the kept calls to clear since the last one; else nil.
--- Where it was is kept in CLEAR.at for the requests after it.  (This is the
--- one place that decides the mark: a compaction step could stand here.)
-function CLEAR.atMark(lastInput)
-    if not lastInput or lastInput < CLEAR.mark then return nil end
+-- The deep clear's edits, when one is due (`due`: CLEAR.deep, the last
+-- call's input when a compaction brought no summary) and there's more than
+-- the kept calls to clear since the last one; else nil.  Where it was is
+-- kept in CLEAR.at for the requests after it.
+function CLEAR.atMark(due)
+    if not due then return nil end
+    CLEAR.deep = nil
     local calls = CLEAR.calls()
     if CLEAR.at and calls - CLEAR.at.calls <= CLEAR.keep then return nil end
     CLEAR.at = { turns = CLEAR.turns(), calls = calls }
-    log(string.format("context: a deep clear at %d tokens in (the last call's): the old thinking, and all but the last %d tool calls",
-        lastInput, CLEAR.keep))
+    log(string.format("context: a deep clear at %d tokens in (the last call's), as no summary came: the old thinking, and all but the last %d tool calls",
+        due, CLEAR.keep))
     return CLEAR.since()
 end
 
@@ -1865,20 +2087,24 @@ function CLEAR.since()
 end
 
 -- The context edits a request sends: the hard clear once the API has said
--- the conversation is too long; a deep clear at the mark and the same
--- after it; before it, all thinking kept and no tool call cleared.
+-- the conversation is too long; a deep clear when a compaction brought no
+-- summary, and the same after it; else all thinking kept and no tool call
+-- cleared.
 local function contextEdits()
-    if hardClear then return { edits = CLEAR.edits(HARD_THINKING, HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST) } end
-    local edits = CLEAR.atMark(CLEAR.lastInput) or (CLEAR.at and CLEAR.since())
+    if hardClear then return { edits = CLEAR.edits(CLEAR.HARD.thinking, CLEAR.HARD.trigger, CLEAR.HARD.keep, CLEAR.HARD.atLeast) } end
+    local edits = CLEAR.atMark(CLEAR.deep) or (CLEAR.at and CLEAR.since())
     return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
 
-local function body()
+-- The request's body: the conversation, or with `compact` ({ messages,
+-- maxTokens }) a compaction request for those messages, which carries no
+-- context edits (the API refuses them with it) and no fallback model.
+local function body(compact)
     -- (unicode_strings: without it each byte past ASCII is sent as a
     -- character of its own, and the API reads its "×" back as "Ã—")
     return textutils.serialiseJSON(asUTF8({
         model = MODEL,
-        max_tokens = MAX_TOKENS,
+        max_tokens = compact and compact.maxTokens or MAX_TOKENS,
         -- cached: the system prompt and tools (they never change), and
         -- the conversation up to its last block, read back by the next
         -- call (the top-level cache_control: the API moves that mark on
@@ -1887,7 +2113,7 @@ local function body()
         system = { { type = "text", text = SYSTEM, cache_control = CACHE } },
         cache_control = CACHE,
         tools = TOOLS,
-        messages = messages,
+        messages = compact and compact.messages or messages,
         output_config = { effort = EFFORT },
         -- streamed, with the thinking summarised as it goes: CC's timeout
         -- is for 60 s with nothing coming in, so the reply has to keep
@@ -1897,12 +2123,13 @@ local function body()
         thinking = { type = "adaptive", display = "summarized" },
         -- a refusal by the safety classifiers is retried on a fallback
         -- model server-side (see the API docs: server-side fallback)
-        fallbacks = "default",
+        fallbacks = not compact and "default" or nil,
         -- a long session's old tool calls and thinking are cleared
         -- server-side in one go at a mark (the newest kept, the memory
         -- tool's never), so each round trip doesn't carry all of them
         -- (contextEdits; see the API docs: context editing)
-        context_management = contextEdits(),
+        context_management = not compact and contextEdits() or nil,
+        compaction = compact and { type = "summarize", instructions = COMPACT.INSTRUCTIONS } or nil,
     }), { allow_repetitions = true, unicode_strings = true })
 end
 
@@ -1912,6 +2139,17 @@ local HEADERS = {
     ["anthropic-version"] = API_VERSION,
     ["anthropic-beta"] = "server-side-fallback-2026-07-01,context-management-2025-06-27",
 }
+
+-- The headers: with compaction's beta header too on a compaction request
+-- and on every request whose conversation starts with a summary
+function COMPACT.headers(compact)
+    local first = messages[1]
+    local block = first and type(first.content) == "table" and first.content[1]
+    if not (compact or block and block.type == "compaction") then return HEADERS end
+    local h = tables.copy(HEADERS)
+    h["anthropic-beta"] = HEADERS["anthropic-beta"] .. "," .. COMPACT.beta
+    return h
+end
 
 -- The events' data in a streamed reply: what follows each "data: ", up to
 -- the end of its line.
@@ -1992,13 +2230,15 @@ end
 local RETRY_CODES = { [429] = true, [500] = true, [502] = true, [503] = true, [529] = true }
 local RETRY_ERRORS = { overloaded_error = true, api_error = true, rate_limit_error = true }
 
--- Send the conversation; the reply as a table, or nil and why.  Rate
--- limits, overloads and outages are retried with a growing wait, and so
--- is a stream cut off by an overload.
-local function request()
+-- Send the conversation (or `compact`'s compaction request, as body has
+-- it); the reply as a table, or nil and why.  Rate limits, overloads and
+-- outages are retried with a growing wait, and so is a stream cut off by
+-- an overload.
+local function request(compact)
     local wait = 2
     for attempt = 1, RETRIES + 2 do         -- (one more for the harder clear)
-        local h, err, failed = http.post({ url = API_URL, headers = HEADERS, body = body(), timeout = HTTP_TIMEOUT })
+        local h, err, failed = http.post({ url = API_URL, headers = COMPACT.headers(compact), body = body(compact),
+                                           timeout = HTTP_TIMEOUT })
         local code, got
         if h then
             code, got = h.getResponseCode(), h.readAll()
@@ -2025,12 +2265,12 @@ local function request()
             end
             again = (not code) or RETRY_CODES[code] == true
         end
-        if tooLong and not hardClear then
+        if tooLong and not hardClear and not compact then
             -- once, at once: the same conversation with more of it cleared
             hardClear = true
             say("orange", "API: the conversation is too long; trying again with more of it cleared.")
             log(string.format("API: %s; trying again with a harder clear (from %d tokens, the last %d tool uses kept)",
-                detail, HARD_TRIGGER, HARD_KEEP))
+                detail, CLEAR.HARD.trigger, CLEAR.HARD.keep))
         elseif not again or attempt > RETRIES then
             local failure = string.format("API request failed%s: %s", code and code ~= 200 and (" (HTTP " .. code .. ")") or "", detail)
             log(failure)
@@ -2146,7 +2386,7 @@ local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
 -- A new conversation: no clears seen, nothing to compare with
 function replyLog.reset()
     replyLog.cleared, replyLog.last = {}, nil
-    CLEAR.lastInput, CLEAR.at = nil, nil
+    CLEAR.lastInput, CLEAR.at, CLEAR.deep = nil, nil, nil
 end
 
 -- Log what changed in `reply` (asked for at `started`)
@@ -2183,6 +2423,138 @@ function replyLog.add(reply, started)
     end
 end
 
+-- A compaction reply's usage, for count: its own counts are 0, the
+-- summary call's are in usage.iterations
+function COMPACT.usage(reply)
+    local u = { input_tokens = 0, output_tokens = 0, cache_read_input_tokens = 0, cache_creation_input_tokens = 0 }
+    for _, it in ipairs((reply.usage or {}).iterations or {}) do
+        for k in pairs(u) do u[k] = u[k] + (tonumber(it[k]) or 0) end
+    end
+    return { usage = u }
+end
+
+-- The conversation from the summary on: the block first, as an assistant
+-- message of its own (with the cache's mark after it), in place of the
+-- messages it summarized, then the ones kept as they were.  What was
+-- cleared or counted of the old conversation goes with it.  The skills'
+-- list, which the summary would swallow, goes with the next message
+-- (ADR-0013 D10): onto the results not yet sent, inside a goal; with the
+-- next goal, at a goal's end.
+function COMPACT.swap(cut, block)
+    block.cache_control = CACHE
+    local kept = {}
+    for i = cut + 1, #messages do kept[#kept + 1] = messages[i] end
+    for i = #messages, 1, -1 do messages[i] = nil end
+    messages[1] = { role = "assistant", content = { block } }
+    for _, m in ipairs(kept) do messages[#messages + 1] = m end
+    hardClear = false
+    replyLog.reset()
+    local skills, last = SKILLS.note(), messages[#messages]
+    if skills and last.role == "user" and type(last.content) == "table" then
+        last.content[#last.content + 1] = { type = "text", text = skills }
+    elseif skills then
+        startNotes[#startNotes + 1] = skills
+    end
+end
+
+-- Summarize messages 1 to cut (`why` for the log), keeping the rest word
+-- for word after the summary: true once the conversation starts with it;
+-- false (logged) when no summary came, and the next request clears deep.
+function COMPACT.run(cut, why)
+    local done = COMPACT.ask(cut, why)
+    if not done then CLEAR.deep = CLEAR.lastInput or 0 end
+    return done
+end
+
+function COMPACT.ask(cut, why)
+    local part = {}
+    for i = 1, cut do part[i] = messages[i] end
+    log(string.format("compacting at %s: %d messages, %d kept as they are; the last call had %d tokens in",
+        why, cut, #messages - cut, CLEAR.lastInput or 0))
+    local asked = { messages = part, maxTokens = COMPACT.maxTokens }
+    for _ = 1, 2 do
+        local started = now()
+        local reply, err = request(asked)
+        if not reply then
+            log("compaction failed: " .. tostring(err))
+            return false
+        end
+        local spent = COMPACT.usage(reply)
+        count(spent, now() - started)
+        local block = reply.content and reply.content[1]
+        if reply.stop_reason == "compaction" and block and block.type == "compaction" then
+            COMPACT.swap(cut, block)
+            local u = spent.usage
+            log(string.format("compacted: %d messages into a summary of %d tokens (%d characters); the call read %d tokens, %d of them from the cache",
+                cut, u.output_tokens, #tostring(block.content or ""),
+                u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens, u.cache_read_input_tokens))
+            return true
+        end
+        local short = reply.stop_reason == "max_tokens"
+        log(string.format("compaction: no summary (stop_reason %s)%s", tostring(reply.stop_reason),
+            short and string.format("; asked again with %d tokens", asked.maxTokens * 2) or ""))
+        if not short then return false end
+        asked.maxTokens = asked.maxTokens * 2
+    end
+    return false
+end
+
+-- Is a goal's end the time to compact: the last call's input over
+-- COMPACT.boundary (nil after a web search: not this time)
+function COMPACT.due()
+    return (CLEAR.lastInput or 0) > COMPACT.boundary and #messages > 1
+end
+
+-- The player's next line, the conversation summarized meanwhile when it's
+-- due: while they type (as a routine beside the prompt), and before their
+-- goal is sent if they're quicker (with no parallel, always after they
+-- type); not when they quit or start a new conversation (COMPACT.DROPPED).
+-- All of it: an assistant turn whose tool calls have no results (the API
+-- refuses that) stays out, kept.
+COMPACT.DROPPED = { [""] = true, ["/new"] = true }
+function COMPACT.whileAsking(label)
+    if not COMPACT.due() then return ask(label) end
+    say("grey", string.format("(the conversation, %dk tokens, is summarized while you type)", math.floor(CLEAR.lastInput / 1000 + 0.5)))
+    local cut = #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+    if not (parallel and parallel.waitForAny) then
+        local line = ask(label)
+        if not COMPACT.DROPPED[text.trim(line)] then COMPACT.run(cut, "a goal's end") end
+        return line
+    end
+    local w = {}
+    parallel.waitForAny(
+        function()
+            COMPACT.run(cut, "a goal's end")
+            w.done = true
+            while w.line == nil do os.pullEvent() end
+        end,
+        function()
+            w.line = ask(label)
+            while not w.done and not COMPACT.DROPPED[text.trim(w.line)] do os.pullEvent() end
+        end)
+    return w.line
+end
+
+-- Inside a goal, right after a batch of tool results: once the last call's
+-- input reached COMPACT.mid, the conversation is summarized but for its
+-- last COMPACT.keep turns, kept word for word.  The cut falls where a
+-- request already sent ended (the player's message or results, then the
+-- reply to it), so the kept turns' thinking stays good and no tool call is
+-- left without its result.  Once one brought no summary, not again in
+-- this goal (COMPACT.failed): the deep clear has done the work.
+function COMPACT.inGoal()
+    if (CLEAR.lastInput or 0) < COMPACT.mid or COMPACT.failed then return end
+    for k = COMPACT.keep, 1, -1 do
+        local cut = #messages - 2 * k
+        if cut >= 2 and messages[cut].role == "user" and messages[cut + 1].role == "assistant" then
+            say("grey", string.format("(the conversation, %dk tokens, is summarized; the last %d turns kept)",
+                math.floor(CLEAR.lastInput / 1000 + 0.5), k))
+            COMPACT.failed = not COMPACT.run(cut, "a goal's middle")
+            return
+        end
+    end
+end
+
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -2190,6 +2562,7 @@ local function converse(goal)
     log("goal: " .. goal)
     local steps, overBudget, cutOff, pauses = 0, false, false, 0
     local quietSince = now()             -- (the goal's start, then each reminder: the player's last word is T.report's)
+    COMPACT.failed = nil
     while true do
         local started = now()
         local reply, err = listen.around(request)
@@ -2249,6 +2622,7 @@ local function converse(goal)
                 log("reminded: " .. quiet)
             end
             messages[#messages + 1] = { role = "user", content = results }
+            COMPACT.inGoal()
         elseif reply.stop_reason == "max_tokens" then
             -- thinking, when all it put out was thinking or it stopped in a thinking block
             local u, last = reply.usage or {}, reply.content[#reply.content]
@@ -2284,7 +2658,6 @@ end
 --------------------------------------------------------------------------
 -- /new at the prompt: the conversation emptied, the helpers loaded again
 -- (what's on disk, the memory and the files, carries over)
-local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
     hardClear, startNotes = false, {}
@@ -2293,10 +2666,51 @@ local function newConversation()
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
     say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
+    startNotes[#startNotes + 1] = SKILLS.note()
     local memory = NOTES.note()
     if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
 end
+
+-- The session's first task when the notes are large (ADR-0013 D9): the
+-- model tidies them, as a goal of the harness's, before the player's; then
+-- the player's goals start a conversation of their own, without the old
+-- notes it viewed whole, told what the session's start told the first.
+function NOTES.firstTask()
+    local told = {}
+    for _, note in ipairs(startNotes) do
+        if note ~= SKILLS.listed then told[#told + 1] = note end      -- (the skills listed afresh after it)
+    end
+    local before = tables.copy(usage)
+    converse(NOTES.tidyGoal())
+    listen.putBack()
+    local line = tokenLine(before)
+    say("grey", line)
+    log("tidy done: " .. line)
+    for i = #messages, 1, -1 do messages[i] = nil end
+    hardClear = false
+    replyLog.reset()
+    startNotes = told
+    startNotes[#startNotes + 1] = SKILLS.note()
+    startNotes[#startNotes + 1] = "Your notes were tidied in a conversation before this one, which was put aside: view /memories afresh."
+end
+
+-- /skills at the prompt: the skills there are, shown (not sent)
+function SKILLS.show()
+    local all = SKILLS.all()
+    if #all == 0 then say("yellow", "No skills: the shipped ones are in " .. SKILLS.shipped .. "/, Claude's own in /" .. SKILLS.own .. "/.") end
+    for _, s in ipairs(all) do
+        say("yellow", s.name .. (s.own and " (Claude's own): " or ": ") .. (s.description or "no description"))
+    end
+end
+
+-- The commands at the prompt: each gives the next line, or the goal the
+-- harness makes (/tidy), to go on with
+local COMMANDS = {
+    ["/new"] = function() newConversation(); return ask("Goal: ") end,
+    ["/tidy"] = function() return NOTES.tidyGoal() end,
+    ["/skills"] = function() SKILLS.show(); return ask("> ") end,
+}
 
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
@@ -2322,11 +2736,10 @@ local function main()
         log("news: " .. news)
         startNotes[#startNotes + 1] = news
     end
-    local memory = NOTES.note()
+    local memory = NOTES.size(MEMORY_DIR) > NOTES.large and NOTES.note()
     if memory then
-        say("yellow", memory)
+        say("yellow", memory .. " Claude tidies them first.")
         log("memory: " .. memory)
-        startNotes[#startNotes + 1] = memory
     end
     -- (ADR-0013 D3: no player set, what reports speaks to everyone)
     if settings and (settings.get("turtle.player") or "") == "" then
@@ -2334,19 +2747,33 @@ local function main()
         say("yellow", nobody)
         startNotes[#startNotes + 1] = nobody
     end
+    -- (ADR-0013 D10: the skills listed in the first message, not the system
+    -- prompt, so one written in the session leaves the cache alone)
+    SKILLS.listed = SKILLS.note()
+    if SKILLS.listed then
+        startNotes[#startNotes + 1] = SKILLS.listed
+        log(string.format("skills: %d listed", text.count(SKILLS.listed, "\n")))
+    end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
+    if memory then NOTES.firstTask() end
     if goal == "" then
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        if text.trim(goal) == NEW then
-            newConversation()
-            goal = ask("Goal: ")
+        local command = COMMANDS[text.trim(goal)]
+        if command then
+            goal = command()
         else
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)
             fileio.write(resume.file, resume.prefix .. " " .. resume.given .. "\n" .. (resume.goal or goal) .. "\n")
             resume.goal = nil
+            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own)
+            local fit = goal ~= NOTES.given and SKILLS.fit(goal)
+            if fit then
+                startNotes[#startNotes + 1] = fit
+                log(fit)
+            end
             local before = tables.copy(usage)
             converse(goal)
             listen.putBack()            -- (the chat box off till the next goal's first request)
@@ -2354,7 +2781,7 @@ local function main()
             say("grey", line)
             log("goal done: " .. line)
             fs.delete(resume.file)
-            goal = ask("> ")
+            goal = COMPACT.whileAsking("> ")
         end
     end
 end

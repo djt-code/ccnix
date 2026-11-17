@@ -4,8 +4,8 @@
 D3 as option C (everything that reports speaks to everyone unless
 `turtle.player` is set); D2 with the longer-term path through ADR-0006;
 D6's light threshold checked against the game's code (below); D9 added
-the same day (compaction and tidy notes), amending D1's deep clear; D10
-added the same day (skills)
+the same day (compaction and tidy notes), amending D1's deep clear, and
+settled as B and C together (below); D10 added the same day (skills)
 **Date:** 2026-11-17
 **Deciders:** Dan Theisen
 
@@ -213,7 +213,8 @@ untested in game. `T.placeDir(d, text)` and `T.frameId` were never used.
 8. **No automatic search-limit retry** in T.travel (D8).
 9. **Compaction instead of the deep clear, and tidy notes** (D9, added
    after the user's question: clearing is a bulldozer, and the turtle
-   did worse this round).
+   did worse this round): at a goal's end over 100k, and inside a goal
+   at 250k keeping the last turns; clearing only when no summary comes.
 10. **Skills:** shipped procedures and the turtle's own, listed by name
     and read when a goal needs them (D10).
 9. **Phase 1 (defects and feedback, no decision):**
@@ -437,13 +438,24 @@ and Sonnet 5.5 among its models):
 | Cost a time | a rewrite of the floor (~100-200k weighted) | the summary call (~6k reading the conversation from the cache, ~5k written: ~30k weighted) and a small new prefix | the same, more often |
 | Lines | done in D1 | ~80 claude.lua, the claude_drive mock's compaction reply | +~40 (the keep-recent split) |
 
-**B (accepted).**
+**B and C (the user, 2026-11-17).**
 - At a goal boundary nobody waits, since the harness is waiting for the
-  player anyway.
+  player anyway: when a goal ends with the last call's input over 100k,
+  the conversation is compacted while the player types, and before
+  their goal is sent if they're quicker.
+- Inside a goal, once a call's input reaches 250k, it's compacted right
+  after a batch of tool results (never with a reply still waiting on
+  its results), the last 3 turns kept word for word.
+- This replaces D1's deep clear at 180k as the mid-goal step: under the
+  mark all thinking is kept and no tool call cleared. Clearing stays as
+  the emergency fallback: the hard clear after "prompt is too long", and
+  D1's deep clear when a compaction brings no summary.
+- The summary prompt is ours: the goal and how far it got, open tasks,
+  the player's words, preferences and corrections, places, what's built
+  and how, lessons, helper and skill names, the T calls that worked; no
+  tool calls, short.
 - The model starts each goal on a summary instead of a heap of
   placeholders.
-- Mid-goal compaction can come later if v4 shows long goals hitting the
-  backstop.
 
 **Tidy notes.** The memory file `notes.md` was 80 KB, about 28k tokens
 every session, and is never cleared. When the notes pass 32 KB at a
@@ -455,7 +467,7 @@ them:
 
 The model does it, not a cheaper summarizer, because it knows what
 matters. Nothing is lost. The task runs before the player's goal, or as
-`/tidy`.
+`/tidy`. Stable procedures it finds go into skills (D10).
 
 ### D10. Skills (added 2026-11-17)
 
@@ -468,7 +480,7 @@ The user asked to give the turtle skills, and to let it write its own.
   notes point there, and their lessons never reach the next session's
   first thought.
 
-**A skill** is a folder holding `SKILL.md`, the same shape as Claude
+**A skill** is a folder holding `skill.md`, the same shape as Claude
 Code's skills:
 - the frontmatter has a `name` and a one-line `description`;
 - the body is a procedure: steps, rules, pitfalls, which `T` calls to
@@ -476,7 +488,9 @@ Code's skills:
 - it may name helpers kept with `keep()`.
 
 **Two sources:**
-- **Shipped in the ROM** (`turtle/skills/<name>/SKILL.md`), written from
+- **Shipped in the ROM** (`turtle/skills/<name>/skill.md`; lowercase,
+  not Claude Code's `SKILL.md`, since the ROM is a data pack and its
+  paths take no capitals), written from
   the field reports. The first set:
   - `build-for-player`: headroom, railings, top slabs, T.lint and
     T.walkable;
@@ -487,7 +501,7 @@ Code's skills:
     (its own rules after the runaway harvest);
   - `storage`: categories and T.sortChests;
   - `field-report`: keeping `report_harness_vN.md`.
-- **Its own** (`/claude/skills/<name>/SKILL.md`):
+- **Its own** (`/claude/skills/<name>/skill.md`):
   - `skill(name, description, body)` in the code's world writes one, as
     `keep()` writes a helper, and refuses a bad name or a missing
     description;
