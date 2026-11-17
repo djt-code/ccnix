@@ -1911,7 +1911,8 @@ end
 
 -- 41. the prompt and the manual (ADR-0013 phase 2): what a turtle can't
 --     do and the player tests, a block put back with T.placeAt, a why
---     read whole before it's shortened, notes kept short
+--     read whole before it's shortened, notes kept short; the index's
+--     lines for T.moveTo's path and T.inspectAll
 do
 fresh({ "" })
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
@@ -1927,4 +1928,7 @@ check("...notes kept short, the old outside /memories",
     sys41:find("the old moved to an archive file outside /memories", 1, true) ~= nil)
 check("the manual's overview says what a turtle can't do",
     REAL_MANUAL:find("A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal", 1, true) ~= nil)
+check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way to block states over an area",
+    sys41:find("\nT%.moveTo%(x, y, z, opts%) %- [^\n]*path = true hands a blocked run to T%.travel")
+        and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
 end

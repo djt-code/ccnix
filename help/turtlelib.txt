@@ -291,7 +291,7 @@ T.cellSet(spec)
     Each is "x,y,z" or { x, y, z } (fields or the three numbers in order); a set's keys are "x,y,z" too, and one cell { x =, y =, z = } on its own will do.
 
 T.moveTo(x, y, z, opts)
-    Move to the cell x, y, z (the turtle's frame), digging only what opts.dig allows. True (and a warning if it dug under sand), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid, path.
+    Move to x, y, z, digging only what opts.dig allows: true (and a warning, if any), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid; path = true hands a blocked run to T.travel.
 
     It goes along the axes in the order opts.order names (default "yxz": up or down first, then x, then z). opts (all optional):
       dig     false (default), true, a glob, or a list or set of globs: the
@@ -1122,6 +1122,6 @@ T.inspectAt(x, y, z, opts)
     The state (a stair's facing, a slab's half) is what a scan can't give. opts.move is passed to T.moveTo (dig and so on); without it the turtle goes round what is in the way with the path finder ({ path = true, scan = false }).
 
 T.inspectAll(list, opts)
-    T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed.
+    T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed: the way to get block states over an area (T.scan gives names only).
 
     Each time it goes next to the nearest one (greedy, not the shortest tour), and looks at any other cell beside it from there.
