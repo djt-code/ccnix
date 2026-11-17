@@ -755,6 +755,14 @@ end
 -- What a temporary block may be, the first found on board (opts.temp names another): plain blocks that come back as
 -- themselves when dug
 local TEMP_BLOCKS = { "cobblestone", "cobbled_deepslate", "dirt", "netherrack", "blackstone", "*_planks", "*bricks" }
+-- Floors that come back as themselves when dug (with a pickaxe), so digBelow can put back the one it dug: those, and
+-- these.  (Stone gives cobblestone, deepslate cobbled deepslate, grass dirt: those must be carried.)
+local SELF_DROPS = { "soul_soil", "soul_sand", "basalt", "polished_basalt", "smooth_basalt", "mossy_cobblestone",
+                     "andesite", "diorite", "granite", "polished_*", "tuff", "calcite", "end_stone", "smooth_stone",
+                     "sandstone", "red_sandstone", "terracotta", "*_terracotta", "*_concrete", "*_wool", "*_log", "*_wood",
+                     "*_stem", "*_hyphae", "quartz_block", "purpur_block", "obsidian", "crying_obsidian" }
+for _, g in ipairs(TEMP_BLOCKS) do SELF_DROPS[#SELF_DROPS + 1] = g end
+local dropsItself = T.nameTest(SELF_DROPS)
 local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
@@ -783,9 +791,9 @@ end
 -- list, for the message).  A top half (a slab, stair or trapdoor) is placed from below against a block above the
 -- target; with nothing there, a temporary block goes there first (opts.temp, or one of TEMP_BLOCKS on board) and is
 -- taken away after, from a free cell beside it.  With a floor under the target, only when opts.digBelow says so: the
--- floor is dug to stand in, and put back after with the same block (one must be on board, as the block dug may drop
--- something else) from a free cell beside it.  Each way is an approach as plan gives them, with support = { temp,
--- floor } (the names of the temporary block and of the floor dug).
+-- floor is dug to stand in, and put back after with the same block from a free cell beside it (one on board, or for a
+-- floor that drops itself a free slot for the one dug).  Each way is an approach as plan gives them, with support =
+-- { temp, floor } (the names of the temporary block and of the floor dug).  The notes say every need not met.
 local function supportPlans(famName, fam, item, learned, want, tx, ty, tz, base, tried, opts)
     local apps, notes = {}, {}
     local above, below = nameAt(tx, ty + 1, tz), nameAt(tx, ty - 1, tz)
@@ -801,15 +809,20 @@ local function supportPlans(famName, fam, item, learned, want, tx, ty, tz, base,
     end
     if next(rowFor) == nil then return apps, notes end
     local at = tx .. "," .. (ty - 1) .. "," .. tz
-    if floor and not opts.digBelow then
-        notes[#notes + 1] = "from below it needs to stand where the floor is (" .. below .. " at " .. at .. "): opts.digBelow = true " ..
-            "digs it, places from there and puts the same block back"
-    elseif floor and T.countItem(below) == 0 then
-        notes[#notes + 1] = "opts.digBelow puts the floor back with the same block: carry one " .. below ..
-            " (the one dug may drop something else)"
-    elseif floor and not freeBeside(tx, ty - 1, tz, "up") then
-        notes[#notes + 1] = "opts.digBelow needs a way out of the floor at " .. at .. " to put it back from, and the map shows " ..
-            "no free cell beside the floor"
+    if floor then
+        if not opts.digBelow then
+            notes[#notes + 1] = "from below it needs to stand where the floor is (" .. below .. " at " .. at .. "): opts.digBelow = true " ..
+                "digs it, places from there and puts the same block back"
+        end
+        local itself = dropsItself(below)
+        if T.countItem(below) == 0 and not (itself and T.freeSlots() > 0) then
+            notes[#notes + 1] = itself and ("opts.digBelow puts the floor back with the " .. below .. " it digs: free a slot for it (or carry one)")
+                or ("opts.digBelow puts the floor back with the same block: carry one " .. below .. " (the one dug may drop something else)")
+        end
+        if not freeBeside(tx, ty - 1, tz, "up") then
+            notes[#notes + 1] = "opts.digBelow needs a way out of the floor at " .. at .. " to put it back from, and the map shows " ..
+                "no free cell beside the floor"
+        end
     end
     local tempName = temp and tempBlock(item, opts.temp) or nil
     if temp and not tempName then
@@ -962,8 +975,9 @@ end
 -- touched.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
--- floor is dug to stand in and put back after with the same block (carry one: the one dug may drop something else).
--- Without digBelow the floor is never dug, and the failure says the option is there.  Returns the block's name, its
+-- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
+-- when dug, as soul soil, planks or bricks do, and a slot is free for it).  Without digBelow the floor is never dug,
+-- and the failure says the option is there, with whatever else digging it would need.  Returns the block's name, its
 -- state, and { approach, from, heading, tries, lines, support } (approach is front, down or up; from the cell the
 -- turtle stood in; lines a sign's text; support { temp, floor }: the names of the block put above and the floor dug).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above

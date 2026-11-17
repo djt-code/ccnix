@@ -19,8 +19,9 @@
 --     below, and the block is taken away (opts.temp names it; none on board is refused, saying so);
 --   * opts.digBelow: a top slab on a floor refused without it (the floor untouched, the option named); with it the
 --     floor dug, the slab placed from there, the floor put back (a log floor the same way round), with a temporary
---     block above too when nothing is there; refused before digging with none of the floor's block on board, with no
---     way out of the floor's cell, in a protected area (unless opts.inside);
+--     block above too when nothing is there; a floor that drops itself (soul soil) needing none on board, only a free
+--     slot; refused before digging with none of the floor's block on board, with no way out of the floor's cell, in a
+--     protected area (unless opts.inside); every unmet need said at once;
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -665,12 +666,31 @@ do
         name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "oak_log", { axis = "y" }) and W.get(0, 1, 3) == nil
         and how.support and how.support.temp == COBBLE and W.carrying(COBBLE) == 1 and W.carrying("minecraft:oak_log") == 1,
         tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, -1, 3) .. " " .. W.show(0, 1, 3))
+    -- a floor that comes back as itself when dug needs none on board, only a free slot for the one dug (ADR-0013)
+    floorScene({ "minecraft:soul_soil" }, { STAIR_ON })
+    W.give(1, SL, 4)
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("a soul soil floor and none on board: dug, the slab placed from there, the floor put back with the soil dug",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "soul_soil") and W.carrying("minecraft:soul_soil") == 0
+        and how and how.support and how.support.floor == "minecraft:soul_soil", tostring(state) .. " " .. W.show(0, -1, 3))
+    floorScene({ "minecraft:soul_soil" }, { STAIR_ON })
+    W.give(1, SL, 4)
+    for slot = 2, 16 do W.give(slot, "minecraft:dirt", 64) end
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...but with no free slot for the soil dug: refused, nothing dug, saying so", name == nil and W.dug == nil
+        and has(0, -1, 3, "soul_soil") and why:find("free a slot", 1, true) ~= nil, tostring(why))
     -- refusals before anything is dug
-    floorScene({ FLOOR }, { STAIR_ON })
+    floorScene({ STONE }, { STAIR_ON })
     W.give(1, SL, 4)
     name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
-    check("opts.digBelow with none of the floor's block on board: refused, nothing dug, saying to carry one",
-        name == nil and W.dug == nil and has(0, -1, 3, "stone_bricks") and why:find("carry one minecraft:stone_bricks", 1, true) ~= nil, tostring(why))
+    check("opts.digBelow on a floor that drops something else, with none of it on board: refused, nothing dug, saying to carry one",
+        name == nil and W.dug == nil and has(0, -1, 3, "stone") and why:find("carry one minecraft:stone", 1, true) ~= nil, tostring(why))
+    floorScene({ STONE }, { STAIR_ON, stone(0, -2, 3) })
+    W.give(1, SL, 4)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("every need of a dug floor said at once: the option, a block to carry, a way out",
+        name == nil and W.dug == nil and why:find("opts.digBelow = true", 1, true) ~= nil and why:find("carry one minecraft:stone", 1, true) ~= nil
+        and why:find("no free cell beside the floor", 1, true) ~= nil, tostring(why))
     floorScene({ FLOOR }, { STAIR_ON, stone(0, -2, 3) })
     W.give(1, SL, 4)
     W.give(2, FLOOR, 1)
