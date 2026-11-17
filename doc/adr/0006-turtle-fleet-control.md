@@ -170,3 +170,14 @@ modem.
     the turtles needn't carry one. (Noted 2026-11-15: a chat box doesn't
     hear another chat box, so a turtle's own `T.report` never reaches
     IRC.)
+11. [ ] Claude bots under turtled (noted 2026-11-17, from ADR-0013 D2): a
+    controller model (Opus by default, selectable) drives agent bots
+    (claude turtles on Sonnet by default, selectable; optionally other
+    kinds of bot), and the player's chat reaches them over CC's `http`
+    through the gateway (option 1 above), so no turtle carries a chat
+    box to listen.
+12. [ ] The `http` path in NAT mode too (noted 2026-11-17): a computer's
+    `http` request to an in-game address reaches it when the server
+    runs the gateway in NAT mode, not only in TUN mode (today: "NAT mode
+    would need a port forward"). Mostly ccnix-mod's gateway: a lockstep
+    change.
