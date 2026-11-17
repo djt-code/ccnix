@@ -1,6 +1,6 @@
--- lint.lua -- a build as a two-tall player meets it: warnings about its stairs, railings, drops and lanterns
+-- lint.lua -- a build as a two-tall player meets it: warnings about its stairs, railings, drops and lanterns, and paths
 --
--- Loaded by turtlelib the first time T.lint is used.  Cells are the turtle's own (the frame it counts in).
+-- Loaded by turtlelib the first time T.lint or T.walkable is used.  Cells are the turtle's own (the frame it counts in).
 --
 -- The turtle is one block tall and the player two (1.8, stepping up a block at most), so a build the turtle gets
 -- round can still stop a player.  T.lint reads a build from the map, or a plan's own cells with the map round them,
@@ -16,6 +16,13 @@
 -- A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll,
 -- T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is
 -- counted as unchecked and only its headroom is looked at.  A cell the map has never seen breaks no rule.
+--
+-- T.walkable searches the map for a way a player walks from one cell to another (breadth first: fewest steps).  A
+-- player's place is the cell its feet are in, over a block to stand on (or on a ladder), and its height in half blocks
+-- (a bottom slab is half a block, a fence or wall one and a half).  A step goes to a side, up a block at most (a stair or
+-- a slab is a step like any other) or down any height; a climb goes up or down a ladder.  The body is 1.8 high, so a
+-- step up needs 3 air where it starts as well as 2 where it ends (the reason a stair needs 3 air).  Lava and fire are
+-- never walked into, water breaks a fall, and a fall over 3 is taken only when there is no way without one, and listed.
 
 local T = require("turtlelib")
 
@@ -26,6 +33,9 @@ local DEEP = 64                   -- how far down a drop is measured
 -- The rules in the order the warnings come
 local RULES = { "headroom", "approach", "exit", "railing", "drop", "lantern" }
 local COMPASS_AT = { north = 0, east = 1, south = 2, west = 3 }
+local WALK_LIMIT = 20000          -- places a walk search visits at most (opts.limit)
+local WALK_MARGIN = 16            -- how far outside the box of the two ends it may go (opts.margin)
+local REASONS = 3                 -- why-nots told, at most, when there is no walk
 
 -- What a block is to a player, by kind.  pass: the body goes through it; floor: a player stands on it; height: its
 -- top in half blocks
@@ -373,6 +383,186 @@ function T.lint(what, opts)
         end
     end
     return warnings, info
+end
+
+--------------------------------------------------------------------------
+-- Walking
+--------------------------------------------------------------------------
+
+-- The highest cell a player's body is in, standing at H (half blocks): its top is 1.8 over its feet.
+local function topCell(H) return math.ceil((5 * H + 18) / 10) - 1 end
+
+-- Half blocks as blocks, in words: "1", "1.5".
+local function blocks(n) return math.floor(n / 2) .. (n % 2 == 1 and ".5" or "") end
+
+-- Where a player with its feet in x, y, z stands: its height H in half blocks, or nil and why.
+local function standIn(view, x, y, z)
+    local feet = view(x, y, z)
+    if not feet then return nil, key(x, y, z) .. " isn't in the map" end
+    if not feet.kind.pass or feet.kind.hot then return nil, key(x, y, z) .. " holds " .. feet.name end
+    local floor = view(x, y - 1, z)
+    local H
+    if floor and not floor.kind.pass then
+        H = 2 * (y - 1) + heightOf(floor)
+    elseif feet.kind.climb then
+        H = 2 * y
+    elseif not floor then
+        return nil, "the map hasn't seen under " .. key(x, y, z)
+    else
+        return nil, "nothing to stand on under " .. key(x, y, z)
+    end
+    for c = y + 1, topCell(H) do
+        local b = view(x, c, z)
+        if not (b and b.kind.pass) then return nil, "no room for a player's head at " .. key(x, c, z) end
+    end
+    return H
+end
+
+-- A step from the place p ({ x, y, z, H }) to the column nx, nz: the place it ends in ({ x, y, z, H, fall }), or nil
+-- and why.  The player goes across at its height and drops to what is under it there, or steps up onto it.
+local function stepTo(view, p, nx, nz, maxFall)
+    local top = topCell(p.H)
+    local c, soft, block = top, false, nil
+    while true do
+        local b = view(nx, c, nz)
+        if not b then return nil, "the map hasn't seen " .. key(nx, c, nz) end
+        if not b.kind.pass then block = b; break end
+        if b.kind.hot then return nil, b.name .. " at " .. key(nx, c, nz) end
+        if b.kind.soft then soft = true end
+        if b.kind.climb and c <= p.y then          -- (walked into a ladder, or caught one falling)
+            local H, why = standIn(view, nx, c, nz)
+            if not H then return nil, why end
+            return { x = nx, y = c, z = nz, H = H }
+        end
+        if top - c > DEEP then return nil, "a drop of more than " .. DEEP .. " at " .. key(nx, p.y, nz) end
+        c = c - 1
+    end
+    local H = 2 * c + heightOf(block)
+    local rise = H - p.H
+    if rise > 2 then
+        if c > p.y then return nil, block.name .. " at " .. key(nx, c, nz) .. " is in the way" end
+        return nil, block.name .. " at " .. key(nx, c, nz) .. " is a step of " .. blocks(rise) .. " (a player climbs 1 at most)"
+    end
+    -- (going up, the body reaches higher in both columns: 3 air where a step up starts)
+    for k = top + 1, topCell(math.max(p.H, H)) do
+        for _, at in ipairs({ { p.x, p.z }, { nx, nz } }) do
+            local b = view(at[1], k, at[2])
+            if not (b and b.kind.pass) then
+                return nil, "headroom: " .. (b and b.name or "a cell never seen") .. " at " .. key(at[1], k, at[2])
+                    .. ": a step up needs 3 air where it starts and 2 where it ends"
+            end
+        end
+    end
+    local fall = (not soft and -rise > 2 * SAFE_FALL) and -rise or nil
+    if fall and fall > 2 * maxFall then
+        return nil, "a fall of " .. blocks(fall) .. " to " .. key(nx, c + 1, nz) .. " (opts.maxFall is " .. maxFall .. ")"
+    end
+    return { x = nx, y = c + 1, z = nz, H = H, fall = fall }
+end
+
+-- Where a player goes from the place p: a list of places; fail(x, y, z, why) is told of each way that's shut.
+local function movesFrom(view, p, maxFall, fail)
+    local out = {}
+    for h = 0, 3 do
+        local d = T.DELTA[h]
+        local nx, nz = p.x + d[1], p.z + d[3]
+        local q, why = stepTo(view, p, nx, nz, maxFall)
+        if q then out[#out + 1] = q else fail(nx, p.y, nz, why) end
+    end
+    local here = view(p.x, p.y, p.z)
+    if here and here.kind.climb then
+        for _, dy in ipairs({ 1, -1 }) do
+            local rung = view(p.x, p.y + dy, p.z)
+            if rung and rung.kind.climb then
+                local H, why = standIn(view, p.x, p.y + dy, p.z)
+                if H then out[#out + 1] = { x = p.x, y = p.y + dy, z = p.z, H = H } else fail(p.x, p.y + dy, p.z, why) end
+            end
+        end
+    end
+    return out
+end
+
+-- The search, breadth first, with falls over 3 up to maxFall: the path (the places after the start) and info, or nil
+-- and why.
+local function walkSearch(view, from, H, to, maxFall, opts)
+    local limit, margin = opts.limit or WALK_LIMIT, opts.margin or WALK_MARGIN
+    local x1, x2 = math.min(from.x, to.x) - margin, math.max(from.x, to.x) + margin
+    local y1, y2 = math.min(from.y, to.y) - margin, math.max(from.y, to.y) + margin
+    local z1, z2 = math.min(from.z, to.z) - margin, math.max(from.z, to.z) + margin
+    local goal = key(to.x, to.y, to.z)
+    local start = { x = from.x, y = from.y, z = from.z, H = H }
+    local parent = { [key(from.x, from.y, from.z)] = false }
+    local queue, head, nodes = { start }, 1, 0
+    -- the ways shut nearest the goal, for the why
+    local near = { d = math.huge, list = {}, seen = {} }
+    local function fail(x, y, z, why)
+        local d = math.abs(x - to.x) + math.abs(y - to.y) + math.abs(z - to.z)
+        if d < near.d then near.d, near.list, near.seen = d, {}, {} end
+        if d == near.d and not near.seen[why] and #near.list < REASONS then
+            near.seen[why] = true
+            near.list[#near.list + 1] = why
+        end
+    end
+    while head <= #queue do
+        local p = queue[head]
+        head = head + 1
+        if key(p.x, p.y, p.z) == goal then
+            local path, falls = {}, {}
+            while p ~= start do
+                table.insert(path, 1, { x = p.x, y = p.y, z = p.z })
+                if p.fall then table.insert(falls, 1, { x = p.x, y = p.y, z = p.z, height = p.fall / 2 }) end
+                p = parent[key(p.x, p.y, p.z)]
+            end
+            return path, { nodes = nodes, falls = falls }
+        end
+        nodes = nodes + 1
+        if nodes > limit then
+            return nil, "no walk: gave up after " .. limit .. " places without reaching " .. goal .. " (opts.limit raises that)"
+        end
+        for _, q in ipairs(movesFrom(view, p, maxFall, fail)) do
+            local k = key(q.x, q.y, q.z)
+            if parent[k] == nil and q.x >= x1 and q.x <= x2 and q.y >= y1 and q.y <= y2 and q.z >= z1 and q.z <= z2 then
+                parent[k] = p
+                queue[#queue + 1] = q
+            end
+        end
+        if nodes % 32 == 0 then breathe() end
+    end
+    local why = "no walk from " .. key(from.x, from.y, from.z) .. " to " .. goal
+    if #near.list > 0 then why = why .. ": nearest the goal (" .. near.d .. " cells off), " .. table.concat(near.list, "; ") end
+    return nil, why
+end
+
+-- A cell as { x, y, z } from { x, y, z } or { x =, y =, z = }, or nil.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local x, y, z = c.x or c[1], c.y or c[2], c.z or c[3]
+    if not (whole(x) and whole(y) and whole(z)) then return nil end
+    return { x = x, y = y, z = z }
+end
+
+-- A way a two-tall player walks from one feet cell to another over the map (steps up 1, ladders, falls over 3 only
+-- if there's no other way): the path (feet cells after `from`, the last `to`) and { falls }; nil and why if none.
+--
+-- `from` and `to` are cells ({ x, y, z } or { x =, y =, z = }) a player's feet are in: the cell over the block stood
+-- on.  A player steps to a side, up a block at most (stairs and slabs included) or down, and climbs ladders; a step up
+-- needs 3 air where it starts (see the overview).  Falls over 3 are taken only when there is no way without one, and
+-- listed; opts.maxFall refuses those over it.  The why of no walk names what shuts the ways nearest the goal (a block
+-- in the way, a step too high, headroom, a fall, cells the map hasn't seen).  Info is { nodes (places searched), falls
+-- = list of { x, y, z, height } (where each fall over 3 lands) }.  opts: maxFall, limit (places to search, default
+-- 20000), margin (how far outside the box of the two cells, default 16).
+function T.walkable(from, to, opts)
+    opts = opts or {}
+    local a, b = cellOf(from), cellOf(to)
+    if not (a and b) then return nil, "walkable wants two cells of whole numbers: { x, y, z }" end
+    local view = newView(mapRead)
+    local H, why = standIn(view, a.x, a.y, a.z)
+    if not H then return nil, "a player can't stand at " .. key(a.x, a.y, a.z) .. ": " .. why end
+    local goalOk, goalWhy = standIn(view, b.x, b.y, b.z)
+    if not goalOk then return nil, "a player can't stand at " .. key(b.x, b.y, b.z) .. ": " .. goalWhy end
+    local path, info = walkSearch(view, a, H, b, opts.maxFall or SAFE_FALL, opts)
+    if path or opts.maxFall then return path, info end
+    return walkSearch(view, a, H, b, DEEP, opts)
 end
 
 return T

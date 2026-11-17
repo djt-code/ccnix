@@ -10,6 +10,11 @@
 --   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
 --     info.warnings, and without it doesn't.
+--   * T.walkable: a path for a 1x2 player up the good staircase; none past a ceiling over the first stair; a step up
+--     in a 2-high corridor refused for headroom (3 air needed where the step starts), allowed once the ceiling is
+--     raised; a fall of 5 taken only when there is no other way, and listed (refused with opts.maxFall = 3); up a
+--     ladder, and not without it; a lantern at head height blocking a corridor, named in the why; a goal the map
+--     hasn't seen.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -250,4 +255,93 @@ do
     plan = pillarScene()
     ok, _, info = T.build(plan, { name = "pillar", limit = 2 })
     check("...nor for a build stopped before every cell was tried", ok == false and info.warnings == nil and #PRINTED == 0, table.concat(PRINTED, " | "))
+end
+
+--------------------------------------------------------------------------
+-- T.walkable: a path for a 1x2 player
+--------------------------------------------------------------------------
+local function has(path, x, y, z)
+    for _, c in ipairs(path or {}) do if c.x == x and c.y == y and c.z == z then return true end end
+    return false
+end
+local function show(path)
+    local out = {}
+    for i, c in ipairs(path or {}) do out[i] = c.x .. "," .. c.y .. "," .. c.z end
+    return table.concat(out, " ")
+end
+do
+    fresh(staircase())
+    know(table.unpack(KNOW))
+    local path, info = T.walkable({ 2, 1, 0 }, { x = 2, y = 4, z = 5 })
+    check("walkable: up the good staircase to the landing, by its stairs", path and has(path, 2, 2, 2) and has(path, 2, 3, 3) and has(path, 2, 4, 4)
+        and path[#path].x == 2 and path[#path].y == 4 and path[#path].z == 5 and #info.falls == 0, show(path) .. " " .. tostring(info))
+    local again = T.walkable({ 2, 4, 5 }, { 2, 1, 0 })
+    check("...and back down", again ~= nil and has(again, 2, 2, 2), tostring(again))
+
+    fresh(add(staircase(), { { 2, 4, 2, STONE } }))
+    know(table.unpack(KNOW))
+    local none, why = T.walkable({ 2, 1, 0 }, { 2, 4, 5 })
+    check("...none with a ceiling 3 over the first stair (2 air)", none == nil and type(why) == "string" and why:find("no walk", 1, true) ~= nil, tostring(why))
+
+    -- a sealed corridor along +z at x = 0, 2 high, and a step up at z = 3 into a part 2 high over the step
+    local function corridor(raised)
+        local blocks = cube(-3, -1, -3, 3, -1, 9, STONE)
+        add(blocks, cube(-1, 0, -1, -1, 3, 7, STONE))
+        add(blocks, cube(1, 0, -1, 1, 3, 7, STONE))
+        add(blocks, cube(0, 0, -1, 0, 1, -1, STONE))
+        add(blocks, cube(0, 0, 3, 0, 0, 6, STONE))
+        add(blocks, cube(0, 1, 7, 0, 2, 7, STONE))
+        add(blocks, cube(0, 2, 0, 0, 2, raised and 1 or 2, STONE))
+        add(blocks, cube(0, 3, raised and 2 or 3, 0, 3, 6, STONE))
+        return blocks
+    end
+    fresh(corridor(false))
+    know(-3, -1, -3, 3, 5, 9)
+    none, why = T.walkable({ 0, 0, 0 }, { 0, 1, 6 })
+    check("a step up from a 2-high corridor: no walk, for headroom where the step starts", none == nil and why:find("headroom", 1, true) ~= nil
+        and why:find("0,2,2", 1, true) ~= nil, tostring(why))
+    fresh(corridor(true))
+    know(-3, -1, -3, 3, 5, 9)
+    path = T.walkable({ 0, 0, 0 }, { 0, 1, 6 })
+    check("...with 3 air where it starts, up it", path ~= nil and has(path, 0, 1, 3), tostring(path))
+
+    -- the top of a pillar 5 high: down only by a fall
+    fresh(add(cube(-3, -1, -3, 5, -1, 5, STONE), cube(2, 0, 2, 2, 4, 2, STONE)))
+    know(-3, -1, -3, 5, 6, 5)
+    path, info = T.walkable({ 2, 5, 2 }, { 0, 0, 0 })
+    check("a fall of 5 is taken when there is no other way, and listed", path ~= nil and #info.falls == 1 and info.falls[1].height == 5,
+        show(path) .. " " .. tostring(info and #info.falls))
+    none, why = T.walkable({ 2, 5, 2 }, { 0, 0, 0 }, { maxFall = 3 })
+    check("...refused with opts.maxFall = 3, the why naming the fall", none == nil and why:find("fall of 5", 1, true) ~= nil, tostring(why))
+
+    -- a wall 5 high with a ladder up its south face
+    local function ladderScene(withLadder)
+        local blocks = add(cube(-3, -1, -3, 3, -1, 3, STONE), cube(0, 0, 1, 0, 4, 1, STONE))
+        if withLadder then add(blocks, cube(0, 0, 0, 0, 4, 0, "minecraft:ladder")) end
+        fresh(blocks)
+        know(-3, -1, -3, 3, 7, 3)
+    end
+    ladderScene(true)
+    path = T.walkable({ 2, 0, 0 }, { 0, 5, 1 })
+    check("up a ladder to the top of a wall", path ~= nil and has(path, 0, 3, 0) and has(path, 0, 5, 1), show(path))
+    ladderScene(false)
+    none, why = T.walkable({ 2, 0, 0 }, { 0, 5, 1 })
+    check("...and not without it", none == nil and type(why) == "string", tostring(why))
+
+    -- a sealed corridor with a lantern hanging at head height
+    local blocks = add(cube(-3, -1, -3, 3, -1, 7, STONE), cube(-1, 0, -1, -1, 2, 5, STONE))
+    add(blocks, cube(1, 0, -1, 1, 2, 5, STONE))
+    add(blocks, cube(0, 0, -1, 0, 1, -1, STONE))
+    add(blocks, cube(0, 0, 5, 0, 1, 5, STONE))
+    fresh(add(blocks, { { 0, 1, 2, "minecraft:lantern", { hanging = "true" } } }))
+    know(-3, -1, -3, 3, 4, 7)
+    none, why = T.walkable({ 0, 0, 0 }, { 0, 0, 4 })
+    check("a lantern at head height blocks a corridor, named in the why", none == nil and why:find("lantern at 0,1,2", 1, true) ~= nil, tostring(why))
+    W.set(0, 1, 2, nil)
+    T.map.set(0, 1, 2, "minecraft:air")
+    path = T.walkable({ 0, 0, 0 }, { 0, 0, 4 })
+    check("...taken down, the corridor walks", path ~= nil and #path == 4, show(path))
+
+    none, why = T.walkable({ 0, 0, 0 }, { 30, 0, 30 })
+    check("a goal the map hasn't seen is refused with why", none == nil and why:find("30,0,30", 1, true) ~= nil, tostring(why))
 end
