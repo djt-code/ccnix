@@ -2,6 +2,25 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.52.0
+T.lint(box or plan) lists what stops a two-tall player: under 3 air over a stair, a flight's approach or exit blocked, railings meeting only on a diagonal, unrailed drops over 3, a lantern at head height. Warnings only.
+T.build now ends with "player: ..." lines from T.lint (its result is unchanged; player = false turns it off); T.verify(plan, {player = true}) adds info.warnings.
+T.walkable(from, to) says whether the player can walk from one feet cell to another (steps up 1, stairs, slabs, ladders; falls over 3 listed), with the path or why not.
+T.placeAt places signs (on a wall, or standing) and writes opts.text, wrapped to 4 lines of 15; T.placeDir(d, text) does too.
+T.placeAt places ladders from above and from below, turning to face the wall they hang on.
+A top slab under a stair is now built after the stair; a blueprint legend entry may say "after dx,dy,dz" to order its cells.
+A top half with nothing above it gets a temporary block (cobblestone, dirt, planks, bricks, or opts.temp) placed above, then the item from below, then the block taken away.
+opts.digBelow = true (placeAt and T.build) does your dig-the-floor trick: dig, stand there, place up, put the same floor block back. Carry one of the floor block. Without it the floor is never dug.
+Routes with dig = true no longer dig ladders, trapdoors, fence gates, signs, lanterns, torches or rails: they go round, and "it met" names them.
+A route to a walled-in goal fails at once with "walled in by ...": open the way or use opts.inside; a bigger limit won't help.
+harvest's "no free cell beside it" now says opts.move = {dig = true} tunnels in.
+mine.job, an unfinished T.build and the undo journal record the frame they were made in; after a re-zero they refuse to go on and are marked stale, and T.build(plan) starts afresh. T.frameId() and T.frameStale(stamp) are new.
+What the player says in chat while you think now comes with your next results ("<name> said in chat: ... (at t)"): a chat box aboard goes on the free side while the request runs, and the pickaxe is back before your code runs. The chunk controller never moves. Chat while your code runs is still missed.
+While a goal runs, /claude/resume.txt holds it (its first line is the session's options: keep it). Add where you are and what's left as you go. If the player has turned on resuming, a reboot brings you back with "You were interrupted (reboot)" and that goal.
+Keep the T.keep items, T.cfg values and T.diggable every session should have in a keep() helper: a session starts with turtlelib's defaults.
+claude.log now keeps 3 old files (claude.log.1 to .3), fewer when the disk is short.
+-- ADR-0012 (#33-#36): the player-access lint, placing with support, the chat listener, resume, log keeping.
+
 == 0.51.0
 Blocks of nine craft both ways with no recipe added (coal and coal blocks, bone meal and bone blocks, iron, gold, nuggets...): the T.addRecipe calls in your helpers.lua can go.
 T.craftBatch(list) crafts many recipes with one stash and leaves the products in the chest (opts.take brings them aboard): your batchCraft can go.
