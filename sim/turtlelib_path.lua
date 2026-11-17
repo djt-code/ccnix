@@ -13,7 +13,9 @@
 --   * liquids (ADR-0011 D1): a block to dig with lava or a water source beside it or over it is a wall unless
 --     opts.liquid; travel digs beside a moat, not into it;
 --   * T.digCell (ADR-0011 D7.1): one cell dug from beside it and nothing else, refusing lava beside it and protected
---     cells; opts.digOnly in T.path and T.travel.
+--     cells; opts.digOnly in T.path and T.travel;
+--   * (ADR-0013) a route that fails with furnishings in the way names the cells a way would go through (T.path and
+--     T.travel, nothing dug), not with the caller's own avoid list, never a door, nor furnishings no way goes through.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -294,6 +296,31 @@ check("furnishings are walls to a route that may dig: through the stone beside t
 box(-3, 0, 3, 3, 0, 3, "minecraft:wall_torch"); learn(T, -3, 0, 3, 3, 0, 3)
 route, why = T.path(0, 0, 5, { dig = true, margin = 0 })
 check("...a row of torches: no route, and the reason names them", route == nil and tostring(why):find("minecraft:wall_torch", 1, true), tostring(why))
+-- (ADR-0013) a route that fails with furnishings in the way names the cells a way would go through: a stone wall
+-- (not to be dug) across z = 3 with a torch in it, and one with a door in it (a hazard: never offered)
+local function wallWith(name)
+    local T = fresh()
+    box(-3, -2, 3, 3, 2, 3, STONE); put(0, 0, 3, name)
+    learn(T, -3, -2, -1, 3, 2, 7)
+    return T
+end
+T = wallWith("minecraft:wall_torch")
+route, why = T.path(0, 0, 5, { margin = 1 })
+check("a route walled off but for a torch: no route, and the why says a way exists through it, to lift and put back", route == nil
+    and tostring(why):find("a way exists through minecraft:wall_torch at 0,0,3 (lift it and put it back)", 1, true), tostring(why))
+ok, why = T.travel(0, 0, 5, { scan = false, margin = 1 })
+check("...T.travel says so too, and nothing is dug", ok == false and tostring(why):find("a way exists through minecraft:wall_torch at 0,0,3", 1, true)
+    and DIGS == 0 and at(T) == "(0,0,0)", tostring(why))
+route, why = T.path(0, 0, 5, { margin = 1, avoid = { "*torch" } })
+check("...not with an avoid list of the caller's own", route == nil and not tostring(why):find("a way exists", 1, true), tostring(why))
+T = wallWith(DOOR)
+route, why = T.path(0, 0, 5, { margin = 1 })
+check("...a door (a hazard, as lava and fire) is never offered", route == nil and not tostring(why):find("a way exists", 1, true), tostring(why))
+T = wallWith(STONE)
+box(-3, -2, 1, 3, 2, 1, "minecraft:ladder"); put(0, 0, 1, nil); learn(T, -3, -2, 1, 3, 2, 1)
+route, why = T.path(0, 0, 5, { margin = 1 })
+check("...nor furnishings met when no way goes through them (the stone wall beyond)", route == nil and not tostring(why):find("a way exists", 1, true),
+    tostring(why))
 T = fresh()
 learn(T, -2, -2, -2, 2, 2, 8)
 put(0, 0, 3, "minecraft:fire"); T.map.set(0, 0, 3, "minecraft:fire")
