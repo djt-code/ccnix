@@ -161,6 +161,12 @@ row("sign placeDown, a block below the target: standing", SI, "down", { DB }, { 
 refused("sign sideways, nothing about: refused", SI, "front", {})
 refused("sign placeDown, nothing below: refused", SI, "down", {})
 
+-- Ladders from above and below: on the first side in the looking order with a block to hold them (the heading first)
+row("ladder placeDown, a wall beyond the target the way the turtle faces: on it, facing back", LA, "down", { stone(0, -1, 1) }, { want(D, "ladder", { facing = "south" }) })
+row("ladder placeUp, a wall beyond the target the way the turtle faces: on it, facing back", LA, "up", { stone(0, 1, 1) }, { want(U, "ladder", { facing = "south" }) })
+row("ladder placeDown, the wall to the right of the heading only: on it", LA, "down", { stone(1, -1, 0) }, { want(D, "ladder", { facing = "west" }) })
+row("ladder placeDown, walls ahead and to the right: the one ahead", LA, "down", { stone(0, -1, 1), stone(1, -1, 0) }, { want(D, "ladder", { facing = "south" }) })
+
 -- Buttons and levers: floor, wall or ceiling
 local TO_WALL = "minecraft:wall_torch"
 local BU, LE = "minecraft:stone_button", "minecraft:lever"

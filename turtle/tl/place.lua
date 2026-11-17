@@ -14,6 +14,7 @@
 --                the block beyond; a door, gate or chest facing as the turtle does
 --   placeDown    stairs and slabs bottom half if there is a block under the target, else top half
 --   placeUp      stairs and slabs top half if there is a block over the target, else bottom half
+--   (from above or below a ladder hangs on the block beside the target the way the turtle faces)
 -- (With nothing to click but the turtle's own block, a sideways stair faces back at the turtle.)
 -- The table of what each approach yields is data (T.PLACE_TABLE): per family of block, per approach (front, down,
 -- up), rows that say "if there is a block beyond (or a floor under the target), these state values".  A row's
@@ -103,8 +104,9 @@ end
 --------------------------------------------------------------------------
 
 -- Rows from "when key=rule key=rule" strings.  `when` is what the game finds, in the order it looks: "beyond" (a
--- block to click beyond the target), "floor" (sideways only: a block under the target to click on its top) or
--- "always" (the turtle's own block is clicked).  The rule for a key is a word, or heading, back, right, left,
+-- block to click beyond the target), "floor" (sideways only: a block under the target to click on its top),
+-- "ahead" (from above or below only: a block beside the target the way the turtle faces, the first side a ladder
+-- looks for to hang on) or "always" (the turtle's own block is clicked).  The rule for a key is a word, or heading, back, right, left,
 -- along and across (see above), or for `block`: wall (the torch hangs on a wall) or item.
 local function rows(...)
     local out = {}
@@ -167,7 +169,9 @@ local FAMILIES = {
         down = rows("beyond"),
         up = {},
     },
-    ladder = { hang = true, sturdy = false, front = rows("beyond facing=back"), down = {}, up = {} },
+    -- a ladder hangs on a side: placed from above or below it goes on the side the turtle faces, if that holds it
+    ladder = { hang = true, sturdy = false, front = rows("beyond facing=back"), down = rows("ahead facing=back"),
+               up = rows("ahead facing=back") },
     button = {
         hang = true, sturdy = false,
         front = rows("beyond face=wall facing=back", "floor face=floor facing=heading"),
@@ -325,6 +329,23 @@ local function beyondFor(kind, h, x, y, z)
 end
 -- The direction the turtle looks and places in on an approach.
 local function dirOf(kind, h) return kind == "front" and h or kind end
+-- The cell beside the target the way the turtle faces (heading h): what a ladder placed from above or below hangs on.
+local function aheadOf(h, x, y, z)
+    local v = T.DELTA[h]
+    return x + v[1], y, z + v[3]
+end
+
+-- Does the way the turtle faces change what it gets: a state that follows the heading, or a family with rows that
+-- look at the side it faces (a ladder from above)?
+local function headingMatters(fam, want)
+    if want.facing ~= nil or want.axis ~= nil then return true end
+    for _, kind in ipairs({ "down", "up" }) do
+        for _, row in ipairs(fam[kind]) do
+            if row.when == "ahead" then return true end
+        end
+    end
+    return false
+end
 
 --------------------------------------------------------------------------
 -- What the map says
@@ -406,21 +427,21 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
         if famName == "slab" and name == item then return nil end
         return factAbout(fam, name)
     end
-    local headingMatters = want.facing ~= nil or want.axis ~= nil
+    local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
         for h = 0, 3 do
-            if (kind == "front" or headingMatters or h == T.dir) and #fam[kind] > 0 then
+            if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
                 local sx, sy, sz = standFor(kind, h, tx, ty, tz)
                 local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
                 local facts = { beyond = fact(nameAt(bx, by, bz)) }
-                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz)) end
+                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz)) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
                 local stand = nameAt(sx, sy, sz)
                 if not (stand and clickable(stand) and not dig) then
                     for _, c in ipairs(rowsFor(fam, kind, facts)) do
                         if gives(learned, famName, kind, c.row, want, h, base) then
                             -- (the heading only tells approaches apart when the state depends on it)
                             local key = kind .. " " .. sx .. "," .. sy .. "," .. sz .. " " .. c.row.when
-                                .. (headingMatters and (" " .. h) or "")
+                                .. (turning and (" " .. h) or "")
                             if not tried[key] then
                                 apps[#apps + 1] = { kind = kind, h = h, sx = sx, sy = sy, sz = sz, row = c.row,
                                                     certain = c.certain, key = key,
@@ -445,17 +466,17 @@ end
 local KIND_WORDS = { front = "sideways", down = "from above", up = "from below" }
 local FACT_WORDS = {
     front = { beyond = "beyond the target", floor = "under the target" },
-    down = { beyond = "under the target" },
-    up = { beyond = "above the target" },
+    down = { beyond = "under the target", ahead = "beside the target the way the turtle faces" },
+    up = { beyond = "above the target", ahead = "beside the target the way the turtle faces" },
 }
 local SHOWN = 6                              -- approaches a message names, at most
 
 -- An approach to the target in words: "sideways from 0,0,2", with the way the turtle faces when that matters ("...
 -- facing north").
-local function approachWords(kind, h, tx, ty, tz, base, headingMatters)
+local function approachWords(kind, h, tx, ty, tz, base, turning)
     local sx, sy, sz = standFor(kind, h, tx, ty, tz)
     local words = KIND_WORDS[kind] .. " from " .. sx .. "," .. sy .. "," .. sz
-    if headingMatters then words = words .. " facing " .. (base and COMPASS[(base + h) % 4] or ("heading " .. h)) end
+    if turning then words = words .. " facing " .. (base and COMPASS[(base + h) % 4] or ("heading " .. h)) end
     return words
 end
 
@@ -487,10 +508,11 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     local stand = nameAt(sx, sy, sz)
     if stand and clickable(stand) and not dig then return "the map has " .. stand .. " there", true end
     local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
-    local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz } }
-    local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz) }
+    local ax, ay, az = aheadOf(h, tx, ty, tz)
+    local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz }, ahead = { ax, ay, az } }
+    local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz), ahead = nameAt(ax, ay, az) }
     local facts = { beyond = fact(names.beyond) }
-    if kind == "front" then facts.floor = fact(names.floor) end
+    if kind == "front" then facts.floor = fact(names.floor) else facts.ahead = fact(names.ahead) end
     local needed
     for _, row in ipairs(fam[kind]) do
         local f = row.when == "always" or facts[row.when]
@@ -518,12 +540,12 @@ local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
         if famName == "slab" and name == item then return nil end
         return factAbout(fam, name)
     end
-    local headingMatters = want.facing ~= nil or want.axis ~= nil
+    local turning = headingMatters(fam, want)
     for _, kind in ipairs({ "front", "down", "up" }) do
         for h = 0, 3 do
-            if (kind == "front" or headingMatters or h == T.dir) and #fam[kind] > 0 then
+            if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
                 local why, standing = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
-                local line = why and approachWords(kind, h, tx, ty, tz, base, headingMatters and not standing) .. ": " .. why
+                local line = why and approachWords(kind, h, tx, ty, tz, base, turning and not standing) .. ": " .. why
                 if line and not said[line] then
                     said[line] = true
                     out[#out + 1] = line

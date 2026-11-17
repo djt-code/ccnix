@@ -6,7 +6,8 @@
 --     iff there is a block under the target; placeUp the top half iff there is a block over it; in each of
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
---     reached by a route round the support) and standing; a ladder, button, lever, trapdoor, fence gate, chest;
+--     reached by a route round the support) and standing; a sign and its text; a ladder (sideways, and from above
+--     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
 --   * the table wrong about a row: the retry gets it right, the wrong block is dug out (in a protected area too),
 --     the correction is kept in .placements, used from then on and after a restart; a wrong guess on a map
@@ -243,6 +244,44 @@ end
 scene("a ladder on the block beyond, facing back", {
     item = "minecraft:ladder", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "front" })
+-- Ladders from above and below: the turtle faces the wall the ladder goes on (the first side the game looks at)
+local LADDER = "minecraft:ladder"
+-- a shaft one cell wide at 0,y,3, its walls at y from y1 to y2, and stone at the cells named
+local function shaft(y1, y2, extra)
+    local out = {}
+    for y = y1, y2 do
+        for _, c in ipairs({ { 0, 4 }, { 0, 2 }, { 1, 3 }, { -1, 3 } }) do out[#out + 1] = stone(c[1], y, c[2]) end
+    end
+    for _, b in ipairs(extra or {}) do out[#out + 1] = b end
+    return out
+end
+scene("a ladder in a shaft with a floor, from above: facing the wall beyond the target, on it", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, -1, 3) }), opts = { facing = "south" },
+    expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "down", from = { 0, 1, 3 } })
+scene("a ladder in a shaft with a roof, from below", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, 1, 3) }), opts = { facing = "south" },
+    expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "up", from = { 0, -1, 3 } })
+scene("a ladder from above with no facing asked: on a wall the turtle turns to", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, -1, 3) }),
+    expect = { { 0, 0, 3, "ladder" } }, approach = "down" })
+do
+    fresh(nil, shaft(0, 2, { stone(0, -1, 3) }))
+    knowAll()
+    W.give(1, LADDER, 4)
+    local good = true
+    for y = 0, 2 do
+        local name, _, how = T.placeAt(0, y, 3, LADDER, { facing = "south" })
+        good = good and name ~= nil and how.approach == "down" and has(0, y, 3, "ladder", { facing = "south" })
+    end
+    check("a ladder column up a shaft, each from above, bottom first", good, W.show(0, 0, 3) .. " " .. W.show(0, 1, 3) .. " " .. W.show(0, 2, 3))
+    fresh(nil, { stone(0, -1, 3), stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 4) })
+    knowAll()
+    W.give(1, LADDER, 4)
+    local name, why = T.placeAt(0, 0, 3, LADDER, { facing = "north" })
+    check("a ladder facing north with no wall south of it: refused, saying the wall it needs from above",
+        name == nil and why:find("from above from 0,1,3 facing south: needs a block to hang it on beside the target the way the turtle "
+        .. "faces, and the map has minecraft:air at 0,0,2", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+end
 scene("a button on a wall beyond", {
     item = "minecraft:stone_button", blocks = { stone(0, 0, 4) }, opts = { face = "wall", facing = "south" },
     expect = { { 0, 0, 3, "stone_button", { face = "wall", facing = "south" } } } })
