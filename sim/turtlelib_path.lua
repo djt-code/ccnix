@@ -496,25 +496,50 @@ learn(T, -2, 0, -2, 6, 0, 6)
 put(4, 0, 3, DOOR); put(3, 0, 4, STONE); learn(T, 3, 0, 3, 4, 0, 4)
 T.protect("keep", 3, 0, 4, 3, 0, 4)
 route, why = T.path(4, 0, 4, { margin = 0 })
-check("walled off by a protected area and a door: the reason names them", route == nil and why:find("walled off", 1, true)
-    and why:find("what walls it in: the protected area keep, minecraft:oak_door", 1, true), tostring(why))
+check("walled in by a protected area and a door: the reason names them, and the edge of the search", route == nil
+    and why:find("the goal 4,0,4 is walled in by the protected area keep, minecraft:oak_door and the edge of the search", 1, true), tostring(why))
 tp(T, 2, 0, 4)
 route, why = T.path(4, 0, 4, { limit = 2 })
 check("...and a search that gives up says what it met, so a bigger limit isn't the obvious fix", route == nil
     and why:find("gave up after searching 2 cells", 1, true) and why:find("it met the protected area keep", 1, true), tostring(why))
 T.unprotect("keep")
+-- a walled-in goal fails at once (ADR-0012): a small flood from the goal finds no way out before the search starts
+T = fresh()
+learn(T, -2, -1, -2, 40, 5, 40)
+box(29, 0, 29, 33, 4, 33, "minecraft:oak_door"); box(30, 1, 30, 32, 3, 32, nil)     -- a room of doors, 27 cells of air inside
+learn(T, 29, 0, 29, 33, 4, 33)
+route, why = T.path(31, 2, 31)
+check("a goal walled in by doors fails at once, naming them: \"the goal is walled in by\", not a search to the limit", route == nil
+    and why:find("the goal 31,2,31 is walled in by minecraft:oak_door", 1, true) and why:find("searched 27 cells round it", 1, true), tostring(why))
+T.protect("vault", 29, 0, 29, 33, 4, 29)
+route, why = T.path(31, 2, 31)
+check("...a protected area in the wall is named too, first", route == nil
+    and why:find("walled in by the protected area vault, minecraft:oak_door", 1, true), tostring(why))
+T.unprotect("vault")
+route, why = T.path(31, 2, 31, { avoid = {}, dig = true })
+check("...and with the doors neither avoided nor kept from digging, a route", route ~= nil and route[#route].x == 31, route and #route or tostring(why))
+-- only the protected areas the search's box overlaps are tested for each cell
+T = fresh()
+learn(T, -2, 0, -2, 8, 0, 8)
+for i = 1, 30 do T.protect("far" .. i, 1000 + i * 4, 0, 1000, 1002 + i * 4, 3, 1002) end
+T.protect("near", 2, 0, 2, 3, 0, 3)
+route, info = T.path(6, 0, 6, { margin = 2 })
+check("a search tests only the protected areas its box overlaps (1 of 31)", route and info.areas == 1 and not has(route, 2, 0, 2),
+    route and tostring(info.areas) or tostring(info))
+for i = 1, 30 do T.unprotect("far" .. i) end
+T.unprotect("near")
 
 --------------------------------------------------------------------------
 -- Yielding
 --------------------------------------------------------------------------
 T = fresh()
-learn(T, -1, 0, -1, 40, 0, 40)
-box(37, 0, 38, 37, 0, 38, STONE); box(38, 0, 37, 38, 0, 37, STONE)       -- the far corner is shut in
-learn(T, 37, 0, 38, 38, 0, 38); learn(T, 38, 0, 37, 38, 0, 37)
+learn(T, -1, 0, -1, 60, 0, 60)
+box(30, 0, 0, 30, 0, 60, STONE)                 -- a wall across the plane: the far half too big for the flood from the goal
+learn(T, 30, 0, 0, 30, 0, 60)
 SLEEPS, STEP = 0, 0.05
-route, why = T.path(38, 0, 38, { margin = 0 })
-check("a long search (the whole plane, 1500 cells) gives the computer a turn on a clock", route == nil and why:find("walled off", 1, true) and SLEEPS >= 3,
-    tostring(why) .. " / " .. SLEEPS .. " turns")
+route, why = T.path(60, 0, 60, { margin = 0 })
+check("a long search (half the plane, 1800 cells) gives the computer a turn on a clock", route == nil and why:find("every way is walled off (searched", 1, true)
+    and SLEEPS >= 3, tostring(why) .. " / " .. SLEEPS .. " turns")
 SLEEPS = 0
 route = T.path(2, 0, 2, { margin = 0 })
 check("...a short one does not", route and SLEEPS == 0, SLEEPS .. " turns")

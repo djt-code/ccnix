@@ -21,6 +21,9 @@
 -- memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds
 -- without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled
 -- off, it names the protected areas and the avoided blocks (doors, lava, ladders, ...) it met, which no longer search gets through.
+-- Before it searches, a small flood from the goal (1024 cells at most) looks for a way out: a goal walled in (a room of
+-- doors, a protected box) fails at once, "the goal is walled in by" what walls it, not after the whole limit.  Only the
+-- protected areas that overlap the search's box are tested for each cell.
 --
 -- T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be
 -- empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits
@@ -34,6 +37,7 @@ local UNKNOWN, PASS, DIG, WALL = 0, 1, 2, 3      -- what a cell is to a route
 local DIG_COST = 3                                -- a dig costs this much more than a move (a move is 1)
 local UNKNOWN_PENALTY = 2                         -- what a cell never seen costs more than a move, if digging is off
 local LIMIT = 20000                               -- cells searched, at most (opts.limit)
+local FLOOD = 1024                                -- cells a flood from the goal looks at for a way out, before the search
 local MARGIN = 24                                 -- how far outside the box of the two cells a search may go (opts.margin)
 local YIELD_EVERY = 0.5                           -- seconds of work before giving the computer a turn
 local LAYER_SPAN = 8                              -- how far above the higher end a layer may be (opts.span)
@@ -153,7 +157,8 @@ local function newWorld(opts, from, to)
             anyBanned = true
         end
     end
-    -- the protected areas, as boxes of this frame: their cells known to be empty are open, the rest walls
+    -- the protected areas, as boxes of this frame: their cells known to be empty are open, the rest walls (w.clip keeps
+    -- only those a search's box overlaps)
     local boxes = {}
     local owned = T.areaSet(T.cfg.inside)
     for name in pairs(T.areaSet(opts.inside)) do owned[name] = true end
@@ -165,7 +170,18 @@ local function newWorld(opts, from, to)
                                   math.max(az, bz), name = a.name }
         end
     end
-    local w = { toS = toS, fromS = fromS, dig = opts.dig, boxes = boxes }
+    local allBoxes = boxes
+    local w = { toS = toS, fromS = fromS, dig = opts.dig }
+    -- Keep only the protected boxes that overlap the box x1..x2, y1..y2, z1..z2 (the map's frame), the one a search
+    -- stays in: every cell is tested against each box, and one outside the search can hold none of its cells.  How
+    -- many are kept.
+    function w.clip(x1, y1, z1, x2, y2, z2)
+        boxes = {}
+        for _, b in ipairs(allBoxes) do
+            if b[1] <= x2 and b[4] >= x1 and b[2] <= y2 and b[5] >= y1 and b[3] <= z2 and b[6] >= z1 then boxes[#boxes + 1] = b end
+        end
+        return #boxes
+    end
     -- a cell of the map's frame as { x, y, z } of the turtle's
     local function cellAt(mx, my, mz)
         local x, y, z = fromS(mx, my, mz)
@@ -240,6 +256,11 @@ local function newWorld(opts, from, to)
         end
         return nil
     end
+    -- What a wall cell holds, in words, when w.wall has nothing to say: the block, or the cells it was asked to keep out of.
+    function w.what(mx, my, mz)
+        if anyBanned and banned[idOf(mx, my, mz)] then return "the cells opts.avoidCells lists" end
+        return nameIn(mx, my, mz) or "cells it may not enter"
+    end
     return w
 end
 
@@ -256,8 +277,9 @@ end
 --------------------------------------------------------------------------
 
 -- What the search met that walls a route off for good (the protected areas and the blocks it avoids, doors, lava, ...),
--- in words, from the cells it searched: "the protected area keep, minecraft:oak_door", or nil if nothing.
-local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
+-- in words, from the cells it searched: "the protected area keep, minecraft:oak_door", or nil if nothing.  With `all`,
+-- every other wall too (stone that may not be dug, by name), after those.
+local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2, all)
     local seen, n = {}, 0
     for id in pairs(closed) do
         local x, y, z = cellOf(id)
@@ -266,6 +288,7 @@ local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
             local nx, ny, nz = x + d[1], y + d[2], z + d[3]
             if nx >= x1 and nx <= x2 and ny >= y1 and ny <= y2 and nz >= z1 and nz <= z2 and w.cls(nx, ny, nz) == WALL then
                 local what, rank = w.wall(nx, ny, nz)
+                if not what and all then what, rank = w.what(nx, ny, nz), 3 end
                 if what then seen[what] = rank end
             end
         end
@@ -282,16 +305,56 @@ local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2)
     return table.concat(list, ", ")
 end
 
+-- Is the goal walled in?  A flood from it over the cells a route may use, kept to the search's box: if it runs out of
+-- cells before FLOOD of them without reaching the start, no search can get there, however long.  What walls it in, in
+-- words (the edge of the search's box too, if the flood met it), and the cells flooded; nil if it isn't walled in.
+local function walledIn(w, sid, gid, x1, y1, z1, x2, y2, z2, margin)
+    local cls = w.cls
+    local seen, queue, head, edge = { [gid] = true }, { gid }, 1, false
+    while queue[head] do
+        local id = queue[head]
+        head = head + 1
+        if id == sid or #queue > FLOOD then return nil end
+        if head % 256 == 0 then breathe() end
+        local x, y, z = cellOf(id)
+        for i = 1, 6 do
+            local nid = id + STEP[i]
+            if not seen[nid] then
+                local d = STEP_XYZ[i]
+                local nx, ny, nz = x + d[1], y + d[2], z + d[3]
+                if nx < x1 or nx > x2 or ny < y1 or ny > y2 or nz < z1 or nz > z2 then
+                    edge = true
+                elseif cls(nx, ny, nz) ~= WALL then
+                    seen[nid] = true
+                    queue[#queue + 1] = nid
+                end
+            end
+        end
+    end
+    local met = wallsMet(w, seen, x1, y1, z1, x2, y2, z2, true)
+    if edge then
+        met = (met and (met .. " and ") or "") .. "the edge of the search (" .. margin .. " cells out: opts.margin widens it)"
+    end
+    return met or "cells it may not enter", #queue
+end
+
 -- A* from (sx, sy, sz) to (gx, gy, gz) in the world's frame: the route as a list of cells after the first, up to and
--- including the last, and an info table { nodes, cost, digs, unknown }; or nil and why.  The why of a search that gave
--- up or was walled off names the protected areas and avoided blocks it met.
-local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin)
+-- including the last, and an info table { nodes, cost, digs, unknown, areas }; or nil and why.  A goal walled in fails
+-- at once, naming what walls it (goalText is the goal in words); the why of a search that gave up or was walled off
+-- names the protected areas and avoided blocks it met.
+local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin, goalText)
     local cls = w.cls
     local sid, gid = idOf(sx, sy, sz), idOf(gx, gy, gz)
-    if sid == gid then return {}, { nodes = 0, cost = 0, digs = 0, unknown = 0 } end
+    if sid == gid then return {}, { nodes = 0, cost = 0, digs = 0, unknown = 0, areas = 0 } end
     local x1, x2 = math.min(sx, gx) - margin, math.max(sx, gx) + margin
     local y1, y2 = math.min(sy, gy) - margin, math.max(sy, gy) + margin
     local z1, z2 = math.min(sz, gz) - margin, math.max(sz, gz) + margin
+    local areas = w.clip(x1, y1, z1, x2, y2, z2)
+    local walls, flooded = walledIn(w, sid, gid, x1, y1, z1, x2, y2, z2, margin)
+    if walls then
+        return nil, "no route: the goal " .. goalText .. " is walled in by " .. walls .. " (searched " .. flooded
+            .. (flooded == 1 and " cell" or " cells") .. " round it: every way is walled off)"
+    end
     local cost = { [PASS] = 1, [DIG] = 1 + DIG_COST, [UNKNOWN] = w.dig == true and 1 + DIG_COST or 1 + UNKNOWN_PENALTY }
     local g, parent, closed = { [sid] = 0 }, {}, {}
     -- the open set: a binary heap of cell numbers by priority
@@ -343,7 +406,7 @@ local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin)
                     if c == DIG then digs = digs + 1 elseif c == UNKNOWN then unknown = unknown + 1 end
                     at = parent[at]
                 end
-                return route, { nodes = nodes, cost = g[gid], digs = digs, unknown = unknown }
+                return route, { nodes = nodes, cost = g[gid], digs = digs, unknown = unknown, areas = areas }
             end
             nodes = nodes + 1
             if nodes > limit then
@@ -387,7 +450,7 @@ local function plan(from, to, opts)
     if w.cls(gx, gy, gz) == WALL then
         return nil, "no route: the goal " .. to.x .. "," .. to.y .. "," .. to.z .. " is " .. w.why(gx, gy, gz)
     end
-    local route, info = astar(w, sx, sy, sz, gx, gy, gz, opts.limit or LIMIT, opts.margin or MARGIN)
+    local route, info = astar(w, sx, sy, sz, gx, gy, gz, opts.limit or LIMIT, opts.margin or MARGIN, to.x .. "," .. to.y .. "," .. to.z)
     if not route then return nil, info end
     for i, c in ipairs(route) do
         local x, y, z = w.fromS(c.x, c.y, c.z)
@@ -399,8 +462,10 @@ end
 -- A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 --
 -- It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere).  The costs and the walls are in the
--- overview of this module.  A second result gives { nodes, cost, digs, unknown }: how many cells the search
--- looked at, the route's cost, and how many of its cells need a dig or were never seen.  Nothing moves.  opts (all optional):
+-- overview of this module.  A second result gives { nodes, cost, digs, unknown, areas }: how many cells the search
+-- looked at, the route's cost, how many of its cells need a dig or were never seen, and how many protected areas
+-- overlap the search (the only ones it tests).  A goal walled in fails at once: "the goal ... is walled in by ...".
+-- Nothing moves.  opts (all optional):
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
 --   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
 --   avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire, doors and furnishings, as
