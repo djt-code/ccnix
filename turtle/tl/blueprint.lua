@@ -64,12 +64,9 @@ local SYMBOLS = "BCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$
 local PLACE_KEYS = { facing = true, half = true, axis = true, face = true, type = true }
 -- The families with no state to place by: put in from above, no questions
 local PLAIN_FAMILIES = { block = true, fence = true, pane = true, wall = true }
--- A block whose item has another name: a plan names the item (what is carried and placed), and the block found is
--- taken as that item's (a torch hung on a wall is a wall_torch, facing away from the wall)
-local ITEM_OF_BLOCK = { ["minecraft:wall_torch"] = "minecraft:torch", ["minecraft:soul_wall_torch"] = "minecraft:soul_torch",
-                        ["minecraft:redstone_wall_torch"] = "minecraft:redstone_torch" }
-local WALL_FORM = {}
-for block, item in pairs(ITEM_OF_BLOCK) do WALL_FORM[item] = block end
+-- A block whose item has another name (tl.place's table, through T.itemOfBlock and T.blockOfItem): a plan names the
+-- item (what is carried and placed), and the block found is taken as that item's (a torch hung on a wall is a
+-- wall_torch, facing away from the wall; redstone dust is redstone_wire)
 -- The order of building inside a layer, by family: what others hang on first, doors last
 local RANK = { block = 0, fence = 0, pane = 0, wall = 0, log = 0, stairs = 1, slab = 1, chest = 1, piston = 1, observer = 1,
                torch = 2, sign = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, diode = 2, door = 3 }
@@ -156,7 +153,7 @@ local function entryOf(value)
             after, why = hintOf(text.trim(hint))
             if not after then return nil, why end
         end
-        return { name = ITEM_OF_BLOCK[name] or name, state = state, after = after }
+        return { name = T.itemOfBlock(name), state = state, after = after }
     end
     if type(value) == "table" then
         local name, state = value.name or value.item or value[1], value.state
@@ -170,7 +167,7 @@ local function entryOf(value)
             after, why = hintOf(value.after)
             if not after then return nil, why end
         end
-        return { name = ITEM_OF_BLOCK[parsed] or parsed, state = next(copy) and copy or nil, after = after }
+        return { name = T.itemOfBlock(parsed), state = next(copy) and copy or nil, after = after }
     end
     return nil, "a legend entry is a block as text, like minecraft:stone[...]"
 end
@@ -190,10 +187,12 @@ local function infoOf(entry)
     return entry.info
 end
 
--- Is the block found the one a plan's entry asks for: the same name, or the wall form of its item when it has a facing?
+-- Is the block found the one a plan's entry asks for: the same name, or a block of its item (redstone_wire for
+-- redstone), the wall form only when it has a facing (a torch with none stands)?
 local function isBlockOf(found, entry)
     if found == entry.name then return true end
-    return found ~= nil and found == WALL_FORM[entry.name] and entry.state ~= nil and entry.state.facing ~= nil
+    if found == nil or T.itemOfBlock(found) ~= entry.name then return false end
+    return found ~= T.blockOfItem(entry.name, "wall") or (entry.state ~= nil and entry.state.facing ~= nil)
 end
 
 -- Is the entry a double slab (two slab items in one cell)?
@@ -463,7 +462,7 @@ function T.blueprint.fromMap(box)
             if state ~= "not in the map" then failure = failure or state end
             return nil
         end
-        return ITEM_OF_BLOCK[name] or name, state
+        return T.itemOfBlock(name), state
     end)
     if not plan then return nil, why end
     if failure then return nil, failure end

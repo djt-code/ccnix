@@ -979,6 +979,16 @@ T.forgetPlacements(family)
 
 == Placing a block with the state wanted ==
 
+T.itemOfBlock(name)
+    The item that places the block `name`: "minecraft:redstone" for "minecraft:redstone_wire", "minecraft:torch" for a wall_torch, a crop's seeds; any other block's name as it is.
+
+    Covers the vanilla 1.21 blocks whose item has another name: redstone dust, tripwire (string), the wall forms of torches, signs, hanging signs, banners, heads and skulls and coral fans, crops and stems, cocoa, sweet berries, glow berries, and the grown parts of kelp, vines and big dripleaf (not what a bucket places). T.placeAt takes the block it finds as the item's by it, and a plan (tl.blueprint) names the item.
+
+T.blockOfItem(item, form)
+    The block the item `item` places ("minecraft:redstone_wire" for "minecraft:redstone", else the item's own name), or with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.
+
+    The other way round from T.itemOfBlock. The wall forms are those of torches, signs, hanging signs, banners, heads and skulls, and coral fans ("minecraft:oak_wall_sign" for an oak_sign).
+
 T.placeInfo(item)
     What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 

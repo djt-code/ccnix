@@ -20,8 +20,9 @@
 --   * A sign's text: turtle.place(text) on a sign writes it as CC:Tweaked does (TurtlePlaceCommand.setSignText:
 --     the lines between newlines, at most 15 characters each, four at most; one or two lines start on the
 --     second); the block keeps it as w.get(...).text, four strings.
---   * Items carry the block they place (the item's name is the block's; a water or lava bucket places its
---     liquid).  A cell that is not replaceable refuses.
+--   * Items carry the block they place (the item's name is the block's, except the few in ITEM_BLOCK: redstone
+--     makes redstone_wire, seeds a crop; a water or lava bucket places its liquid).  A cell that is not
+--     replaceable refuses.
 --   * Digging: the drops go to the turtle; what hung on a dug block pops off.
 --   * A crafting grid and the workbench peripheral (the recipes in RECIPES, an independent table so that
 --     the library's own can be checked against it), chests, and a furnace (fuel through the sides and the
@@ -58,7 +59,8 @@
 -- ladder, button or lever with no support on the side clicked.  UNVERIFIED in game.
 --
 -- Simplifications (what it leaves out): waterlogging (always false), double chests, fence and wall
--- connections, redstone (a repeater's delay, a piston pushing, a dispenser's slots), blocks falling, fluids flowing,
+-- connections, redstone (a repeater's delay, a piston pushing, a dispenser's slots, dust joining its neighbours: a
+-- dust is always the lone cross), crops growing and needing light, blocks falling, fluids flowing,
 -- entities moving.  A bucket of water or lava
 -- places a source block in the target cell; an empty one placed on a source in the target cell takes it
 -- up (the bucket comes back full, in the selected slot as CC puts it) and does nothing on flowing liquid.  Flint and steel puts a fire in the cell
@@ -95,11 +97,15 @@ local REPLACEABLE = { short_grass = true, tall_grass = true, fern = true, large_
 -- Items that are not blocks.
 local NOT_BLOCK_EXACT = { stick = true, coal = true, charcoal = true, diamond = true, emerald = true, flint = true,
                           flint_and_steel = true, bucket = true, apple = true, bread = true, string = true,
-                          clay_ball = true, brick = true, lapis_lazuli = true, quartz = true, redstone = true }
+                          clay_ball = true, brick = true, lapis_lazuli = true, quartz = true }
 local NOT_BLOCK_SUFFIX = { "_pickaxe", "_axe", "_shovel", "_hoe", "_sword", "_ingot", "_nugget", "_dye", "_helmet" }
 local ITEM_LIQUID = { ["minecraft:water_bucket"] = "minecraft:water", ["minecraft:lava_bucket"] = "minecraft:lava" }
 -- The full bucket an empty one makes of each liquid
 local LIQUID_BUCKET = { ["minecraft:water"] = "minecraft:water_bucket", ["minecraft:lava"] = "minecraft:lava_bucket" }
+-- The block an item places, where the names differ (the game's rule: the block its BlockItem is made with, the
+-- ItemNameBlockItem ones; only those the sims use)
+local ITEM_BLOCK = { redstone = "redstone_wire", wheat_seeds = "wheat", carrot = "carrots", potato = "potatoes",
+                     beetroot_seeds = "beetroots" }
 -- Torches: the standing block and the one that hangs on a wall.
 local WALL_OF = { torch = "wall_torch", soul_torch = "soul_wall_torch", redstone_torch = "redstone_wall_torch" }
 local IS_WALL_TORCH = {}
@@ -116,6 +122,7 @@ local FAMILY_EXACT = {
     repeater = "diode", comparator = "diode",
     short_grass = "plant", tall_grass = "plant", fern = "plant", large_fern = "plant", dead_bush = "plant",
     vine = "plant", seagrass = "plant", fire = "plant", snow = "plant",
+    redstone_wire = "dust", wheat = "crop", carrots = "crop", potatoes = "crop", beetroots = "crop",
 }
 local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
@@ -147,7 +154,8 @@ end
 
 -- What a block gives when dug (default: itself).
 local DROP_AS = { wall_torch = "torch", soul_wall_torch = "soul_torch", redstone_wall_torch = "redstone_torch",
-                  trapped_chest = "trapped_chest" }
+                  trapped_chest = "trapped_chest", redstone_wire = "redstone", wheat = "wheat_seeds", carrots = "carrot",
+                  potatoes = "potato", beetroots = "beetroot_seeds" }
 
 --------------------------------------------------------------------------
 -- Support: does a block have a full face (or, for a torch on top, a centre) to hang or stand on?
@@ -277,6 +285,28 @@ FAMILIES = {
     turtle = { sturdy = no, full = no, place = function() return {} end },
     liquid = { sturdy = no, full = no, passable = true, place = function() return {} end },
     plant = { sturdy = no, full = no, passable = true, place = function() return {} end },
+    -- redstone dust (RedStoneWireBlock): on a block with a sturdy top, alone a cross (every side "side"), unpowered
+    dust = {
+        sturdy = no, full = no, passable = true,
+        place = function(ctx)
+            if not sturdy(ctx.near("down"), "up") then return nil end
+            return { north = "side", east = "side", south = "side", west = "side", power = 0 }
+        end,
+        survives = function(w, x, y, z) return sturdy(w.near(x, y, z, "down"), "up") end,
+    },
+    -- a crop (CropBlock.mayPlaceOn): on farmland only, at age 0
+    crop = {
+        sturdy = no, full = no, passable = true,
+        place = function(ctx)
+            local below = ctx.near("down")
+            if not (below and below.name == "minecraft:farmland") then return nil end
+            return { age = 0 }
+        end,
+        survives = function(w, x, y, z)
+            local below = w.near(x, y, z, "down")
+            return below ~= nil and below.name == "minecraft:farmland"
+        end,
+    },
     leaves = { sturdy = no, full = yes, place = function() return { persistent = true } end },
     pane = { sturdy = centerOnly, full = no, place = function() return {} end },
     fence = { sturdy = centerOnly, full = no, place = function() return {} end },
@@ -823,7 +853,8 @@ function B.new(opts)
             return true
         end
         if not isBlockItem(item) then return false end
-        local fam = FAMILIES[familyOf(item)]
+        local placed = ITEM_BLOCK[short(item)] and "minecraft:" .. ITEM_BLOCK[short(item)] or item
+        local fam = FAMILIES[familyOf(placed)]
         local ctx = {
             w = w, x = px, y = py, z = pz, face = face, clicked = clicked, replaceClicked = replaceClicked,
             horizontal = facing, item = item, hitRel = cy + rel - py,
@@ -832,7 +863,7 @@ function B.new(opts)
         function ctx.near(dir) return (w.near(px, py, pz, dir)) end
         local state, name = fam.place(ctx)
         if not state then return false end
-        local block = { name = name or item, state = state }
+        local block = { name = name or placed, state = state }
         if fam.name == "sign" and type(message) == "string" then block.text = signText(message) end
         w.put(px, py, pz, block)
         if fam.after then fam.after(w, px, py, pz, block) end

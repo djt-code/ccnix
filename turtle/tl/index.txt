@@ -213,6 +213,8 @@ T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer
 Looking at what came out, and taking it back:
 T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 Placing a block with the state wanted:
+T.itemOfBlock(name) - The item that places the block `name`: "minecraft:redstone" for "minecraft:redstone_wire", "minecraft:torch" for a wall_torch, a crop's seeds; any other block's name as it is.
+T.blockOfItem(item, form) - The block the item `item` places ("minecraft:redstone_wire" for "minecraft:redstone", else the item's own name), or with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.
 T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the block, its state and how; nil and why if it can't.
 A sign in front of a reader:
