@@ -93,7 +93,10 @@
 -- clears, and each goal's tokens in all.  A call that writes many tokens
 -- to the cache after a long gap is the cache having run out (--cache 1h).
 -- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
--- replacing the older copy, and a new claude.log starts: one old copy kept.
+-- the older copies moving up to claude.log.3 (the setting claude.logKeep:
+-- that many kept, about 8 hours at 3), and a new claude.log starts.  On a
+-- disk with less than a quarter free (turtlelib's map, .map/, counted in)
+-- fewer are kept, the oldest going first; the current log always stays.
 --
 -- Its helpers: functions it wants again are kept one to a file, each
 -- with keep(name, code) in its code, which runs the code (so it's defined
@@ -187,9 +190,16 @@ end
 local API_URL = "https://api.anthropic.com/v1/messages"
 local API_VERSION = "2026-10-21"
 local KEY_FILE = T.dataPath("claude.key")
-local LOG_FILE = T.dataPath("claude.log")
-local LOG_SIZE = tonumber(T.setting("claude.logSize", 262144,
-    "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144
+-- The log: its file, the size at which it's moved to claude.log.1, and how
+-- many old ones are kept (one table, not locals: claude.lua is near CC's
+-- 200 locals)
+local LOG = {
+    file = T.dataPath("claude.log"),
+    size = tonumber(T.setting("claude.logSize", 262144,
+        "claude: bytes at which claude.log is moved to claude.log.1 and a new one started")) or 262144,
+    keep = tonumber(T.setting("claude.logKeep", 3,
+        "claude: old logs kept (claude.log.1 ...), fewer when the disk has less than a quarter free")) or 3,
+}
 local REMIND_CHAT = tonumber(T.setting("claude.remindChat", 15,
     "claude: minutes without a chat message to the player before the model is reminded to tell them (0: never)")) or 15
 -- (read by autostart; defined here so sysctl describes it)
@@ -609,14 +619,44 @@ local function now()
     return os.epoch and math.floor(os.epoch("utc") / 1000) or os.time()
 end
 
--- Each entry in the log starts with when it was written (UTC).
--- Past LOG_SIZE the log becomes LOG_FILE.1 (an older one goes) first.
-local function log(line)
-    if fs.exists(LOG_FILE) and fs.getSize(LOG_FILE) >= LOG_SIZE then
-        if fs.exists(LOG_FILE .. ".1") then fs.delete(LOG_FILE .. ".1") end
-        fs.move(LOG_FILE, LOG_FILE .. ".1")
+-- Will a quarter of the log's disk stay free once the current log has
+-- grown to LOG.size?  (Yes where CC can't tell.)  The map caps itself at a
+-- quarter of the disk, so the logs leaving a quarter free leave it room.
+function LOG.roomy()
+    local dir = fs.getDir(LOG.file)
+    local okCap, capacity = pcall(fs.getCapacity, dir)
+    local okFree, free = pcall(fs.getFreeSpace, dir)
+    if not (okCap and okFree and type(capacity) == "number" and type(free) == "number") then return true end
+    local growth = LOG.size - (fs.exists(LOG.file) and fs.getSize(LOG.file) or 0)
+    return free - math.max(0, growth) >= capacity / 4
+end
+
+-- Past LOG.size the log becomes claude.log.1, each old one moving up a
+-- number (the one past LOG.keep goes); then, and at the session's first
+-- entry, old ones go, the oldest first, while the disk is short of a
+-- quarter free.  The current log is never deleted.
+function LOG.rotate()
+    local function old(n) return LOG.file .. "." .. n end
+    local full = fs.exists(LOG.file) and fs.getSize(LOG.file) >= LOG.size
+    if full then
+        if fs.exists(old(LOG.keep)) then fs.delete(old(LOG.keep)) end
+        for n = LOG.keep - 1, 1, -1 do
+            if fs.exists(old(n)) then fs.move(old(n), old(n + 1)) end
+        end
+        if LOG.keep >= 1 then fs.move(LOG.file, old(1)) else fs.delete(LOG.file) end
     end
-    local f = fs.open(LOG_FILE, "a")
+    if not full and LOG.trimmed then return end
+    LOG.trimmed = true
+    for n = LOG.keep, 1, -1 do
+        if LOG.roomy() then return end
+        if fs.exists(old(n)) then fs.delete(old(n)) end
+    end
+end
+
+-- Each entry in the log starts with when it was written (UTC).
+local function log(line)
+    LOG.rotate()
+    local f = fs.open(LOG.file, "a")
     if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
 end
 

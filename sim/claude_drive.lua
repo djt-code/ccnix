@@ -776,7 +776,7 @@ check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, l
 check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
 check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))
 
--- 21. The log rotates at claude.logSize, keeping one old copy; the helpers
+-- 21. The log rotates at claude.logSize, keeping one old copy (claude.logKeep 1: scenario 38 has more); the helpers
 --     the model keeps in /claude/helpers.lua are in its code's world; a
 --     broken helpers file is told to the model and the session goes on
 -- (loadfile reads the real disk in the sim: files in the mock's fs are read from it first)
@@ -789,7 +789,7 @@ loadfile = function(p, ...)
     end
     return realLoadfile(p, ...)
 end
-local SET = { ["claude.logSize"] = 600 }
+local SET = { ["claude.logSize"] = 600, ["claude.logKeep"] = 1 }
 settings = { define = function() end, get = function(n) return SET[n] end }
 fresh({ "" })
 HTTP.queue = {
@@ -802,7 +802,7 @@ run("fill the log")
 local cur, old = Mine.files["claude.log"], Mine.files["claude.log.1"]
 check("claude.log passes claude.logSize: the old log is kept as claude.log.1, a new one started",
     cur and old and #old >= 600 and cur:find("^%d+%-%d+%-%d+ %d+:%d+:%d+ ") ~= nil, tostring(cur and #cur) .. " / " .. tostring(old and #old))
-check("only one old copy: the first entries are gone from both", not (Mine.files["claude.log.2"])
+check("claude.logKeep 1: only one old copy, the first entries gone from both", not (Mine.files["claude.log.2"])
     and not (old or ""):find("start: claude", 1, true) and not (cur or ""):find("start: claude", 1, true))
 settings = nil
 
@@ -1693,4 +1693,68 @@ run("what about reboots")
 local sys37 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("the prompt says /claude/resume.txt holds the goal, to add where it is",
     sys37:find("While a goal is under way /claude/resume.txt holds it, for a resume after a reboot", 1, true) ~= nil)
+end
+
+-- 38. how much log is kept (ADR-0012 D5): past claude.logSize the log
+--     moves to claude.log.1, the older ones up to claude.log.<logKeep>
+--     (default 3); on a small disk old ones go, oldest first, until a
+--     quarter of it is free beside turtlelib's map (.map/); the current
+--     log never goes.  (The mock disk counts the logs and the map alone.)
+do
+local SET38 = { ["claude.logSize"] = 600 }
+settings = { define = function() end, get = function(n) return SET38[n] end }
+local CAP38
+fs.getCapacity = function() return CAP38 end
+fs.getFreeSpace = function()
+    local used = 0
+    for name, data in pairs(Mine.files) do
+        if name:find("^claude%.log") or name:find("^%.map/") then used = used + #data end
+    end
+    return CAP38 - used
+end
+-- eight calls, each result 400 of its own letter: a to h
+local function logRun(map)
+    fresh({ "" })
+    if map then Mine.files[".map/0_0_0"] = string.rep("m", map) end
+    HTTP.queue = {}
+    for i = 1, 8 do
+        HTTP.queue[i] = reply({ toolUse("lua", { code = "return string.rep('" .. string.char(96 + i) .. "', 400)" }) }, "tool_use")
+    end
+    HTTP.queue[9] = reply({ text("Done.") }, "end_turn")
+    run("fill the logs")
+end
+-- the old logs there are (1, 2, ...), and the first letter run in each
+local function olds()
+    local n, firsts = 0, {}
+    while Mine.files["claude.log." .. (n + 1)] do
+        n = n + 1
+        firsts[n] = Mine.files["claude.log." .. n]:match("%-> (%l)%l%l%l") or "?"
+    end
+    return n, table.concat(firsts)
+end
+
+CAP38 = 1000000
+logRun()
+local n1, f1 = olds()
+check("claude.logKeep 3 by default: claude.log, .1, .2 and .3, the newest first", n1 == 3 and f1 > "" and f1:sub(1, 1) > f1:sub(3, 3)
+    and Mine.files["claude.log"] ~= nil, n1 .. " " .. f1)
+
+SET38["claude.logKeep"] = 1
+logRun()
+local n2 = olds()
+check("claude.logKeep 1: one old copy, as before", n2 == 1, n2)
+SET38["claude.logKeep"] = nil
+
+CAP38 = 6000
+logRun(2500)
+local n3 = olds()
+check("a small disk: fewer old logs, so a quarter stays free beside the map",
+    n3 >= 1 and n3 < 3 and fs.getFreeSpace() >= CAP38 / 4, n3 .. " kept, " .. fs.getFreeSpace() .. " free")
+
+logRun(5000)
+local n4 = olds()
+check("the map alone leaves less than a quarter free: every old log goes, the current one stays",
+    n4 == 0 and Mine.files["claude.log"] ~= nil and Mine.files[".map/0_0_0"] ~= nil, n4)
+fs.getCapacity, fs.getFreeSpace = nil, nil
+settings = nil
 end
