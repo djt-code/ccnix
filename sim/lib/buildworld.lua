@@ -547,6 +547,27 @@ B.RECIPES = {
     { name = "chain", shape = { "N", "I", "N" }, key = { N = "iron_nugget", I = "iron_ingot" }, out = function() return "minecraft:chain", 1 end },
     { name = "boat", shape = { "P.P", "PPP" }, key = { P = "planks" }, out = function(i) return derive(i.P, "boat"), 1 end },
 }
+-- Redstone and the rest the turtle's model wrote for itself (ADR-0013), from the game's recipe files: a barrel takes any
+-- planks and any wooden slabs (#planks, #wooden_slabs), a soul campfire any logs or stems (#logs) over soul sand or soil
+local WOODS = { oak = true, spruce = true, birch = true, jungle = true, acacia = true, dark_oak = true, mangrove = true,
+                cherry = true, pale_oak = true, bamboo = true, crimson = true, warped = true }
+TAGS.wooden_slab = function(n) return endsWith(n, "_slab") and WOODS[n:sub(1, #n - 5)] == true end
+TAGS.any_log = function(n) return TAGS.log(n) or endsWith(n, "_stem") or endsWith(n, "_hyphae") end
+TAGS.soul_base = function(n) return n == "soul_sand" or n == "soul_soil" end
+for _, item in ipairs({ "redstone", "redstone_torch", "cobblestone", "crying_obsidian", "glowstone" }) do
+    TAGS[item] = function(n) return n == item end
+end
+for _, rec in ipairs({
+    { name = "barrel", shape = { "PSP", "P.P", "PSP" }, key = { P = "planks", S = "wooden_slab" }, mixed = true, out = function() return "minecraft:barrel", 1 end },
+    { name = "redstone torch", shape = { "R", "S" }, key = { R = "redstone", S = "stick" }, out = function() return "minecraft:redstone_torch", 1 end },
+    { name = "repeater", shape = { "TRT", "SSS" }, key = { T = "redstone_torch", R = "redstone", S = "plain_stone" }, out = function() return "minecraft:repeater", 1 end },
+    { name = "lever", shape = { "S", "C" }, key = { S = "stick", C = "cobblestone" }, out = function() return "minecraft:lever", 1 end },
+    { name = "stone button", shape = { "S" }, key = { S = "plain_stone" }, out = function() return "minecraft:stone_button", 1 end },
+    { name = "iron door", shape = { "II", "II", "II" }, key = { I = "iron_ingot" }, out = function() return "minecraft:iron_door", 3 end },
+    { name = "respawn anchor", shape = { "OOO", "GGG", "OOO" }, key = { O = "crying_obsidian", G = "glowstone" }, out = function() return "minecraft:respawn_anchor", 1 end },
+    { name = "soul campfire", shape = { ".S.", "S#S", "LLL" }, key = { S = "stick", ["#"] = "soul_base", L = "any_log" }, mixed = true,
+      out = function() return "minecraft:soul_campfire", 1 end },
+}) do B.RECIPES[#B.RECIPES + 1] = rec end
 -- Blocks of nine, the game's list written out again here (the item: the block nine of it make), and each way
 B.NINE = { coal = "coal_block", iron_ingot = "iron_block", gold_ingot = "gold_block", copper_ingot = "copper_block",
            redstone = "redstone_block", lapis_lazuli = "lapis_block", emerald = "emerald_block", diamond = "diamond_block",

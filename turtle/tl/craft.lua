@@ -99,6 +99,7 @@ end
 
 local PLANKS = each(PLANK_WOODS, "{}_planks")
 local LOG_PLANKS = each(LOG_WOODS, "{}_planks")
+local WOODEN_SLABS = each(PLANK_WOODS, "{}_slab")       -- the game's #wooden_slabs (not the bamboo mosaic's)
 -- Everything planks are made from: logs and wood, stripped or not; the nether's stems and hyphae
 local LOGS = joined(each(LOG_WOODS, "{}_log"), each(LOG_WOODS, "{}_wood"), each(LOG_WOODS, "stripped_{}_log"),
     each(LOG_WOODS, "stripped_{}_wood"), each(STEM_WOODS, "{}_stem"), each(STEM_WOODS, "{}_hyphae"),
@@ -345,12 +346,13 @@ local function define(spec)
     rows[#rows + 1] = rowOf(spec)
 end
 
--- The built-in recipes: vanilla's building and tool basics.
+-- The built-in recipes: vanilla's building and tool basics, and the redstone a build wants.
 -- Wood
 define { out = "{}_planks", count = 4, shape = { "L" }, of = "L", from = LOGS }
 define { out = "stick", count = 4, shape = { "P", "P" }, key = { P = "*_planks" }, mixed = true }
 define { out = "crafting_table", shape = { "PP", "PP" }, key = { P = "*_planks" }, mixed = true }
 define { out = "chest", shape = { "PPP", "P.P", "PPP" }, key = { P = "*_planks" }, mixed = true }
+define { out = "barrel", shape = { "PSP", "P.P", "PSP" }, key = { P = "*_planks", S = WOODEN_SLABS }, mixed = true }
 define { out = "ladder", count = 3, shape = { "S.S", "SSS", "S.S" }, key = { S = "stick" } }
 define { out = "{}_door", count = 3, shape = { "XX", "XX", "XX" }, of = "X", from = PLANKS }
 define { out = "{}_trapdoor", count = 2, shape = { "XXX", "XXX" }, of = "X", from = PLANKS }
@@ -387,6 +389,15 @@ define { out = "iron_bars", count = 16, shape = { "III", "III" }, key = { I = "i
 define { out = "glass_pane", count = 16, shape = { "GGG", "GGG" }, key = { G = "glass" } }
 define { out = "bucket", shape = { "I.I", ".I." }, key = { I = "iron_ingot" } }
 define { out = "nether_brick_fence", count = 6, shape = { "NIN", "NIN" }, key = { N = "nether_bricks", I = "nether_brick" } }
+define { out = "iron_door", count = 3, shape = { "II", "II", "II" }, key = { I = "iron_ingot" } }
+define { out = "soul_campfire", shape = { ".S.", "SXS", "LLL" }, key = { S = "stick", X = { "soul_sand", "soul_soil" }, L = LOGS },
+         mixed = true }
+define { out = "respawn_anchor", shape = { "OOO", "GGG", "OOO" }, key = { O = "crying_obsidian", G = "glowstone" } }
+-- Redstone
+define { out = "redstone_torch", shape = { "R", "S" }, key = { R = "redstone", S = "stick" } }
+define { out = "repeater", shape = { "TRT", "SSS" }, key = { T = "redstone_torch", R = "redstone", S = "stone" } }
+define { out = "lever", shape = { "S", "C" }, key = { S = "stick", C = "cobblestone" } }
+define { out = "stone_button", shape = { "S" }, key = { S = "stone" } }
 -- Blocks of nine, each way (coal blocks into coal, bone meal into a bone block, nuggets into an ingot)
 for _, block in ipairs(tables.sortedKeys(BLOCK_OF_NINE)) do
     local item = BLOCK_OF_NINE[block]
