@@ -1758,3 +1758,15 @@ check("the map alone leaves less than a quarter free: every old log goes, the cu
 fs.getCapacity, fs.getFreeSpace = nil, nil
 settings = nil
 end
+
+-- 39. the prompt (ADR-0012 phase 1): the settings a session should have
+--     (T.keep, T.cfg) are kept in a keep() helper, since a session starts
+--     with turtlelib's defaults
+do
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("keep my settings")
+local sys39 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
+    sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
+end
