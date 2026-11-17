@@ -5,7 +5,8 @@
 --     top one with a level exit) gives no warnings; too little headroom over a stair; an approach blocked and one with
 --     no floor; an exit into a wall and one out over an edge; railings meeting only on a diagonal, level and stepped,
 --     and closed by a corner piece; an unrailed drop of 4 (a drop of 3 is fine); a lantern at head height (one a block
---     higher is fine); each warning names the cell and the rule;
+--     higher is fine); each warning names the cell and the rule; (ADR-0013) a lone stair against a wall, or two side
+--     by side with no step up beyond, is a seat, not a flight (no warnings), and a lone stair up onto a ledge is still checked;
 --   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
 --   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
@@ -142,6 +143,18 @@ do
     warnings = lintScene(blocks)
     exit = ofRule(warnings, "exit")
     check("...and a flight that runs out over an edge", at(exit, 2, 3, 4) ~= nil and exit[1].text:find("edge", 1, true) ~= nil, texts(warnings))
+
+    -- (ADR-0013) benches made of stairs: a lone stair with nothing to climb to isn't a flight
+    local floor = cube(-2, 0, -2, 6, 0, 8, STONE)
+    warnings = lintScene(add(add(cube(-2, 0, -2, 6, 0, 8, STONE), cube(0, 1, 3, 4, 2, 3, STONE)), { { 2, 1, 2, STAIRS, NORTH } }))
+    check("a lone stair against a wall (a seat) isn't a flight: no warnings", warnings and #warnings == 0, texts(warnings))
+    warnings = lintScene(add(floor, { { 1, 1, 2, STAIRS, NORTH }, { 2, 1, 2, STAIRS, NORTH } }))
+    check("...nor two side by side, facing the same way, with no step up beyond them", warnings and #warnings == 0, texts(warnings))
+    warnings = lintScene(add(add(cube(-2, 0, -2, 6, 0, 8, STONE), cube(0, 1, 3, 4, 1, 5, STONE)),
+        { { 2, 1, 2, STAIRS, NORTH }, { 2, 3, 3, STONE } }))
+    exit = ofRule(warnings, "exit")
+    check("...but a lone stair up onto a ledge is a flight of one, checked as before", at(exit, 2, 1, 2) ~= nil
+        and exit[1].text:find("2,3,3", 1, true) ~= nil, texts(warnings))
 end
 
 --------------------------------------------------------------------------

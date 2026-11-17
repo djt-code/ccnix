@@ -15,7 +15,9 @@
 --   lantern   a lantern at head height over a walk cell: a player walks into it
 -- A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll,
 -- T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is
--- counted as unchecked and only its headroom is looked at.  A cell the map has never seen breaks no rule.
+-- counted as unchecked and only its headroom is looked at.  A lone stair that climbs to nothing (a seat against a wall,
+-- a bench of stairs side by side) isn't a flight, and none of the stair rules is looked at for it.  A cell the map has
+-- never seen breaks no rule.
 --
 -- T.walkable searches the map for a way a player walks from one cell to another (breadth first: fewest steps).  A
 -- player's place is the cell its feet are in, over a block to stand on (or on a ladder), and its height in half blocks
@@ -246,7 +248,18 @@ local function exit(view, warn, x, y, z, dx, dz)
     return 3
 end
 
--- The rules for the stair c at x, y, z.
+-- Does a stair at x, y, z, going up the step (dx, dz), climb to anything: a floor level with its top beyond it (a
+-- ledge), or a half step or another stair going on?  A cell beyond that the map hasn't seen counts as yes.
+local function climbsTo(view, x, y, z, dx, dz)
+    local ex, ez = x + dx, z + dz
+    local feet, under = view(ex, y + 1, ez), view(ex, y, ez)
+    if not (feet and under) then return true end
+    if feet.kind.pass then return not under.kind.pass end
+    return (feet.kind.slab and heightOf(feet) == 1) or walkStair(view, ex, y + 1, ez) ~= nil
+end
+
+-- The rules for the stair c at x, y, z.  A lone stair (no stair of its flight below or above it) that climbs to
+-- nothing, against a wall or out over a lower floor, is a seat, not a flight: no rule is looked at.
 local function checkStair(view, warn, info, base, x, y, z, c)
     local up = upOf(c, base)
     if not up then
@@ -259,9 +272,11 @@ local function checkStair(view, warn, info, base, x, y, z, c)
         local n = walkStair(view, nx, ny, nz)
         return n ~= nil and n.state ~= nil and n.state.facing == c.state.facing
     end
+    local first, last = not inFlight(x - dx, y - 1, z - dz), not inFlight(x + dx, y + 1, z + dz)
+    if first and last and not climbsTo(view, x, y, z, dx, dz) then return end
     local need = 3
-    if not inFlight(x - dx, y - 1, z - dz) then approach(view, warn, x, y, z, dx, dz) end
-    if not inFlight(x + dx, y + 1, z + dz) then need = exit(view, warn, x, y, z, dx, dz) end
+    if first then approach(view, warn, x, y, z, dx, dz) end
+    if last then need = exit(view, warn, x, y, z, dx, dz) end
     headroom(view, warn, x, y, z, need)
 end
 
