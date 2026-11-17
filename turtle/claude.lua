@@ -78,14 +78,21 @@
 --
 -- Keeping the player told: when claude.remindChat minutes (default 15, 0
 -- for never) pass with no chat message to the player (T.report, the chat
--- tool), the model is reminded after the next tool results.
+-- tool), the model is reminded after the next tool results.  With no
+-- turtle.player set, what it says in chat goes to everyone: a session
+-- says so at its start, and `sysctl turtle.player=<name>` makes it private.
 --
 -- Hearing the player: while claude waits for the model's reply, a chat
 -- box aboard goes on the free side (an empty one or a tool's: never the
--- chunk controller's or another upgrade's) and the chat is heard; what
--- was there is back before the model's code runs.  What turtle.player
--- says (anyone, when it isn't set) comes with the next results.  What's
--- said while the code runs is missed.  claude.listen = false turns it off.
+-- chunk controller's or another upgrade's) and the chat is heard; it stays
+-- on while the model's code runs, until the code first digs or attacks
+-- (what was there, the pickaxe, goes back on at once and the code carries
+-- on), and run_program and the goal's end put it back too.  What
+-- turtle.player says (anyone, when it isn't set) comes with the next
+-- results, or chatHeard() in the code takes it; the player's other
+-- messages while T.report.ask waits come too.  Each lua result says how
+-- long its run took, and in a long one how long the chat went unheard.
+-- claude.listen = false turns it off.
 --
 -- The log, claude.log beside the program: each entry with its time (UTC);
 -- the options a session started with, the goals, the code and what it
@@ -147,10 +154,13 @@
 --                insert, delete, rename, only under that folder)
 --   web_search, web_fetch   run on Anthropic's side, not the turtle's
 --                (each costs a little; at most a few a reply)
--- Old tool calls (the code and its results) and old thinking are cleared
--- from the conversation once it's long (the API's context editing), the
--- memory tool's kept; when the API says the conversation is too long all
--- the same, it's sent again with more of it cleared.  A reply paused
+-- Old tool calls (the code and its results) and old thinking are kept
+-- while the conversation grows, and cleared in one go once a call's input
+-- reaches 180k tokens (the API's context editing): all but the last 6
+-- calls, the memory tool's kept, and the thinking before the turn in
+-- progress.  Each clear has the cache written again, so one deep clear
+-- pays for many calls.  When the API says the conversation is too long
+-- all the same, it's sent again with more of it cleared.  A reply paused
 -- partway through its web searches is carried on.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
@@ -208,8 +218,15 @@ T.setting("claude.resume", false,
 local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
 local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
 local MAX_HEIGHT = 256          -- T.cfg.maxHeight in a session (blocks above the start; programs keep 16)
-local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
-                                -- thinking before it counts too
+local MAX_TOKENS = 64000        -- a reply is a short note and some code, but the
+                                -- thinking before it counts too (ADR-0013 D4:
+                                -- 32000 cut off a long think about a broken door)
+-- What the model is told when its reply is cut off at MAX_TOKENS, by what
+-- it was doing then; a second cut-off in a goal ends the goal
+local CUT_OFF = {
+    thinking = "Your reply was cut off at the length limit while you were thinking: decide with what you have and take a smaller step.",
+    writing = "Your reply was cut off at the length limit while you were writing: say less and take a smaller step.",
+}
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
 local RETRIES = 4               -- on rate limits, overload and outages
 local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in CC; the
@@ -225,18 +242,26 @@ local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran 
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
 local PAUSES = 5                -- times a paused reply (pause_turn) is carried on
--- Old tool results cleared once the conversation is this long (tokens in),
--- the last KEEP_TOOL_USES kept, and only if it frees CLEAR_AT_LEAST.  A
--- clear changes the conversation from the first result cleared on, so the
--- cache is written again from there: rarer and bigger clears cost less
--- than many small ones.
-local CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST = 100000, 6, 30000
--- The harder clear once the API has said the prompt is too long: sooner,
--- fewer results kept, and whatever it frees
-local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST = 50000, 2, 0
--- The thinking of the last THINKING_TURNS assistant turns is kept; older
--- thinking is cleared with the old tool results' code
-local THINKING_TURNS = 3
+-- Context editing (ADR-0013 D1).  The API clears old thinking and old tool
+-- calls on its side, from what each request sends (it keeps nothing
+-- between requests), and the cache is written again from the first block
+-- a clear changes: each clear costs a rewrite of the conversation from
+-- there on.  Clearing a little at a time (the last 3 thinking turns kept,
+-- tool results from 100k) cost 41 rewrites in a day, most of the spend.
+-- So all thinking and every tool call are kept while the conversation
+-- grows, and once a call's input reaches CLEAR.mark the next request clears
+-- deep: the thinking of all but the turn in progress, and every tool call
+-- but the last CLEAR.keep.  One rewrite down to the floor buys many cheap
+-- calls after it.  The requests after it ask for the same clear and no
+-- more (its keep counts grow with what came since): asking for less would
+-- send back what was cleared, the API being stateless.  CLEAR.trigger is
+-- the tool edit's: under any conversation that reached the mark, so the
+-- clear applies to all a request sends.  (The functions are by the API's.)
+local CLEAR = { mark = 180000, keep = 6, trigger = 100000 }
+-- The harder clear once the API has said the prompt is too long, for the
+-- rest of the conversation: sooner, fewer results kept, whatever it frees,
+-- and the thinking of the last 3 turns kept
+local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
@@ -374,7 +399,7 @@ Building: the library is meant to be used end to end, and loads each part the fi
 
 How to work: do several steps per call, check results in the code, and return short summaries of what you learn (counts, what failed), not whole tables. Each call is a chunk of its own: a global you set (x = 1, function f() end) persists for the session, a `local` ends with its call, and clearing old results never removes a definition (only a new session starts without them): keep each reusable helper (a function you will want again) with keep(name, code): it runs the code now and writes it to /claude/helpers/<name>.lua (code that doesn't compile or run is refused, and nothing is written); at the start of every session /claude/helpers.lua, then each file in /claude/helpers/, is loaded into the code's world, each on its own, so what they define is there in every lua call. Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too: a session starts with turtlelib's defaults. While a goal is under way /claude/resume.txt holds it, for a resume after a reboot: keep its first line, and add where you are and what's left as you go. Before a big job, write its plan to /claude/<job>.md and T.job.start it, and check first: fuel for the job and the way back, free slots, the materials, the protected areas, the route, and lava or water next to anything you will dig. T.job.clear() ends a finished job. Before telling the player something is done, check each result, and the why that comes with every T call's false or nil: read the whole why before you shorten it (what to do is often at its end). Prefer turtlelib's functions to writing your own loops, and look a function up in the index below before you write one. An upgrade you want as a peripheral (the Geo Scanner, a chat box, a crafting table) is used with T.withPeripheral(name, fn), which swaps it in and back and never takes off a chunk controller. Files: read any with fs or io; write only under /claude/ (fs.makeDir("/claude") first), for notes, maps, helpers or programs you keep between goals. The rest of the turtle API works as usual: turtle.inspect(), inspectUp(), inspectDown() -> ok, {name=..., state=...}; detect/detectUp/detectDown; select(slot), getItemDetail(slot), getItemCount(slot); place/placeUp/placeDown; drop/dropUp/dropDown(n); suck/suckUp/suckDown(n); getFuelLevel(); peripheral.wrap("left"/"right"/"front"/"top"/"bottom"); sleep(seconds).
 
-The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. What they say in chat while you think comes with your next results (a chat box aboard listens); what's said while your code runs is missed. The chat tool says something in the game's chat without code, and with ask = true asks and waits for the answer, from the chat or the keyboard; T.report.ask(question, opts) asks from code. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use; put a block back with T.placeAt (it stands outside the cell), not by placing up from the hole. A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal ("Movement obstructed"): ask the player to test those. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
+The player: keep them told in chat (T.report) at the start, at milestones, at trouble and at the end, honestly, saying what failed too. What they say in chat comes with your next results: a chat box aboard listens on the pickaxe's side while you think and while your code runs, until the run's first dig or attack (or T.usePrimaryTool, or run_program) puts the pickaxe back; then chat isn't heard until your next call (T.equipped shows the chat box meanwhile; T.raw's digs don't bring the pickaxe back). chatHeard() in your code returns what was heard so far, a line a message, for a long loop to react (those don't come with the results then); each lua result's status line says how long the run took, and in a long one when chat went unheard. The chat tool says something in the game's chat without code, and with ask = true asks and waits for the answer, from the chat or the keyboard; T.report.ask(question, opts) asks from code. Don't undo or "fix" their changes; ask before replacing their things or digging big holes in shared spaces. Restore a floor you dig through with the same block, and stow what isn't in use; put a block back with T.placeAt (it stands outside the cell), not by placing up from the hole. A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal ("Movement obstructed"): ask the player to test those. Build for a player two blocks tall: 3 air above a stair's walking line, a landing and a turn where a flight meets a wall, corner pieces where railings meet on a diagonal, and railings at drops of more than 3.
 
 What you can call in turtlelib (T), one line a function, with what it does and returns (made from the code's own comments, so it is right). A line ending in a colon is a group heading, not a function.
 @INDEX@
@@ -1019,10 +1044,10 @@ local LOOKS = { { "below", "inspectDown" }, { "ahead", "inspect" }, { "above", "
 
 -- The line that ends each lua result: where the turtle is, its fuel and
 -- what the call used of it (fuelBefore: the level before), the free
--- slots, and lava or water beside it:
--- "[at 1,0,2 facing 1, fuel 997 (-3), 14 slots free; lava below/ahead]".
+-- slots, lava or water beside it, and `ran` (how long the run took):
+-- "[at 1,0,2 facing 1, fuel 997 (-3), 14 slots free; lava below/ahead; took 5 s]".
 -- A fault in it is said in its place; Ctrl+T still stops claude.
-local function statusLine(fuelBefore)
+local function statusLine(fuelBefore, ran)
     local ok, line = pcall(function()
         local fuel = turtle.getFuelLevel()
         local used = ""
@@ -1047,8 +1072,8 @@ local function statusLine(fuelBefore)
         for _, liquid in ipairs(LIQUID_ORDER) do
             if sides[liquid] then wet[#wet + 1] = liquid .. " " .. table.concat(sides[liquid], "/") end
         end
-        return string.format("[at %d,%d,%d facing %d, fuel %s%s, %d slots free%s]", T.pos.x, T.pos.y, T.pos.z, T.dir,
-            tostring(fuel), used, free, #wet > 0 and "; " .. table.concat(wet, ", ") or "")
+        return string.format("[at %d,%d,%d facing %d, fuel %s%s, %d slots free%s%s]", T.pos.x, T.pos.y, T.pos.z, T.dir,
+            tostring(fuel), used, free, #wet > 0 and "; " .. table.concat(wet, ", ") or "", ran and "; " .. ran or "")
     end)
     if ok then return line end
     if line == "Terminated" then error(line, 0) end
@@ -1340,6 +1365,159 @@ local function memory(input)
 end
 
 --------------------------------------------------------------------------
+-- The chat listener (ADR-0012 D3, ADR-0013 D2): a chat box aboard goes on
+-- the free side for the wait for the model's reply and stays on through
+-- the code's run, so the chat is heard most of the time (the chat box
+-- keeps no history: what's said while it's off is lost).  The first dig
+-- or attack in a run (the tool hook, T.hooks.tool), run_program and the
+-- goal's end put back what was on that side (the pickaxe), and the next
+-- request puts the chat box on again.  A side with an upgrade that isn't
+-- a tool (the chunk controller, a modem, the scanner) is never used.
+--------------------------------------------------------------------------
+-- (one table, not locals: claude.lua is near CC's 200 locals)
+local listen = {
+    on = T.setting("claude.listen", true,
+        "claude: hear the chat while the model thinks and its code runs (a chat box aboard goes on the free side meanwhile)") ~= false,
+    max = 20,           -- chat messages kept for the next results; the rest only counted
+    said = {},          -- the chat heard, for the next results (or chatHeard())
+    heard = {},         -- notes for the next results: why the listener was off, a side not put back
+    left = 0,           -- messages heard past max, only counted
+    told = {},          -- the reasons the listener was off, each told to the model once
+    -- chat: lib/mc on the chat box it put on, while that's on; restore: what
+    -- puts back what was on its side; hearing: a request or a run is under
+    -- way with the chat heard; run: the lua run under way (when it started,
+    -- and since when and why the chat isn't heard)
+}
+
+-- lib/mc on a chat box to hear through: the one it put on, else one
+-- attached, else (unless onlyIfOn) one aboard put on the free side; or nil
+-- and why not (nil alone when it's off by the setting, or there's no
+-- parallel: not CC)
+function listen.chatBox(onlyIfOn)
+    if not (listen.on and parallel) then return nil end
+    if listen.chat then return listen.chat end
+    local mc = require("mc")
+    local here = mc.new()
+    if here.has.hears then return here end
+    if onlyIfOn then return nil end
+    local box, restore = T.equipPeripheral(CHAT_BOX, { free = true })
+    if not box then return nil, restore end
+    listen.chat, listen.restore = mc.new({ chatBox = box }), restore
+    return listen.chat
+end
+
+-- Put back what the chat box took the place of, if it's on (through
+-- T.equipPeripheral's restore, so turtlelib knows the pickaxe is back).
+function listen.putBack()
+    local restore = listen.restore
+    listen.chat, listen.restore = nil, nil
+    if not restore then return end
+    local back, notBack = restore()
+    if not back then
+        listen.heard[#listen.heard + 1] = "After listening to the chat: " .. tostring(notBack)
+        log("listener: " .. tostring(notBack))
+    end
+end
+
+-- Keep a chat message (lib/mc's event) for the model when it's the setting
+-- turtle.player's, or anyone's when it isn't set.
+function listen.note(e)
+    local who = settings and settings.get("turtle.player") or ""
+    if not (e and e.kind == "chat" and (who == "" or text.equalFold(tostring(e.player), who))) then return end
+    local line = string.format("%s said in chat: %s (at %s UTC)", tostring(e.player), tostring(e.text),
+        os.date("!%H:%M:%S", now()))
+    -- (on the screen, not into a run's output: the code's print is another)
+    local was = COLOUR and term.getTextColour()
+    if was then term.setTextColour(colours.yellow) end
+    keepPrint("(" .. convert.fromUTF8(line) .. ")")
+    if was then term.setTextColour(was) end
+    log("heard: " .. line)
+    if #listen.said < listen.max then listen.said[#listen.said + 1] = line else listen.left = listen.left + 1 end
+end
+
+-- Hear the chat until stopped.
+function listen.hear(chat)
+    while true do listen.note(chat.event(os.pullEvent("chat"))) end
+end
+
+-- fn() with the chat heard meanwhile when it can be: for a request, the
+-- chat box is put on if need be (why it can't be is told to the model
+-- once); for a run (onlyIfOn), only one that's on is heard.  The chat box
+-- stays on afterwards; an error puts back what it took the place of.
+function listen.around(fn, onlyIfOn)
+    local chat, why = listen.chatBox(onlyIfOn)
+    if not chat then
+        if why and not listen.told[why] then
+            listen.told[why] = true
+            listen.heard[#listen.heard + 1] = "The chat listener is off (" .. why .. "): what the player says in chat isn't heard."
+            log("listener off: " .. why)
+        end
+        return fn()
+    end
+    local out
+    listen.hearing = true
+    local ok, err = pcall(parallel.waitForAny, function() out = table.pack(fn()) end, function() listen.hear(chat) end)
+    listen.hearing = false
+    if not ok then
+        listen.putBack()
+        error(err, 0)
+    end
+    return table.unpack(out, 1, out.n)
+end
+
+-- A run starts: when, and whether the chat goes unheard (the listener
+-- off, or from the first dig, the tool hook putting the pickaxe back).
+function listen.startRun()
+    local run = { started = now() }
+    listen.run = run
+    if listen.restore then
+        T.hooks.tool = function()
+            listen.putBack()
+            run.deaf, run.why = now(), "the pickaxe went back on for a dig"
+        end
+    elseif listen.on and parallel and not listen.chatBox(true) then
+        run.deaf, run.why = run.started, "the chat listener was off"
+    end
+end
+
+-- The run ended: how long it took ("took 91 s"), and over a minute, for
+-- how long the chat went unheard and why.
+function listen.endRun()
+    local run = listen.run
+    T.hooks.tool, listen.run = nil, nil
+    local took = now() - run.started
+    if run.deaf and took > 60 then
+        return string.format("took %d s, chat not heard for the last %d s (%s)", took, now() - run.deaf, run.why)
+    end
+    return string.format("took %d s", took)
+end
+
+-- The player's other messages while T.report.ask waits (the chat tool's,
+-- or the code's when no chat box is listening), kept as the listener's
+T.hooks.heard = function(e)
+    if not listen.hearing then listen.note(e) end
+end
+
+-- What was heard since it was last taken, as text for the model, or nil
+function listen.take()
+    local all = {}
+    for _, l in ipairs(listen.heard) do all[#all + 1] = l end
+    for _, l in ipairs(listen.said) do all[#all + 1] = l end
+    if listen.left > 0 then all[#all + 1] = listen.left .. " more chat messages were heard and not kept." end
+    listen.heard, listen.said, listen.left = {}, {}, 0
+    return #all > 0 and table.concat(all, "\n") or nil
+end
+
+-- chatHeard() in the code: the chat heard so far and not yet passed on, a
+-- line a message (taken: they don't come with the results too)
+API.chatHeard = function()
+    local lines = listen.said
+    if listen.left > 0 then lines[#lines + 1] = listen.left .. " more chat messages were heard and not kept." end
+    listen.said, listen.left = {}, 0
+    return lines
+end
+
+--------------------------------------------------------------------------
 -- run_program: ccnix's turtle programs
 --------------------------------------------------------------------------
 -- A program's manual (help/<name>.txt: ccnix's, else the checkout's), or nil
@@ -1384,6 +1562,7 @@ local function runProgram(input)
             return "The user declined to run this program.", true
         end
     end
+    listen.putBack()                    -- (its tools as it expects them: the pickaxe back)
     -- what it prints and its errors, kept for the model and shown as the
     -- code's output is (its own program, so through the real globals)
     local out, stopped = {}, false
@@ -1456,7 +1635,10 @@ local function runTool(name, input)
         -- what the code prints, in grey, apart from what Claude says
         if COLOUR then term.setTextColour(colours.lightGrey) end
         local fuelBefore = turtle.getFuelLevel()
-        local ok, out, isErr = pcall(runLua, code)
+        -- (the chat heard meanwhile, while the chat box is on)
+        listen.startRun()
+        local ok, out, isErr = pcall(listen.around, function() return runLua(code) end, true)
+        local ran = listen.endRun()
         if COLOUR then term.setTextColour(colours.white) end
         if not ok then error(out, 0) end        -- Terminated
         if isErr then
@@ -1465,7 +1647,7 @@ local function runTool(name, input)
             say("red", from and (text.cut(out:sub(from), "\n")) or out)
         end
         -- (for the model and the log; the screen has seen it happen)
-        out = out .. "\n" .. statusLine(fuelBefore)
+        out = out .. "\n" .. statusLine(fuelBefore, ran)
         log((isErr and "error:\n" or "result:\n") .. out)
         return out, isErr
     elseif name == "status" then
@@ -1590,83 +1772,6 @@ local function keepVersion()
 end
 
 --------------------------------------------------------------------------
--- The chat listener (ADR-0012 D3): the wait for the model's reply is most
--- of a step's time, so the chat box goes on the free side for it and the
--- chat is heard; what was on that side (the pickaxe) is back before the
--- model's code runs.  What's said while the code runs is missed: the chat
--- box keeps no history.  A side with an upgrade that isn't a tool (the
--- chunk controller, a modem, the scanner) is never used.
---------------------------------------------------------------------------
--- (one table, not locals: claude.lua is near CC's 200 locals)
-local listen = {
-    on = T.setting("claude.listen", true,
-        "claude: hear the chat while the model thinks (a chat box aboard goes on the free side meanwhile)") ~= false,
-    max = 20,           -- chat messages kept for the next results; the rest only counted
-    heard = {},         -- for the next results: what was heard, and why the listener was off
-    left = 0,           -- messages heard past max, only counted
-    told = {},          -- the reasons the listener was off, each told to the model once
-}
-
--- lib/mc on the chat box it hears through, and the function that puts
--- back what was on the side; or nil and why not (nil alone when it's off
--- by the setting, or there's no parallel: not CC)
-function listen.chatBox()
-    if not (listen.on and parallel) then return nil end
-    local mc = require("mc")
-    local here = mc.new()
-    if here.has.hears then return here, function() return true end end
-    local box, restore = T.equipPeripheral(CHAT_BOX, { free = true })
-    if not box then return nil, restore end
-    return mc.new({ chatBox = box }), restore
-end
-
--- Hear the chat (the setting turtle.player's, or everyone's when it isn't set) until stopped.
-function listen.hear(chat)
-    local who = settings and settings.get("turtle.player") or ""
-    while true do
-        local e = chat.event(os.pullEvent("chat"))
-        if e and (who == "" or text.equalFold(tostring(e.player), who)) then
-            local line = string.format("%s said in chat: %s (at %s UTC)", tostring(e.player), tostring(e.text),
-                os.date("!%H:%M:%S", now()))
-            say("yellow", "(" .. convert.fromUTF8(line) .. ")")
-            log("heard: " .. line)
-            if #listen.heard < listen.max then listen.heard[#listen.heard + 1] = line else listen.left = listen.left + 1 end
-        end
-    end
-end
-
--- fn() (the request), with the chat heard meanwhile when the listener can
--- be on; why it's off is told to the model once
-function listen.around(fn)
-    local chat, why = listen.chatBox()
-    if not chat then
-        if why and not listen.told[why] then
-            listen.told[why] = true
-            listen.heard[#listen.heard + 1] = "The chat listener is off (" .. why .. "): what the player says in chat while you think isn't heard."
-            log("listener off: " .. why)
-        end
-        return fn()
-    end
-    local out
-    local ok, err = pcall(parallel.waitForAny, function() out = table.pack(fn()) end, function() listen.hear(chat) end)
-    local back, notBack = why()
-    if not back then
-        listen.heard[#listen.heard + 1] = "After listening to the chat: " .. tostring(notBack)
-        log("listener: " .. tostring(notBack))
-    end
-    if not ok then error(err, 0) end
-    return table.unpack(out, 1, out.n)
-end
-
--- What was heard since it was last taken, as text for the model, or nil
-function listen.take()
-    if listen.left > 0 then listen.heard[#listen.heard + 1] = listen.left .. " more chat messages were heard and not kept." end
-    local said = #listen.heard > 0 and table.concat(listen.heard, "\n") or nil
-    listen.heard, listen.left = {}, 0
-    return said
-end
-
---------------------------------------------------------------------------
 -- The API
 --------------------------------------------------------------------------
 local messages = {}
@@ -1693,14 +1798,13 @@ end
 -- harder one for the rest of the conversation (/new starts it again)
 local hardClear = false
 
--- The context edits: old thinking first (the API wants that edit listed
--- before the others), then the old tool calls, their code and results
--- both, the memory tool's kept.
-local function contextEdits()
-    local trigger, keep, atLeast = CLEAR_TRIGGER, KEEP_TOOL_USES, CLEAR_AT_LEAST
-    if hardClear then trigger, keep, atLeast = HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST end
-    return { edits = {
-        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = THINKING_TURNS } },
+-- The edits that clear old thinking (keeping that of the last `turns`
+-- turns) and old tool calls (keeping the last `keep`), their code and
+-- results both, the memory tool's never: the thinking edit first, as the
+-- API wants.
+function CLEAR.edits(turns, trigger, keep, atLeast)
+    return {
+        { type = "clear_thinking_20251015", keep = { type = "thinking_turns", value = turns } },
         {
             type = "clear_tool_uses_20250919",
             trigger = { type = "input_tokens", value = trigger },
@@ -1709,7 +1813,64 @@ local function contextEdits()
             clear_tool_inputs = true,
             exclude_tools = { "memory" },
         },
-    } }
+    }
+end
+
+-- The conversation's turns as the API counts them for the thinking edit:
+-- each user message that isn't all tool results starts one (a goal, or
+-- results with a note after them: chat heard, a reminder)
+function CLEAR.turns()
+    local n = 0
+    for _, m in ipairs(messages) do
+        local results = m.role == "user" and type(m.content) == "table" and #m.content > 0
+        for _, b in ipairs(results and m.content or {}) do
+            if b.type ~= "tool_result" then results = false end
+        end
+        if m.role == "user" and not results then n = n + 1 end
+    end
+    return n
+end
+
+-- The tool calls the tool edit may clear: all but the memory tool's
+function CLEAR.calls()
+    local n = 0
+    for _, m in ipairs(messages) do
+        for _, b in ipairs(m.role == "assistant" and type(m.content) == "table" and m.content or {}) do
+            if b.type == "tool_use" and b.name ~= "memory" then n = n + 1 end
+        end
+    end
+    return n
+end
+
+-- The deep clear's edits, when the last call's input (lastInput, nil after
+-- a web search, whose usage adds up its passes) reached CLEAR.mark and
+-- there's more than the kept calls to clear since the last one; else nil.
+-- Where it was is kept in CLEAR.at for the requests after it.  (This is the
+-- one place that decides the mark: a compaction step could stand here.)
+function CLEAR.atMark(lastInput)
+    if not lastInput or lastInput < CLEAR.mark then return nil end
+    local calls = CLEAR.calls()
+    if CLEAR.at and calls - CLEAR.at.calls <= CLEAR.keep then return nil end
+    CLEAR.at = { turns = CLEAR.turns(), calls = calls }
+    log(string.format("context: a deep clear at %d tokens in (the last call's): the old thinking, and all but the last %d tool calls",
+        lastInput, CLEAR.keep))
+    return CLEAR.since()
+end
+
+-- After a deep clear, the edits that clear what it cleared and no more:
+-- the thinking of the turn it was in and of each since, the kept calls
+-- and each one since
+function CLEAR.since()
+    return CLEAR.edits(1 + CLEAR.turns() - CLEAR.at.turns, CLEAR.trigger, CLEAR.keep + CLEAR.calls() - CLEAR.at.calls, 0)
+end
+
+-- The context edits a request sends: the hard clear once the API has said
+-- the conversation is too long; a deep clear at the mark and the same
+-- after it; before it, all thinking kept and no tool call cleared.
+local function contextEdits()
+    if hardClear then return { edits = CLEAR.edits(HARD_THINKING, HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST) } end
+    local edits = CLEAR.atMark(CLEAR.lastInput) or (CLEAR.at and CLEAR.since())
+    return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
 
 local function body()
@@ -1738,9 +1899,9 @@ local function body()
         -- model server-side (see the API docs: server-side fallback)
         fallbacks = "default",
         -- a long session's old tool calls and thinking are cleared
-        -- server-side (the newest kept, the memory tool's never), so each
-        -- round trip doesn't carry all of them (see the API docs: context
-        -- editing)
+        -- server-side in one go at a mark (the newest kept, the memory
+        -- tool's never), so each round trip doesn't carry all of them
+        -- (contextEdits; see the API docs: context editing)
         context_management = contextEdits(),
     }), { allow_repetitions = true, unicode_strings = true })
 end
@@ -1985,6 +2146,7 @@ local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
 -- A new conversation: no clears seen, nothing to compare with
 function replyLog.reset()
     replyLog.cleared, replyLog.last = {}, nil
+    CLEAR.lastInput, CLEAR.at = nil, nil
 end
 
 -- Log what changed in `reply` (asked for at `started`)
@@ -2013,6 +2175,7 @@ function replyLog.add(reply, started)
     for _, b in ipairs(reply.content) do
         if b.type == "server_tool_use" then replyLog.last = nil end
     end
+    CLEAR.lastInput = replyLog.last and replyLog.last.input     -- (what the next request's mark is measured by)
     if reply.stop_reason == "max_tokens" then
         local thought = (u.output_tokens_details or {}).thinking_tokens
         log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
@@ -2086,11 +2249,25 @@ local function converse(goal)
                 log("reminded: " .. quiet)
             end
             messages[#messages + 1] = { role = "user", content = results }
-        elseif reply.stop_reason == "max_tokens" and not cutOff then
+        elseif reply.stop_reason == "max_tokens" then
+            -- thinking, when all it put out was thinking or it stopped in a thinking block
+            local u, last = reply.usage or {}, reply.content[#reply.content]
+            local thought = (u.output_tokens_details or {}).thinking_tokens
+            local doing = ((thought and thought >= (u.output_tokens or 0)) or (last and last.type == "thinking"))
+                and "thinking" or "writing"
+            if cutOff then
+                -- the second in this goal: the goal ends, and the model hears why with the next
+                local why = string.format("the reply was cut off at the length limit a second time (%d tokens, while %s)", MAX_TOKENS, doing)
+                say("red", "(the goal ended: " .. why .. ")")
+                log("goal ended: " .. why)
+                startNotes[#startNotes + 1] = string.format("Your last goal ended when your reply was cut off at the length limit a second time (%d tokens, while you were %s): take smaller steps, and think less before each.",
+                    MAX_TOKENS, doing)
+                return false
+            end
             cutOff = true
-            say("orange", "(the reply was cut off; asking it to carry on)")
+            say("orange", "(the reply was cut off while " .. doing .. "; asking for a smaller step)")
             local heardNote = listen.take()
-            addUser("Your reply was cut off; carry on, more briefly." .. (heardNote and "\n\n" .. heardNote or ""),
+            addUser(CUT_OFF[doing] .. (heardNote and "\n\n" .. heardNote or ""),
                 "Not run: your reply was cut off before this call was complete.")
         elseif reply.stop_reason == "refusal" then
             local d = reply.stop_details or {}
@@ -2151,6 +2328,12 @@ local function main()
         log("memory: " .. memory)
         startNotes[#startNotes + 1] = memory
     end
+    -- (ADR-0013 D3: no player set, what reports speaks to everyone)
+    if settings and (settings.get("turtle.player") or "") == "" then
+        local nobody = "turtle.player isn't set: reports go to everyone; `sysctl turtle.player=<name>` makes them private."
+        say("yellow", nobody)
+        startNotes[#startNotes + 1] = nobody
+    end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
     if goal == "" then
         goal = ask("Goal: ")
@@ -2166,6 +2349,7 @@ local function main()
             resume.goal = nil
             local before = tables.copy(usage)
             converse(goal)
+            listen.putBack()            -- (the chat box off till the next goal's first request)
             local line = tokenLine(before)
             say("grey", line)
             log("goal done: " .. line)
@@ -2176,6 +2360,7 @@ local function main()
 end
 
 local ok, err = pcall(T.run, main)
+pcall(listen.putBack)                   -- (Ctrl+T in the code's run: the pickaxe back)
 print = screenPrint
 -- (Ctrl+T is the player's stop: not a goal to resume at the next boot)
 if err == "Terminated" and fs.exists(resume.file) then fs.delete(resume.file) end

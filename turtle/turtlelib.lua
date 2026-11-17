@@ -6,8 +6,8 @@
 -- Provides:
 --   * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right
 --     by the turtle API itself: loading this wraps the moves and turns
---     (forward, back, up, down, turnLeft, turnRight) and the digs and
---     places, once however many programs load it, so a move made
+--     (forward, back, up, down, turnLeft, turnRight), the digs, places
+--     and attacks, once however many programs load it, so a move made
 --     straight through turtle.* is counted too; T.raw holds the originals
 --   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that
 --     no dig through the turtle API goes into, and a refusal to dig
@@ -65,7 +65,8 @@
 --     takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
 --   * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file
 --     so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them
---     back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
+--     back; T.report tells the player (the setting turtle.player; everyone when it isn't set) through a chat box, with
+--     position, fuel and progress
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on
@@ -408,7 +409,8 @@ end
 --
 -- Loading turtlelib replaces turtle.dig/digUp/digDown, place/placeUp/
 -- placeDown, forward/back/up/down and turnLeft/turnRight with versions
--- that know which cell they act on (from T.pos and T.dir):
+-- that know which cell they act on (from T.pos and T.dir), and
+-- attack/attackUp/attackDown with ones that call the tool hook (T.hooks):
 --   * a move or turn that succeeds updates T.pos / T.dir and saves them,
 --     so the position is right whatever code made it (a program, or
 --     claude's code calling turtle.forward() straight);
@@ -430,7 +432,8 @@ end
 --------------------------------------------------------------------------
 local WRAP_KEY = "_ccnixWrap"
 local WRAPPED = { "dig", "digUp", "digDown", "place", "placeUp", "placeDown",
-                  "forward", "back", "up", "down", "turnLeft", "turnRight" }
+                  "forward", "back", "up", "down", "turnLeft", "turnRight",
+                  "attack", "attackUp", "attackDown" }
 
 -- Which side of the turtle each digging and placing function acts on, and
 -- the inspect that looks at the same side
@@ -482,6 +485,25 @@ end
 -- T.forward, T.digDir and the rest call underneath.  Nothing here tracks
 -- the position, checks an area or tells a listener.
 T.raw = raw
+
+-- Hooks for whatever drives this module (claude sets them; each is called
+-- only when it is set):
+--   T.hooks.tool()    before the first dig or attack that goes ahead (the
+--                     wrapped ones) or T.usePrimaryTool: it is cleared, then
+--                     called, so it runs once.  claude's chat listener puts
+--                     the pickaxe back there, from where the chat box sat.
+--   T.hooks.heard(e)  each chat message T.report.ask's wait reads that isn't
+--                     its answer (lib/mc's event: e.player, e.text).
+T.hooks = {}
+
+-- Call the tool hook, if it's set, once.
+local function needTool()
+    local hook = T.hooks.tool
+    if hook then
+        T.hooks.tool = nil
+        hook()
+    end
+end
 
 -- Make this module the one the wrapped turtle functions keep up to date.
 -- Loading turtlelib does it already; call it when another program's
@@ -788,6 +810,7 @@ for name, side in pairs(DIG_SIDE) do
         if ok and type(data) == "table" and data.name and not T.cfg.digContainers and T.neverDig(data.name) then
             return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
         end
+        needTool()
         return afterwards(function()
             forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
@@ -827,6 +850,14 @@ for name in pairs(MOVE_STEP) do
 end
 for name, by in pairs(TURN_BY) do
     impl[name] = function() return afterwards(function() turned(by) end, raw[name]()) end
+end
+
+-- The wrapped attacks: the tool hook first (T.hooks).
+for _, name in ipairs({ "attack", "attackUp", "attackDown" }) do
+    impl[name] = function(...)
+        needTool()
+        return raw[name](...)
+    end
 end
 
 -- Turn a quarter turn to the right, keeping T.dir and the saved position right.
@@ -1073,7 +1104,10 @@ end
 -- Equip `name` from the inventory if it isn't already, unequip any OTHER
 -- tool into the inventory, and return a function that restores the
 -- original arrangement.  Errors if the tool is nowhere on the turtle.
+--
+-- The tool hook (T.hooks.tool) is called first.
 function T.usePrimaryTool(name)
+    needTool()
     local before = { left = T.equipped("left"), right = T.equipped("right") }
     local sel = turtle.getSelectedSlot()
     local freed

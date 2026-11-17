@@ -4,7 +4,7 @@ Usage in a program (same directory):
     local T = require("turtlelib")
 
 Provides:
-  * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right by the turtle API itself: loading this wraps the moves and turns (forward, back, up, down, turnLeft, turnRight) and the digs and places, once however many programs load it, so a move made straight through turtle.* is counted too; T.raw holds the originals
+  * dead-reckoned position/heading (T.pos, T.dir, T.face), kept right by the turtle API itself: loading this wraps the moves and turns (forward, back, up, down, turnLeft, turnRight), the digs, places and attacks, once however many programs load it, so a move made straight through turtle.* is counted too; T.raw holds the originals
   * protected areas (T.protect, T.unprotect, T.protected, T.inside) that no dig through the turtle API goes into, and a refusal to dig chests, barrels, shulker boxes, spawners and ComputerCraft blocks (T.cfg.digContainers lifts it)
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
@@ -18,7 +18,7 @@ Provides:
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
-  * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
+  * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them back; T.report tells the player (the setting turtle.player; everyone when it isn't set) through a chat box, with position, fuel and progress
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
   * fuel management that refuels from inventory mid-task (T.ensureFuel)
   * low-level moves that only dig blocks listed in T.diggable
@@ -182,6 +182,8 @@ T.findTool(suffix)
 
 T.usePrimaryTool(name)
     Equip `name` from the inventory if it isn't already, unequip any OTHER tool into the inventory, and return a function that restores the original arrangement. Errors if the tool is nowhere on the turtle.
+
+    The tool hook (T.hooks.tool) is called first.
 
 T.withTool(name, fn)
     Run fn with `name` as the only equipped tool, restoring the original tools afterwards even if fn errors (the error is re-thrown).
@@ -776,7 +778,7 @@ T.build and T.harvest write their progress there (T.job.progress) when a job is 
 
 The undo journal (T.cfg.undo = true) writes down each block the turtle digs or places, in the data file .undo: the block's name and its state for a dig (the dig looks first, so the state comes free), the item for a placement.  T.undo(n) puts the last n back: a dug block is placed again (through T.placeAt when it has a state, with the item on hand) and a placed one is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 
-T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).  T.report.ask asks the player in chat and waits for an answer starting with "claude"; T.report.lastTold says when the player was last told anything.
+T.report tells the player (the setting turtle.player, never in the code; everyone when it isn't set) through a chat box, with where the turtle is, its fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral; the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps (a step is a T.job.done, or a progress line from a build or a harvest).  T.report.ask asks the player in chat and waits for an answer starting with "claude"; T.report.lastTold says when the player was last told anything.
 
 == The job journal ==
 
@@ -810,7 +812,7 @@ T.job.clear()
 T.report.now(said, opts)
     Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 
-    The player is the setting turtle.player (opts.player overrides it); with none, nothing is said. A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
+    The player is the setting turtle.player (opts.player overrides it); with none, it's said to everyone in the chat (ADR-0013 D3: what reports speaks to everyone unless turtle.player makes it private). A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
 
     opts.from names a side ("top", "bottom" or "front") whose container may hold the chat box: with none aboard or attached, one is taken out of it for the telling and put back after (a program that keeps its chat box in the chest at home).
 
@@ -820,7 +822,7 @@ T.report.try(said, opts)
 T.report.ask(question, opts)
     Ask the player `question` in chat and wait for the answer: the text (the prefix taken off), the player who gave it and when (seconds since 1970); or nil and why ("no answer in 300 s", no chat box).
 
-    The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back after. An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from that player only (anyone's with none set). opts.timeout is the longest wait in seconds (default 300); opts.remind says the question again every so many seconds (default never). Ctrl+T stops the wait.
+    The question goes to the setting turtle.player (opts.player overrides it), or to everyone when none is set, through a chat box as T.report's does: one on a side as it is, else one aboard equipped for the wait (T.withPeripheral) and put back after. An answer is a chat message starting with opts.prefix (default "claude": "claude yes" or "claude: yes"), from that player only (anyone's with none set). opts.timeout is the longest wait in seconds (default 300); opts.remind says the question again every so many seconds (default never). Ctrl+T stops the wait. The other chat messages it reads go to T.hooks.heard, when it is set (claude passes the player's on to the model).
 
 T.report.lastTold()
     When the player was last told something through T.report, T.report.now or T.report.ask: seconds since 1970, or nil if nothing has been told since the computer started.

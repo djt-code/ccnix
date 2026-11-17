@@ -13,6 +13,11 @@ local P = Mine.P
 local check = Mine.check
 
 textutils = M.textutilsApi()
+-- A clock that stands still unless a scenario moves it (a run's "took N s"
+-- is then the same on every run of the simulator)
+local STILL = os.time()
+local clockWas = os.time
+os.time = function(t) if t ~= nil then return clockWas(t) end return STILL end
 local HTTP = M.httpApi()
 http = HTTP.api
 local answers = M.consoleApi(Mine, {})
@@ -114,17 +119,10 @@ check("the request names the model, effort, cached system prompt and the tools: 
             .. "web_search=web_search_20260209 web_fetch=web_fetch_20260209"
         and r1.body.tools[1].input_schema.required[1] == "code", table.concat(toolNames, " "))
 local edits1 = r1 and r1.body.context_management.edits or {}
-check("old tool results are cleared past a size, the memory tool's kept, with the beta header for it",
-    edits1[2] and edits1[2].type == "clear_tool_uses_20250919"
-        and edits1[2].exclude_tools[1] == "memory"
-        and edits1[2].trigger.value == 100000
-        and edits1[2].clear_at_least.value == 30000
+check("a short conversation keeps all its thinking and every tool call (ADR-0013 D1: scenario 42 has the clear), with the beta header for it",
+    #edits1 == 1 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep == "all"
         and r1.headers["anthropic-beta"]:find("context-management-2025-06-27", 1, true)
-        and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true))
-check("...the code of a cleared call goes with its result (clear_tool_inputs)", edits1[2] and edits1[2].clear_tool_inputs == true)
-check("...and old thinking is cleared, the last 3 turns' kept: that edit first, as the API wants",
-    #edits1 == 2 and edits1[1].type == "clear_thinking_20251015" and edits1[1].keep.type == "thinking_turns"
-        and edits1[1].keep.value == 3, textutils.serialiseJSON(edits1))
+        and r1.headers["anthropic-beta"]:find("server-side-fallback-2026-07-01", 1, true), textutils.serialiseJSON(edits1))
 check("the system prompt tells it of ccnix's libraries, whole (a [[:alpha:]] in it doesn't end it)",
     r1 and r1.body.system[1].text:find('require("text")', 1, true) and r1.body.system[1].text:find("[[:alpha:]]", 1, true)
         and r1.body.system[1].text:find("say plainly if something failed.", 1, true))
@@ -222,7 +220,8 @@ local function clearOf(n)
 end
 check("prompt too long: sent again at once (no wait) with the harder clear, the same conversation",
     #HTTP.requests == 4 and clearOf(3).trigger.value == 50000 and clearOf(3).keep.value == 2
-        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger.value == 100000
+        and clearOf(3).clear_at_least.value == 0 and clearOf(2).trigger == nil
+        and HTTP.requests[3].body.context_management.edits[1].keep.value == 3
         and #HTTP.requests[3].body.messages == #HTTP.requests[2].body.messages
         and Mine.logHas("too long; trying again with more of it cleared"), textutils.serialiseJSON(clearOf(3)))
 check("...the harder clear stays for the conversation's next calls", clearOf(4).trigger.value == 50000)
@@ -448,7 +447,8 @@ check("the reply put back together from its events is printed, the thinking logg
 
 -- 13. a reply cut off at max_tokens partway through a tool call: the call
 --     isn't run, and the next turn answers it (the API wants every
---     tool_use answered in the very next turn) before asking to carry on
+--     tool_use answered in the very next turn) before telling the model it
+--     ran out of room while writing (ADR-0013 D4); max_tokens is 64000
 fresh({ "" })
 HTTP.queue = {
     reply({ text("Digging now."), toolUse("lua", { code = "turtle.dig(" }) }, "max_tokens"),
@@ -457,25 +457,44 @@ HTTP.queue = {
 run("dig a lot")
 local cutTurn = HTTP.requests[2] and HTTP.requests[2].body.messages[3]
 local cr = cutTurn and type(cutTurn.content) == "table" and cutTurn.content
-check("a tool call cut off at max_tokens is answered (not run), then told to carry on",
+check("a tool call cut off at max_tokens is answered (not run), then told it ran out of room while writing",
     cr and cr[1].type == "tool_result" and cr[1].tool_use_id == "toolu_1" and cr[1].is_error == true
-        and cr[2].type == "text" and cr[2].text:find("cut off") and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
+        and cr[2].type == "text"
+        and cr[2].text == "Your reply was cut off at the length limit while you were writing: say less and take a smaller step."
+        and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
+check("...a reply may be 64000 tokens long", HTTP.requests[1] and HTTP.requests[1].body.max_tokens == 64000,
+    HTTP.requests[1] and tostring(HTTP.requests[1].body.max_tokens))
 
--- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1),
---      the second as the first (what a second one does is D4's)
+-- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1);
+--      one cut off while thinking is told so (ADR-0013 D4); a second in
+--      the same goal ends the goal with that reason, logged and shown, and
+--      the model is told at its next goal
 do
-fresh({ "" })
+fresh({ "go on", "" })
 HTTP.queue = {
-    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000, cache_read_input_tokens = 50,
-        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 31800 } } }),
-    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000,
+    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 64000, cache_read_input_tokens = 50,
+        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 64000 } } }),
+    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 64000,
         cache_read_input_tokens = 50, cache_creation_input_tokens = 25 } }),
+    reply({ text("Smaller then.") }, "end_turn"),
 }
 run("think hard")
 local klog = Mine.files["claude.log"] or ""
 check("a cut-off at max_tokens is logged with the tokens out and thinking, each time",
-    #HTTP.requests == 2 and klog:find("cut off at max_tokens (32000 out, 31800 thinking)", 1, true)
-        and klog:find("cut off at max_tokens (32000 out)\n", 1, true), klog)
+    #HTTP.requests == 3 and klog:find("cut off at max_tokens (64000 out, 64000 thinking)", 1, true)
+        and klog:find("cut off at max_tokens (64000 out)\n", 1, true), klog)
+local k2 = HTTP.requests[2] and HTTP.requests[2].body.messages
+local kTold = k2 and k2[#k2].content
+check("cut off while thinking: told to decide with what it has and take a smaller step",
+    kTold == "Your reply was cut off at the length limit while you were thinking: decide with what you have and take a smaller step.",
+    tostring(kTold))
+local ENDED = "Your last goal ended when your reply was cut off at the length limit a second time (64000 tokens, while you were writing): take smaller steps, and think less before each."
+check("a second cut-off in the goal ends it: logged and shown",
+    klog:find("goal ended: the reply was cut off at the length limit a second time (64000 tokens, while writing)", 1, true)
+        and Mine.logHas("^%(the goal ended: the reply was cut off at the length limit a second time"), klog)
+local k3 = HTTP.requests[3] and HTTP.requests[3].body.messages
+local kNext = k3 and k3[#k3].content
+check("...and the model is told at its next goal", kNext == "go on\n\n[" .. ENDED .. "]", tostring(kNext))
 end
 
 -- 14. a request that fails after tool results: the results stay, and the
@@ -1195,12 +1214,12 @@ local countWas = turtle.getItemCount
 run("look at the status line")
 turtle.getItemCount = countWas
 local s30 = resultsIn(2).toolu_1
-check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it",
-    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above]",
+check("a lua result ends with the status line: position, fuel and what the call used, slots free, lava and water beside it, how long the run took",
+    s30 and s30.content == "-> two" and s30.status == "[at 0,0,2 facing 0, fuel 998 (-2), 14 slots free; lava ahead, water above; took 0 s]",
     s30 and tostring(s30.status))
 local e30 = resultsIn(3).toolu_2
 check("...an error result too", e30 and e30.is_error == true and e30.content == "error: stuck"
-    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above]", e30 and tostring(e30.status))
+    and e30.status == "[at 0,0,2 facing 0, fuel 998 (-0), 14 slots free; lava ahead, water above; took 0 s]", e30 and tostring(e30.status))
 local f30 = resultsIn(4).toolu_3
 check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
     f30 and tostring(f30.status))
@@ -1212,7 +1231,7 @@ Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
 HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("lava round it")
 local l30 = resultsIn(2).toolu_1
-check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above]",
+check("lava on two sides is named once with both", l30 and l30.status == "[at 0,0,0 facing 0, fuel 1000 (-0), 16 slots free; lava below/above; took 0 s]",
     l30 and tostring(l30.status))
 end
 
@@ -1364,6 +1383,21 @@ check("...and the tool is offered: lua status run_program ask_user chat, then th
     HTTP.requests[1].body.tools[5].name == "chat" and HTTP.requests[1].body.tools[5].input_schema.required[1] == "text"
         and HTTP.requests[1].body.tools[5].description:find("stops short of the cache's 5 minutes", 1, true))
 
+-- the player's other messages during the wait come with the next results
+-- (ADR-0013 D2: T.report.ask passes them on), the answer once
+chatFresh()
+SCRIPT = { { "chat", "Steve", "wait, the spruce", "u-s", false }, { "chat", "Steve", "claude: oak", "u-s", false } }
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Which wood?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("ask about wood")
+local ca, caTurn = resultsIn(2).toolu_1, select(2, resultsIn(2))
+local caText = caTurn and type(caTurn.content) == "table" and caTurn.content[2] and caTurn.content[2].text or ""
+check("chat ask: the player's other messages meanwhile come with the next results, the answer in the result alone",
+    ca and ca.content == "Steve answered in chat: oak" and caText:find("^Steve said in chat: wait, the spruce %(at %d%d:%d%d:%d%d UTC%)$") ~= nil,
+    caText)
+
 chatFresh()
 SCRIPT = { { "timer", 1 }, { "sim_read", "go left" } }
 HTTP.queue = {
@@ -1431,9 +1465,9 @@ check("...both failures logged and shown (ADR-0013 phase 1)",
     nlog:find("chat, couldn't ask: [^\n]*chat_box") and nlog:find("chat: not said: [^\n]*chat_box")
         and Mine.logHas("^%(not said in chat: .*chat_box"), nlog)
 
--- with no turtle.player, T.report refuses: the refusal is logged and
--- shown, not only the line said before it (ADR-0013 phase 1; whether the
--- tool then speaks to everyone is D3's)
+-- with no turtle.player, the chat tool speaks to everyone (ADR-0013 D3),
+-- and the session says at its start that reports go to everyone, on the
+-- screen and with the first goal
 chatFresh()
 SET32["turtle.player"] = nil
 HTTP.queue = {
@@ -1443,15 +1477,19 @@ HTTP.queue = {
 run("nobody set")
 SET32["turtle.player"] = "Steve"
 local c9 = resultsIn(2).toolu_1
-check("no player set: the chat tool's refusal is logged and shown",
-    c9 and c9.is_error == true and c9.content:find("no player to tell", 1, true)
-        and (Mine.files["claude.log"] or ""):find("chat: not said: no player to tell", 1, true)
-        and Mine.logHas("^%(not said in chat: no player to tell"), c9 and c9.content)
+check("no player set: the chat tool speaks to everyone",
+    c9 and c9.content == "said in chat" and c9.is_error == nil and CHATSENT[1] and CHATSENT[1].everyone == true
+        and CHATSENT[1].message == "Starting.", c9 and c9.content)
+local NOBODY = "turtle.player isn't set: reports go to everyone; `sysctl turtle.player=<name>` makes them private."
+local goal9 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("...and the session said at its start that reports go to everyone, on the screen and with the first goal",
+    goal9 == "nobody set\n\n[" .. NOBODY .. "]" and Mine.logHas("^turtle%.player isn't set: reports go to everyone"), goal9)
 
 chatFresh()
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("what can I say")
 local sys32 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("with turtle.player set, no such note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "what can I say")
 check("the prompt tells of the chat tool and T.report.ask, and to ask in the game",
     sys32:find("The chat tool says something in the game's chat without code", 1, true)
         and sys32:find("T.report.ask(question, opts)", 1, true)
@@ -1582,14 +1620,19 @@ check("the real news file reads: its 0.51.0 lines, the note for people left out"
         and not n6:find("more lines from", 1, true) and not n6:find("claude-news:", 1, true), n6)
 end
 
--- 36. the chat listener (ADR-0012 D3): while the harness waits for the
---     model's reply, the chat box goes on the free side (never the chunk
---     controller's, nor another upgrade's) and the chat is heard; the
---     pickaxe is back before the code runs; what the player said comes
---     with the next results, or the next goal.  No free side or no chat
---     box: off, and the first results say why, once; claude.listen = false:
---     off, nothing said.  (A request waits for a "sim_http" event here, so
---     chat events can come meanwhile, as CC's http.post pulls events.)
+-- 36. the chat listener (ADR-0012 D3, ADR-0013 D2): while the harness
+--     waits for the model's reply, the chat box goes on the free side
+--     (never the chunk controller's, nor another upgrade's) and the chat is
+--     heard; it stays on through the code's run, the chat heard then too,
+--     until the first dig (the pickaxe back on, the run carrying on, the
+--     chat box on again only for the next request), run_program (the
+--     pickaxe first) or the goal's end; what the player said comes with
+--     the next results, or the next goal, or chatHeard() in the code; a run
+--     says how long it took, and a long one when chat went unheard.  No
+--     free side or no chat box: off, and the first results say why, once;
+--     claude.listen = false: off, nothing said.  (A request waits for a
+--     "sim_http" event here, so chat events can come meanwhile, as CC's
+--     http.post pulls events; the code waits for "sim_step".)
 do
 local CHAT = "advancedperipherals:chat_box"
 local CONTROLLER = "advancedperipherals:chunk_controller"
@@ -1676,8 +1719,9 @@ run("build the stairs")
 local r36 = resultsIn(2).toolu_1
 check("while the model thinks the chat box is on the pickaxe's side, the controller never moves",
     DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1] and DURING[3] == DURING[1], table.concat(DURING, ", "))
-check("...and the pickaxe is back before the code runs, the chat box in the inventory",
-    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. PICK and chatAboard() == 1 and EQ.right == PICK, r36 and r36.content)
+check("...and stays on through code that doesn't dig, the controller where it was; the pickaxe back when the goal ends",
+    r36 and r36.content == "-> " .. CONTROLLER .. "\n-> " .. CHAT and chatAboard() == 1 and EQ.right == PICK and EQ.left == CONTROLLER,
+    r36 and r36.content)
 local t36 = textsIn(2)
 check("what turtle.player said while the model thought comes with the next results (not another player's, not a hidden one)",
     t36:find("^Steve said in chat: claude use the oak stairs " .. CLOCK .. "$") ~= nil, t36)
@@ -1689,6 +1733,64 @@ check("heard during the last reply: it comes with the next goal",
 check("...shown, and in claude.log", Mine.logHas("^%(Steve said in chat: claude use the oak stairs " .. CLOCK .. "%)$")
     and (Mine.files["claude.log"] or ""):find("heard: Steve said in chat: thanks", 1, true) ~= nil)
 
+-- chat while code that doesn't dig runs: heard, and with the results;
+-- chatHeard() takes what's heard so far (it doesn't come again)
+listenFresh(CONTROLLER, PICK, true)
+SCRIPT = { { "sim_http" }, said("Steve", "careful by the lava"), { "sim_step" }, said("Steve", "and now left"), { "sim_step" },
+           { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "os.pullEvent('sim_step'); local h = chatHeard(); os.pullEvent('sim_step'); return #h, h[1]" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("walk about")
+local w36 = resultsIn(2).toolu_1
+check("chat while the code runs is heard: chatHeard() in the code takes what's heard so far",
+    w36 and w36.content:find("^%-> 1\n%-> Steve said in chat: careful by the lava " .. CLOCK .. "$") ~= nil, w36 and w36.content)
+check("...the rest comes with the results, what chatHeard() took not again",
+    textsIn(2):find("^Steve said in chat: and now left " .. CLOCK .. "$") ~= nil, textsIn(2))
+check("...and the run says how long it took", w36 and w36.status and w36.status:find("; took 0 s%]$") ~= nil, w36 and tostring(w36.status))
+
+-- a dig in the run: the pickaxe back on at once, the run carrying on; the
+-- chat box on again only for the next request (a second run in the same
+-- reply has the pickaxe); a run over a minute says when chat went unheard
+listenFresh(CONTROLLER, PICK, true)
+local timeWas36, sleepWas36, skipped36 = os.time, sleep, 0
+os.time = function(t) if t ~= nil then return timeWas36(t) end return timeWas36() + skipped36 end
+sleep = function(s) skipped36 = skipped36 + (tonumber(s) or 0) end
+SCRIPT = { { "sim_http" }, said("Steve", "before the dig"), { "sim_step" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "os.pullEvent('sim_step'); local was = turtle.getEquippedRight().name; local dug = turtle.dig(); sleep(70)"
+                .. "; return was, dug, turtle.getEquippedLeft().name, turtle.getEquippedRight().name" }),
+            toolUse("lua", { code = "return turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig one")
+os.time, sleep = timeWas36, sleepWas36
+local d36, d36b = resultsIn(2).toolu_1, resultsIn(2).toolu_2
+check("a dig mid-run: the pickaxe back on for it, the run carrying on, the controller where it was",
+    d36 and d36.content == "-> " .. CHAT .. "\n-> true\n-> " .. CONTROLLER .. "\n-> " .. PICK, d36 and d36.content)
+check("...the chat box not on again for the next run in the same reply, but for the next request",
+    d36b and d36b.content == "-> " .. PICK and DURING[2] == CONTROLLER .. " | " .. CHAT, (d36b and d36b.content or "") .. " " .. table.concat(DURING, ", "))
+check("...what was heard before the dig comes with the results",
+    textsIn(2):find("^Steve said in chat: before the dig " .. CLOCK .. "$") ~= nil, textsIn(2))
+check("...and a run over a minute says how long, and that chat went unheard after the dig",
+    d36 and d36.status and d36.status:find("; took 70 s, chat not heard for the last 70 s %(the pickaxe went back on for a dig%)%]$") ~= nil,
+    d36 and tostring(d36.status))
+
+-- run_program: the pickaxe back on before the program runs
+listenFresh(CONTROLLER, PICK, true)
+Mine.files["turtle/mine.lua"] = "-- mine"
+local progEQ
+local shellRunWas, ioWas36 = shell.run, io
+io = setmetatable({ stdout = false }, { __index = ioWas36 })
+shell.run = function() progEQ = (EQ.left or "-") .. " | " .. (EQ.right or "-"); return true end
+SCRIPT = { { "sim_http" }, { "sim_http" } }
+HTTP.queue = { reply({ toolUse("run_program", { program = "mine", args = "3 3 8" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
+run("mine a little")
+shell.run, io = shellRunWas, ioWas36
+check("run_program: the pickaxe back on before the program runs, the controller where it was",
+    progEQ == CONTROLLER .. " | " .. PICK and DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1], tostring(progEQ))
+
 listenFresh(CONTROLLER, MODEM, true)
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
@@ -1698,7 +1800,7 @@ HTTP.queue = {
 run("no free side")
 check("no side free of upgrades: nothing moves, the first results say why",
     DURING[1] == CONTROLLER .. " | " .. MODEM and textsIn(2) == "The chat listener is off (neither side is free (left " .. CONTROLLER
-        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat while you think isn't heard.",
+        .. ", right " .. MODEM .. "; an upgrade stays on): nowhere to put the " .. CHAT .. "): what the player says in chat isn't heard.",
     textsIn(2))
 check("...once", textsIn(3) == "", textsIn(3))
 
@@ -1706,7 +1808,7 @@ listenFresh(CONTROLLER, PICK, false)
 HTTP.queue = { reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("no chat box")
 check("no chat box aboard: off, and the first results say so",
-    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat while you think isn't heard.", textsIn(2))
+    textsIn(2) == "The chat listener is off (no " .. CHAT .. " on board): what the player says in chat isn't heard.", textsIn(2))
 
 listenFresh(CONTROLLER, PICK, true)
 SET36["claude.listen"] = false
@@ -1728,8 +1830,9 @@ HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 SCRIPT = { { "sim_http" } }
 run("what do you hear")
 local sys36 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
-check("the prompt says what the player says while it thinks comes with the next results",
-    sys36:find("What they say in chat while you think comes with your next results", 1, true) ~= nil)
+check("the prompt says what the player says comes with the next results, while it thinks and while the code runs until a dig, and chatHeard()",
+    sys36:find("What they say in chat comes with your next results: a chat box aboard listens on the pickaxe's side while you think and while your code runs", 1, true) ~= nil
+        and sys36:find("chatHeard()", 1, true) ~= nil and not sys36:find("is missed", 1, true))
 
 peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
 os.pullEvent, HTTP.api.post = pullWas, postWas
@@ -1931,4 +2034,50 @@ check("the manual's overview says what a turtle can't do",
 check("the index: T.moveTo's path = true said plainly, T.inspectAll as the way to block states over an area",
     sys41:find("\nT%.moveTo%(x, y, z, opts%) %- [^\n]*path = true hands a blocked run to T%.travel")
         and sys41:find("\nT%.inspectAll%(list, opts%) %- [^\n]*the way to get block states over an area %(T%.scan gives names only%)"))
+end
+
+-- 42. context editing for the cache (ADR-0013 D1): while the last call's
+--     input is under 180k a request keeps all thinking and clears no tool
+--     call; once one reaches it, the next request clears deep (the
+--     thinking of all but the turn in progress, every tool call but the
+--     last 6, the memory tool's never, the code with its result), logged;
+--     the requests after it ask for that same clear and no more: the API
+--     edits what each request sends and keeps nothing, so the counts kept
+--     grow with what came since (a tool call, a new goal's turn), and
+--     nothing cleared comes back.  (The hard clear is 3c's.)
+do
+fresh({ "and more", "" })
+local function inp(n)
+    return { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = n - 100, cache_creation_input_tokens = 0 } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inp(120000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inp(185000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inp(100000)),
+    reply({ toolUse("lua", { code = "return 4" }) }, "tool_use", inp(101000)),
+    reply({ text("Done.") }, "end_turn", inp(102000)),
+    reply({ text("More.") }, "end_turn", inp(103000)),
+}
+run("grow")
+local function edits42(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {} end
+local function keepsAll(n) local e = edits42(n); return #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all" end
+-- the thinking turns and the tool calls a request keeps, as "turns/calls"
+local function kept(n)
+    local e = edits42(n)
+    if not (e[1] and e[2] and type(e[1].keep) == "table") then return textutils.serialiseJSON(e) end
+    return e[1].keep.value .. "/" .. e[2].keep.value
+end
+check("under the mark: every request keeps all thinking and clears no tool call", keepsAll(1) and keepsAll(2),
+    textutils.serialiseJSON(edits42(2)))
+local mark = edits42(3)
+check("at the mark (the last call had 185k in): one request clears both, the thinking edit first",
+    #mark == 2 and mark[1].type == "clear_thinking_20251015" and mark[1].keep.type == "thinking_turns" and mark[1].keep.value == 1
+        and mark[2].type == "clear_tool_uses_20250919" and mark[2].trigger.type == "input_tokens" and mark[2].trigger.value <= 185000
+        and mark[2].keep.type == "tool_uses" and mark[2].keep.value == 6 and mark[2].clear_at_least.value == 0
+        and mark[2].clear_tool_inputs == true and mark[2].exclude_tools[1] == "memory", textutils.serialiseJSON(mark))
+check("...and the log says so", (Mine.files["claude.log"] or ""):find("context: a deep clear at 185000 tokens in", 1, true) ~= nil)
+check("after it: the same clear, the counts grown by what came since (a lua call; the memory tool's not counted; a new goal's turn)",
+    kept(4) == "1/7" and kept(5) == "1/8" and kept(6) == "2/8", kept(4) .. " " .. kept(5) .. " " .. kept(6))
+local _, marks = (Mine.files["claude.log"] or ""):gsub("context: a deep clear", "")
+check("...and under the mark again, no second deep clear", marks == 1, marks)
 end

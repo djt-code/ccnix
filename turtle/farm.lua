@@ -91,9 +91,10 @@
 --    avoided, so the turtle doesn't bump into the same post over and over.
 --    If that leaves no way to a tile it forgets them for the trip and finds
 --    out for itself.  `sysctl farm.map=false` turns it off.
---  * Telling the player: with `sysctl farm.report=true` and a player named
---    in turtle.player (`sysctl turtle.player=<name>`), farm tells them
---    through a chat box when it is done (a single pass, or `farm repair`),
+--  * Telling the player: with `sysctl farm.report=true`, farm tells the
+--    player named in turtle.player (`sysctl turtle.player=<name>`), or
+--    everyone in the chat when none is, through a chat box when it is
+--    done (a single pass, or `farm repair`),
 --    after a pass with trouble (damaged or unreachable tiles, out of seeds)
 --    however many passes it repeats, and when it stops on an error, with
 --    where the turtle is and its fuel (T.report).  A chat box in the chest

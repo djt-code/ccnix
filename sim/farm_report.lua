@@ -32,6 +32,10 @@ package.loaded.mc = { new = function()
              tell = function(who, message)
                  told[#told + 1] = who .. ": " .. message .. (aboard and " {chat box aboard}" or "")
                  return true
+             end,
+             say = function(message)
+                 told[#told + 1] = "everyone: " .. message .. (aboard and " {chat box aboard}" or "")
+                 return true
              end }
 end }
 local function withSettings(chosen, fn)
@@ -124,5 +128,5 @@ withSettings({ ["turtle.player"] = "Tester" }, function() run("5", "6", "0") end
 check("farm.report off (the default): no one is told", #told == 0, table.concat(told, " | "))
 farm()
 withSettings({ ["farm.report"] = true }, function() run("5", "6", "0") end)
-check("on, but no player set: no one is told, and farm says why", #told == 0 and F.logHas("Couldn't tell the player %(no player to tell"), table.concat(told, " | "))
+check("on, but no player set: everyone is told (ADR-0013 D3)", #told == 1 and told[1]:find("^everyone: farm: ") ~= nil, table.concat(told, " | "))
 package.loaded.mc = nil

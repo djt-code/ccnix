@@ -44,9 +44,10 @@
 --    out of: the tiles in one are left alone, the routes go round them, and
 --    mow says how many tiles it kept out of.  The area home is in, if any,
 --    is crossed to get out and back (its tiles are still left alone).
---  * Telling the player: with `sysctl mow.report=true` and a player named
---    in turtle.player (`sysctl turtle.player=<name>`), mow tells them
---    through a chat box when it is done, and after a pass that gave up on
+--  * Telling the player: with `sysctl mow.report=true`, mow tells the
+--    player named in turtle.player (`sysctl turtle.player=<name>`), or
+--    everyone in the chat when none is, through a chat box when it is
+--    done, and after a pass that gave up on
 --    tiles or couldn't get home, with where the turtle is and its fuel
 --    (T.report).  A chat box in the chest below home is taken out for the
 --    telling and put back; one on board is put on for the moment.
