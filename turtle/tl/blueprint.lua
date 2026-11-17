@@ -22,13 +22,16 @@
 -- the name, key=value separated by commas; a name without a namespace is minecraft:'s.  The same plan as a Lua
 -- table: { name, anchor = {x, y, z}, legend = { B = "minecraft:stone_bricks", s = "...[facing=north]" }, layers = {
 -- "BBBB\nB..B", { "ssss" } } } (a layer is a string of lines or a list of lines).  The helpers fill, box, walls and
--- fromMap make one from code; put changes a cell.
+-- fromMap make one from code; put changes a cell.  A legend entry may give an order hint: "t = oak_slab[type=top]
+-- after 0,1,0" (as a table, { name = ..., after = { 0, 1, 0 } }) builds each of its cells after the cell that far from
+-- it (here the one above), whatever the order would have been.
 --
 -- T.build puts a plan up.  It checks the materials first (what is short, and what could be crafted if the
 -- craft module is there), then goes layer by layer from the bottom, standing over each cell and placing down; in a
 -- layer the plain blocks come first, then stairs and slabs, then what hangs on others (torches, ladders, buttons,
--- trapdoors, gates), then doors, so a thing goes in after its support.  With order = "column" the blocks, stairs and
--- slabs go up column by column instead, each column from the bottom, the columns in a serpentine (on to the nearest
+-- trapdoors, gates), then doors, so a thing goes in after its support; a top slab with a stair on it goes in after the
+-- stair (then it is placed from below, against it), and the legend's hints are followed.  With order = "column" the
+-- blocks, stairs and slabs go up column by column instead, each column from the bottom, the columns in a serpentine (on to the nearest
 -- one left), so a wall costs a climb a column rather than a lap a layer; then what hangs and the doors, layer by
 -- layer.  A stair, slab, log, torch or door goes through T.placeAt for the state it names.  The plan is kept as text
 -- in the data file .build, and how far the build has got (the number of the last cell tried, the cells that failed,
@@ -69,7 +72,7 @@ local WALL_FORM = {}
 for block, item in pairs(ITEM_OF_BLOCK) do WALL_FORM[item] = block end
 -- The order of building inside a layer, by family: what others hang on first, doors last
 local RANK = { block = 0, fence = 0, pane = 0, wall = 0, log = 0, stairs = 1, slab = 1, chest = 1,
-               torch = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, door = 3 }
+               torch = 2, sign = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, door = 3 }
 local RANKS = 3                                -- (0 to 3)
 
 local S = { lastYield = 0 }
@@ -123,12 +126,37 @@ local function parseItem(source)
     return name, state
 end
 
--- A legend entry from a string or a table: { name, state } or nil and why.
+-- An order hint: { dx, dy, dz } from "1,0,0" or a table ({ 1, 0, 0 } or { x =, y =, z = }); nil and why if it isn't
+-- three whole numbers.
+local function hintOf(value)
+    local v = value
+    if type(value) == "string" then
+        local parts = text.split(value, ",")
+        v = {}
+        if #parts == 3 then
+            for i = 1, 3 do v[i] = convert.toInteger(parts[i]) end
+        end
+    end
+    if type(v) ~= "table" then v = {} end
+    local dx, dy, dz = v.x or v[1], v.y or v[2], v.z or v[3]
+    if not (whole(dx) and whole(dy) and whole(dz)) then
+        return nil, "after is three whole numbers, the way to the cell it goes after: after 0,1,0"
+    end
+    return { dx, dy, dz }
+end
+
+-- A legend entry from a string or a table: { name, state, after } or nil and why.
 local function entryOf(value)
     if type(value) == "string" then
-        local name, state = parseItem(value)
+        local item, hint = text.cut(value, " after ")
+        local name, state = parseItem(item)
         if not name then return nil, state end
-        return { name = ITEM_OF_BLOCK[name] or name, state = state }
+        local after, why
+        if hint then
+            after, why = hintOf(text.trim(hint))
+            if not after then return nil, why end
+        end
+        return { name = ITEM_OF_BLOCK[name] or name, state = state, after = after }
     end
     if type(value) == "table" then
         local name, state = value.name or value.item or value[1], value.state
@@ -137,9 +165,21 @@ local function entryOf(value)
         if not parsed then return nil, parsedState end
         local copy = {}
         for key, v in pairs(state or parsedState or {}) do copy[key] = tostring(v) end
-        return { name = ITEM_OF_BLOCK[parsed] or parsed, state = next(copy) and copy or nil }
+        local after, why
+        if value.after ~= nil then
+            after, why = hintOf(value.after)
+            if not after then return nil, why end
+        end
+        return { name = ITEM_OF_BLOCK[parsed] or parsed, state = next(copy) and copy or nil, after = after }
     end
     return nil, "a legend entry is a block as text, like minecraft:stone[...]"
+end
+
+-- A legend entry as text: the block, and its hint if it has one.
+local function entryText(entry)
+    local s = itemText(entry.name, entry.state)
+    if entry.after then s = s .. " after " .. table.concat(entry.after, ",") end
+    return s
 end
 
 -- placeAt's view of an entry: its family, the state keys that can be asked for, whether it hangs.
@@ -247,7 +287,7 @@ local function formatPlan(plan)
     if plan.name then out[#out + 1] = "name: " .. plan.name end
     out[#out + 1] = "anchor: " .. plan.anchor.x .. " " .. plan.anchor.y .. " " .. plan.anchor.z
     for _, ch in ipairs(tables.sortedKeys(plan.legend)) do
-        out[#out + 1] = ch .. " = " .. itemText(plan.legend[ch].name, plan.legend[ch].state)
+        out[#out + 1] = ch .. " = " .. entryText(plan.legend[ch])
     end
     for li, rows in ipairs(plan.layers) do
         out[#out + 1] = "layer " .. li .. ":"
@@ -487,7 +527,7 @@ function T.blueprint.put(plan, x, y, z, item)
         else
             local wanted = itemText(name, state)
             for symbol, entry in pairs(plan.legend) do
-                if itemText(entry.name, entry.state) == wanted then ch = symbol end
+                if not entry.after and itemText(entry.name, entry.state) == wanted then ch = symbol end
             end
             if ch == " " then
                 for i = 1, #SYMBOLS do
@@ -633,9 +673,90 @@ end
 -- The orders a build can go in: "layer" (the default) or "column"
 local ORDERS = { layer = eachLayerCell, column = eachColumnCell }
 
+-- The hints a build follows with none given, by the family of a cell: when the cell's state is as named and the cell
+-- at the offset holds the family named, the cell goes after that one.  A top slab under a stair goes after the
+-- stair, so it is placed from below against it (the player's flights have a top slab under each stair).
+local DEFAULT_HINTS = {
+    slab = { state = { type = "top" }, offset = { 0, 1, 0 }, family = "stairs" },
+}
+
+-- The cell a cell is to go after, by its entry's hint or a default one, among the cells to place (byKey); nil for none.
+local function afterOf(cell, byKey)
+    local entry = cell.entry
+    local offset, family = entry.after, nil
+    if not offset then
+        local rule = DEFAULT_HINTS[infoOf(entry).family]
+        if not (rule and stateHolds(rule.state, entry.state)) then return nil end
+        offset, family = rule.offset, rule.family
+    end
+    local other = byKey[(cell.x + offset[1]) .. "," .. (cell.y + offset[2]) .. "," .. (cell.z + offset[3])]
+    if other == nil or other == cell or (family and infoOf(other.entry).family ~= family) then return nil end
+    return other
+end
+
+-- The cells of a list with the hints followed: a cell whose hint names a cell later in the list goes right after it
+-- (cells waiting for the same one in the list's order).  Hints that go round in a circle are let be: those cells go
+-- in at the end, in the list's order.
+local function followHints(list)
+    local byKey, waitFor, hinted = {}, {}, false
+    for _, cell in ipairs(list) do byKey[cell.x .. "," .. cell.y .. "," .. cell.z] = cell end
+    for _, cell in ipairs(list) do
+        waitFor[cell] = afterOf(cell, byKey)
+        hinted = hinted or waitFor[cell] ~= nil
+    end
+    if not hinted then return list end
+    local out, done, waiting = {}, {}, {}
+    local function emit(first)
+        local queue, i = { first }, 1
+        while queue[i] do
+            local cell = queue[i]
+            i = i + 1
+            if not done[cell] then
+                out[#out + 1] = cell
+                done[cell] = true
+                for _, c in ipairs(waiting[cell] or {}) do queue[#queue + 1] = c end
+                waiting[cell] = nil
+            end
+        end
+    end
+    for _, cell in ipairs(list) do
+        local other = waitFor[cell]
+        if other and not done[other] then
+            waiting[other] = waiting[other] or {}
+            table.insert(waiting[other], cell)
+        else
+            emit(cell)
+        end
+        breathe()
+    end
+    for _, cell in ipairs(list) do
+        if not done[cell] then emit(cell) end
+    end
+    return out
+end
+
+-- The cells of each plan in each order, hints followed, numbered from 1 (worked out once: the plan tables are kept
+-- while a build runs)
+local buildLists = setmetatable({}, { __mode = "k" })
+
 -- Call fn(cell) for each cell to place, in the order `order` builds them ("layer" if nil), until fn returns true.
 local function eachBuildCell(plan, fn, order)
-    return ORDERS[order or "layer"](plan, fn)
+    order = order or "layer"
+    local lists = buildLists[plan] or {}
+    buildLists[plan] = lists
+    if not lists[order] then
+        local base = {}
+        ORDERS[order](plan, function(cell) base[#base + 1] = cell end)
+        lists[order] = followHints(base)
+        for n, cell in ipairs(lists[order]) do cell.n = n end
+    end
+    for _, cell in ipairs(lists[order]) do
+        if fn({ n = cell.n, x = cell.x, y = cell.y, z = cell.z, name = cell.name, state = cell.state, entry = cell.entry }) then
+            return true
+        end
+        breathe()
+    end
+    return false
 end
 
 --------------------------------------------------------------------------
@@ -725,8 +846,9 @@ end
 -- Building
 --------------------------------------------------------------------------
 
--- Put one cell in place: true, or false and why; the second answer is true when it was there already.
-local function putCell(cell, move, look)
+-- Put one cell in place: true, or false and why; the second answer is true when it was there already.  support: the
+-- build's opts that T.placeAt takes on (digBelow, temp).
+local function putCell(cell, move, look, support)
     local want, asked = wantsOf(cell.entry)
     if isDouble(cell.entry) then
         -- a double slab: a bottom half, then a second slab placed down onto it from above
@@ -760,7 +882,7 @@ local function putCell(cell, move, look)
             -- (nothing seen there: some other way in may do)
         end
     end
-    local opts = { move = move }
+    local opts = { move = move, digBelow = support.digBelow, temp = support.temp }
     for key, value in pairs(want) do opts[key] = value end
     local name, stateOrWhy, how = T.placeAt(cell.x, cell.y, cell.z, cell.name, opts)
     if not name then return false, stateOrWhy end
@@ -862,9 +984,11 @@ end
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
 -- false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart,
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
--- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end).  Info is { name, done,
--- total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in
--- place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell }, warnings }.
+-- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow and temp
+-- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow).
+-- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
+-- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
+-- warnings }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
 -- info.warnings and printed, a line a rule ("player: headroom at 3,1,4: ..."); they never change the result.
 function T.build(plan, opts)
@@ -945,7 +1069,7 @@ function T.build(plan, opts)
     info.fuel = watch and { estimate = math.ceil(watch.approach), spent = 0, perCell = watch.perCell } or nil
 
     local function attempt(cell)
-        local good, extra = putCell(cell, move, opts.look)      -- (extra: already there, or why not)
+        local good, extra = putCell(cell, move, opts.look, opts)      -- (extra: already there, or why not)
         attempted = attempted + 1
         if good then
             job.failed[cell.n] = nil

@@ -14,8 +14,11 @@
 --     gives name and state as CC does (booleans as booleans, the rest strings).
 --   * turtle.place* as CC:Tweaked 1.120.2 runs it (TurtlePlaceCommand.deploy, read from the source, see
 --     "The order" below), and Minecraft's own rules for each family of block (stairs, slabs, logs and
---     pillars, torches, ladders, buttons and levers, doors, trapdoors, fence gates, chests and furnaces;
---     everything else is a plain full block).  The rules are DATA, in FAMILIES below.
+--     pillars, torches, signs, ladders, buttons and levers, doors, trapdoors, fence gates, chests and
+--     furnaces; everything else is a plain full block).  The rules are DATA, in FAMILIES below.
+--   * A sign's text: turtle.place(text) on a sign writes it as CC:Tweaked does (TurtlePlaceCommand.setSignText:
+--     the lines between newlines, at most 15 characters each, four at most; one or two lines start on the
+--     second); the block keeps it as w.get(...).text, four strings.
 --   * Items carry the block they place (the item's name is the block's; a water or lava bucket places its
 --     liquid).  A cell that is not replaceable refuses.
 --   * Digging: the drops go to the turtle; what hung on a dug block pops off.
@@ -114,7 +117,7 @@ local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
     { "_fence_gate", "fence_gate" }, { "_button", "button" }, { "_log", "log" }, { "_wood", "log" },
     { "_hyphae", "log" }, { "_pillar", "log" }, { "_leaves", "leaves" }, { "_pane", "pane" },
-    { "_fence", "fence" }, { "_wall", "wall" },
+    { "_fence", "fence" }, { "_wall", "wall" }, { "_sign", "sign" },
 }
 local function familyOf(name)
     local s = short(name)
@@ -254,6 +257,12 @@ end
 -- A torch, ladder, button or lever hangs where the first direction in the looking order has support.
 local function hangs(ctx, dir) return sturdy(ctx.near(dir), OPP[dir]) end
 
+-- A standing sign's rotation (sixteenths of a turn from south), turned to face the placer: the placer's compass facing
+local SIGN_ROTATION = { north = 0, east = 4, south = 8, west = 12 }
+-- The wall form of a sign: oak_sign -> oak_wall_sign
+local function wallSign(item) return item:sub(1, #item - 5) .. "_wall_sign" end
+local function isWallSign(name) return endsWith(name, "_wall_sign") end
+
 FAMILIES = {
     block = { sturdy = yes, full = yes, place = function() return {} end },
     -- (the turtle is a small cube in its cell: nothing hangs on it and a door needs more than it)
@@ -330,6 +339,31 @@ FAMILIES = {
             if IS_WALL_TORCH[short(b.name)] then
                 return sturdy(w.near(x, y, z, OPP[b.state.facing]), b.state.facing)
             end
+            return sturdy(w.near(x, y, z, "down"), "up", true)
+        end,
+    },
+
+    -- a sign (StandingAndWallBlockItem, as a torch): on a wall (the wall form, facing away from it) on the first
+    -- side in the looking order with a block to hold it, or standing on the floor, turned to face the placer
+    sign = {
+        sturdy = no, full = no, passable = true,
+        place = function(ctx)
+            local wall
+            for _, d in ipairs(ctx.look) do
+                if CIDX[d] and hangs(ctx, d) then wall = { facing = OPP[d], waterlogged = false }; break end
+            end
+            for _, d in ipairs(ctx.look) do
+                if d == "down" then
+                    if sturdy(ctx.near("down"), "up", true) then
+                        return { rotation = SIGN_ROTATION[ctx.horizontal], waterlogged = false }, ctx.item
+                    end
+                elseif d ~= "up" and wall then
+                    return wall, wallSign(ctx.item)
+                end
+            end
+        end,
+        survives = function(w, x, y, z, b)
+            if isWallSign(b.name) then return sturdy(w.near(x, y, z, OPP[b.state.facing]), b.state.facing) end
             return sturdy(w.near(x, y, z, "down"), "up", true)
         end,
     },
@@ -670,6 +704,7 @@ function B.new(opts)
     local DIRS6 = { "up", "down", "north", "east", "south", "west" }
     local function itemOf(b)
         local s = short(b.name)
+        if isWallSign(s) then return "minecraft:" .. s:sub(1, #s - 10) .. "_sign" end
         return "minecraft:" .. (DROP_AS[s] or s)
     end
     local settle
@@ -696,9 +731,28 @@ function B.new(opts)
     -- Hit height above the clicked block's floor: a top face 1, a bottom face 0, a side 0.45
     local function hitFrac(face) return VERT[face] and (face == "up" and 1 or 0) or 0.45 end
 
+    -- A sign's four lines from the text given to turtle.place, as CC:Tweaked writes them
+    local function signText(message)
+        local split, from = {}, 1
+        while true do
+            local nl = message:find("\n", from, true)
+            split[#split + 1] = message:sub(from, (nl or 0) - 1)
+            if not nl then break end
+            from = nl + 1
+        end
+        local first = #split <= 2 and 2 or 1
+        local lines = { "", "", "", "" }
+        for i = first, 4 do
+            local line = split[i - first + 1]
+            if line then lines[i] = line:sub(1, 15) end
+        end
+        return lines
+    end
+
     -- Use the item in the selected slot on the block at cx,cy,cz, clicked on `face`, with the placer
     -- facing `facing` (compass) and looking `pitch` (nil, "down" or "up").  True if something was placed.
-    local function useOn(item, cx, cy, cz, face, facing, pitch)
+    -- message: turtle.place's text, written on a sign.
+    local function useOn(item, cx, cy, cz, face, facing, pitch, message)
         local clicked = w.at(cx, cy, cz)
         local rel = hitFrac(face)
         local replaceClicked = replaceable(clicked, item, face, rel, true)
@@ -732,6 +786,7 @@ function B.new(opts)
         local state, name = fam.place(ctx)
         if not state then return false end
         local block = { name = name or item, state = state }
+        if fam.name == "sign" and type(message) == "string" then block.text = signText(message) end
         w.put(px, py, pz, block)
         if fam.after then fam.after(w, px, py, pz, block) end
         w.placed = w.placed + 1
@@ -742,7 +797,7 @@ function B.new(opts)
     end
 
     -- turtle.place in a direction ("front", "up", "down"): the attempts of TurtlePlaceCommand.deploy
-    local function deploy(where)
+    local function deploy(where, message)
         local it = S.inv[S.sel]
         if not it then return false, "No items to place" end
         local heading = w.compass(S.P.d)
@@ -795,7 +850,7 @@ function B.new(opts)
         for _, a in ipairs(attempts) do
             if usable(a[1], a[2], a[3], a[4], a[5]) then
                 local facing, pitch = placer(a[5])
-                if useOn(item, a[1], a[2], a[3], a[5], facing, pitch) then return true end
+                if useOn(item, a[1], a[2], a[3], a[5], facing, pitch, message) then return true end
             end
         end
         return false, block and "Cannot place block here" or "Cannot place item here"
@@ -1035,7 +1090,7 @@ function B.new(opts)
     }
 
     local acting = M.merge(
-        M.actingApi(S, "place", function(_, _, _, where) return deploy(where) end),
+        M.actingApi(S, "place", function(_, _, _, where, message) return deploy(where, message) end),
         M.actingApi(S, "dig", function(x, y, z) return dig(x, y, z) end),
         M.actingApi(S, "drop", function(x, y, z, where, n)
             local b = w.at(x, y, z)

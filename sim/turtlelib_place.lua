@@ -6,13 +6,20 @@
 --     iff there is a block under the target; placeUp the top half iff there is a block over it; in each of
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
---     reached by a route round the support) and standing; a ladder, button, lever, trapdoor, fence gate, chest;
+--     reached by a route round the support) and standing; a sign and its text; a ladder (sideways, and from above
+--     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
 --   * the table wrong about a row: the retry gets it right, the wrong block is dug out (in a protected area too),
 --     the correction is kept in .placements, used from then on and after a restart; a wrong guess on a map
 --     that does not know the surroundings is not learnt from; the table wrong about a facing rule;
 --   * what it refuses: a cell in use, no item, a state the family has no key for, a facing without the
 --     world origin; a cell that already holds the block as wanted is left alone;
+--   * support: a top slab with nothing above (placing from above refused) gets a temporary block above, is placed from
+--     below, and the block is taken away (opts.temp names it; none on board is refused, saying so);
+--   * opts.digBelow: a top slab on a floor refused without it (the floor untouched, the option named); with it the
+--     floor dug, the slab placed from there, the floor put back (a log floor the same way round), with a temporary
+--     block above too when nothing is there; refused before digging with none of the floor's block on board, with no
+--     way out of the floor's cell, in a protected area (unless opts.inside);
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -243,12 +250,91 @@ end
 scene("a ladder on the block beyond, facing back", {
     item = "minecraft:ladder", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "front" })
+-- Ladders from above and below: the turtle faces the wall the ladder goes on (the first side the game looks at)
+local LADDER = "minecraft:ladder"
+-- a shaft one cell wide at 0,y,3, its walls at y from y1 to y2, and stone at the cells named
+local function shaft(y1, y2, extra)
+    local out = {}
+    for y = y1, y2 do
+        for _, c in ipairs({ { 0, 4 }, { 0, 2 }, { 1, 3 }, { -1, 3 } }) do out[#out + 1] = stone(c[1], y, c[2]) end
+    end
+    for _, b in ipairs(extra or {}) do out[#out + 1] = b end
+    return out
+end
+scene("a ladder in a shaft with a floor, from above: facing the wall beyond the target, on it", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, -1, 3) }), opts = { facing = "south" },
+    expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "down", from = { 0, 1, 3 } })
+scene("a ladder in a shaft with a roof, from below", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, 1, 3) }), opts = { facing = "south" },
+    expect = { { 0, 0, 3, "ladder", { facing = "south" } } }, approach = "up", from = { 0, -1, 3 } })
+scene("a ladder from above with no facing asked: on a wall the turtle turns to", {
+    item = LADDER, blocks = shaft(0, 0, { stone(0, -1, 3) }),
+    expect = { { 0, 0, 3, "ladder" } }, approach = "down" })
+do
+    fresh(nil, shaft(0, 2, { stone(0, -1, 3) }))
+    knowAll()
+    W.give(1, LADDER, 4)
+    local good = true
+    for y = 0, 2 do
+        local name, _, how = T.placeAt(0, y, 3, LADDER, { facing = "south" })
+        good = good and name ~= nil and how.approach == "down" and has(0, y, 3, "ladder", { facing = "south" })
+    end
+    check("a ladder column up a shaft, each from above, bottom first", good, W.show(0, 0, 3) .. " " .. W.show(0, 1, 3) .. " " .. W.show(0, 2, 3))
+    fresh(nil, { stone(0, -1, 3), stone(1, 0, 3), stone(-1, 0, 3), stone(0, 0, 4) })
+    knowAll()
+    W.give(1, LADDER, 4)
+    local name, why = T.placeAt(0, 0, 3, LADDER, { facing = "north" })
+    check("a ladder facing north with no wall south of it: refused, saying the wall it needs from above",
+        name == nil and why:find("from above from 0,1,3 facing south: needs a block to hang it on beside the target the way the turtle "
+        .. "faces, and the map has minecraft:air at 0,0,2", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+end
 scene("a button on a wall beyond", {
     item = "minecraft:stone_button", blocks = { stone(0, 0, 4) }, opts = { face = "wall", facing = "south" },
     expect = { { 0, 0, 3, "stone_button", { face = "wall", facing = "south" } } } })
 scene("a lever on the floor, from above", {
     item = "minecraft:lever", blocks = { stone(0, -1, 3) }, opts = { face = "floor" },
     expect = { { 0, 0, 3, "lever", { face = "floor" } } } })
+
+--------------------------------------------------------------------------
+-- Signs: on a wall when the block beyond holds one, else standing; opts.text written, 4 lines of 15
+--------------------------------------------------------------------------
+local SIGN = "minecraft:oak_sign"
+local function signLines(x, y, z)
+    local b = W.get(x, y, z)
+    return b and b.text and table.concat(b.text, "|") or "no text"
+end
+do
+    local _, _, how = scene("a sign on the wall beyond: a wall sign facing back at the turtle", {
+        item = SIGN, blocks = { stone(0, 0, 4) }, opts = { text = "Welcome to the castle" },
+        expect = { { 0, 0, 3, "oak_wall_sign", { facing = "south" } } }, approach = "front", from = { 0, 0, 2 } })
+    check("...its text wrapped to lines of 15 (two lines start on the sign's second)", signLines(0, 0, 3) == "|Welcome to the|castle|",
+        signLines(0, 0, 3))
+    check("...and the lines come back in how", how and how.lines and #how.lines == 2 and how.lines[1] == "Welcome to the",
+        tostring(how and how.lines))
+    scene("a sign with a floor and no wall: it stands", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Keep\nout" }, expect = { { 0, 0, 3, "oak_sign" } } })
+    check("...the lines as given, each its own", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
+    scene("a sign facing north goes round its wall to the north side", {
+        item = SIGN, blocks = { stone(0, 0, 2) }, opts = { facing = "north", text = "north" },
+        expect = { { 0, 0, 3, "oak_wall_sign", { facing = "north" } } }, from = { 0, 0, 4 } })
+    fresh(nil, { stone(0, 0, 4) })
+    knowAll()
+    W.give(1, SIGN, 4)
+    local name, why = T.placeAt(0, 0, 3, SIGN, { text = "one two three four five six seven eight nine ten eleven twelve" })
+    check("text that will not fit 4 lines of 15 is refused with why, nothing placed, no move", name == nil
+        and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    W.give(2, STONE, 4)
+    name, why = T.placeAt(0, 0, 3, STONE, { text = "hello" })
+    check("text on a block that is not a sign is refused", name == nil and why:find("only a sign", 1, true) ~= nil and W.get(0, 0, 3) == nil,
+        tostring(why))
+    fresh(nil, { stone(0, 0, 2) })
+    W.give(1, SIGN, 2)
+    T.selectItem(SIGN)
+    local ok = T.placeDir(0, "by hand")
+    check("T.placeDir(d, text) writes the text on a sign", ok == true and signLines(0, 0, 1) == "|by hand||", signLines(0, 0, 1))
+    local info = T.placeInfo(SIGN)
+    check("placeInfo: a sign is its own family, hangs, placed by facing", info.family == "sign" and info.hang == true and info.keys.facing == true)
+end
 
 --------------------------------------------------------------------------
 -- Doors, trapdoors, gates, chests
@@ -464,6 +550,111 @@ do
     check("the map holds the wall torch (not the item's name)", n == "minecraft:wall_torch", tostring(n))
     local _, st = T.map.get(0, 0, 3)
     check("...with its state", st and st.facing == "south", tostring(st and st.facing))
+end
+
+--------------------------------------------------------------------------
+-- Support: a top half placed from below with nothing above to place against gets a temporary block there, taken away
+-- after (here the game refuses the placement from above, so from below is the only way left)
+--------------------------------------------------------------------------
+local COBBLE = "minecraft:cobblestone"
+-- T.placeDir with placing down refused, as a game that won't place from above would
+local function noPlacingDown()
+    local rawPlace = T.placeDir
+    T.placeDir = function(d, ...)
+        if d == "down" then return false, "Cannot place block here" end
+        return rawPlace(d, ...)
+    end
+end
+do
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    W.give(2, COBBLE, 3)
+    noPlacingDown()
+    local name, state, how = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("a top slab with nothing above: a temporary block above, the slab from below, the block taken away",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and W.get(0, 1, 3) == nil and how.approach == "up"
+        and how.support and how.support.temp == COBBLE, tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, 1, 3))
+    check("...the cobblestone back on board, one slab used, the map with air where the block was", W.carrying(COBBLE) == 3 and W.carrying(SL) == 3
+        and T.map.get(0, 1, 3) == "minecraft:air", W.carrying(COBBLE) .. " " .. tostring(T.map.get(0, 1, 3)))
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    W.give(2, "minecraft:dirt", 2)
+    W.give(3, COBBLE, 2)
+    noPlacingDown()
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", temp = "minecraft:dirt" })
+    check("opts.temp names the block to use", name ~= nil and how.support and how.support.temp == "minecraft:dirt" and W.carrying("minecraft:dirt") == 2
+        and W.get(0, 1, 3) == nil, tostring(state))
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    noPlacingDown()
+    local why
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("no block on board to hold it up: refused, saying so", name == nil and why:find("a block to put above it for a moment", 1, true) ~= nil
+        and W.get(0, 0, 3) == nil, tostring(why))
+end
+
+--------------------------------------------------------------------------
+-- opts.digBelow: a top half on a floor is placed from where the floor is: the floor dug, stood in, the item placed up,
+-- the floor put back with the same block; never without the option
+--------------------------------------------------------------------------
+local FLOOR = "minecraft:stone_bricks"
+-- A floor round 0,-1,3 with air under it (the way out), and what else is named
+local function floorScene(floorBlock, extra)
+    local blocks = { { 0, -1, 3, floorBlock[1], floorBlock[2] }, stone(1, -1, 3), stone(-1, -1, 3), stone(0, -1, 2), stone(0, -1, 4) }
+    for _, b in ipairs(extra or {}) do blocks[#blocks + 1] = b end
+    fresh(nil, blocks)
+    knowAll()
+end
+do
+    local STAIR_ON = { 0, 1, 3, ST, { facing = "north", half = "bottom", shape = "straight", waterlogged = false } }
+    floorScene({ FLOOR }, { STAIR_ON })
+    W.give(1, SL, 4)
+    W.give(2, FLOOR, 1)
+    local name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("a top slab on a floor under a stair, without opts.digBelow: refused, the floor left as it is, the option named",
+        name == nil and has(0, -1, 3, "stone_bricks") and W.get(0, 0, 3) == nil and W.dug == nil
+        and why:find("opts.digBelow = true", 1, true) ~= nil, tostring(why))
+    local state, how
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...with opts.digBelow: the floor dug, the slab placed up from there against the stair, the floor put back",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "stone_bricks") and how.support
+        and how.support.floor == FLOOR and how.support.temp == nil, tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, -1, 3))
+    check("...the same number of bricks on board as before, the map with the floor and the slab", W.carrying(FLOOR) == 1
+        and T.map.get(0, -1, 3) == FLOOR and T.map.get(0, 0, 3) == SL, W.carrying(FLOOR) .. " " .. tostring(T.map.get(0, -1, 3)))
+    -- nothing above: a temporary block too, and a floor with a state put back the same way round
+    floorScene({ "minecraft:oak_log", { axis = "y" } })
+    W.give(1, SL, 4)
+    W.give(2, "minecraft:oak_log", 1)
+    W.give(3, COBBLE, 1)
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("with nothing above as well: a temporary block above, the floor dug, the slab, the floor back, the block taken away",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "oak_log", { axis = "y" }) and W.get(0, 1, 3) == nil
+        and how.support and how.support.temp == COBBLE and W.carrying(COBBLE) == 1 and W.carrying("minecraft:oak_log") == 1,
+        tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, -1, 3) .. " " .. W.show(0, 1, 3))
+    -- refusals before anything is dug
+    floorScene({ FLOOR }, { STAIR_ON })
+    W.give(1, SL, 4)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("opts.digBelow with none of the floor's block on board: refused, nothing dug, saying to carry one",
+        name == nil and W.dug == nil and has(0, -1, 3, "stone_bricks") and why:find("carry one minecraft:stone_bricks", 1, true) ~= nil, tostring(why))
+    floorScene({ FLOOR }, { STAIR_ON, stone(0, -2, 3) })
+    W.give(1, SL, 4)
+    W.give(2, FLOOR, 1)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...with no free cell beside the floor to step out to: refused, nothing dug", name == nil and W.dug == nil
+        and why:find("no free cell beside the floor", 1, true) ~= nil, tostring(why))
+    floorScene({ FLOOR }, { STAIR_ON })
+    W.give(1, SL, 4)
+    W.give(2, FLOOR, 1)
+    T.protect("hall", -1, -1, 2, 1, -1, 4)
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true })
+    check("...a floor in a protected area is not dug: refused, saying so", name == nil and has(0, -1, 3, "stone_bricks")
+        and why:find("protected", 1, true) ~= nil, tostring(why))
+    name = T.placeAt(0, 0, 3, SL, { half = "top", digBelow = true, inside = "hall" })
+    check("...unless the job owns it (opts.inside)", name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and has(0, -1, 3, "stone_bricks"))
 end
 
 --------------------------------------------------------------------------

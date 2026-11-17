@@ -66,7 +66,7 @@ T.neighbour(d) - The block next to the turtle in direction d.
 T.dirTo(p) - The direction from the turtle to the block next to it at p.
 T.look(d) - Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 T.digDir(d) - Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected area holds. Returns turtle.dig's results (false and why if it can't).
-T.placeDir(d) - Face direction d (0 to 3, "up" or "down") and place the selected item there. Returns turtle.place's results.
+T.placeDir(d, text) - Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign. Returns turtle.place's results.
 T.attackDir(d) - Face direction d (0 to 3, "up" or "down") and attack there. Returns turtle.attack's results.
 T.suckDir(d) - Face direction d (0 to 3, "up" or "down") and pick up items there. Returns turtle.suck's results.
 T.moveDir(d) - Move one block in direction d (T.up/T.down/T.forward: digging what T.diggable allows, attacking what's in the way).
@@ -207,7 +207,7 @@ Looking at what came out, and taking it back:
 T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 Placing a block with the state wanted:
 T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
-T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and how; nil and why if it can't.
+T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the block, its state and how; nil and why if it can't.
 Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 The list of chests, in a data file:
