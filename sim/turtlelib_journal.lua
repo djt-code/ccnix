@@ -461,7 +461,8 @@ do
     local sent = #SENT
     SETTINGS["turtle.player"] = ""
     ok, why = T.report("nobody")
-    check("no player set: nil and why, nothing sent", ok == nil and contains(why, "turtle.player") and #SENT == sent, tostring(why))
+    check("no player set: said to everyone (ADR-0013 D3)", ok == true and #SENT == sent + 1 and SENT[#SENT].everyone == true
+        and SENT[#SENT].message:find("^nobody %[") ~= nil, tostring(why))
     SETTINGS["turtle.player"] = "Steve"
     ok, why = T.report("")
     check("an empty text is refused", ok == nil and contains(why, "nothing to say"))

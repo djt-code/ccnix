@@ -200,9 +200,10 @@
 --    "mine home K chest" and "mine home K bulk"), so no other program on the
 --    turtle digs them either; they are let go of when it ends, however it
 --    ends (`sysctl mine.protect=false` protects nothing).
---  * Telling the player: with `sysctl mine.report=true` and a player named
---    in turtle.player (`sysctl turtle.player=<name>`), mine tells them
---    through a chat box when it ends or stops and why, with where the
+--  * Telling the player: with `sysctl mine.report=true`, mine tells the
+--    player named in turtle.player (`sysctl turtle.player=<name>`), or
+--    everyone in the chat when none is, through a chat box when it ends
+--    or stops and why, with where the
 --    turtle is and its fuel (T.report).  A chat box in the start's top chest
 --    is taken out for the telling and put back; one on board is put on for
 --    the moment, beside a chunk controller.

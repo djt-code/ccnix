@@ -78,7 +78,9 @@
 --
 -- Keeping the player told: when claude.remindChat minutes (default 15, 0
 -- for never) pass with no chat message to the player (T.report, the chat
--- tool), the model is reminded after the next tool results.
+-- tool), the model is reminded after the next tool results.  With no
+-- turtle.player set, what it says in chat goes to everyone: a session
+-- says so at its start, and `sysctl turtle.player=<name>` makes it private.
 --
 -- Hearing the player: while claude waits for the model's reply, a chat
 -- box aboard goes on the free side (an empty one or a tool's: never the
@@ -2304,6 +2306,12 @@ local function main()
         say("yellow", memory)
         log("memory: " .. memory)
         startNotes[#startNotes + 1] = memory
+    end
+    -- (ADR-0013 D3: no player set, what reports speaks to everyone)
+    if settings and (settings.get("turtle.player") or "") == "" then
+        local nobody = "turtle.player isn't set: reports go to everyone; `sysctl turtle.player=<name>` makes them private."
+        say("yellow", nobody)
+        startNotes[#startNotes + 1] = nobody
     end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
     if goal == "" then

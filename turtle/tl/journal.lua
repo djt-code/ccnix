@@ -16,7 +16,7 @@
 -- is dug out.  T.undoMark() gives a mark to undo back to later: T.undo(nil, { since = mark }).  The journal is cut to its
 -- newest 2000 entries (the setting undo.max).  Moves are not written down, and neither is anything done while undoing.
 --
--- T.report tells the player (the setting turtle.player, never in the code) through a chat box, with where the turtle is, its
+-- T.report tells the player (the setting turtle.player, never in the code; everyone when it isn't set) through a chat box, with where the turtle is, its
 -- fuel and the job's progress added (not once the job is finished: its last step done).  A chat box that is not attached is equipped for the moment through T.withPeripheral;
 -- the chat box's cooldown is waited out and retried.  T.report.every(n) makes the job tell the player once in every n steps
 -- (a step is a T.job.done, or a progress line from a build or a harvest).  T.report.ask asks the player in chat and waits for
@@ -254,18 +254,19 @@ local function whereText()
     return string.format("at %d,%d,%d (turtle frame)", T.pos.x, T.pos.y, T.pos.z)
 end
 
--- The player to tell: the setting turtle.player.
+-- The player to tell: the setting turtle.player ("": everyone).
 local function playerName()
-    return T.setting("turtle.player", "", "The player the turtle's reports go to (through a chat box)")
+    return T.setting("turtle.player", "", "The player the turtle's reports go to (through a chat box; unset: everyone)")
 end
 
--- Hand the message to a chat box and wait out its cooldown.  True, or nil and why.
+-- Hand the message to a chat box (for `who`, or everyone when nil) and wait out its cooldown.  True, or nil and why.
 local function deliver(box, who, message, tries, wait)
     local mc = require("mc")
     local chat = mc.new(box and { chatBox = box } or nil)
     if not chat.has.chat then return nil, "no chat box to speak through" end
     local label = os.getComputerLabel and os.getComputerLabel() or "turtle"
-    local ok, why = chat.tell(who, message, label)
+    local ok, why
+    if who then ok, why = chat.tell(who, message, label) else ok, why = chat.say(message, label) end
     if not ok then return nil, why end
     for _ = 1, tries do
         if chat.flush() then return true end
@@ -295,7 +296,8 @@ end
 -- Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil
 -- and why.
 --
--- The player is the setting turtle.player (opts.player overrides it); with none, nothing is said.  A chat box on a side is used
+-- The player is the setting turtle.player (opts.player overrides it); with none, it's said to everyone in the chat (ADR-0013
+-- D3: what reports speaks to everyone unless turtle.player makes it private).  A chat box on a side is used
 -- as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side.  The
 -- chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1).  opts.plain sends the
 -- text alone.  T.report(said, opts) does the same.
@@ -306,9 +308,7 @@ function T.report.now(said, opts)
     opts = opts or {}
     if type(said) ~= "string" or said == "" then return nil, "nothing to say: give the text" end
     local who = opts.player or playerName()
-    if type(who) ~= "string" or who == "" then
-        return nil, "no player to tell: set turtle.player (sysctl turtle.player=<name>)"
-    end
+    if type(who) ~= "string" or who == "" then who = nil end        -- (everyone)
     local borrowed = false
     if opts.from and T.countItem(CHAT_BOX) == 0 and require("mc").new().has.chat ~= "chat box" and T.containerOn(opts.from) then
         borrowed = T.pull(opts.from, CHAT_BOX, 1) == 1

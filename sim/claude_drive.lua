@@ -1445,9 +1445,9 @@ check("...both failures logged and shown (ADR-0013 phase 1)",
     nlog:find("chat, couldn't ask: [^\n]*chat_box") and nlog:find("chat: not said: [^\n]*chat_box")
         and Mine.logHas("^%(not said in chat: .*chat_box"), nlog)
 
--- with no turtle.player, T.report refuses: the refusal is logged and
--- shown, not only the line said before it (ADR-0013 phase 1; whether the
--- tool then speaks to everyone is D3's)
+-- with no turtle.player, the chat tool speaks to everyone (ADR-0013 D3),
+-- and the session says at its start that reports go to everyone, on the
+-- screen and with the first goal
 chatFresh()
 SET32["turtle.player"] = nil
 HTTP.queue = {
@@ -1457,15 +1457,19 @@ HTTP.queue = {
 run("nobody set")
 SET32["turtle.player"] = "Steve"
 local c9 = resultsIn(2).toolu_1
-check("no player set: the chat tool's refusal is logged and shown",
-    c9 and c9.is_error == true and c9.content:find("no player to tell", 1, true)
-        and (Mine.files["claude.log"] or ""):find("chat: not said: no player to tell", 1, true)
-        and Mine.logHas("^%(not said in chat: no player to tell"), c9 and c9.content)
+check("no player set: the chat tool speaks to everyone",
+    c9 and c9.content == "said in chat" and c9.is_error == nil and CHATSENT[1] and CHATSENT[1].everyone == true
+        and CHATSENT[1].message == "Starting.", c9 and c9.content)
+local NOBODY = "turtle.player isn't set: reports go to everyone; `sysctl turtle.player=<name>` makes them private."
+local goal9 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("...and the session said at its start that reports go to everyone, on the screen and with the first goal",
+    goal9 == "nobody set\n\n[" .. NOBODY .. "]" and Mine.logHas("^turtle%.player isn't set: reports go to everyone"), goal9)
 
 chatFresh()
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("what can I say")
 local sys32 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("with turtle.player set, no such note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "what can I say")
 check("the prompt tells of the chat tool and T.report.ask, and to ask in the game",
     sys32:find("The chat tool says something in the game's chat without code", 1, true)
         and sys32:find("T.report.ask(question, opts)", 1, true)

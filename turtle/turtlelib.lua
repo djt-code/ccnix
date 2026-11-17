@@ -65,7 +65,8 @@
 --     takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
 --   * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file
 --     so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them
---     back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
+--     back; T.report tells the player (the setting turtle.player; everyone when it isn't set) through a chat box, with
+--     position, fuel and progress
 --   * modules loaded when first used: a function T lacks that is in
 --     T.registry is looked up there, its module (turtle/tl/<name>.lua,
 --     required as "tl.<name>") fills T in, and the call goes on

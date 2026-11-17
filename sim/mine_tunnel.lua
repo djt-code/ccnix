@@ -354,6 +354,10 @@ package.loaded.mc = { new = function()
                  end
                  told[#told + 1] = who .. ": " .. message .. (held and " {chat box aboard}" or "")
                  return true
+             end,
+             say = function(message)
+                 told[#told + 1] = "everyone: " .. message
+                 return true
              end }
 end }
 local function withSettings(chosen, fn)
@@ -392,7 +396,7 @@ withSettings({ ["turtle.player"] = "Tester" }, function() run("2", "2", "--spaci
 check("mine.report off (the default): no one is told", #told == 0, table.concat(told, " | "))
 bedrockWorld()
 withSettings({ ["mine.report"] = true }, function() run("2", "2", "--spacing", "8", "--new") end)
-check("on, but no player set: no one is told, and mine says why", #told == 0 and logHas("Couldn't tell the player %(no player to tell"),
+check("on, but no player set: everyone is told (ADR-0013 D3)", #told == 1 and told[1]:find("^everyone: mine ") ~= nil,
     table.concat(told, " | "))
 package.loaded.mc = nil
 

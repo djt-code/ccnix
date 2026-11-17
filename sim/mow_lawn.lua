@@ -318,6 +318,10 @@ package.loaded.mc = { new = function()
              tell = function(who, message)
                  told[#told + 1] = who .. ": " .. message .. (aboard and " {chat box aboard}" or "")
                  return true
+             end,
+             say = function(message)
+                 told[#told + 1] = "everyone: " .. message .. (aboard and " {chat box aboard}" or "")
+                 return true
              end }
 end }
 local function reportLawn(rough)
@@ -351,7 +355,7 @@ check("mow.report off (the default): no one is told", #told == 0, table.concat(t
 reportLawn(false)
 EQ.left = "minecraft:diamond_hoe"
 withSettings({ ["mow.report"] = true }, function() run("4", "3", "notorch") end)
-check("on, but no player set: no one is told, and mow says why", #told == 0 and logHas("Couldn't tell the player %(no player to tell"), table.concat(told, " | "))
+check("on, but no player set: everyone is told (ADR-0013 D3)", #told == 1 and told[1]:find("^everyone: mow: ") ~= nil, table.concat(told, " | "))
 package.loaded.mc = nil
 
 --------------------------------------------------------------------------
