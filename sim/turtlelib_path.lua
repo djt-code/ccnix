@@ -15,7 +15,8 @@
 --   * T.digCell (ADR-0011 D7.1): one cell dug from beside it and nothing else, refusing lava beside it and protected
 --     cells; opts.digOnly in T.path and T.travel;
 --   * (ADR-0013) a route that fails with furnishings in the way names the cells a way would go through (T.path and
---     T.travel, nothing dug), not with the caller's own avoid list, never a door, nor furnishings no way goes through.
+--     T.travel, nothing dug), not with the caller's own avoid list, never a door, nor furnishings no way goes through;
+--     a nether portal is never dug or gone through, even with dig = true.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -321,6 +322,12 @@ box(-3, -2, 1, 3, 2, 1, "minecraft:ladder"); put(0, 0, 1, nil); learn(T, -3, -2,
 route, why = T.path(0, 0, 5, { margin = 1 })
 check("...nor furnishings met when no way goes through them (the stone wall beyond)", route == nil and not tostring(why):find("a way exists", 1, true),
     tostring(why))
+-- (ADR-0013) a nether portal is unbreakable: a route that may dig goes through the stone beside it, never the portal
+T = wallWith("minecraft:nether_portal")
+route = T.path(0, 0, 5, { dig = true, margin = 1 })
+check("a nether portal in a wall: a route that may dig goes round it, through the stone", route and not has(route, 0, 0, 3), route and #route or "nil")
+route, why = T.path(0, 0, 5, { dig = true, margin = 0 })
+check("...and with no way round, no route through it", route == nil and tostring(why):find("minecraft:nether_portal", 1, true), tostring(why))
 T = fresh()
 learn(T, -2, -2, -2, 2, 2, 8)
 put(0, 0, 3, "minecraft:fire"); T.map.set(0, 0, 3, "minecraft:fire")

@@ -15,7 +15,7 @@
 --                        nothing in an area is dug, except in the one opts.inside names; its known air and water are
 --                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire, doors and the player's
 --                        furnishings: ladders, trapdoors, fence gates, signs, lanterns, torches, rails; unless it says
---                        otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any
+--                        otherwise), a block it may not dig (a chest, bedrock, a nether portal, anything opts.dig leaves out), and any
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
 -- memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds
@@ -59,12 +59,13 @@ local PASSABLE = {
     ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true,
 }
 
--- Blocks no turtle can dig
+-- Blocks no turtle can dig (nor go through: a nether portal obstructs a move)
 local UNBREAKABLE = {
     ["minecraft:bedrock"] = true, ["minecraft:barrier"] = true, ["minecraft:end_portal_frame"] = true,
     ["minecraft:end_portal"] = true, ["minecraft:end_gateway"] = true, ["minecraft:command_block"] = true,
     ["minecraft:chain_command_block"] = true, ["minecraft:repeating_command_block"] = true,
     ["minecraft:structure_block"] = true, ["minecraft:jigsaw"] = true, ["minecraft:reinforced_deepslate"] = true,
+    ["minecraft:nether_portal"] = true,
 }
 
 -- The time since the last turn given to the rest of the computer
