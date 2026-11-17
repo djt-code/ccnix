@@ -14,7 +14,7 @@ Provides:
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * the player's view (tl.lint, loaded when first used): T.lint warns of what stops a two-tall player in a build: headroom over stairs, a flight's approach and exit, railings meeting only on a diagonal, unrailed drops, a lantern at head height; T.walkable finds a way a player walks from one cell to another
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
-  * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and T.cfg.autoDump = true does that on its own when the inventory nearly fills
+  * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
   * jobs, undo and reports (tl.journal, loaded when first used): T.job keeps a job's goal, steps and progress in a file so a restart carries on at the step; T.cfg.undo = true writes down each dig and placement and T.undo(n) puts them back; T.report tells the player (the setting turtle.player) through a chat box, with position, fuel and progress
   * modules loaded when first used: a function T lacks that is in T.registry is looked up there, its module (turtle/tl/<name>.lua, required as "tl.<name>") fills T in, and the call goes on
@@ -924,26 +924,32 @@ T.ignite(x, y, z, opts)
 
 tl.store: chests at home: where they are, what is in them, fetching from them and putting away
 
-Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue, T.where, T.fetch, T.stow, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
+Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue, T.where, T.fetch, T.stow, T.sortChests, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
 
-A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known it takes the junk chest's trip instead (T.dumpJunk).  T.inventoryReport adds up what the chests and the turtle hold, and T.prepare readies the turtle for a job in one trip: what isn't needed put away, what is fetched, the room checked.
+A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest for that item, else one that already holds it, else into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known it takes the junk chest's trip instead (T.dumpJunk).  T.inventoryReport adds up what the chests and the turtle hold, and T.prepare readies the turtle for a job in one trip: what isn't needed put away, what is fetched, the room checked.
+
+A chest may be for some things: T.addChest's holds, globs of the items it is for ("*_log", "cobblestone").  T.stow puts those there first, and T.sortChests moves what is in the wrong chest to where it belongs.
 
 A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at) is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which T.catalogue finds out from the halves' block states (by their facing when the world origin is known, else by two halves side by side holding the same).
 
-The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found out the next time it is visited.
+The chests and what they held when last looked at are in the data file .chests, so every program on the turtle shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was read, in seconds), "other x y z" after it is the other half's cell for a double chest, "holds glob ..." what the chest is for (none: anything), and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found out the next time it is visited.
 
 == The list of chests, in a data file ==
 
-T.addChest(x, y, z, side, bulk)
-    Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True (and a note if it was known), or nil and why.
+T.addChest(x, y, z, side, bulk, opts)
+    Tell the turtle of a chest: it stands at x, y, z (the turtle's frame), the chest on `side` ("up", "down" or a heading 0 to 3); opts.holds: globs of what it is for. True (and a note if known or changed), or nil and why.
 
-    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again, from this stand or another, or the other half of a known double chest, keeps the one record and what was written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1, reached from 3,0,0 side 0"). Kept in the data file .chests.
+    The heading is T.dir's; "top" and "bottom" are up and down. Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again, from this stand or another, or the other half of a known double chest, keeps the one record and what was written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1, reached from 3,0,0 side 0"). Kept in the data file .chests.
+
+    opts.holds says what the chest is for: a glob of item names, or a list or set of them (T.addChest(3, 0, 0, 0, { holds = { "*_log", "*_planks" } })); T.stow puts those there before anywhere else and T.sortChests moves them there. Given again for a known chest it changes them, and the note says so; false makes it a chest for anything again; left out, they stay as they were. opts may come in bulk's place, with opts.bulk.
 
 T.forgetChest(x, y, z, side)
     Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 
 T.chests()
-    The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
+    The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
+
+    seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.
 
 == Going to a chest ==
 
@@ -957,7 +963,7 @@ T.recount(side)
 T.catalogue(spots, opts)
     Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
 
-    `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered (T.addChest); nil goes round the ones already known. The two halves of a double chest become one chest as they are read (see the top of this module). opts.find, a box in the map (six numbers, as T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it. opts.move is T.moveTo's (default { path = true, scan = false }). The nearest comes next and the turtle ends where it began, facing as before. Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
+    `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest, holds as T.addChest takes), which are remembered (T.addChest); nil goes round the ones already known. The two halves of a double chest become one chest as they are read (see the top of this module). opts.find, a box in the map (six numbers, as T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it. opts.move is T.moveTo's (default { path = true, scan = false }). The nearest comes next and the turtle ends where it began, facing as before. Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
 
 == Where an item is, and fetching it ==
 
@@ -981,9 +987,18 @@ T.inventoryReport(opts)
 == Putting away ==
 
 T.stow(opts)
-    Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+    Put what the turtle carries away: into a chest for the item (its holds), else one that holds it already, else the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
 
-    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. What no chest holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: move (T.moveTo's), keep (names, a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
+    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. A chest for other things never takes an item, and a full chest for it sends it on to the next place. What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: move (T.moveTo's), keep (names, a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
+
+== Sorting the chests ==
+
+T.sortChests(opts)
+    Move what is in the wrong chest to the chest it belongs in (T.addChest's holds), at most opts.limit stacks (32). Returns true, info; false, why, info when some couldn't move; nil, why.
+
+    In the wrong chest is an item in a chest for other things, or one in a chest for anything (or the bulk chest) that a chest is for. It goes to each chest with something in the wrong place (as last read: T.catalogue first after changes by hand), nearest first, reads it again, takes those stacks out while the turtle has room (two slots free), and takes each load where it belongs as T.stow would (a chest for it, else one holding it, else the bulk chest; never back into a chest for other things). What has no room there goes back to the chest it came from, and what has nowhere to go at all is not taken out. The turtle comes back facing as before (opts.stay: stays at the last chest).
+
+    It is bounded: opts.limit stacks at most (32 by default), and info.more says there is more to do. It walks: the fuel is about the round of the chests with something misplaced and of the chests it goes to, once for every load (up to the turtle's free slots less one), and each stack takes a pull and a drop (a few ticks). Info is { moved = { name = count }, stacks, chests, more, left = { { name, count, from, why } } }: left is what couldn't move, each with the chest it is in and why; the why returned says them all. opts: limit, move (T.moveTo's), stay.
 
 == Getting ready for a job ==
 

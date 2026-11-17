@@ -1,16 +1,20 @@
 -- store.lua -- chests at home: where they are, what is in them, fetching from them and putting away
 --
 -- Loaded by turtlelib the first time one of its functions is used (T.addChest, T.forgetChest, T.chests, T.catalogue,
--- T.where, T.fetch, T.stow, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump is set.
+-- T.where, T.fetch, T.stow, T.sortChests, T.recount, T.inventoryReport, T.prepare, T.autoDump), or when T.cfg.autoDump
+-- is set.
 --
 -- A chest is known by where the turtle stands to reach it, as the junk chest is (T.setJunkChest): the cell x, y, z in the
 -- turtle's frame, and the side the chest is on ("up", "down", or a heading 0 to 3).  T.addChest tells the turtle about
 -- one, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and
--- takes some, T.stow puts what the turtle carries away (into a chest that already holds that item, else into the bulk
--- chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free
+-- takes some, T.stow puts what the turtle carries away (into a chest for that item, else one that already holds it, else
+-- into the bulk chest) and T.autoDump is that done for you when the inventory nearly fills: T.cfg.autoDump = true (or a number of free
 -- slots) and every dig is followed, when the room has run out, by a trip to the chests and back.  With no chests known
 -- it takes the junk chest's trip instead (T.dumpJunk).  T.inventoryReport adds up what the chests and the turtle hold,
 -- and T.prepare readies the turtle for a job in one trip: what isn't needed put away, what is fetched, the room checked.
+--
+-- A chest may be for some things: T.addChest's holds, globs of the items it is for ("*_log", "cobblestone").  T.stow
+-- puts those there first, and T.sortChests moves what is in the wrong chest to where it belongs.
 --
 -- A chest is one record however it is reached: a second stand for the same chest (the cell the stand and side point at)
 -- is the same chest, and so are the two halves of a double chest (each half is a peripheral listing the whole of it), which
@@ -19,8 +23,8 @@
 --
 -- The chests and what they held when last looked at are in the data file .chests, so every program on the turtle
 -- shares them and a restart keeps them.  A line "chest x y z side bulk|plain seen" starts a chest ("seen" the time it was
--- read, in seconds), "other x y z" after it is the other half's cell for a double chest, and the lines "item count name"
--- are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest
+-- read, in seconds), "other x y z" after it is the other half's cell for a double chest, "holds glob ..." what the chest
+-- is for (none: anything), and the lines "item count name" are what it held.  Fetching and stowing read the chest again as they go, and so does crafting at a known chest
 -- (T.recount: the chest beside the turtle read again), so the list stays right; a chest someone else emptied is found
 -- out the next time it is visited.
 
@@ -112,7 +116,7 @@ local function chestAt(list, cell)
     return nil
 end
 
--- The chests as the file has them: a list of { x, y, z, side, bulk, seen, other, items = { name = count } }.  Two records of
+-- The chests as the file has them: a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.  Two records of
 -- one chest (from an older file) are one: the first, the bulk chest if either was.
 local function load()
     local list, cur = {}, nil
@@ -133,6 +137,8 @@ local function load()
         elseif w[1] == "other" and cur then
             local x, y, z = convert.toInteger(w[2] or ""), convert.toInteger(w[3] or ""), convert.toInteger(w[4] or "")
             if x and y and z then cur.other = { x = x, y = y, z = z } end
+        elseif w[1] == "holds" and cur and #w > 1 then
+            cur.holds = { table.unpack(w, 2) }
         end
     end
     for i = #list, 2, -1 do
@@ -140,6 +146,7 @@ local function load()
         for j = 1, i - 1 do
             if holds(list[j], cellOf(c)) or (c.other and holds(list[j], c.other)) then
                 list[j].bulk = list[j].bulk or c.bulk
+                list[j].holds = list[j].holds or c.holds
                 table.remove(list, i)
                 break
             end
@@ -154,6 +161,7 @@ local function save(list)
     for _, c in ipairs(list) do
         out[#out + 1] = string.format("chest %d %d %d %s %s %d", c.x, c.y, c.z, tostring(c.side), c.bulk and "bulk" or "plain", c.seen or 0)
         if c.other then out[#out + 1] = string.format("other %d %d %d", c.other.x, c.other.y, c.other.z) end
+        if c.holds then out[#out + 1] = "holds " .. table.concat(c.holds, " ") end
         for _, name in ipairs(tables.sortedKeys(c.items)) do
             if c.items[name] > 0 then out[#out + 1] = "item " .. c.items[name] .. " " .. name end
         end
@@ -179,7 +187,64 @@ end
 -- A copy of a chest record.
 local function copyOf(c)
     return { x = c.x, y = c.y, z = c.z, side = c.side, bulk = c.bulk, seen = c.seen, items = tables.copy(c.items),
-             other = c.other and { x = c.other.x, y = c.other.y, z = c.other.z } or nil }
+             other = c.other and { x = c.other.x, y = c.other.y, z = c.other.z } or nil,
+             holds = c.holds and tables.copy(c.holds) or nil }
+end
+
+-- What a chest is for, as T.addChest's opts.holds gives it (a glob, or a list or set of them), as the sorted list the
+-- file keeps: a list, false for none (anything), or nil and why.  Each is one word, as item names are.
+local function holdsOf(spec)
+    if spec == false then return false end
+    local globs = {}
+    if type(spec) == "string" then
+        globs[spec] = true
+    elseif type(spec) == "table" then
+        for _, g in ipairs(spec) do globs[g] = true end
+        for k, v in pairs(spec) do
+            if type(k) == "string" and v then globs[k] = true end
+        end
+    else
+        return nil, "holds is a glob of item names, or a list or set of them (false: anything), not " .. tostring(spec)
+    end
+    for g in pairs(globs) do
+        if type(g) ~= "string" or #text.words(g) ~= 1 or text.words(g)[1] ~= g then
+            return nil, "holds wants globs of item names, one word each, not \"" .. tostring(g) .. "\""
+        end
+    end
+    local list = tables.sortedKeys(globs)
+    return #list > 0 and list or false
+end
+
+-- The test of a chest's holds (made once for each set of globs), or nil for a chest for anything.
+local holdsTests = {}
+local function holdsTest(c)
+    if not c.holds then return nil end
+    local k = table.concat(c.holds, " ")
+    if not holdsTests[k] then holdsTests[k] = matcher(c.holds) end
+    return holdsTests[k]
+end
+
+-- Is the chest c for the item name (its holds match it)?
+local function isFor(c, name)
+    local test = holdsTest(c)
+    return test ~= nil and test(name)
+end
+
+-- Does the chest c take the item name: a chest for anything, or one whose holds match it?
+local function accepts(c, name)
+    local test = holdsTest(c)
+    return test == nil or test(name)
+end
+
+-- Does the item name belong in the chest c (of list)?  In a chest for it; else, when no chest is for it, in a chest for
+-- anything or the bulk chest.
+local function belongs(list, c, name)
+    if isFor(c, name) then return true end
+    if c.holds and not c.bulk then return false end
+    for _, q in ipairs(list) do
+        if q ~= c and isFor(q, name) then return false end
+    end
+    return true
 end
 
 -- The chest in the list with this place, or nil.
@@ -191,20 +256,32 @@ local function find(list, c)
     return nil
 end
 
--- Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top",
--- "down"/"bottom", or a heading 0 to 3 as T.dir counts them).  True (and a note if it was known), or nil and why.
+-- Tell the turtle of a chest: it stands at x, y, z (the turtle's frame), the chest on `side` ("up", "down" or
+-- a heading 0 to 3); opts.holds: globs of what it is for.  True (and a note if known or changed), or nil and why.
 --
--- Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
+-- The heading is T.dir's; "top" and "bottom" are up and down.  Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
 -- puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again).  Adding a chest
 -- again, from this stand or another, or the other half of a known double chest, keeps the one record and what was
 -- written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1,
 -- reached from 3,0,0 side 0").  Kept in the data file .chests.
-function T.addChest(x, y, z, side, bulk)
+--
+-- opts.holds says what the chest is for: a glob of item names, or a list or set of them (T.addChest(3, 0, 0, 0,
+-- { holds = { "*_log", "*_planks" } })); T.stow puts those there before anywhere else and T.sortChests moves them
+-- there.  Given again for a known chest it changes them, and the note says so; false makes it a chest for anything
+-- again; left out, they stay as they were.  opts may come in bulk's place, with opts.bulk.
+function T.addChest(x, y, z, side, bulk, opts)
+    if type(bulk) == "table" then bulk, opts = bulk.bulk, bulk end
+    opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
         if not whole(n) then return nil, "a chest's place is x, y, z: whole numbers" end
     end
     local d = sideOf(side)
     if d == nil then return nil, "a chest's side is \"up\", \"down\" or a heading 0 to 3, not " .. tostring(side) end
+    local newHolds, holdsWhy
+    if opts.holds ~= nil then
+        newHolds, holdsWhy = holdsOf(opts.holds)
+        if newHolds == nil then return nil, holdsWhy end
+    end
     local list = load()
     local want = { x = x, y = y, z = z, side = d }
     local c = find(list, want) or chestAt(list, cellOf(want))
@@ -214,10 +291,16 @@ function T.addChest(x, y, z, side, bulk)
         local same = own.x == at.x and own.y == at.y and own.z == at.z
         known = "already known: " .. (same and "the chest at " or "the other half of the double chest at ") .. T.posKey(own) ..
             ", reached from " .. T.posKey(c) .. " side " .. tostring(c.side)
+        local was = c.holds and table.concat(c.holds, " ") or ""
+        if newHolds ~= nil and (newHolds and table.concat(newHolds, " ") or "") ~= was then
+            known = "the chest at " .. T.posKey(own) .. " is now for " ..
+                (newHolds and table.concat(newHolds, " ") or "anything (no holds)") .. (was ~= "" and ", was for " .. was or "")
+        end
     else
         c = { x = x, y = y, z = z, side = d, items = {} }
         list[#list + 1] = c
     end
+    if newHolds ~= nil then c.holds = newHolds or nil end
     if bulk then
         for _, q in ipairs(list) do q.bulk = false end
         c.bulk = true
@@ -241,8 +324,10 @@ function T.forgetChest(x, y, z, side)
     return false, "no chest is known at " .. tostring(x) .. "," .. tostring(y) .. "," .. tostring(z) .. " on the " .. tostring(side)
 end
 
--- The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when
--- the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
+-- The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
+--
+-- seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's
+-- cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.
 function T.chests()
     local list = load()
     for i, c in ipairs(list) do
@@ -414,7 +499,7 @@ local function pairUp(list, todo, read, c, side)
                 if t == q then table.remove(todo, j); break end
             end
             read[q] = nil
-            c.other, c.bulk = cellOf(q), c.bulk or q.bulk
+            c.other, c.bulk, c.holds = cellOf(q), c.bulk or q.bulk, c.holds or q.holds
             break
         end
     end
@@ -441,7 +526,7 @@ end
 -- Go round the chests and write down what each holds.  Returns true, info; false, why, info when some could not be
 -- read; nil, why when there is nothing to do.
 --
--- `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest), which are remembered
+-- `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest, holds as T.addChest takes), which are remembered
 -- (T.addChest); nil goes round the ones already known.  The two halves of a double chest become one chest as they are
 -- read (see the top of this module).  opts.find, a box in the map (six numbers, as T.map.find
 -- takes), adds the chests and barrels the map shows in it, each from a free cell beside it.  opts.move is T.moveTo's
@@ -451,7 +536,7 @@ function T.catalogue(spots, opts)
     opts = opts or {}
     local move = opts.move or MOVE
     for _, s in ipairs(spots or {}) do
-        local ok, why = T.addChest(s.x, s.y, s.z, s.side, s.bulk)
+        local ok, why = T.addChest(s.x, s.y, s.z, s.side, { bulk = s.bulk, holds = s.holds })
         if not ok then return nil, why end
     end
     local info = { chests = 0, kinds = 0, items = 0, failed = {} }
@@ -665,18 +750,25 @@ end
 -- Is there any of the item name aboard?
 local function aboard(name) return T.countItem(name) > 0 end
 
--- The chests to try for an item now: the ones that hold it which have not been tried, else the bulk chest if it has
--- not.
-local function candidates(list, name, tried)
-    local out = {}
-    for _, c in ipairs(list) do
-        if not tried[keyOf(c) .. name] and (c.items[name] or 0) > 0 then out[#out + 1] = c end
+-- Where an item goes, in order: a chest for it (its holds match), a chest that holds some already and isn't for other
+-- things, the bulk chest.  Each is a test of the chest c for the item name.
+local PLACES = {
+    function(c, name) return isFor(c, name) end,
+    function(c, name) return (c.items[name] or 0) > 0 and accepts(c, name) end,
+    function(c) return c.bulk == true end,
+}
+
+-- The chests to try for an item now: those of the first place in PLACES that has some not tried yet.  With `strict`
+-- (sorting) only chests it belongs in (a full chest for it doesn't send it to the bulk chest).
+local function candidates(list, name, tried, strict)
+    for _, place in ipairs(PLACES) do
+        local out = {}
+        for _, c in ipairs(list) do
+            if not tried[keyOf(c) .. name] and place(c, name) and (not strict or belongs(list, c, name)) then out[#out + 1] = c end
+        end
+        if #out > 0 then return out end
     end
-    if #out > 0 then return out end
-    for _, c in ipairs(list) do
-        if c.bulk and not tried[keyOf(c) .. name] then out[#out + 1] = c end
-    end
-    return out
+    return {}
 end
 
 -- What the game says when a drop finds no room in the container (any other failure is said as it is)
@@ -711,14 +803,78 @@ local function leftWords(left, notes, list)
     return reasons, "some stayed aboard: " .. table.concat(parts, "; ")
 end
 
--- Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest.
--- Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+-- Take what `want` says ({ name = count }: how many of each to drop, math.huge for all aboard) to the chests: again and
+-- again the nearest chest targets(list, name, tried) offers for something still to go, where it drops all of that it
+-- has for that chest and reads it again for the list.  Adds to info.stowed and info.chests, and to notes[name] what
+-- happened at each chest an item was tried at (full, gone); `tried` ("x,y,z,side" .. name) marks the chests an item
+-- isn't to go to (each is marked as it is tried).  Returns what went in, { name = count }.
+local function deliver(list, want, move, targets, info, notes, tried)
+    local put = {}
+    local function due(name) return want[name] - (put[name] or 0) > 0 and aboard(name) end
+    local function noteFor(name, said)
+        notes[name] = notes[name] or {}
+        local l = notes[name]
+        l[#l + 1] = said
+    end
+    while true do
+        local best, bestAt
+        for name in pairs(want) do
+            if due(name) then
+                for _, c in ipairs(targets(list, name, tried)) do
+                    local d = T.dist(T.pos, c)
+                    if not best or d < bestAt or (d == bestAt and keyOf(c) < keyOf(best)) then best, bestAt = c, d end
+                end
+            end
+        end
+        if not best then return put end
+        local wanted = {}
+        for name in pairs(want) do
+            if due(name) then
+                for _, c in ipairs(targets(list, name, tried)) do
+                    if c == best then wanted[#wanted + 1] = name end
+                end
+            end
+        end
+        local side, reason = arrive(best, move)
+        if side then
+            info.chests = info.chests + 1
+            local sel = turtle.getSelectedSlot()
+            for _, name in ipairs(wanted) do
+                local said
+                for slot = 1, 16 do
+                    local it = turtle.getItemDetail(slot)
+                    if it and it.name == name and due(name) then
+                        local n = math.min(it.count, want[name] - (put[name] or 0))
+                        turtle.select(slot)
+                        local dropped, err = T.dropSide(side, n)
+                        local gone = it.count - turtle.getItemCount(slot)
+                        put[name] = (put[name] or 0) + gone
+                        info.stowed = info.stowed + gone
+                        if gone < n and not said then
+                            said = chestWords(best) .. ((dropped or NO_ROOM[err]) and " full" or ": " .. tostring(err))
+                        end
+                    end
+                end
+                if said then noteFor(name, said) end
+            end
+            turtle.select(sel)
+            note(list, best, side)
+        else
+            for _, name in ipairs(wanted) do noteFor(name, reason) end
+        end
+        for _, name in ipairs(wanted) do tried[keyOf(best) .. name] = true end
+    end
+end
+
+-- Put what the turtle carries away: into a chest for the item (its holds), else one that holds it already, else the
+-- bulk chest.  Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
 --
 -- By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or
 -- a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or
--- a peripheral.  With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too.  It goes to the nearest chest that wants something, drops what that chest should have, reads it again
--- for the list and goes on, then comes back facing as before.  What no chest holds, with no bulk chest, or what does
--- not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
+-- a peripheral.  With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too.  It goes to
+-- the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on,
+-- then comes back facing as before.  A chest for other things never takes an item, and a full chest for it sends it on
+-- to the next place.  What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
 -- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
 -- and no bulk chest"), and the why returned says them all.  opts: move (T.moveTo's), keep (names, a list or set, globs
 -- too, that stay aboard whatever), stay (stay at the last chest).
@@ -735,61 +891,9 @@ function T.stow(opts)
     end
     local info = { stowed = 0, chests = 0, left = {}, reasons = {} }
     if next(names) == nil then return true, info end
-    local tried, notes = {}, {}
-    -- note, for the item name, what happened at a chest it was tried at
-    local function noteFor(name, said)
-        notes[name] = notes[name] or {}
-        local l = notes[name]
-        l[#l + 1] = said
-    end
-    round(move, function()
-        while true do
-            local best, bestAt
-            for name in pairs(names) do
-                if aboard(name) then
-                    for _, c in ipairs(candidates(list, name, tried)) do
-                        local d = T.dist(T.pos, c)
-                        if not best or d < bestAt or (d == bestAt and keyOf(c) < keyOf(best)) then best, bestAt = c, d end
-                    end
-                end
-            end
-            if not best then return end
-            local wanted = {}
-            for name in pairs(names) do
-                if aboard(name) then
-                    for _, c in ipairs(candidates(list, name, tried)) do
-                        if c == best then wanted[#wanted + 1] = name end
-                    end
-                end
-            end
-            local side, reason = arrive(best, move)
-            if side then
-                info.chests = info.chests + 1
-                local sel = turtle.getSelectedSlot()
-                for _, name in ipairs(wanted) do
-                    local said
-                    for slot = 1, 16 do
-                        local it = turtle.getItemDetail(slot)
-                        if it and it.name == name then
-                            turtle.select(slot)
-                            local dropped, err = T.dropSide(side, it.count)
-                            local left = turtle.getItemCount(slot)
-                            info.stowed = info.stowed + it.count - left
-                            if left > 0 and not said then
-                                said = chestWords(best) .. ((dropped or NO_ROOM[err]) and " full" or ": " .. tostring(err))
-                            end
-                        end
-                    end
-                    if said then noteFor(name, said) end
-                end
-                turtle.select(sel)
-                note(list, best, side)
-            else
-                for _, name in ipairs(wanted) do noteFor(name, reason) end
-            end
-            for _, name in ipairs(wanted) do tried[keyOf(best) .. name] = true end
-        end
-    end, opts.stay)
+    local want, notes = {}, {}
+    for name in pairs(names) do want[name] = math.huge end
+    round(move, function() deliver(list, want, move, candidates, info, notes, {}) end, opts.stay)
     for name in pairs(names) do
         local n = T.countItem(name)
         if n > 0 then info.left[name] = n end
@@ -800,6 +904,152 @@ function T.stow(opts)
         return false, why, info
     end
     return true, info
+end
+
+--------------------------------------------------------------------------
+-- Sorting the chests
+--------------------------------------------------------------------------
+
+-- The stacks T.sortChests moves at most, unless opts.limit says
+local SORT_LIMIT = 32
+-- Why an item that is in the wrong chest stays there when there is nowhere else for it
+local NOWHERE = "nowhere for it: no chest is for it, no other chest holds it and there is no bulk chest"
+
+-- The items in the chest c (as last read) that don't belong there, sorted by name.
+local function misplaced(list, c)
+    local out = {}
+    for name, n in pairs(c.items) do
+        if n > 0 and not belongs(list, c, name) then out[#out + 1] = name end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Move what is in the wrong chest to the chest it belongs in (T.addChest's holds), at most opts.limit stacks (32).
+-- Returns true, info; false, why, info when some couldn't move; nil, why.
+--
+-- In the wrong chest is an item in a chest for other things, or one in a chest for anything (or the bulk chest) that
+-- a chest is for.  It goes to each chest with something in the wrong place (as last read: T.catalogue first after
+-- changes by hand), nearest first, reads it again, takes those stacks out while the turtle has room (two slots free),
+-- and takes each load where it belongs as T.stow would (a chest for it, else one holding it, else the bulk chest; never back into a
+-- chest for other things).  What has no room there goes back to the chest it came from, and what has nowhere to go
+-- at all is not taken out.  The turtle comes back facing as before (opts.stay: stays at the last chest).
+--
+-- It is bounded: opts.limit stacks at most (32 by default), and info.more says there is more to do.  It walks: the
+-- fuel is about the round of the chests with something misplaced and of the chests it goes to, once for every load
+-- (up to the turtle's free slots less one), and each stack takes a pull and a drop (a few ticks).  Info is { moved =
+-- { name = count }, stacks, chests, more, left = { { name, count, from, why } } }: left is what couldn't move, each
+-- with the chest it is in and why; the why returned says them all.  opts: limit, move (T.moveTo's), stay.
+function T.sortChests(opts)
+    opts = opts or {}
+    local move, limit = opts.move or MOVE, opts.limit or SORT_LIMIT
+    if not (whole(limit) and limit >= 1) then return nil, "opts.limit is a whole number of stacks, 1 or more" end
+    local list = load()
+    if #list == 0 then return nil, "no chests are known: T.addChest (with holds), then T.catalogue" end
+    local info = { moved = {}, stacks = 0, chests = 0, more = false, left = {} }
+    local todo = {}
+    for _, c in ipairs(list) do
+        if #misplaced(list, c) > 0 then todo[#todo + 1] = c end
+    end
+    if #todo == 0 then return true, info end
+    if T.freeSlots() < 2 then return nil, "T.sortChests needs two free slots in the turtle (T.stow first)" end
+    -- what the turtle took, { name = count }, and from which chests, { name = { chest = count } }; why an item can't
+    -- move, by name; what was said of each chest and item
+    local carried, from, stuck, said = {}, {}, {}, {}
+    local function couldnt(name, n, c, why)
+        said[keyOf(c) .. name] = true
+        info.left[#info.left + 1] = { name = name, count = n, from = T.posKey(cellOf(c)), why = why }
+    end
+    -- take the load where it belongs, and what has no room there back where it came from
+    local function unload()
+        local tried, notes = {}, {}
+        for name, srcs in pairs(from) do
+            for c in pairs(srcs) do tried[keyOf(c) .. name] = true end
+        end
+        local scratch = { stowed = 0, chests = 0 }
+        local put = deliver(list, tables.copy(carried), move, function(l, name, t) return candidates(l, name, t, true) end,
+            scratch, notes, tried)
+        for _, name in ipairs(tables.sortedKeys(carried)) do
+            local n = put[name] or 0
+            if n > 0 then info.moved[name] = (info.moved[name] or 0) + n end
+            local back = carried[name] - n
+            if back > 0 then
+                stuck[name] = notes[name] and table.concat(notes[name], ", ") or "no room where it belongs"
+                for _, c in ipairs(nearest(tables.sortedKeys(from[name], function(a, b) return keyOf(a) < keyOf(b) end), T.here())) do
+                    local k = math.min(back, from[name][c])
+                    if k > 0 then
+                        local again = deliver(list, { [name] = k }, move, function(_, _, t)
+                            return t[keyOf(c) .. name] and {} or { c }
+                        end, scratch, {}, {})
+                        local home = again[name] or 0
+                        back = back - home
+                        couldnt(name, k, c, stuck[name] .. (home < k and "; " .. (k - home) .. " still aboard" or ""))
+                    end
+                end
+            end
+        end
+        info.chests = info.chests + scratch.chests
+        carried, from = {}, {}
+    end
+    round(move, function()
+        while #todo > 0 and info.stacks < limit do
+            local c = table.remove(nearest(todo, T.here()), 1)
+            for i, q in ipairs(todo) do
+                if q == c then table.remove(todo, i); break end
+            end
+            local side, reason = arrive(c, move)
+            local full = false
+            if not side then
+                for _, name in ipairs(misplaced(list, c)) do couldnt(name, c.items[name], c, reason) end
+            else
+                info.chests = info.chests + 1
+                note(list, c, side)
+                local chest = peripheral.wrap(side)
+                local slots = chest and chest.list() or {}
+                local took, skip = 0, {}
+                local function skipped(name, n, why)
+                    skip[name] = skip[name] or { n = 0, why = why }
+                    skip[name].n = skip[name].n + n
+                end
+                for _, slot in ipairs(tables.sortedKeys(slots)) do
+                    local it = slots[slot]
+                    if not belongs(list, c, it.name) then
+                        if stuck[it.name] then
+                            skipped(it.name, it.count, stuck[it.name])
+                        elseif #candidates(list, it.name, { [keyOf(c) .. it.name] = true }, true) == 0 then
+                            skipped(it.name, it.count, NOWHERE)
+                        elseif info.stacks >= limit then
+                            info.more = true
+                        elseif T.freeSlots() < 2 then
+                            if took > 0 then full = true else skipped(it.name, it.count, "no room in the turtle") end
+                        else
+                            local got = T.pull(side, it.name, it.count)
+                            if got > 0 then
+                                info.stacks, took = info.stacks + 1, took + got
+                                carried[it.name] = (carried[it.name] or 0) + got
+                                from[it.name] = from[it.name] or {}
+                                from[it.name][c] = (from[it.name][c] or 0) + got
+                            end
+                        end
+                    end
+                end
+                note(list, c, side)
+                for _, name in ipairs(tables.sortedKeys(skip)) do
+                    if not said[keyOf(c) .. name] then couldnt(name, skip[name].n, c, skip[name].why) end
+                end
+            end
+            if full then todo[#todo + 1] = c end
+            if full or #todo == 0 or info.stacks >= limit then unload() end
+        end
+        if next(carried) then unload() end
+        if #todo > 0 then info.more = true end
+    end, opts.stay)
+    if #info.left == 0 then return true, info end
+    local parts = {}
+    for i, l in ipairs(info.left) do
+        parts[i] = l.count .. " " .. (text.stripPrefix(l.name, NS) or l.name) .. " in the chest at " .. l.from .. " (" .. l.why .. ")"
+    end
+    return false, "couldn't move " .. table.concat(parts, "; "), info
 end
 
 --------------------------------------------------------------------------

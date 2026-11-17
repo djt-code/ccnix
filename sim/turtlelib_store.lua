@@ -23,6 +23,11 @@
 --     sorted by name or count, matched; it moves nothing;
 --   * T.prepare: one trip that puts away what isn't needed and fetches what is (home only at the end), refused before
 --     moving when the chests' list is short, spec.partial, too few free slots after;
+--   * chest categories (ADR-0013 D6.4): T.addChest's holds kept in the file (an old file without them still read, kept
+--     through a re-zero), set, changed and cleared on a known chest; T.stow puts an item in a chest for it first, then
+--     one that holds it already (never a chest for other things), then the bulk chest, a full one falling through;
+--     T.sortChests moves what is in the wrong chest to where it belongs, says what moved and what couldn't (no room
+--     where it belongs: put back), stops at opts.limit stacks, and goes nowhere when nothing is out of place;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
 --     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
 local PROJ = ...
@@ -587,6 +592,151 @@ do
     ok, why, info2 = T.stow()
     check("...gone, and no bulk chest: the item stays aboard, its reason what went wrong there", ok == false and carrying(COBBLE) == 10
         and info2.reasons[COBBLE] == "no chest on the front of 3,0,0; no bulk chest", tostring(info2 and info2.reasons and info2.reasons[COBBLE]))
+end
+
+--------------------------------------------------------------------------
+-- Chest categories: holds, T.stow's order, T.sortChests (ADR-0013 D6.4)
+--------------------------------------------------------------------------
+local OAKLOG, BIRCH = "minecraft:oak_log", "minecraft:birch_planks"
+do
+    setUp()
+    check("an old file without holds is read: no chest is for anything", T.chests()[1].holds == nil and not fileText():find("holds", 1, true))
+    local ok, note = T.addChest(D.x, D.y, D.z, D.side, { holds = { "*_planks", "*_log" } })
+    check("T.addChest with holds on a known chest sets them, and the note says so (not \"already known\")", ok == true
+        and type(note) == "string" and note:find("*_log *_planks", 1, true) and not note:find("already known", 1, true), tostring(note))
+    check("...kept in the file on a line after the chest's", fileText():find("chest 2 0 -2 down plain 0\nholds *_log *_planks\n", 1, true),
+        tostring(fileText()))
+    local d = line(T.chests(), 2, -2, "down")
+    check("...T.chests gives them, sorted", d.holds and d.holds[1] == "*_log" and d.holds[2] == "*_planks" and #d.holds == 2)
+    ok, note = T.addChest(D.x, D.y, D.z, D.side, { holds = { ["*_log"] = true, ["*_planks"] = true } })
+    check("the same holds again (a set this time): \"already known\", as before", ok == true and note:find("already known", 1, true), tostring(note))
+    ok, note = T.addChest(D.x, D.y, D.z, D.side)
+    check("...and no holds given leaves them as they are", ok == true and note:find("already known", 1, true) and #line(T.chests(), 2, -2, "down").holds == 2)
+    ok, note = T.addChest(D.x, D.y, D.z, D.side, true, { holds = "cobblestone" })
+    check("bulk and holds as the fifth and sixth arguments", ok == true and line(T.chests(), 2, -2, "down").bulk == true
+        and line(T.chests(), 2, -2, "down").holds[1] == "cobblestone" and line(T.chests(), 0, -2, 2).bulk == false, tostring(note))
+    ok, note = T.addChest(D.x, D.y, D.z, D.side, { holds = false })
+    check("holds = false clears them", ok == true and line(T.chests(), 2, -2, "down").holds == nil and not fileText():find("holds", 1, true)
+        and type(note) == "string" and note:find("anything", 1, true), tostring(note))
+    T.addChest(C.x, C.y, C.z, C.side, true)
+    ok, note = T.addChest(D.x, D.y, D.z, D.side, { holds = { "oak planks" } })
+    check("a glob with a space in it: nil and why, nothing changed", ok == nil and note:find("holds", 1, true) and line(T.chests(), 2, -2, "down").holds == nil,
+        tostring(note))
+    ok, note = T.addChest(D.x, D.y, D.z, D.side, { holds = 5 })
+    check("...holds that are not names: nil and why", ok == nil and type(note) == "string", tostring(note))
+    ok, note = T.addChest(1, 0, 3, 0, { holds = "*_log" })
+    check("a new chest with holds: true and no note", ok == true and note == nil and line(T.chests(), 1, 3, 0).holds[1] == "*_log")
+    T.forgetChest(1, 0, 3, 0)
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.reframeChests(function(x, y, z) return x + 10, y, z end, 1)
+    local moved = line(T.chests(), 12, -2, "down")
+    check("a re-zero keeps a chest's holds", moved and moved.holds and moved.holds[1] == "*_planks")
+    for _, name in ipairs(MODS) do package.loaded[name] = nil end
+    T = require("turtlelib")
+    check("...and another copy of the library reads them", line(T.chests(), 12, -2, "down").holds[1] == "*_planks")
+end
+
+do
+    -- T.stow: a chest for the item first, then one that holds it already, then the bulk chest
+    setUp()
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    W.give(1, PLANKS, 10)
+    local ok, why = T.stow()
+    check("T.stow puts planks in the chest for planks, not in A or B that hold some already", ok == true and chestHas(2, -1, -2, PLANKS) == 10
+        and chestHas(3, 0, 1, PLANKS) == 40 and chestHas(-3, 0, 1, PLANKS) == 5, tostring(why))
+    T.addChest(A.x, A.y, A.z, A.side, { holds = "cobblestone" })
+    T.addChest(D.x, D.y, D.z, D.side, { holds = false })
+    W.give(1, PLANKS, 3)
+    ok, why = T.stow()
+    check("...not in a chest for other things though it holds some (A, for cobblestone): in B, which holds planks", ok == true
+        and chestHas(3, 0, 1, PLANKS) == 40 and chestHas(-3, 0, 1, PLANKS) == 8, tostring(why))
+    -- a full chest for planks: on to one that holds them
+    local items = {}
+    for s = 1, 27 do items[s] = { BIRCH, 64 } end
+    fill(2, -1, -2, items)
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    W.give(1, PLANKS, 4)
+    ok, why = T.stow()
+    check("...a full chest for planks falls through to a chest that holds them", ok == true and chestHas(-3, 0, 1, PLANKS) == 12, tostring(why))
+    W.give(1, OAKLOG, 6)
+    ok, why = T.stow()
+    check("...and something no chest is for or holds goes to the bulk chest", ok == true and chestHas(0, 0, -3, OAKLOG) == 6, tostring(why))
+end
+
+do
+    -- T.sortChests
+    setUp()
+    T.catalogue()
+    local moves = W.S.moves
+    local ok, info = T.sortChests()
+    check("T.sortChests with no chest for anything: true, nothing moved, nowhere gone", ok == true and next(info.moved) == nil
+        and info.stacks == 0 and W.S.moves == moves)
+    T.addChest(A.x, A.y, A.z, A.side, { holds = "cobblestone" })
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    local why
+    ok, why, info = T.sortChests()
+    if ok then info = why end
+    check("T.sortChests: the planks out of A (for cobblestone) and B (plain) into D (for planks), D's iron to the bulk chest",
+        ok == true and chestHas(2, -1, -2, PLANKS) == 45 and chestHas(3, 0, 1, PLANKS) == 0 and chestHas(-3, 0, 1, PLANKS) == 0
+        and chestHas(0, 0, -3, IRON) == 7 and chestHas(2, -1, -2, IRON) == 0, tostring(why))
+    check("...what stays put stays: A's cobblestone, B's stone, the bulk chest's dirt", chestHas(3, 0, 1, COBBLE) == 64
+        and chestHas(-3, 0, 1, STONE) == 10 and chestHas(0, 0, -3, DIRT) == 30)
+    check("...info says what moved and how many stacks", info and info.moved[PLANKS] == 45 and info.moved[IRON] == 7 and info.stacks == 3
+        and #info.left == 0 and info.more == false)
+    check("...the turtle is home, facing as before, carrying nothing it took", here() and carrying(PLANKS) == 0 and carrying(IRON) == 0)
+    check("...the list is right", line(T.chests(), 2, -2, "down").items[PLANKS] == 45 and line(T.chests(), 3, 0, 0).items[PLANKS] == nil)
+    check("nothing was thrown into the world", (W.thrown or 0) == 0)
+    moves = W.S.moves
+    ok, info = T.sortChests()
+    check("sorted already: nothing to do, nowhere gone", ok == true and info.stacks == 0 and W.S.moves == moves)
+
+    -- opts.limit
+    setUp()
+    T.addChest(A.x, A.y, A.z, A.side, { holds = "cobblestone" })
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    ok, info = T.sortChests({ limit = 1 })
+    check("opts.limit = 1: one stack moved, info.more says there is more", ok == true and info.stacks == 1 and info.more == true
+        and chestHas(2, -1, -2, PLANKS) + chestHas(0, 0, -3, IRON) > 0 and here())
+    ok, why = T.sortChests({ limit = 0 })
+    check("...a limit that is not a whole number of stacks: nil and why", ok == nil and type(why) == "string" and why:find("limit", 1, true), tostring(why))
+
+    -- no room where it belongs: put back, and said
+    setUp()
+    T.addChest(A.x, A.y, A.z, A.side, { holds = "cobblestone" })
+    local items = {}
+    for s = 1, 27 do items[s] = { BIRCH, 64 } end
+    fill(2, -1, -2, items)
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    ok, why, info = T.sortChests()
+    check("the chest for planks is full: false, the planks back where they were, and why", ok == false and chestHas(3, 0, 1, PLANKS) == 40
+        and chestHas(-3, 0, 1, PLANKS) == 5 and carrying(PLANKS) == 0 and here() and type(why) == "string"
+        and why:find("oak_planks", 1, true) and why:find("full", 1, true), tostring(why))
+    check("...info.left has each with its chest and why", info and #info.left == 2 and info.left[1].name == PLANKS and info.left[1].why
+        and info.left[1].why:find("chest at 2,-1,-2 full", 1, true), info and info.left[1] and tostring(info.left[1].why))
+
+    -- nowhere for it at all: not taken out
+    setUp()
+    T.forgetChest(C.x, C.y, C.z, C.side)
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    ok, why, info = T.sortChests()
+    check("iron in the chest for planks with no bulk chest: left there and said, the planks still moved", ok == false
+        and chestHas(2, -1, -2, IRON) == 7 and carrying(IRON) == 0 and chestHas(2, -1, -2, PLANKS) == 45 and why:find("iron_ingot", 1, true)
+        and why:find("no bulk chest", 1, true), tostring(why))
+
+    -- a chest that is gone
+    setUp()
+    T.addChest(A.x, A.y, A.z, A.side, { holds = "cobblestone" })
+    T.addChest(D.x, D.y, D.z, D.side, { holds = "*_planks" })
+    T.catalogue()
+    W.set(3, 0, 1, nil)
+    ok, why, info = T.sortChests()
+    check("a chest that is gone: said, the rest sorted", ok == false and why:find("no chest on the front of 3,0,0", 1, true)
+        and chestHas(2, -1, -2, PLANKS) == 5 and chestHas(0, 0, -3, IRON) == 7 and here(), tostring(why))
 end
 
 --------------------------------------------------------------------------

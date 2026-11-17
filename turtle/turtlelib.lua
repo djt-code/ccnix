@@ -53,7 +53,7 @@
 --     T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
 --   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue
 --     goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes
---     some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and
+--     some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and
 --     T.cfg.autoDump = true does that on its own when the inventory nearly fills
 --   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a
 --     place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava
@@ -3070,7 +3070,7 @@ T.registry = {
     craftBatch = "tl.craft", smeltAt = "tl.craft", craftPlan = "tl.craft",
     -- tl.store: the chests at home, what is in them, putting away and fetching
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
-    fetch = "tl.store", stow = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
+    fetch = "tl.store", stow = "tl.store", sortChests = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
     inventoryReport = "tl.store", prepare = "tl.store", recount = "tl.store",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
