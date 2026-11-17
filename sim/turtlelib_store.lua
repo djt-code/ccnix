@@ -3,7 +3,8 @@
 -- tl.store (ADR-0008 phase 4): the chests at home, on sim/lib/buildworld's mock world (chests with their slots and the
 -- peripheral that lists them).
 --   * T.addChest / T.forgetChest / T.chests: the places kept in a data file other copies of the library read, whole
---     numbers and a real side asked for, one bulk chest;
+--     numbers and a real side asked for, one bulk chest; a chest known already (the same place, another stand, the
+--     other half of a double chest) adds nothing and says which;
 --   * T.catalogue: goes round the chests nearest first, writes down what each holds, comes back facing as before; a
 --     chest that is gone or unreachable is reported and the rest are read; chests given as places are remembered;
 --     opts.find adds the chests the map shows in a box;
@@ -265,9 +266,19 @@ do
     check("a double chest whose halves were both added is one chest: its bricks counted once", ok == true and #T.chests() == 1
         and total == 128 and #found == 1, tostring(#T.chests()) .. " chests, " .. tostring(total) .. " bricks")
     check("...and the catalogue says one chest", info.chests == 1, tostring(info and info.chests))
-    T.addChest(3, 1, 1, "down")
+    local kept = T.chests()[1]
+    local otherX = kept.x == 3 and 4 or 3
+    local keptAt = kept.x .. ",0,1, reached from " .. kept.x .. ",0,0 side 0"
+    local added, said = T.addChest(otherX, 0, 0, 0)
+    check("T.addChest on the other half of the known double chest: true, and it says so", added == true and #T.chests() == 1
+        and said == "already known: the other half of the double chest at " .. keptAt, tostring(said))
+    added, said = T.addChest(3, 1, 1, "down")
     check("a second stand for a chest already known is the same chest", #T.chests() == 1 and select(2, T.where(BRICKS)) == 128,
         tostring(#T.chests()))
+    check("...and T.addChest says which", added == true and said == (kept.x == 3 and "already known: the chest at " .. keptAt
+        or "already known: the other half of the double chest at " .. keptAt), tostring(said))
+    added, said = T.addChest(kept.x, 0, 0, 0)
+    check("...the same place again: already known", added == true and said == "already known: the chest at " .. keptAt, tostring(said))
     T.addChest(3, 1, 1, "down", true)
     check("...and naming it the bulk chest from there marks the one record", #T.chests() == 1 and T.chests()[1].bulk == true)
     check("...and forgetting it from there forgets it", T.forgetChest(3, 1, 1, "down") == true and #T.chests() == 0)

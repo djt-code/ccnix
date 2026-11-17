@@ -927,9 +927,9 @@ The chests and what they held when last looked at are in the data file .chests, 
 == The list of chests, in a data file ==
 
 T.addChest(x, y, z, side, bulk)
-    Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
+    Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True (and a note if it was known), or nil and why.
 
-    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again, from this stand or another, keeps the one record and what was written down of it. Kept in the data file .chests.
+    Nothing is visited: T.catalogue reads what is in it. With `bulk` true it becomes the bulk chest, where T.stow puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again). Adding a chest again, from this stand or another, or the other half of a known double chest, keeps the one record and what was written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1, reached from 3,0,0 side 0"). Kept in the data file .chests.
 
 T.forgetChest(x, y, z, side)
     Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.

@@ -192,11 +192,13 @@ local function find(list, c)
 end
 
 -- Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top",
--- "down"/"bottom", or a heading 0 to 3 as T.dir counts them).  True, or nil and why.
+-- "down"/"bottom", or a heading 0 to 3 as T.dir counts them).  True (and a note if it was known), or nil and why.
 --
 -- Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
 -- puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again).  Adding a chest
--- again, from this stand or another, keeps the one record and what was written down of it.  Kept in the data file .chests.
+-- again, from this stand or another, or the other half of a known double chest, keeps the one record and what was
+-- written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1,
+-- reached from 3,0,0 side 0").  Kept in the data file .chests.
 function T.addChest(x, y, z, side, bulk)
     for _, n in ipairs({ x, y, z }) do
         if not whole(n) then return nil, "a chest's place is x, y, z: whole numbers" end
@@ -206,7 +208,13 @@ function T.addChest(x, y, z, side, bulk)
     local list = load()
     local want = { x = x, y = y, z = z, side = d }
     local c = find(list, want) or chestAt(list, cellOf(want))
-    if not c then
+    local known
+    if c then
+        local own, at = cellOf(c), cellOf(want)
+        local same = own.x == at.x and own.y == at.y and own.z == at.z
+        known = "already known: " .. (same and "the chest at " or "the other half of the double chest at ") .. T.posKey(own) ..
+            ", reached from " .. T.posKey(c) .. " side " .. tostring(c.side)
+    else
         c = { x = x, y = y, z = z, side = d, items = {} }
         list[#list + 1] = c
     end
@@ -214,7 +222,9 @@ function T.addChest(x, y, z, side, bulk)
         for _, q in ipairs(list) do q.bulk = false end
         c.bulk = true
     end
-    return save(list)
+    local ok, why = save(list)
+    if not ok then return nil, why end
+    return true, known
 end
 
 -- Forget the chest at this place (as T.addChest was given it, or another stand for the same chest).  True, or false and why.

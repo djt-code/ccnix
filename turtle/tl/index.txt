@@ -211,7 +211,7 @@ T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state w
 Lighting a fire:
 T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel, from above: the fire's name, or nil and why.
 The list of chests, in a data file:
-T.addChest(x, y, z, side, bulk) - Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True, or nil and why.
+T.addChest(x, y, z, side, bulk) - Tell the turtle about a chest: it stands at x, y, z (the turtle's frame) and the chest is on `side` ("up"/"top", "down"/"bottom", or a heading 0 to 3 as T.dir counts them). True (and a note if it was known), or nil and why.
 T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, items = { name = count } }; seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest.
 Going to a chest:
