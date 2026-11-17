@@ -30,7 +30,15 @@
 --
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
--- helpers are loaded again), or press Enter on an empty line to quit.
+-- helpers are loaded again), /tidy to have it tidy its notes (below), or
+-- press Enter on an empty line to quit.
+--
+-- Its notes: the memory tool's files (/claude/memories) are read whole
+-- and sent on every call after.  When they're over 32 KB at a session's
+-- start, its first task, before your goal, is to tidy them: notes.md
+-- rewritten as the current state (about 12 KB), the rest moved to
+-- /claude/notes-archive/<date>.md, which it reads with fs when it needs
+-- to and isn't sent.  Your goals then start a conversation of their own.
 -- Ctrl+T stops it (under T.run, so the saved position stays right).
 --
 -- Colour (an advanced computer or turtle): the code it runs is highlighted
@@ -241,11 +249,13 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
--- Memory over NOTES.large bytes in all is a start note: a file viewed
--- stays in the conversation, never cleared, so it is sent on every call
--- (about NOTES.bytesAToken bytes a token: the field's 80 KB notes.md came
--- to about 28k tokens)
-local NOTES = { large = 32 * 1024, bytesAToken = 3 }
+-- Memory over NOTES.large bytes in all at a session's start is its first
+-- task: the model tidies it (ADR-0013 D9), notes.md down to about
+-- NOTES.tidyTo bytes and the rest to NOTES.archive; after /new it's a note.
+-- A file viewed stays in the conversation, never cleared, so it is sent
+-- on every call (about NOTES.bytesAToken bytes a token: the field's 80 KB
+-- notes.md came to about 28k tokens)
+local NOTES = { large = 32 * 1024, bytesAToken = 3, tidyTo = 12 * 1024, archive = "claude/notes-archive" }
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -460,7 +470,7 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories (a file you view is sent on every call after, so keep notes.md short). web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
 
 Call `status` to see where the turtle is, what's around it, what it carries and has attached, the protected areas near it, the world origin and the job journal's step, and whether the network is up. If the task is unclear or risky, ask: the chat tool with ask = true reaches the player in the game, ask_user only the keyboard. When done (or stuck), stop and say what you did and where the turtle is; say plainly if something failed.]==]
 SYSTEM = text.replace(text.replace(SYSTEM, "@DETAILS@", DETAILS), "@INDEX@", INDEX)
@@ -1801,6 +1811,20 @@ function NOTES.note()
         MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
 end
 
+-- The goal the harness gives the model to tidy its notes (the session's
+-- first task when they're large, or /tidy): notes.md rewritten as the
+-- current state, about NOTES.tidyTo bytes, the rest moved to an archive
+-- file of the day's, which the model reads with fs and isn't loaded
+function NOTES.tidyGoal()
+    local size = NOTES.size(MEMORY_DIR)
+    return string.format("A task from the harness, before the player's next goal: tidy your notes. %s holds %d KB, about %dk tokens on every call once a file is viewed. "
+        .. "Rewrite %s/notes.md as the current state, about %d KB: where things are, what's built, jobs under way, the player's preferences, the lessons that still matter. "
+        .. "Move the rest, as it was, to /%s/%s.md with fs (append if it's there): it isn't loaded, and you can read it with fs when it's wanted. "
+        .. "Do the same with the other files in %s that are history. Don't touch the world. When done, say in a line what you kept and what you moved.",
+        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5),
+        MEMORY_ROOT, math.floor(NOTES.tidyTo / 1024), NOTES.archive, os.date("!%Y-%m-%d", now()), MEMORY_ROOT)
+end
+
 -- Keep the version the model has had the news for.
 local function keepVersion()
     if not newVersion then return end
@@ -2466,7 +2490,6 @@ end
 --------------------------------------------------------------------------
 -- /new at the prompt: the conversation emptied, the helpers loaded again
 -- (what's on disk, the memory and the files, carries over)
-local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
     hardClear, startNotes = false, {}
@@ -2479,6 +2502,32 @@ local function newConversation()
     if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
 end
+
+-- The session's first task when the notes are large (ADR-0013 D9): the
+-- model tidies them, as a goal of the harness's, before the player's; then
+-- the player's goals start a conversation of their own, without the old
+-- notes it viewed whole, told what the session's start told the first.
+function NOTES.firstTask()
+    local told = tables.copy(startNotes)
+    local before = tables.copy(usage)
+    converse(NOTES.tidyGoal())
+    listen.putBack()
+    local line = tokenLine(before)
+    say("grey", line)
+    log("tidy done: " .. line)
+    for i = #messages, 1, -1 do messages[i] = nil end
+    hardClear = false
+    replyLog.reset()
+    startNotes = told
+    startNotes[#startNotes + 1] = "Your notes were tidied in a conversation before this one, which was put aside: view /memories afresh."
+end
+
+-- The commands at the prompt: each gives the next line, or the goal the
+-- harness makes (/tidy), to go on with
+local COMMANDS = {
+    ["/new"] = function() newConversation(); return ask("Goal: ") end,
+    ["/tidy"] = function() return NOTES.tidyGoal() end,
+}
 
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
@@ -2504,11 +2553,10 @@ local function main()
         log("news: " .. news)
         startNotes[#startNotes + 1] = news
     end
-    local memory = NOTES.note()
+    local memory = NOTES.size(MEMORY_DIR) > NOTES.large and NOTES.note()
     if memory then
-        say("yellow", memory)
+        say("yellow", memory .. " Claude tidies them first.")
         log("memory: " .. memory)
-        startNotes[#startNotes + 1] = memory
     end
     -- (ADR-0013 D3: no player set, what reports speaks to everyone)
     if settings and (settings.get("turtle.player") or "") == "" then
@@ -2517,13 +2565,14 @@ local function main()
         startNotes[#startNotes + 1] = nobody
     end
     if opts.resume and not resume.goal then say("yellow", "Nothing to resume: /" .. resume.file .. " isn't there.") end
+    if memory then NOTES.firstTask() end
     if goal == "" then
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        if text.trim(goal) == NEW then
-            newConversation()
-            goal = ask("Goal: ")
+        local command = COMMANDS[text.trim(goal)]
+        if command then
+            goal = command()
         else
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)

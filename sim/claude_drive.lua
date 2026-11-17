@@ -1985,31 +1985,52 @@ check("the prompt says to keep T.keep and T.cfg settings in a keep() helper",
     sys39:find("Settings every session should have (T.keep items, T.cfg values, T.diggable) go in a keep() helper too", 1, true) ~= nil)
 end
 
--- 40. large notes (ADR-0013 phase 1): memory over 32 KB in all (its
---     folders counted) is a start note, on the screen and with the first
---     goal (and after /new), saying what it costs and where the old
---     goes; under it, none
+-- 40. large notes (ADR-0013 phase 1, D9): memory over 32 KB in all (its
+--     folders counted) at a session's start is its first task, a goal of
+--     the harness's before the player's: notes.md rewritten as the current
+--     state (about 12 KB), the rest moved to /claude/notes-archive/<the
+--     day>.md; the player's goal then starts a conversation of its own,
+--     told the notes were tidied; after /new it's a note, saying what they
+--     cost and where the old goes; under 32 KB, neither
 do
 fresh({ "/new", "again", "" })
 fs.makeDir("claude/memories")
 fs.makeDir("claude/memories/old")
 Mine.files["claude/memories/notes.md"] = string.rep("x", 30 * 1024)
 Mine.files["claude/memories/old/done.md"] = string.rep("y", 10 * 1024)
-HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
+HTTP.queue = { reply({ text("Tidied.") }, "end_turn"), reply({ text("Ok.") }, "end_turn"), reply({ text("Ok.") }, "end_turn") }
 run("tidy up")
-local goal40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+local tidy40 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("memory over 32 KB: the session's first task is to tidy it, before the player's goal",
+    tidy40:find("^A task from the harness, before the player's next goal: tidy your notes%. /memories holds 40 KB, about 14k tokens on every call")
+        and tidy40:find("Rewrite /memories/notes.md as the current state, about 12 KB", 1, true)
+        and tidy40:find("to /claude/notes-archive/" .. os.date("!%Y-%m-%d") .. ".md with fs", 1, true)
+        and #HTTP.requests[1].body.messages == 1, tidy40:sub(1, 60))
+check("...and the screen says so", Mine.logHas("^Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: .* Claude tidies them first%.$"))
+local goal40 = HTTP.requests[2] and HTTP.requests[2].body.messages or {}
+check("...then the player's goal starts a conversation of its own, told the notes were tidied",
+    #goal40 == 1 and goal40[1].content == "tidy up\n\n[Your notes were tidied in a conversation before this one, which was put aside: view /memories afresh.]",
+    goal40[1] and goal40[1].content)
+check("...logged", (Mine.files["claude.log"] or ""):find("\n[^\n]* tidy done: %[") ~= nil)
 local NOTE40 = "Your notes in /memories are 40 KB, about 14k tokens on every call once viewed: move what you no longer need to an archive file outside /memories (under /claude/, read with fs when it's wanted)."
-check("memory over 32 KB: a start note with the first goal and on the screen",
-    goal40 == "tidy up\n\n[" .. NOTE40 .. "]" and Mine.logHas("^Your notes in /memories are 40 KB"), goal40)
-local new40 = HTTP.requests[2] and HTTP.requests[2].body.messages[1].content or ""
-check("...and with the first goal after /new", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
+local new40 = HTTP.requests[3] and HTTP.requests[3].body.messages[1].content or ""
+check("...and after /new, a note with the first goal", new40:sub(-#NOTE40 - 1) == NOTE40 .. "]", new40)
 
 fresh({ "" })
 fs.makeDir("claude/memories")
 Mine.files["claude/memories/notes.md"] = string.rep("x", 20 * 1024)
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("small notes")
-check("...under it, no note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "small notes")
+check("...under it, no tidy and no note", #HTTP.requests == 1 and HTTP.requests[1].body.messages[1].content == "small notes")
+
+-- /tidy at the prompt: the same task, on demand, in the conversation as it is
+fresh({ "/tidy", "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn"), reply({ text("Tidied.") }, "end_turn") }
+run("small notes")
+local m2 = HTTP.requests[2] and HTTP.requests[2].body.messages or {}
+check("/tidy: the harness's tidy task as the next goal, in the same conversation",
+    #m2 == 3 and type(m2[3].content) == "string" and m2[3].content:find("^A task from the harness, before the player's next goal: tidy your notes%."),
+    m2[3] and tostring(m2[3].content):sub(1, 60))
 end
 
 -- 41. the prompt and the manual (ADR-0013 phase 2): what a turtle can't
