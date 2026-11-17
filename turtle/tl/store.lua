@@ -655,7 +655,7 @@ end
 --------------------------------------------------------------------------
 
 -- Can the item go in a chest by default?  What isn't kept (T.isJunk); with opts.all also what the job keeps, but never a
--- tool, fuel or a peripheral (T.isEssential); never what opts.keep names (a test made from it).
+-- tool the job keeps, fuel or a peripheral (T.isEssential); never what opts.keep names (a test made from it).
 local function stowable(name, opts, keep)
     if keep and keep(name) then return false end
     if opts.all then return not T.isEssential(name) end
@@ -716,7 +716,7 @@ end
 --
 -- By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or
 -- a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or
--- a peripheral.  It goes to the nearest chest that wants something, drops what that chest should have, reads it again
+-- a peripheral.  With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too.  It goes to the nearest chest that wants something, drops what that chest should have, reads it again
 -- for the list and goes on, then comes back facing as before.  What no chest holds, with no bulk chest, or what does
 -- not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
 -- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
@@ -821,9 +821,10 @@ end
 -- spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots
 -- must be empty after (default 0).  The chests' list (as last read) is checked first: if they and the turtle together
 -- hold too little of something it refuses before moving, naming what is short, unless spec.partial.  Then it stows
--- everything that isn't needed (but never tools, fuel or a peripheral; what is needed stays aboard whole), fetches what
--- is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest).  Then it counts
--- again: anything still short, or fewer free slots than asked, is a failure that says what.  spec.move is T.moveTo's.
+-- everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard
+-- whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last
+-- chest).  Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what.
+-- spec.move is T.moveTo's.
 -- Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
 function T.prepare(spec)
     spec = spec or {}

@@ -517,10 +517,14 @@ T.clearCrafted()
     Forget what T.markCrafted named: the end of a job.
 
 T.isEssential(name)
-    Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
+    Is the item `name` something a turtle needs whatever the job: a tool (with T.cfg.tools set, one equipped or named), fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
+
+    Every tool is, unless T.cfg.tools is set: then only the tools equipped (or parked aboard by T.withTool or T.equipPeripheral until they go back on) and those it names, a list or set of names or globs (T.cfg.tools = { "*_pickaxe", "minecraft:iron_hoe" }; {} keeps only what is equipped). The rest are junk unless T.keep names them, so T.stow and T.dumpJunk put away the swords and axes a job picked up.
 
 T.isJunk(name)
     Is the item `name` junk? False for what's in T.keep (a set or a list of names, globs too: put the job's materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+
+    Tools: the ones T.isEssential keeps (all of them, unless T.cfg.tools names the job's).
 
 T.dumpJunk()
     Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
@@ -979,14 +983,14 @@ T.inventoryReport(opts)
 T.stow(opts)
     Put what the turtle carries away in the chests: into one that already holds the item, else into the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
 
-    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. What no chest holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: move (T.moveTo's), keep (names, a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
+    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. What no chest holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: move (T.moveTo's), keep (names, a list or set, globs too, that stay aboard whatever), stay (stay at the last chest).
 
 == Getting ready for a job ==
 
 T.prepare(spec)
     Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch what is, come back, check the room. True, info; false, why, info (what is short, too few slots free); nil, why.
 
-    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never tools, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
+    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
 
 T.autoDump()
     Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.

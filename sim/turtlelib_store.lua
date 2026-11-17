@@ -16,6 +16,8 @@
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
 --     the why; nothing is ever dropped in the world;
 --   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
+--   * T.cfg.tools (ADR-0013 D5): T.stow and opts.all put away the looted tools it doesn't list, never the one
+--     equipped, nor the pickaxe parked in the inventory while a crafting table or a hoe is on its side;
 --   * T.recount: the known chest on a side read again into the list, with the time; no known chest there, a bad side;
 --   * T.inventoryReport: every item across the chests and the turtle, totalled, with each count's age, as lines too,
 --     sorted by name or count, matched; it moves nothing;
@@ -460,6 +462,45 @@ do
     check("...the crafted stone went to the chest that holds stone", chestHas(-3, 0, 1, STONE) == 14)
     T.keep[DIRT] = nil
     T.clearCrafted()
+end
+
+do
+    -- T.cfg.tools: the tools a job keeps (ADR-0013 D5)
+    local SWORD, HOE, IRONPICK = "minecraft:iron_sword", "minecraft:iron_hoe", "minecraft:iron_pickaxe"
+    setUp()
+    T.catalogue()
+    W.give(1, SWORD, 1)
+    W.give(2, IRONPICK, 1)
+    W.give(3, HOE, 1)
+    W.give(4, DIRT, 5)
+    local ok, info = T.stow()
+    check("T.cfg.tools unset: T.stow leaves every tool aboard, looted ones too", ok == true and info.stowed == 5 and carrying(SWORD) == 1
+        and carrying(IRONPICK) == 1 and carrying(HOE) == 1)
+    T.cfg.tools = { "*_hoe" }
+    ok, info = T.stow()
+    check("T.cfg.tools set: the looted sword and pickaxe go to the bulk chest, the hoe it lists stays", ok == true and info.stowed == 2
+        and chestHas(0, 0, -3, SWORD) == 1 and chestHas(0, 0, -3, IRONPICK) == 1 and carrying(HOE) == 1 and EQ.left == PICK)
+    T.cfg.tools = {}
+    ok, info = T.stow()
+    check("...T.cfg.tools = {} (only what is equipped): the hoe goes too, the pickaxe equipped stays on", ok == true and info.stowed == 1
+        and carrying(HOE) == 0 and chestHas(0, 0, -3, HOE) == 1 and EQ.left == PICK)
+    -- a crafting table on the pickaxe's side (a chunk controller on the other): the pickaxe is parked aboard, and kept
+    EQ.right = "advancedperipherals:chunk_controller"
+    W.give(1, "minecraft:crafting_table", 1)
+    W.give(2, SWORD, 1)
+    local inside, during
+    T.withPeripheral("minecraft:crafting_table", function()
+        inside = EQ.left == "minecraft:crafting_table" and carrying(PICK) == 1
+        during = T.isEssential(PICK) and T.stow({ all = true }) == true and carrying(PICK) == 1 and carrying(SWORD) == 0
+    end)
+    check("...a pickaxe parked aboard by T.equipPeripheral is kept, the sword is not", inside and during and EQ.left == PICK
+        and chestHas(0, 0, -3, SWORD) == 2, tostring(inside) .. " " .. tostring(during))
+    W.give(1, HOE, 1)
+    T.withTool(HOE, function()
+        inside = EQ.left == HOE and carrying(PICK) == 1 and T.isEssential(PICK) and T.isEssential(HOE)
+    end)
+    check("...and one parked by T.withTool; the hoe, back aboard, is not kept", inside and EQ.left == PICK and not T.isEssential(HOE))
+    T.cfg.tools, EQ.right = nil, nil
 end
 
 do

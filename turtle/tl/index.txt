@@ -134,7 +134,7 @@ T.setJunkChest(x, y, z, side) - Remember the junk chest: it stands on `side` of 
 T.junkChest() - Where the junk chest is, as { x, y, z, side } (side a heading 0 to 3, "up" or "down"), or nil if none is set.
 T.markCrafted(name) - The craft module calls this for each item it makes, so it is never junk for the rest of the job (until the computer restarts, or T.clearCrafted()).
 T.clearCrafted() - Forget what T.markCrafted named: the end of a job.
-T.isEssential(name) - Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
+T.isEssential(name) - Is the item `name` something a turtle needs whatever the job: a tool (with T.cfg.tools set, one equipped or named), fuel, a bucket, a crafting table or a peripheral? (Never junk, and never put away in a chest by T.stow.)
 T.isJunk(name) - Is the item `name` junk? False for what's in T.keep (a set or a list of names, globs too: put the job's materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
 T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back facing as before; nothing is dropped unless a chest is there. Returns true, items dropped, items left; or false and why.
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
