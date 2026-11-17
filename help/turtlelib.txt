@@ -13,6 +13,7 @@ Provides:
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * the player's view (tl.lint, loaded when first used): T.lint warns of what stops a two-tall player in a build: headroom over stairs, a flight's approach and exit, railings meeting only on a diagonal, unrailed drops, a lantern at head height; T.walkable finds a way a player walks from one cell to another
+  * light (tl.light, loaded when first used): T.light floods block light over the map; T.darkCells lists the cells where a mob could spawn
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
@@ -803,6 +804,31 @@ T.undo(n, opts)
 
     A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why, and stays marked stale. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
 
+tl.light: block light over the map, and the cells where a mob could spawn in the dark
+
+Loaded by turtlelib the first time T.light or T.darkCells is used.  Cells are the turtle's own (the frame it counts in).
+
+A flood fill of block light over the map (tl.world), as the game spreads it: a light gives its level in its own cell, and each step to a side, up or down loses 1, so a torch (14) lights the cells beside it to 13 and nothing 14 steps away.  What light goes through comes from the lint's kinds (T.blockKind): what a player passes through, railings, lanterns, stairs and slabs; a solid block stops it unless the table of exceptions says it is clear (glass, leaves, ice, a chest, a plant).  A slab or a stair lets light through sideways but not through its full face (a bottom one's underside, a top one's top); one whose half the map lacks is taken as a bottom one.  Lights up to 14 cells outside the box count (the box is grown by 14 to look for them), and so does light that goes round a wall outside the box. A cell the map never saw stops light.  Sky light isn't modelled: the dark cells are those of a roofed place, or of any place at night.
+
+A monster spawns with its feet in a cell with room (that cell and the one over it: nothing it collides with, so air, a torch or a sign, but not a rail, a carpet, a pressure plate, a button, a lever or redstone, which stop spawning) over a floor with a full, sturdy top (a solid block, a top slab, an upside-down stair; not a bottom slab, glass, leaves, ice, a block that isn't a full one such as a chest or farmland, or one giving light 14 or more such as glowstone), when the block light in its feet cell is at or under the dimension's limit (Java 1.21.1's code, checked 2026-11-17):
+  overworld, end
+      0 (the dimension's monster_spawn_block_light_limit)
+  nether
+      7 for skeletons, wither skeletons and endermen (monster_spawn_light_level); 11 for zombified piglins, piglins, hoglins and blazes (the walk-target check every pathfinding monster passes, MC-156004); ghasts and magma cubes whatever the light: only the floor or the room stops them
+The turtle can't tell which dimension it is in: opts.dimension says, else the setting T.cfg.dimension, else it is the overworld.  Only two cells of room are asked for (an enderman wants three, a ghast more, a spider a wider space), and the game's chances (sky light at night, the distance from a player) aren't modelled.  Mods in a pack can change spawning, and a block the tables don't know is taken as a solid one: check in game, comparing the dark cells with where mobs appeared.
+
+== tl.light: block light over the map, and the cells where a mob could spawn in the dark ==
+
+T.light(box, opts)
+    The block light in a box from the map: a function level(x, y, z) giving a cell's light (0 to 15; nil for a cell outside the box), and info; nil and why.
+
+    `box` is { x1, y1, z1, x2, y2, z2 } (or the fields), 65536 cells at most. Lights up to 14 cells outside it count; what light passes and what stops it is in the overview (a cell the map never saw stops it). opts.with = a list of { x, y, z, name, state } read in place of the map's cells: what a torch there would do ({ 3, 1, 4, "torch" }), or a light taken away ({ 3, 1, 4, "air" }). Info is { cells, sources (the lights that reached the grown box), guessed (lights whose level goes by a state the map lacks, such as a redstone lamp's lit: the game's default taken), cut (more than 20000 lights: some left out) }. Block light only, as the game spreads it in Java 1.21.1: check in game.
+
+T.darkCells(box, opts)
+    Where a mob could spawn in a box (the map's blocks and T.light): a list of { x, y, z, light } (the feet cell, its light) at or under the dimension's limit, darkest first, and info; nil and why.
+
+    A cell is spawnable with room for a mob (it and the cell over it: air, a torch, a sign; not a rail, carpet, button, pressure plate or redstone) over a full, sturdy floor (a solid block, a top slab, an upside-down stair; not a bottom slab, glass, leaves, ice, glowstone or a block that isn't a full one). The limit (see the overview): the overworld's and the end's 0; the nether's 11, in two groups, light 7 or less (skeletons, wither skeletons, endermen) and 11 or less (zombified piglins, piglins, hoglins, blazes), and the spawnable cells lit over it listed apart in info.anyLight, since ghasts and magma cubes spawn whatever the light (only a slab or glass floor, or no room, stops them). opts: dimension ("overworld", "nether", "end"; else the setting T.cfg.dimension, else the overworld: the turtle can't tell), max (the limit, overriding the dimension's), limit (cells listed, default 50), with (as T.light). Info is { dimension, max, spawnable (cells), dark (cells at or under the limit), more (past the limit), groups (a list of { max, mobs, count }), anyLight and anyLightCount (the nether), unsure (cells over a slab or stair whose half the map lacks, taken as a bottom one: inspect them, since a top one is a floor), unseen (cells of the box the map never saw), sources, guessed, cut (as T.light), summary (a line) }. Mods can change spawning: check in game.
+
 tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths
 
 Loaded by turtlelib the first time T.lint or T.walkable is used.  Cells are the turtle's own (the frame it counts in).
@@ -825,6 +851,13 @@ The turtle is one block tall and the player two (1.8, stepping up a block at mos
 A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll, T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is counted as unchecked and only its headroom is looked at.  A lone stair that climbs to nothing (a seat against a wall, a bench of stairs side by side) isn't a flight, and none of the stair rules is looked at for it.  A cell the map has never seen breaks no rule.
 
 T.walkable searches the map for a way a player walks from one cell to another (breadth first: fewest steps).  A player's place is the cell its feet are in, over a block to stand on (or on a ladder), and its height in half blocks (a bottom slab is half a block, a fence or wall one and a half).  A step goes to a side, up a block at most (a stair or a slab is a step like any other) or down any height; a climb goes up or down a ladder.  The body is 1.8 high, so a step up needs 3 air where it starts as well as 2 where it ends (the reason a stair needs 3 air).  Lava and fire are never walked into, water breaks a fall, and a fall over 3 is taken only when there is no way without one, and listed.
+
+== tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths ==
+
+T.blockKind(name)
+    What a block is to a player, by its name: the kind's name (open, railing, stairs, slab, solid, ...) and a copy of its facts ({ pass, floor, height, ... }).
+
+    The kinds are open, ladder, water, hot, gate, railing, lantern, walltorch, stairs, slab and solid (a name no rule knows). The facts: pass (the body goes through it), floor (a player stands on it), height (its top in half blocks), climb, soft, hot, rail, lantern, light, stairs, slab. The lint and T.walkable go by these; tl.light reads light's way through a block from them.
 
 == The lint ==
 

@@ -100,9 +100,9 @@ end
 local function whole(n) return type(n) == "number" and n == math.floor(n) end
 local function key(x, y, z) return x .. "," .. y .. "," .. z end
 
--- The kind of a block, by name (worked out once a name).
+-- The name of a block's kind, by the block's name (worked out once a name).
 local kindCache = {}
-local function kindOf(name)
+local function kindNameOf(name)
     local kind = kindCache[name]
     if not kind then
         kind = "solid"
@@ -111,7 +111,24 @@ local function kindOf(name)
         end
         kindCache[name] = kind
     end
-    return KINDS[kind]
+    return kind
+end
+
+-- The kind of a block, by name.
+local function kindOf(name) return KINDS[kindNameOf(name)] end
+
+-- What a block is to a player, by its name: the kind's name (open, railing, stairs, slab, solid, ...) and a copy of its
+-- facts ({ pass, floor, height, ... }).
+--
+-- The kinds are open, ladder, water, hot, gate, railing, lantern, walltorch, stairs, slab and solid (a name no rule
+-- knows).  The facts: pass (the body goes through it), floor (a player stands on it), height (its top in half blocks),
+-- climb, soft, hot, rail, lantern, light, stairs, slab.  The lint and T.walkable go by these; tl.light reads light's
+-- way through a block from them.
+function T.blockKind(name)
+    local kind = kindNameOf(tostring(name))
+    local facts = {}
+    for k, v in pairs(KINDS[kind]) do facts[k] = v end
+    return kind, facts
 end
 
 -- How high a block's top is, in half blocks.

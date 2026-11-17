@@ -195,6 +195,11 @@ The undo journal:
 T.undoMark() - The mark of the journal as it is now: T.undo(nil, { since = mark }) undoes everything done after it.
 T.undoClear() - Empty the undo journal. True.
 T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
+tl.light: block light over the map, and the cells where a mob could spawn in the dark:
+T.light(box, opts) - The block light in a box from the map: a function level(x, y, z) giving a cell's light (0 to 15; nil for a cell outside the box), and info; nil and why.
+T.darkCells(box, opts) - Where a mob could spawn in a box (the map's blocks and T.light): a list of { x, y, z, light } (the feet cell, its light) at or under the dimension's limit, darkest first, and info; nil and why.
+tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths:
+T.blockKind(name) - What a block is to a player, by its name: the kind's name (open, railing, stairs, slab, solid, ...) and a copy of its facts ({ pass, floor, height, ... }).
 The lint:
 T.lint(what, opts) - What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lights in the way. A list of { rule, x, y, z, text }, and info.
 Walking:
