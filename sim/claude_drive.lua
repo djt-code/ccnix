@@ -731,6 +731,31 @@ local _, sameClears = clog:gsub("context: 4 old tool results cleared %(20000 tok
 check("the same clear reported on three calls is logged once, a new one again",
     sameClears == 1 and clog:find("context: 9 old tool results cleared (41000 tokens)", 1, true), sameClears)
 
+-- both edits in one reply, as the API reports them (ADR-0013 phase 1):
+-- each logged by its own type (old thinking as turns, not as "0 old tool
+-- results"), and each once until it changes, the other's line between
+-- them notwithstanding
+fresh({ "" })
+local function bothCleared(turns, thinkTokens)
+    return { context_management = { applied_edits = {
+        { type = "clear_thinking_20251015", cleared_thinking_turns = turns, cleared_input_tokens = thinkTokens },
+        { type = "clear_tool_uses_20250919", cleared_tool_uses = 4, cleared_input_tokens = 20000 } } } }
+end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", bothCleared(3, 15000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", bothCleared(3, 15000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", bothCleared(4, 18000)),
+    reply({ text("Done.") }, "end_turn", bothCleared(4, 18000)),
+}
+run("clear both")
+local blog = Mine.files["claude.log"] or ""
+local _, toolLines = blog:gsub("context: 4 old tool results cleared %(20000 tokens%)", "")
+local _, think3 = blog:gsub("context: old thinking cleared %(3 turns, 15000 tokens%)", "")
+local _, think4 = blog:gsub("context: old thinking cleared %(4 turns, 18000 tokens%)", "")
+check("both edits in a reply: old thinking logged as turns, each edit once until it changes",
+    toolLines == 1 and think3 == 1 and think4 == 1 and not blog:find("context: 0 old tool results", 1, true),
+    toolLines .. " " .. think3 .. " " .. think4)
+
 -- 19b. the rest of the sandbox (scenario 2 has the start of it): write
 --     and io.write come back a line at a time (print after a write
 --     finishes its line), printError too, and the plain Lua bits a helper

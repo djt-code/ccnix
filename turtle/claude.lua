@@ -1930,7 +1930,27 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
-local lastCleared       -- the last `context:` line logged (the API reports the same clear on every call after it)
+-- The log's line for each kind of context edit the API applied, from the
+-- fields it reports (another kind: its type, and the tokens it freed)
+local EDIT_LINES = {
+    clear_thinking_20251015 = function(e)
+        return string.format("context: old thinking cleared (%d turns, %d tokens)",
+            e.cleared_thinking_turns or 0, e.cleared_input_tokens or 0)
+    end,
+    clear_tool_uses_20250919 = function(e)
+        return string.format("context: %d old tool results cleared (%d tokens)",
+            e.cleared_tool_uses or 0, e.cleared_input_tokens or 0)
+    end,
+}
+local function editLine(e)
+    local line = EDIT_LINES[e.type]
+    if line then return line(e) end
+    return string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0)
+end
+-- The last `context:` line logged for each kind of edit: the API reports
+-- the same clear on every call after it, so a line is logged when it
+-- differs from its own kind's last one
+local lastCleared = {}
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -1964,12 +1984,12 @@ local function converse(goal)
                 log(what)
             end
         end
-        -- (logged when it differs from the last one: a clear stays applied,
-        -- and is reported again, on every call until a bigger one)
+        -- (logged when it differs from the last one of its kind: a clear
+        -- stays applied, and is reported again, on every call until a
+        -- bigger one)
         for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            local line = string.format("context: %d old tool results cleared (%d tokens)",
-                edit.cleared_tool_uses or 0, edit.cleared_input_tokens or 0)
-            if line ~= lastCleared then log(line); lastCleared = line end
+            local line = editLine(edit)
+            if line ~= lastCleared[edit.type] then log(line); lastCleared[edit.type] = line end
         end
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):
@@ -2027,7 +2047,7 @@ end
 local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
-    hardClear, lastCleared, startNotes = false, nil, {}
+    hardClear, lastCleared, startNotes = false, {}, {}
     startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
