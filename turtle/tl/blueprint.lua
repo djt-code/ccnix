@@ -644,7 +644,8 @@ end
 
 local function dataFile(name) return T.dataPath(name) end
 
--- The saved build: { plan, text, order, done, failed = { [n] = why }, total }, or nil.
+-- The saved build: { plan, text, order, done, failed = { [n] = why }, total, frame }, or nil.  frame is the T.frameId it was
+-- saved in ("stale" once found in another; nil from before frames were numbered).
 local function loadSaved()
     local planText = fileio.read(dataFile(PLAN_FILE))
     if not planText then return nil end
@@ -658,6 +659,8 @@ local function loadSaved()
             saved.done = convert.toInteger(rest or "") or 0
         elseif kind == "order" and ORDERS[rest] then
             saved.order = rest
+        elseif kind == "frame" then
+            saved.frame = rest == "stale" and "stale" or convert.toInteger(rest or "")
         elseif kind == "failed" and rest then
             local number, why = text.cut(rest, " ")
             number = convert.toInteger(number)
@@ -681,15 +684,20 @@ local function tellJob(job)
     if not ok and err == "Terminated" then error(err, 0) end
 end
 
--- Write how far the build has got (and tell the job journal).
-local function saveProgress(job)
-    tellJob(job)
-    local out = { "name " .. (job.plan.name or ""), "done " .. job.done }
+-- Write how far the build has got, and the frame it is in (job.frame, else this one).
+local function writeProgress(job)
+    local out = { "name " .. (job.plan.name or ""), "done " .. job.done, "frame " .. tostring(job.frame or T.frameId()) }
     if job.order ~= "layer" then out[#out + 1] = "order " .. job.order end      -- (no line: the layer order)
     for _, n in ipairs(tables.sortedKeys(job.failed)) do
         out[#out + 1] = "failed " .. n .. " " .. text.replace(tostring(job.failed[n]), "\n", " ")
     end
     return fileio.write(dataFile(PROGRESS_FILE), table.concat(out, "\n") .. "\n")
+end
+
+-- Write how far the build has got (and tell the job journal).
+local function saveProgress(job)
+    tellJob(job)
+    return writeProgress(job)
 end
 
 -- Does the map say the cell already holds its block, with the state asked for (so it needs none of that block)?
@@ -847,7 +855,8 @@ end
 -- A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built
 -- over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead.
 -- opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the
--- order it began with.  The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they
+-- order it began with.  A build saved before a re-zero (T.frameStale) is not carried on: T.build() says why and marks it
+-- stale, and a plan given starts afresh.  The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they
 -- come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E";
 -- opts.fuelWatch = false turns it off.
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
@@ -859,6 +868,20 @@ end
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
+    -- a build saved before a re-zero is in the old frame: its cells would go in the wrong place, so it is marked stale
+    -- and never carried on (a plan given starts afresh)
+    local stale = saved and T.frameStale(saved.frame)
+    if stale then
+        if saved.frame ~= "stale" then
+            saved.frame = "stale"
+            writeProgress(saved)
+        end
+        if plan == nil then
+            return nil, "the build \"" .. (saved.plan.name or "build") .. "\" can't be carried on: " .. stale
+                .. "; give T.build a plan to start one here"
+        end
+        saved = nil
+    end
     if opts.order ~= nil and not ORDERS[opts.order] then return nil, "opts.order is \"layer\" or \"column\", not " .. tostring(opts.order) end
     local job
     if plan == nil then

@@ -9,7 +9,7 @@ Provides:
   * change hooks: T.onChange(fn) hears every successful dig, placement and move
   * T.moveTo: a move to a cell in three dimensions that says why it stopped (blocked, protected, lava), T.withPeripheral and T.equipPeripheral: use an item as a peripheral without taking off a chunk controller, T.pull: a count of one item out of a chest, and a junk chest (T.setJunkChest, T.isJunk, T.dumpJunk) that nothing is ever dropped on the ground for
   * the map and the frames (tl.world, loaded when first used): T.scan, the geo scanner's blocks in the turtle's own frame, kept in a map on disk (T.map.get/find/heights/slice, ...) that digs, placements and moves update, T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt for block states; a re-zeroed frame (--here) keeps the map right
-  * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire and doors and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
+  * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire, doors and the player's furnishings (ladders, signs, torches, ...) and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
@@ -48,6 +48,14 @@ T.run(fn, ...)
 
 T.loadPos()
     The saved position as { x, y, z, dir, mode }, or nil if there is none.
+
+T.frameId()
+    The number of the frame the turtle counts in: one more at each re-zero that moves 0,0,0 (0 before the first).
+
+T.frameStale(stamp)
+    Why a job saved in frame `stamp` can't be carried on now (a re-zero since), or nil if it can.
+
+    The stamp is a frame's number (T.frameId), or "stale" for a job found in another frame before and marked so; no stamp (a job saved before frames were numbered) can be carried on.
 
 T.clearPos()
     Delete the saved position file: the next job starts from home as (0,0,0).
@@ -290,7 +298,9 @@ T.moveTo(x, y, z, opts)
               the only cells it may dig (whatever block is there, unless
               opts.dig says which); any other block stops it
       avoid   a glob, a list or a set: blocks it stops at rather than enter
-              (default: lava, fire and doors); {} avoids nothing
+              (default: lava, fire, doors and the player's furnishings:
+              ladders, trapdoors, fence gates, signs, lanterns, torches,
+              rails); {} avoids nothing
       inside  the name of a protected area the move may dig in, or a list of
               names (see T.inside)
       liquid  true: dig a cell even when lava or a water source is beside it
@@ -385,10 +395,12 @@ T.options(args, long)
     `long` lists the long options: name = true for a flag, "=" for one with a value. A dash word that isn't one of them stays an operand.
 
 T.loadMineJob()
-    The job: { width, height, length (nil: no end), spacing, homes, state }, or nil if there's none or it isn't one.
+    The job: { width, height, length (nil: no end), spacing, homes, frame, state, stale }, or nil if there's none or it isn't one.
+
+    stale is why the job can't be carried on (T.frameStale): marked stale (state "stale"), or saved in another frame.
 
 T.saveMineJob(job)
-    Save a job as loadMineJob reads it back.
+    Save a job as loadMineJob reads it back, stamped with the frame it was made in (job.frame, else this one).
 
 T.hasMineJob()
     Whether a mine.job file is there at all (a job that can't be read still counts: mine was given one).
@@ -585,7 +597,7 @@ T.blueprint.put(plan, x, y, z, item)
 T.build(plan, opts)
     Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it circles. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 
-    `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a reboot. The same plan again carries on too; a different plan while one is unfinished is refused unless opts.restart. It first counts what the cells still to do need against what is on board, and refuses if anything is short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a function) unless opts.partial; cells with no item left fail one by one. A cell that fails is noted and the build goes on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them). Nothing is dug out of a cell it fills: a block in the way is a failure. A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead. opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the order it began with. The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E"; opts.fuelWatch = false turns it off. opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan = false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart, partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or that name; only when no cell failed), order, fuelWatch. Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell } }.
+    `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a reboot. The same plan again carries on too; a different plan while one is unfinished is refused unless opts.restart. It first counts what the cells still to do need against what is on board, and refuses if anything is short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a function) unless opts.partial; cells with no item left fail one by one. A cell that fails is noted and the build goes on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them). Nothing is dug out of a cell it fills: a block in the way is a failure. A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead. opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the order it began with. A build saved before a re-zero (T.frameStale) is not carried on: T.build() says why and marks it stale, and a plan given starts afresh. The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E"; opts.fuelWatch = false turns it off. opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan = false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart, partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or that name; only when no cell failed), order, fuelWatch. Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell } }.
 
 == Checking ==
 
@@ -782,7 +794,7 @@ T.undoClear()
 T.undo(n, opts)
     Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
 
-    A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
+    A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why, and stays marked stale. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
 
 tl.path: routes: a search over the map for a way to a cell, and walking it
 
@@ -796,8 +808,8 @@ T.path finds a route: A* in three dimensions over the map (tl.world), with a bin
   a cell never seen
       a move and a dig when digging everything is allowed; otherwise a move and a penalty, so a route through the unseen is possible but the known is preferred (it is checked as it is walked)
   a wall
-      never: a cell of a protected area the map doesn't know to be empty (a block, or never seen: nothing in an area is dug, except in the one opts.inside names; its known air and water are crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire and doors unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
-The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava) it met, which no longer search gets through.
+      never: a cell of a protected area the map doesn't know to be empty (a block, or never seen: nothing in an area is dug, except in the one opts.inside names; its known air and water are crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire, doors and the player's furnishings: ladders, trapdoors, fence gates, signs, lanterns, torches, rails; unless it says otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any cell in opts.avoidCells
+The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled off, it names the protected areas and the avoided blocks (doors, lava, ladders, ...) it met, which no longer search gets through. Before it searches, a small flood from the goal (1024 cells at most) looks for a way out: a goal walled in (a room of doors, a protected box) fails at once, "the goal is walled in by" what walls it, not after the whole limit.  Only the protected areas that overlap the search's box are tested for each cell.
 
 T.travel goes there.  From the map it looks for a clear layer, a height at which the whole way is known to be empty, between the highest floor and the lowest ceiling on the way (the Nether has a roof: a fixed height hits bastion ceilings): up, across, down.  If the map doesn't know enough it scans the route's box first; if there is no layer it uses the search.  Then it walks the route.  A block it didn't expect stops a step: it notes the block in the map and plans again from where it is, a few times.
 
@@ -806,10 +818,11 @@ T.travel goes there.  From the map it looks for a clear layer, a height at which
 T.path(x, y, z, opts)
     A route to the cell x, y, z through the map: a list of cells to step into, one after another, the last being the goal (empty when already there); nil and why if there is none.
 
-    It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown }: how many cells the search looked at, the route's cost, and how many of its cells need a dig or were never seen. Nothing moves. opts (all optional):
+    It starts from where the turtle is (opts.from = { x, y, z } to plan from elsewhere). The costs and the walls are in the overview of this module. A second result gives { nodes, cost, digs, unknown, areas }: how many cells the search looked at, the route's cost, how many of its cells need a dig or were never seen, and how many protected areas overlap the search (the only ones it tests). A goal walled in fails at once: "the goal ... is walled in by ...". Nothing moves. opts (all optional):
       dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
       digOnly    a list or set of cells (T.cellSet): the only cells a route may dig
-      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire and doors; {} avoids nothing)
+      avoid      a glob, a list or a set: blocks a route stays out of (default: lava, fire, doors and furnishings, as
+                 T.moveTo; {} avoids nothing)
       inside     the name of a protected area the route may dig in, or a list (and those of T.cfg.inside, see T.inside)
       liquid     true: a block with lava or a water source beside it or over it may be dug (by default it is a wall)
       avoidCells a list of { x, y, z } cells a route may not use

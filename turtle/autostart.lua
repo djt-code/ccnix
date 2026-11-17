@@ -61,6 +61,9 @@ local function plan()
         -- the job as mine saved it (one it can't read: carry on, and mine says why)
         local job = T.loadMineJob() or {}
         local state = job.state
+        if job.stale then
+            return nil, "the tunnel can't be carried on (" .. job.stale .. "): `mine --new` for another"
+        end
         if state == "done" or state == "stopped" then
             return nil, "the tunnel " .. (state == "done" and "is finished" or "stopped itself")
                 .. ": `mine --resume`, or `mine --new` for another"

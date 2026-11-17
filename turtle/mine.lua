@@ -27,6 +27,10 @@
 -- the start.  The map then knows where it is in the world (T.toWorld,
 -- T.toLocal), for claude and the other programs.
 --
+-- A tunnel saved before a re-zero that moved the start (another program
+-- started away from home, T.clearPos) is in the old frame: --resume, haul
+-- and reset refuse it, say why and mark it stale; a fresh tunnel replaces it.
+--
 -- width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 -- height = blocks UP from the turtle (negative = DOWN)
 -- length = blocks the tunnel runs ahead; leave it out to keep going until
@@ -3065,6 +3069,18 @@ pickaxe = T.findTool("_pickaxe")      -- one equipped, else one in the inventory
 if not pickaxe then print("Needs a pickaxe, equipped or in the inventory."); return end
 job = loadJob()
 
+-- a tunnel saved before a re-zero is in the old frame: going back along it or digging on would be in the wrong
+-- place, so it is marked stale and left (a fresh tunnel replaces it)
+if job and job.stale and (doReset or doHaul or resume) then
+    print("The saved tunnel can't be carried on: " .. job.stale .. ".")
+    if job.state ~= "stale" then
+        job.state = "stale"
+        T.saveMineJob(job)
+        print("It is marked stale; `mine --new` starts a fresh tunnel.")
+    end
+    return
+end
+
 if doReset then
     if not job then print("No saved job; nothing to go back along."); return end
     useJob(job)
@@ -3185,7 +3201,7 @@ if resume then
     end
     useJob(job)
     lastHome = job.homes
-elseif job and job.state ~= "done" and job.homes > 0 and not fresh then
+elseif job and job.state ~= "done" and not job.stale and job.homes > 0 and not fresh then
     print(string.format("A %dx%d tunnel with %d homes was stopped here.", job.width, job.height, job.homes))
     print("Run `mine --resume` to keep digging it, or add --new to start a fresh tunnel.")
     return

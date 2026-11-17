@@ -321,6 +321,16 @@ check("resumed from home 5, not the start", not logHas("Back at home") and logHa
 check("tunnel dug to z=48", leftIn(0, 1, 0, 1, 1, 48) == 0, leftIn(0, 1, 0, 1, 1, 48) .. " blocks left")
 check("back at the start", atStart())
 
+-- 4s. a re-zero since the tunnel was saved (another program started away from home, ADR-0012): the
+--     tunnel is in the old frame, so `mine --resume` refuses, says why and marks the job stale
+for _, it in ipairs(stock(2, 0)) do table.insert(chestAt(0, 1, 0), it) end
+Mine.files[".frame"] = tostring((tonumber(Mine.files[".frame"]) or 0) + 1)    -- (what that re-zero leaves)
+run("--resume")
+check("--resume after a re-zero: refused with why, nothing dug, the job marked stale", logHas("can't be carried on") and logHas("re%-zeroed")
+    and DIGS == 0 and atStart() and jobState() == "stale", tostring(jobState()))
+run("reset")
+check("...and `mine reset` refuses it too", logHas("can't be carried on") and logHas("marked stale") and atStart())
+
 -- 5. bedrock across the tunnel at z=13: stops there and comes back
 setup(stock(10, 64))
 for x = 0, 1 do for y = 0, 1 do set(x, y, 13, { name = "minecraft:bedrock" }) end end

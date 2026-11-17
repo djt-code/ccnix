@@ -369,6 +369,8 @@ do
     local ok, why1, info = T.harvest("stone", { 2, 1, 4, 2, 1, 4 })
     check("a block with no free side the map shows is not dug, and says why", ok == false and info.got == 0 and #info.failed == 1 and info.failed[1].why:find("no free cell beside it", 1, true)
         and has(2, 1, 4), tostring(ok) .. " " .. tostring(info.failed[1] and info.failed[1].why) .. " " .. tostring(info.got))
+    check("...and says that opts.move = { dig = ... } tunnels in", info.failed[1] and info.failed[1].why:find("opts.move = { dig = true } tunnels in", 1, true),
+        tostring(info.failed[1] and info.failed[1].why))
     ok, info = T.harvest("stone", { 2, 1, 4, 2, 1, 4 }, nil, { move = { dig = true } })
     check("with moves that may dig it tunnels in", ok == true and info.got == 1 and not has(2, 1, 4), tostring(ok) .. " " .. tostring(info and info.failed[1] and info.failed[1].why))
 end

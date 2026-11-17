@@ -360,7 +360,9 @@ function T.harvest(pattern, where, target, opts)
                 return "stop"
             end
         end
-        if not why then why = "no free cell beside it that the map shows" end
+        if not why then
+            why = "no free cell beside it that the map shows" .. (tunnel and "" or " (opts.move = { dig = true } tunnels in)")
+        end
         info.failed[#info.failed + 1] = { x = c.x, y = c.y, z = c.z, name = c.name, why = "couldn't get next to it: " .. tostring(why) }
     end
 

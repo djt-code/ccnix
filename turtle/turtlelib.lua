@@ -27,7 +27,8 @@
 --     T.setOrigin/T.toWorld/T.toLocal for world coordinates, and T.inspectAt
 --     for block states; a re-zeroed frame (--here) keeps the map right
 --   * routes (tl.path, loaded when first used): T.path, A* over the map round
---     lava, fire and doors and through protected areas only where the map
+--     lava, fire, doors and the player's furnishings (ladders, signs, torches,
+--     ...) and through protected areas only where the map
 --     knows they are empty (nothing in one is dug), and T.travel, which walks one
 --     along a clear layer (or the search), planning again at a block it did
 --     not expect; T.moveTo's opts.path asks for it
@@ -278,7 +279,7 @@ T.MAP_DIR = ".map"
 local reframers = {}
 -- ...and what the modules keep, by data file: the T function (a registry name) that moves it.
 -- The module is loaded only if its file is there.  (An unfinished T.build and the undo journal
--- are not moved: they belong to the frame they were made in.)
+-- are not moved: they belong to the frame they were made in, and are stamped with it; see T.frameStale.)
 local REFRAMED_FILES = { [".chests"] = "reframeChests" }
 
 -- The breadcrumb trail (T.trail, T.retrace): the cells the turtle moved through lately, oldest first, kept on the
@@ -292,6 +293,29 @@ if not trail then
     trailHolder._ccnixTrail = trail
 end
 
+-- The frame the turtle counts in, numbered: the data file .frame holds the number, one more each time a re-zero moves
+-- where 0,0,0 is (or loses it).  What turtlelib keeps in the frame moves with it (below); the jobs saved in it (mine.job,
+-- an unfinished T.build, the undo journal) are not moved but stamped with the number they were made in, so carrying one
+-- on in another frame is refused rather than done in the wrong place.
+local FRAME_FILE = ".frame"
+
+-- The number of the frame the turtle counts in: one more at each re-zero that moves 0,0,0 (0 before the first).
+function T.frameId()
+    return convert.toInteger(text.trim(fileio.read(T.dataPath(FRAME_FILE)) or "")) or 0
+end
+
+-- Why a job saved in frame `stamp` can't be carried on now (a re-zero since), or nil if it can.
+--
+-- The stamp is a frame's number (T.frameId), or "stale" for a job found in another frame before and marked so; no stamp
+-- (a job saved before frames were numbered) can be carried on.
+function T.frameStale(stamp)
+    if stamp == "stale" then return "it was marked stale (the turtle was re-zeroed after it was saved)" end
+    local now = T.frameId()
+    if stamp == nil or stamp == now then return nil end
+    return "the turtle was re-zeroed after it was saved (frame " .. tostring(stamp) .. ", now " .. now
+        .. "), so its cells are no longer where they were"
+end
+
 -- (x, z) turned by k quarter turns to the right, as tl.world turns its frames
 local TURN_XZ = { [0] = { 1, 0, 0, 1 }, { 0, 1, -1, 0 }, { -1, 0, 0, -1 }, { 0, -1, 1, 0 } }
 
@@ -302,6 +326,7 @@ local TURN_XZ = { [0] = { 1, 0, 0, 1 }, { 0, 1, -1, 0 }, { -1, 0, 0, -1 }, { 0, 
 local function frameMoved(old)
     local home = old and old.x == 0 and old.y == 0 and old.z == 0 and old.dir == 0
     if home then return end
+    fileio.write(T.dataPath(FRAME_FILE), tostring(T.frameId() + 1))
     if old then
         local turns = (0 - old.dir) % 4
         local m = TURN_XZ[turns]
@@ -1430,8 +1455,13 @@ end
 local AXIS = { x = { "x", 1, 3 }, y = { "y", "up", "down" }, z = { "z", 0, 2 } }
 
 -- What moveTo goes round by default: lava, fire and doors (a turtle
--- can't open one)
-local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door" }
+-- can't open one), and the player's furnishings, which a run that may
+-- dig would otherwise dig on its way: ladders, trapdoors, fence gates,
+-- signs (standing, on a wall, hanging), lanterns, torches (on a wall,
+-- soul and redstone too) and rails.  (Not sea lanterns or jack
+-- o'lanterns: those are blocks to build with.)
+local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door",
+    "*ladder", "*_trapdoor", "*_fence_gate", "*_sign", "lantern", "soul_lantern", "torch", "*_torch", "*rail*" }
 T.DEFAULT_AVOID = DEFAULT_AVOID           -- (tl.path routes round the same by default)
 
 -- Blocks a turtle moves into without digging them
@@ -1601,7 +1631,9 @@ end
 --           the only cells it may dig (whatever block is there, unless
 --           opts.dig says which); any other block stops it
 --   avoid   a glob, a list or a set: blocks it stops at rather than enter
---           (default: lava, fire and doors); {} avoids nothing
+--           (default: lava, fire, doors and the player's furnishings:
+--           ladders, trapdoors, fence gates, signs, lanterns, torches,
+--           rails); {} avoids nothing
 --   inside  the name of a protected area the move may dig in, or a list of
 --           names (see T.inside)
 --   liquid  true: dig a cell even when lava or a water source is beside it
@@ -2093,29 +2125,36 @@ function T.options(args, long)
     return opts, operands
 end
 
--- mine's job file (mine.job): "width height length spacing homes state",
--- length 0 for a tunnel with no end.  mine writes it; mine and autostart
+-- mine's job file (mine.job): "width height length spacing homes frame state",
+-- length 0 for a tunnel with no end, frame the T.frameId it was saved in (a
+-- file from before frames has none).  mine writes it; mine and autostart
 -- read it.
 local MINE_JOB = "mine.job"
 
--- The job: { width, height, length (nil: no end), spacing, homes, state },
--- or nil if there's none or it isn't one.
+-- The job: { width, height, length (nil: no end), spacing, homes, frame, state, stale }, or nil if there's none or it isn't one.
+--
+-- stale is why the job can't be carried on (T.frameStale): marked stale (state "stale"), or saved in another frame.
 function T.loadMineJob()
     local job = fileio.read(T.dataPath(MINE_JOB))
     if not job then return nil end
     local w = text.words(job)
     local width, height, length = convert.toInteger(w[1]), convert.toInteger(w[2]), convert.toInteger(w[3])
-    if not (width and height and length and scan.isUnsigned(w[4]) and scan.isUnsigned(w[5]) and scan.isName(w[6])) then
+    local frame, state = nil, w[6]
+    if w[7] then frame, state = w[6], w[7] end
+    if not (width and height and length and scan.isUnsigned(w[4]) and scan.isUnsigned(w[5]) and scan.isName(state)
+            and (frame == nil or scan.isUnsigned(frame))) then
         return nil
     end
+    frame = frame and tonumber(frame)
     return { width = width, height = height, length = length ~= 0 and length or nil,
-             spacing = convert.toInteger(w[4]), homes = convert.toInteger(w[5]), state = w[6] }
+             spacing = convert.toInteger(w[4]), homes = convert.toInteger(w[5]), frame = frame, state = state,
+             stale = T.frameStale(state == "stale" and "stale" or frame) }
 end
 
--- Save a job as loadMineJob reads it back.
+-- Save a job as loadMineJob reads it back, stamped with the frame it was made in (job.frame, else this one).
 function T.saveMineJob(job)
-    fileio.write(T.dataPath(MINE_JOB), string.format("%d %d %d %d %d %s", job.width, job.height,
-        job.length or 0, job.spacing, job.homes, job.state))
+    fileio.write(T.dataPath(MINE_JOB), string.format("%d %d %d %d %d %d %s", job.width, job.height,
+        job.length or 0, job.spacing, job.homes, job.frame or T.frameId(), job.state))
 end
 
 -- Whether a mine.job file is there at all (a job that can't be read

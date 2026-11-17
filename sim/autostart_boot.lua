@@ -63,6 +63,14 @@ r, o = boot("mine finished", { ["ccnix.autostart"] = "mine" }, { ["mine.job"] = 
 check("a finished tunnel: nothing, and it says why", r == "" and o:find("finished", 1, true) ~= nil, o)
 r, o = boot("mine stopped", { ["ccnix.autostart"] = "mine" }, { ["mine.job"] = "3 3 0 16 2 stopped", [".turtlepos"] = AT_START })
 check("a tunnel that stopped itself (out of chests): left to you", r == "" and o:find("stopped itself", 1, true) ~= nil, o)
+r, o = boot("mine, another frame", { ["ccnix.autostart"] = "mine" }, { ["mine.job"] = "3 3 0 16 2 0 active", [".turtlepos"] = AT_START,
+    [".frame"] = "1" })
+check("a tunnel saved before a re-zero (another frame): left alone, saying why", r == "" and o:find("re-zeroed", 1, true) ~= nil, o)
+r, o = boot("mine stale", { ["ccnix.autostart"] = "mine" }, { ["mine.job"] = "3 3 0 16 2 0 stale", [".turtlepos"] = AT_START })
+check("...and one marked stale", r == "" and o:find("stale", 1, true) ~= nil, o)
+r = boot("mine, this frame", { ["ccnix.autostart"] = "mine" }, { ["mine.job"] = "3 3 0 16 2 1 active", [".turtlepos"] = AT_START,
+    [".frame"] = "1" })
+check("...but one saved in this frame is resumed", r == "mine --resume", r)
 r = (function()
     S.files, SET, runs, out, EVENTS, failOn = { ["ccnix/mine.job"] = "3 3 0 16 2 active", ["ccnix/.turtlepos"] = AT_START },
         { ["ccnix.autostart"] = "mine" }, {}, {}, {}, nil
