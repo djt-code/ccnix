@@ -15,12 +15,15 @@
 --                        nothing in an area is dug, except in the one opts.inside names; its known air and water are
 --                        crossed like any other), a block beside liquid (above), what opts.avoid lists (lava, fire, doors and the player's
 --                        furnishings: ladders, trapdoors, fence gates, signs, lanterns, torches, rails; unless it says
---                        otherwise), a block it may not dig (a chest, bedrock, anything opts.dig leaves out), and any
+--                        otherwise), a block it may not dig (a chest, bedrock, a nether portal, anything opts.dig leaves out), and any
 --                        cell in opts.avoidCells
 -- The search reads the map's cubes as strings (string.byte), not as tables of cells, so a big search stays cheap in
 -- memory; it gives the rest of the computer a turn about every half second (CC stops code that goes seven seconds
 -- without yielding), and gives up past a limit of cells searched, saying so; when it gives up, or every way is walled
 -- off, it names the protected areas and the avoided blocks (doors, lava, ladders, ...) it met, which no longer search gets through.
+-- When the player's furnishings were among them (the default avoid list only), it searches once more, the same limit,
+-- with only the hazards (lava, fire, doors) avoided and the furnishings open to a dig; a way found is named, not taken:
+-- "a way exists through minecraft:wall_torch at x,y,z (lift it and put it back)".
 -- Before it searches, a small flood from the goal (1024 cells at most) looks for a way out: a goal walled in (a room of
 -- doors, a protected box) fails at once, "the goal is walled in by" what walls it, not after the whole limit.  Only the
 -- protected areas that overlap the search's box are tested for each cell.
@@ -56,12 +59,13 @@ local PASSABLE = {
     ["minecraft:lava"] = true, ["minecraft:flowing_lava"] = true,
 }
 
--- Blocks no turtle can dig
+-- Blocks no turtle can dig (nor go through: a nether portal obstructs a move)
 local UNBREAKABLE = {
     ["minecraft:bedrock"] = true, ["minecraft:barrier"] = true, ["minecraft:end_portal_frame"] = true,
     ["minecraft:end_portal"] = true, ["minecraft:end_gateway"] = true, ["minecraft:command_block"] = true,
     ["minecraft:chain_command_block"] = true, ["minecraft:repeating_command_block"] = true,
     ["minecraft:structure_block"] = true, ["minecraft:jigsaw"] = true, ["minecraft:reinforced_deepslate"] = true,
+    ["minecraft:nether_portal"] = true,
 }
 
 -- The time since the last turn given to the rest of the computer
@@ -109,6 +113,9 @@ local function newWorld(opts, from, to)
     local only = opts.digOnly ~= nil and (T.cellSet(opts.digOnly) or {}) or nil
     local mayDig = T.nameTest(opts.dig == nil and only and true or opts.dig)
     local avoid = T.nameTest(opts.avoid == nil and T.DEFAULT_AVOID or opts.avoid)
+    -- the player's furnishings: what the default list avoids that isn't a hazard (none with a list of the caller's own)
+    local hazard = T.nameTest(T.HAZARDS)
+    local function furnishing(name) return opts.avoid == nil and avoid(name) and not hazard(name) end
     local containers = T.cfg.digContainers
     local memo = {}
     -- what a block is to a route
@@ -171,7 +178,7 @@ local function newWorld(opts, from, to)
         end
     end
     local allBoxes = boxes
-    local w = { toS = toS, fromS = fromS, dig = opts.dig }
+    local w = { toS = toS, fromS = fromS, dig = opts.dig, mayDig = mayDig, isFurnishing = furnishing }
     -- Keep only the protected boxes that overlap the box x1..x2, y1..y2, z1..z2 (the map's frame), the one a search
     -- stays in: every cell is tested against each box, and one outside the search can hold none of its cells.  How
     -- many are kept.
@@ -256,6 +263,12 @@ local function newWorld(opts, from, to)
         end
         return nil
     end
+    -- The furnishing in a cell (a ladder, a torch, ...), or nil.
+    function w.furnishing(mx, my, mz)
+        local name = nameIn(mx, my, mz)
+        if name and furnishing(name) then return name end
+        return nil
+    end
     -- What a wall cell holds, in words, when w.wall has nothing to say: the block, or the cells it was asked to keep out of.
     function w.what(mx, my, mz)
         if anyBanned and banned[idOf(mx, my, mz)] then return "the cells opts.avoidCells lists" end
@@ -278,7 +291,7 @@ end
 
 -- What the search met that walls a route off for good (the protected areas and the blocks it avoids, doors, lava, ...),
 -- in words, from the cells it searched: "the protected area keep, minecraft:oak_door", or nil if nothing.  With `all`,
--- every other wall too (stone that may not be dug, by name), after those.
+-- every other wall too (stone that may not be dug, by name), after those.  A furnishing met sets w.furnished.
 local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2, all)
     local seen, n = {}, 0
     for id in pairs(closed) do
@@ -288,6 +301,7 @@ local function wallsMet(w, closed, x1, y1, z1, x2, y2, z2, all)
             local nx, ny, nz = x + d[1], y + d[2], z + d[3]
             if nx >= x1 and nx <= x2 and ny >= y1 and ny <= y2 and nz >= z1 and nz <= z2 and w.cls(nx, ny, nz) == WALL then
                 local what, rank = w.wall(nx, ny, nz)
+                if rank == 2 and w.furnishing(nx, ny, nz) then w.furnished = true end
                 if not what and all then what, rank = w.what(nx, ny, nz), 3 end
                 if what then seen[what] = rank end
             end
@@ -441,6 +455,34 @@ local function astar(w, sx, sy, sz, gx, gy, gz, limit, margin, goalText)
         .. (met and ("; what walls it in: " .. met) or "")
 end
 
+local FURNISHINGS_NAMED = 3                     -- cells a way through the furnishings names, at most
+
+-- When a search in the world w failed with furnishings among its walls: the same search again, the same limit, with
+-- only the hazards avoided and the furnishings open to a dig.  If it finds a way, the furnishings on it in words, to add
+-- to the why: "; a way exists through minecraft:wall_torch at 0,0,3 (lift it and put it back)"; else "".
+local function wayThrough(w, opts, sx, sy, sz, gx, gy, gz, goalText)
+    if not w.furnished then return "" end
+    local o = {}
+    for k, v in pairs(opts) do o[k] = v end
+    o.avoid = T.HAZARDS
+    o.dig = function(name) return w.mayDig(name) or w.isFurnishing(name) end
+    local route = astar(newWorld(o), sx, sy, sz, gx, gy, gz, opts.limit or LIMIT, opts.margin or MARGIN, goalText)
+    if not route then return "" end
+    local named = {}
+    for _, c in ipairs(route) do
+        local name = w.furnishing(c.x, c.y, c.z)
+        if name then
+            local x, y, z = w.fromS(c.x, c.y, c.z)
+            named[#named + 1] = name .. " at " .. x .. "," .. y .. "," .. z
+        end
+    end
+    if #named == 0 then return "" end
+    local more = #named - FURNISHINGS_NAMED
+    while #named > FURNISHINGS_NAMED do named[#named] = nil end
+    return "; a way exists through " .. table.concat(named, ", ") .. (more > 0 and (" and " .. more .. " more") or "")
+        .. ((#named == 1 and more <= 0) and " (lift it and put it back)" or " (lift them and put them back)")
+end
+
 -- The route from `from` to `to` (turtle frame cells), planned: list, info | nil, why.  `from` is where the turtle is
 -- unless opts.from says otherwise.
 local function plan(from, to, opts)
@@ -450,8 +492,9 @@ local function plan(from, to, opts)
     if w.cls(gx, gy, gz) == WALL then
         return nil, "no route: the goal " .. to.x .. "," .. to.y .. "," .. to.z .. " is " .. w.why(gx, gy, gz)
     end
-    local route, info = astar(w, sx, sy, sz, gx, gy, gz, opts.limit or LIMIT, opts.margin or MARGIN, to.x .. "," .. to.y .. "," .. to.z)
-    if not route then return nil, info end
+    local goalText = to.x .. "," .. to.y .. "," .. to.z
+    local route, info = astar(w, sx, sy, sz, gx, gy, gz, opts.limit or LIMIT, opts.margin or MARGIN, goalText)
+    if not route then return nil, info .. wayThrough(w, opts, sx, sy, sz, gx, gy, gz, goalText) end
     for i, c in ipairs(route) do
         local x, y, z = w.fromS(c.x, c.y, c.z)
         route[i] = { x = x, y = y, z = z }
@@ -465,6 +508,8 @@ end
 -- overview of this module.  A second result gives { nodes, cost, digs, unknown, areas }: how many cells the search
 -- looked at, the route's cost, how many of its cells need a dig or were never seen, and how many protected areas
 -- overlap the search (the only ones it tests).  A goal walled in fails at once: "the goal ... is walled in by ...".
+-- When the player's furnishings were in the way (with the default avoid list), the why says where a way would go
+-- through them, up to 3 cells: "a way exists through minecraft:wall_torch at x,y,z (lift it and put it back)".
 -- Nothing moves.  opts (all optional):
 --   dig        false (default), true, a glob, or a list or set of globs: what a route may dig (as for T.moveTo)
 --   digOnly    a list or set of cells (T.cellSet): the only cells a route may dig

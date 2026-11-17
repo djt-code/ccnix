@@ -1464,10 +1464,14 @@ local AXIS = { x = { "x", 1, 3 }, y = { "y", "up", "down" }, z = { "z", 0, 2 } }
 -- dig would otherwise dig on its way: ladders, trapdoors, fence gates,
 -- signs (standing, on a wall, hanging), lanterns, torches (on a wall,
 -- soul and redstone too) and rails.  (Not sea lanterns or jack
--- o'lanterns: those are blocks to build with.)
-local DEFAULT_AVOID = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door",
-    "*ladder", "*_trapdoor", "*_fence_gate", "*_sign", "lantern", "soul_lantern", "torch", "*_torch", "*rail*" }
+-- o'lanterns: those are blocks to build with.)  The hazards alone are
+-- T.HAZARDS: a route that fails for the furnishings is tried again
+-- without them, to say where a way would go (tl.path).
+local HAZARDS = { "minecraft:lava", "minecraft:flowing_lava", "minecraft:fire", "minecraft:soul_fire", "*_door" }
+local DEFAULT_AVOID = { "*ladder", "*_trapdoor", "*_fence_gate", "*_sign", "lantern", "soul_lantern", "torch", "*_torch", "*rail*" }
+for i, g in ipairs(HAZARDS) do table.insert(DEFAULT_AVOID, i, g) end
 T.DEFAULT_AVOID = DEFAULT_AVOID           -- (tl.path routes round the same by default)
+T.HAZARDS = HAZARDS
 
 -- Blocks a turtle moves into without digging them
 local FLUID = {

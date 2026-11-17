@@ -5,11 +5,16 @@
 --     top one with a level exit) gives no warnings; too little headroom over a stair; an approach blocked and one with
 --     no floor; an exit into a wall and one out over an edge; railings meeting only on a diagonal, level and stepped,
 --     and closed by a corner piece; an unrailed drop of 4 (a drop of 3 is fine); a lantern at head height (one a block
---     higher is fine); each warning names the cell and the rule;
+--     higher is fine); each warning names the cell and the rule; (ADR-0013) a lone stair against a wall, or two side
+--     by side with no step up beyond, is a seat, not a flight (no warnings), and a lone stair up onto a ledge is still checked;
+--     a wall torch (soul, redstone) in a walk cell's head or feet cell, a flush light suggested (not one over head height,
+--     and a lantern at head height warned of by the lantern rule alone);
 --   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
 --   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
---     info.warnings, and without it doesn't.
+--     info.warnings, and without it doesn't;
+--   * (ADR-0013) a plan's warnings tagged in the plan or round it (counted in info, the plan's first); T.build prints
+--     the plan's and one line counting those round it; a box's lint has no tags.
 --   * T.walkable: a path for a 1x2 player up the good staircase; none past a ceiling over the first stair; a step up
 --     in a 2-high corridor refused for headroom (3 air needed where the step starts), allowed once the ceiling is
 --     raised; a fall of 5 taken only when there is no other way, and listed (refused with opts.maxFall = 3); up a
@@ -140,6 +145,18 @@ do
     warnings = lintScene(blocks)
     exit = ofRule(warnings, "exit")
     check("...and a flight that runs out over an edge", at(exit, 2, 3, 4) ~= nil and exit[1].text:find("edge", 1, true) ~= nil, texts(warnings))
+
+    -- (ADR-0013) benches made of stairs: a lone stair with nothing to climb to isn't a flight
+    local floor = cube(-2, 0, -2, 6, 0, 8, STONE)
+    warnings = lintScene(add(add(cube(-2, 0, -2, 6, 0, 8, STONE), cube(0, 1, 3, 4, 2, 3, STONE)), { { 2, 1, 2, STAIRS, NORTH } }))
+    check("a lone stair against a wall (a seat) isn't a flight: no warnings", warnings and #warnings == 0, texts(warnings))
+    warnings = lintScene(add(floor, { { 1, 1, 2, STAIRS, NORTH }, { 2, 1, 2, STAIRS, NORTH } }))
+    check("...nor two side by side, facing the same way, with no step up beyond them", warnings and #warnings == 0, texts(warnings))
+    warnings = lintScene(add(add(cube(-2, 0, -2, 6, 0, 8, STONE), cube(0, 1, 3, 4, 1, 5, STONE)),
+        { { 2, 1, 2, STAIRS, NORTH }, { 2, 3, 3, STONE } }))
+    exit = ofRule(warnings, "exit")
+    check("...but a lone stair up onto a ledge is a flight of one, checked as before", at(exit, 2, 1, 2) ~= nil
+        and exit[1].text:find("2,3,3", 1, true) ~= nil, texts(warnings))
 end
 
 --------------------------------------------------------------------------
@@ -197,6 +214,25 @@ do
         and lantern[1].text:find("1,2,1", 1, true) ~= nil, texts(warnings))
     warnings = lintScene(add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 3, 1, "minecraft:soul_lantern", { hanging = "true" } } }), { 0, 0, 0, 2, 3, 2 })
     check("...one a block higher is not", #ofRule(warnings, "lantern") == 0, texts(warnings))
+
+    -- (ADR-0013) lights in a walkway: a wall torch in a walk cell's head or feet cell
+    local function lit(y, name)
+        return add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 1, 2, STONE }, { 1, 2, 2, STONE }, { 1, 3, 2, STONE },
+            { 1, y, 1, name, { facing = "south" } } })
+    end
+    warnings = lintScene(lit(2, "minecraft:wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    local light = ofRule(warnings, "light")
+    check("light: a wall torch at head height over a walk cell is warned of, with a flush light suggested", #light == 1 and at(light, 1, 1, 1) ~= nil
+        and light[1].text:find("1,2,1", 1, true) ~= nil and light[1].text:find("glowstone", 1, true) ~= nil, texts(warnings))
+    warnings = lintScene(lit(1, "minecraft:soul_wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    light = ofRule(warnings, "light")
+    check("...a soul torch on the wall at the feet too", #light == 1 and at(light, 1, 1, 1) ~= nil and light[1].text:find("soul_wall_torch", 1, true) ~= nil,
+        texts(warnings))
+    warnings = lintScene(lit(3, "minecraft:redstone_wall_torch"), { 0, 0, 0, 2, 3, 2 })
+    check("...one over head height is not", #ofRule(warnings, "light") == 0, texts(warnings))
+    warnings = lintScene(add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 2, 1, "minecraft:lantern", { hanging = "true" } } }), { 0, 0, 0, 2, 2, 2 })
+    check("...a lantern at head height is the lantern rule's alone (no light warning too)", #ofRule(warnings, "lantern") == 1
+        and #ofRule(warnings, "light") == 0, texts(warnings))
 end
 
 --------------------------------------------------------------------------
@@ -255,6 +291,27 @@ do
     plan = pillarScene()
     ok, _, info = T.build(plan, { name = "pillar", limit = 2 })
     check("...nor for a build stopped before every cell was tried", ok == false and info.warnings == nil and #PRINTED == 0, table.concat(PRINTED, " | "))
+
+    -- (ADR-0013) the plan's warnings apart from those round it: a planned pillar at x = 4 and, inside the plan's box
+    -- but left alone by it, the map's own pillar at x = 0, each with a drop of 5 round its top
+    fresh(add(cube(-3, -1, -3, 7, -1, 5, STONE), cube(0, 0, 2, 0, 4, 2, STONE)))
+    know(-3, -1, -3, 7, 6, 5)
+    W.give(1, STONE, 5)
+    for i = #PRINTED, 1, -1 do PRINTED[i] = nil end
+    plan = T.blueprint.new({ anchor = { 0, 0, 2 }, legend = { B = STONE }, layers = { { "    B" }, { "    B" }, { "    B" }, { "    B" }, { "    B" } } })
+    local warnings, lint = T.lint(plan)
+    local mine, theirs = at(ofRule(warnings, "drop"), 4, 5, 2), at(ofRule(warnings, "drop"), 0, 5, 2)
+    check("a plan's lint tags each warning: in the plan (the planned pillar's top) or round it (the map's pillar)",
+        mine and mine.where == "plan" and theirs and theirs.where == "around", texts(warnings))
+    check("...its info counts them, and lists the plan's own first", lint and lint.inPlan == 1 and lint.around == 1 and warnings[1] == mine,
+        tostring(lint and lint.inPlan) .. " " .. tostring(lint and lint.around))
+    ok, info = T.build(plan, { name = "pillars" })
+    local said = table.concat(PRINTED, " | ")
+    check("T.build prints the plan's warnings and one line for those round it; info.warnings keeps them all",
+        ok == true and #PRINTED == 2 and said:find("player: drop at 4,5,2", 1, true) ~= nil and not said:find("0,5,2", 1, true)
+        and said:find("player: 1 more round it (T.lint(box) lists them)", 1, true) ~= nil and #info.warnings == 2, said)
+    warnings = T.lint({ -1, 0, 1, 5, 4, 3 })
+    check("...a box's lint has no tags", warnings and #warnings == 2 and warnings[1].where == nil, texts(warnings))
 end
 
 --------------------------------------------------------------------------
