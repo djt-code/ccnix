@@ -561,7 +561,7 @@ the seed skills as text.
 ### Phase 0
 
 1. [x] The baseline (two runs byte for byte the same) on main at 0.52.0.
-2. [ ] Each field failure as a sim scenario that fails today:
+2. [x] Each field failure as a sim scenario that fails today:
    - a torch on a wall;
    - placeAt "already there" leaving the map air;
    - the chat tool with no player;
@@ -572,61 +572,61 @@ the seed skills as text.
 
 ### Phase 1: no decision
 
-1. [ ] `T.look` notes into the map when the world module is loaded;
+1. [x] `T.look` notes into the map when the world module is loaded;
    placeAt's "already there" and "in the way", and T.build's plain path,
    correct the map.
-2. [ ] Walls and fences hold a torch or a standing sign on top: a "holds
+2. [x] Walls and fences hold a torch or a standing sign on top: a "holds
    on top" test apart from "sturdy".
-3. [ ] digBelow:
+3. [x] digBelow:
    - takes no carried block when the floor drops itself (TEMP_BLOCKS
      and soul soil, soul sand, basalt) and a slot is free;
    - lists every need at once.
-4. [ ] The lint:
+4. [x] The lint:
    - T.build's `player:` lines show the plan's warnings and "N more
      round it";
    - a lone stair with no flight isn't a flight;
    - a "light" rule: a wall torch or hanging lantern in a walk cell's
      feet or head cell.
-5. [ ] A route that fails with furnishings in the way names the cells
+5. [x] A route that fails with furnishings in the way names the cells
    ("a way exists through minecraft:wall_torch at x,y,z: lift and put it
    back").
-6. [ ] Storage:
+6. [x] Storage:
    - `T.stow`'s why per item ("chest at x,y,z full");
    - `T.recount(side)` after crafting or smelting at a known chest;
    - `T.addChest` on a known double chest's other half says so.
-7. [ ] `minecraft:nether_portal` unbreakable for routes.
-8. [ ] A directional family in tl.place: repeater, comparator, observer,
+7. [x] `minecraft:nether_portal` unbreakable for routes.
+8. [x] A directional family in tl.place: repeater, comparator, observer,
    piston, dispenser, dropper, placed by facing.
-9. [ ] Recipes: barrel (any wood), redstone torch, repeater, lever,
+9. [x] Recipes: barrel (any wood), redstone torch, repeater, lever,
    stone button, iron door, respawn anchor, soul campfire.
-10. [ ] The harness log:
+10. [x] The harness log:
     - the context edits by type ("old thinking cleared");
     - "cache written again: N (why)" when a call reads only the system
       prompt;
     - chat refusals;
     - cut-offs.
-11. [ ] At a session's start, when `/claude/memories` is over 32 KB:
+11. [x] At a session's start, when `/claude/memories` is over 32 KB:
     "your notes cost N tokens every call: move the old to an archive".
 
 ### Phase 2: the model's knowledge
 
-1. [ ] Prompt and manual lines:
+1. [x] Prompt and manual lines:
    - a turtle can't open doors or trapdoors, press buttons, set a
      repeater's delay or pass a nether portal: ask the player to test
      them;
    - put a block back with `T.placeAt`;
    - read a result's whole why before you shorten it;
    - keep `notes.md` short.
-2. [ ] Index lines for `T.moveTo{path = true}`, and `T.inspectAll` as
+2. [x] Index lines for `T.moveTo{path = true}`, and `T.inspectAll` as
    the scan with states.
 
 ### Phase 3: the decisions
 
-1. [ ] D1 to D10 as decided.
+1. [x] D1 to D10 as decided.
 
 ### Phase 4: release and hand back
 
-1. [ ] `doc/claude-news.txt`, which tells the model which helpers to
+1. [x] `doc/claude-news.txt`, which tells the model which helpers to
    retire:
    - `say` and `askPlayer` (the chat tool, `T.report`);
    - `batchCraft` (`T.craftBatch`);
@@ -634,8 +634,8 @@ the seed skills as text.
    - the recipe files;
    - `lightmodel` (D6.1, if accepted);
    - `storage` (D6.4, if accepted).
-2. [ ] The version bump (minor), UNTESTED.md and the lockstep bump.
-3. [ ] Mark this ADR Accepted.
+2. [x] The version bump (minor), UNTESTED.md and the lockstep bump.
+3. [x] Mark this ADR Accepted.
 
 ### Later (named, not planned)
 
