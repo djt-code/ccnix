@@ -42,6 +42,10 @@
 --     puts one up layer by layer, materials checked first, progress kept so a
 --     stop or reboot carries on; T.verify says which cells differ, states
 --     included; T.replace swaps the blocks matching a glob in a box
+--   * the player's view (tl.lint, loaded when first used): T.lint warns of
+--     what stops a two-tall player in a build: headroom over stairs, a
+--     flight's approach and exit, railings meeting only on a diagonal,
+--     unrailed drops, a lantern at head height
 --   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the
 --     rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral
 --     (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short;
@@ -2998,6 +3002,8 @@ T.registry = {
     placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place", forgetPlacements = "tl.place",
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
+    -- tl.lint: a build as a two-tall player meets it
+    lint = "tl.lint",
     -- tl.craft: recipes, crafting from a chest, and smelting
     craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",

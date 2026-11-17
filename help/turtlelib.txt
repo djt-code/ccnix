@@ -12,6 +12,7 @@ Provides:
   * routes (tl.path, loaded when first used): T.path, A* over the map round lava, fire, doors and the player's furnishings (ladders, signs, torches, ...) and through protected areas only where the map knows they are empty (nothing in one is dug), and T.travel, which walks one along a clear layer (or the search), planning again at a block it did not expect; T.moveTo's opts.path asks for it
   * placing (tl.place, loaded when first used): T.placeAt puts a stair, slab, log, torch, door or the like down with the state wanted (facing, half, axis), choosing how to place it from a table of what each approach gives, checking and trying another way if the game differed, and remembering what it learnt; T.ignite lights a fire from above
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
+  * the player's view (tl.lint, loaded when first used): T.lint warns of what stops a two-tall player in a build: headroom over stairs, a flight's approach and exit, railings meeting only on a diagonal, unrailed drops, a lantern at head height
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
@@ -795,6 +796,32 @@ T.undo(n, opts)
     Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
 
     A block that was dug is placed again (T.placeAt when it had a state, so it faces as it did; the item must be aboard); one that was placed is dug out if it is still there. The turtle goes next to each cell (opts.move is T.moveTo's; opts.inside names a protected area the job may work in). An entry that was done leaves the journal; one that could not stays, and info.failed lists it: { seq, kind, x, y, z, name, why }. An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why, and stays marked stale. info.undone is how many went. It does nothing to what the turtle did since to those cells except as said, and it writes nothing to the journal itself.
+
+tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lanterns
+
+Loaded by turtlelib the first time T.lint is used.  Cells are the turtle's own (the frame it counts in).
+
+The turtle is one block tall and the player two (1.8, stepping up a block at most), so a build the turtle gets round can still stop a player.  T.lint reads a build from the map, or a plan's own cells with the map round them, and warns; it never refuses, since a player's own design may break a rule on purpose.  The rules:
+  headroom
+      a stair walked up needs 3 air above it: the body rises half a block onto the next step while the head is still over this one (the top stair of a flight needs only 2 when the way off it is level)
+  approach
+      the cell in front of a flight's first stair needs a floor and 3 air (the step up starts there)
+  exit
+      the cell beyond a flight's last stair needs a floor at the stair's top and 2 air: not a wall, not an edge
+  railing
+      two railings (fences, walls, panes, bars, gates) that meet only on a diagonal, level or a block apart in height, don't join: a player slips between them; a railing or a block in either cell between closes it
+  drop
+      a walk cell (2 air over a floor) with an open side over a drop of more than 3, and no railing there
+  lantern
+      a lantern at head height over a walk cell: a player walks into it
+A stair goes by its state (facing, half), which the map has only for blocks that were inspected (T.inspectAll, T.verify; a scan gives names alone), and its compass facing needs the world origin: a stair without them is counted as unchecked and only its headroom is looked at.  A cell the map has never seen breaks no rule.
+
+== The lint ==
+
+T.lint(what, opts)
+    What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lanterns at head height. A list of { rule, x, y, z, text }, and info.
+
+    `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own cells and states, the map for the cells it leaves alone and round it). The cells looked at are the box's and, for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too. A warning is { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop or lantern (see the overview), x, y, z the cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved. Warnings, not refusals: a design may break a rule on purpose. Nil and why if it can't start. Info is { cells, unchecked (stairs with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50), rules (a count by rule), summary (a line a rule: its first warning, and how many more) }.
 
 tl.path: routes: a search over the map for a way to a cell, and walking it
 
