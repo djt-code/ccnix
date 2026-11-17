@@ -5,43 +5,31 @@ A scenario goes in when the change ships, and moves to **Tested** (with the
 date and what happened) once someone has run it. Newest first in each
 section.
 
-## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0)
+Each section has an issue labelled `needs-in-game-test` (its number is in
+the heading), on the "Needs in-game test" view of the ccnix board. A new
+section gets its issue when it ships; tick the issue's checks as they are
+tried, and close it when the section is empty.
+
+## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0) (#85)
 
 In-game order: `/ccnix rom update`, then on the castle turtle (chunk controller on one side) give claude a goal
 like "read what's new, then build a short staircase with a top slab under each stair and a railing, and keep
 /claude/report_harness_v3.md as you work" (v3 is still the report this ADR's Later list waits on).
 
-- **What's new**: the first goal carries the 0.52.0 lines of `help claude-news`.
-- **Chat while it thinks**: say something in chat while claude is waiting on the model; it comes back in the
-  model's next results as "(<name> said in chat: ...)". The pickaxe is back before code runs; the chunk
-  controller never moves. With no chat box aboard, the first results say why. `claude.listen = false` turns
-  it off.
 - **Resume**: `sysctl ccnix.autostart=claude` and `claude.resume=true`, then reboot mid-goal (or restart the
   server): claude starts with "You were interrupted (reboot)..." and the goal, with the session's --steps and
   --cache. With resume off it just waits for a goal; Ctrl+T leaves nothing to resume.
-- **Log**: claude.log keeps claude.log.1 to .3 (`claude.logKeep`) on a roomy disk, fewer on a nearly full one;
-  claude.log itself is never deleted.
-- **The lint**: `T.lint` on a staircase the player built: do the headroom, approach and exit warnings match
-  what the player would say (the top stair with a level exit needs only 2 air)? A diagonal fence pair, and a
-  stepped one, warned of; a corner piece or a post on top silences it. A drop over 3 and a lantern at head
-  height warned of. A finished `T.build` prints `player:` lines and still returns true; `T.verify(plan,
-  {player = true})` gives `info.warnings`.
-- **Walking**: `T.walkable` up the keep stairs; a flight with 2 air gives "no walk" naming the block; a ladder
-  tower climbs; a fall over 3 is listed.
-- **Signs**: `T.placeAt(x, y, z, "minecraft:oak_sign", {text = ...})` on a wall and standing, text wrapped to
-  4 lines of 15 (the mock's limit; check it against the game), longer refused; `T.placeDir(d, text)`.
-- **Ladders** placed from above and from below, a column up a shaft.
-- **Top slabs**: a top slab under a stair built after the stair; a top slab with nothing above it (a temporary
-  block appears and goes); `opts.digBelow = true` on a floor: the floor dug, the slab placed, the same floor
-  block back (through `T.build` too); without it, the failure names the option.
-- **Routes**: `T.moveTo` / `T.travel` with `dig = true` into a ladder, wall sign, wall torch, trapdoor or
-  rail stops with "avoiding ..." and leaves it; a route into a room of doors fails at once with "walled in
-  by ..."; `T.harvest` on a block with every side solid names `opts.move = {dig = true}`.
+- **Signs**: standing signs on top of a wall (placed by hand in v3: placeAt refused them, fixed for 0.53)
+  and the 15-character line against the game; `T.placeDir(d, text)`.
+- **Top slabs**: `opts.digBelow = true` on a floor with a free cell beside it: the floor dug, the slab
+  placed, the same floor block back (through `T.build` too).
+- **Routes**: a route into a room of doors fails at once with "walled in by ..." (never fired in v3);
+  `T.harvest` on a block with every side solid names `opts.move = {dig = true}`.
 - **Frames**: stop `mine` mid-tunnel, re-zero (a program started with `--here` away from home), then
   `mine --resume`: refused with "re-zeroed ... (frame N, now M)" and marked stale, and autostart leaves it.
   The same for a half-built `T.build` and `T.undo`.
 
-## ADR-0011: what the turtle learned, second pass (ccnix 0.51.0)
+## ADR-0011: what the turtle learned, second pass (ccnix 0.51.0) (#84)
 
 In-game order: on the castle turtle, after `/ccnix rom update`, give claude a goal like "read what's new,
 retire the helpers it names, then carry on, and keep /claude/report_harness_v3.md as you work"; the items
@@ -74,18 +62,18 @@ below come up as it works, or try them by asking for them.
   after two; a finished job no longer ends every chat message (mine's and farm's reports too); `T.retrace(n)`
   walks back; the map keeps the castle's cubes when it evicts (`T.map.stats()`); `--model sonnet`.
 
-## The mod's icon (ccnix-mod 0.26.10)
+## The mod's icon (ccnix-mod 0.26.10) (#83)
 
 - **The mod list**: the page's links go to the repo and its issues.
 
-## A turtle with no map yet (ccnix 0.50.2)
+## A turtle with no map yet (ccnix 0.50.2) (#82)
 
 - **claude starts on a turtle with no `.map`**: the first `status` no longer stops claude with
   `tl/world.lua:567: .../.map: No such file` (0.50.1 listed the map's folder before checking it was there).
   `status` works, and no `.map` folder appears. Also: any fault inside `status` now goes back to the model as
   a tool error ("status failed: ...") instead of ending the session.
 
-## ADR-0008 after review: frames, owners, building fixes (ccnix 0.50.1)
+## ADR-0008 after review: frames, owners, building fixes (ccnix 0.50.1) (#81)
 
 In-game order for all of ADR-0008 (the ADR's own list): 1. phase 1 with claude on the castle turtle (a helper
 kept over a cleared conversation, the log rotating, a protected area refusing a dig); 2. a scan in the turtle's
@@ -125,7 +113,7 @@ verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, 
 - **Placement facts in the mock** (to compare with the game): a torch from placeDown over leaves, with blocks
   ahead of and right of the target, hangs on the one ahead; a ladder is not placed against a ladder's front.
 
-## farm and mow on the shared pieces (ADR-0008 phase 5, ccnix 0.50.0)
+## farm and mow on the shared pieces (ADR-0008 phase 5, ccnix 0.50.0) (#80)
 
 - **Protected areas hold for farm's crop digs**: `T.protect("garden", x1, y, z1, x2, y, z2)` over a few ripe crop
   tiles (in a Lua prompt or claude's code, in the turtle's frame; the crops are one below the cruise height), then
@@ -160,7 +148,7 @@ verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, 
 - **T.report(text, { from = "bottom" })** and **T.report.try(text)**: the chat box taken from the container
   on that side for the telling, and a version that never raises; both used by the two reports above.
 
-## mine on the shared pieces (ADR-0008 phase 5)
+## mine on the shared pieces (ADR-0008 phase 5) (#79)
 
 - **The Geo Scanner through T.withPeripheral**: `mine` with a scanner in the start's top chest and a chunk
   controller on one side: the scanner goes on the side without the controller (an empty side first, then the
@@ -190,7 +178,7 @@ verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, 
   same start adds to the map, and that `mine --here` somewhere else does not leave the map wrong (it takes
   the new spot for the old one: `T.map.clear()` before a start somewhere new).
 
-## tl.journal: T.job, T.undo and T.report (ADR-0008 phase 4, ccnix 0.49.0)
+## tl.journal: T.job, T.undo and T.report (ADR-0008 phase 4, ccnix 0.49.0) (#78)
 
 - **T.job.start(goal, steps)** then **T.job.done()** as each step finishes; reboot the computer (or Ctrl+T and
   start again) and **T.job.resume()** gives the step to do now (`job.next`, `job.step`). The job is the data file
@@ -208,7 +196,7 @@ verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, 
   box does when it is busy (the retry waits a second, five times), and with the chat box already attached.
   **T.report.every(2)** with a job: a message on every second `T.job.done()`.
 
-## tl.harvest: T.harvest, T.refuelFromLava, T.fuelFor (ADR-0008 phase 4)
+## tl.harvest: T.harvest, T.refuelFromLava, T.fuelFor (ADR-0008 phase 4) (#77)
 
 - **T.harvest(glob, box, target)** digs the blocks matching in a box (scanned as
   needed), nearest first and top down. Check it on a tree and an ore vein: that it
@@ -223,7 +211,7 @@ verified; 4. a craft (stairs from blocks) with the controller kept on, a smelt, 
   board. The scan cost is an estimate from the r=16 figure; set
   `T.cfg.scanFuel = { [8] = cost }` from what `T.scan` reports in `info.fuel`.
 
-## tl.store: the chests at home, fetching, stowing and T.cfg.autoDump (ADR-0008 phase 4)
+## tl.store: the chests at home, fetching, stowing and T.cfg.autoDump (ADR-0008 phase 4) (#76)
 
 `T.addChest(x, y, z, side, bulk)` tells the turtle where a chest is (the cell it
 stands in and the side the chest is on, as `T.setJunkChest` does); the list and
@@ -253,7 +241,7 @@ chests in a row and the turtle at home:
   (`T.moveTo` with digging, or mine with it set): that the position is right afterwards, that
   it does not loop when there is nothing to put away, and that Ctrl+T stops it.
 
-## tl.craft: T.craft, T.canCraft, T.smelt and the fuel and smelting tables (ADR-0008 phase 4)
+## tl.craft: T.craft, T.canCraft, T.smelt and the fuel and smelting tables (ADR-0008 phase 4) (#75)
 
 Recipes are data (`T.RECIPES`, `T.recipe(name)`, `T.addRecipe(spec)`); `T.craft(name, n)`
 works from a chest in front of, above or below the turtle (or `opts.chest`,
@@ -303,7 +291,7 @@ Not done here: crafting an ingredient first (planks from logs for a chest): call
 `T.craft` for each step. Recipes added by `T.addRecipe` are kept in memory only;
 put the calls in `/claude/helpers.lua`. mine, farm and mow still do their own crafting.
 
-## tl.blueprint: T.build, T.verify, T.replace (ADR-0008 phase 3, ccnix 0.48.0)
+## tl.blueprint: T.build, T.verify, T.replace (ADR-0008 phase 3, ccnix 0.48.0) (#74)
 
 A plan is layers of text with a legend (`T.blueprint.parse`, or a table, or
 `T.blueprint.fill/box/walls/fromMap`); `T.build(plan)` puts it up. Needs the
@@ -342,7 +330,7 @@ turtle, with the items on board:
 - Fuel is not checked before a build (moves ask for fuel as they go); a big plan
   on a thirsty turtle stops at "out of fuel" with the cell failed.
 
-## tl.place: T.placeAt and T.ignite (ADR-0008 phase 3)
+## tl.place: T.placeAt and T.ignite (ADR-0008 phase 3) (#73)
 
 `T.placeAt(x, y, z, item, { facing, half, axis })` places a block with the state
 wanted: it picks, from a table of what each way of placing gives (sideways,
@@ -384,7 +372,7 @@ table is the building mock's (read from CC:Tweaked's source), so the facts under
 - **The map's name for what was placed**: after a placement the map holds the
   block as inspected (`wall_torch`, with its state), not the item's name.
 
-## The building mock's placement rules (ADR-0008 phase 3, sim/lib/buildworld.lua)
+## The building mock's placement rules (ADR-0008 phase 3, sim/lib/buildworld.lua) (#72)
 
 The mock models `turtle.place*` from the source of CC:Tweaked 1.120.2
 (TurtlePlaceCommand and TurtlePlayer, read for this) and from Minecraft's
@@ -425,7 +413,7 @@ then `turtle.inspect*` from beside it.
   the underside by `suckUp`; a stone block dropped from the side is refused;
   crimson and warped planks are not accepted as fuel.
 
-## tl.path: routes over the map (ADR-0008 phase 2, 0.47.0)
+## tl.path: routes over the map (ADR-0008 phase 2, 0.47.0) (#71)
 
 - **A route and its cost**: with a scanned area, `T.path(x, y, z)` in claude's
   code returns a list of cells and `{ nodes, cost, digs, unknown }`; the turtle
@@ -456,7 +444,7 @@ then `turtle.inspect*` from beside it.
   turtle inside the castle's walls can walk its courtyard). `opts.inside =
   name` lets a job dig in the area it owns.
 
-## tl.world: the map, the frames, scans and inspects (ADR-0008 phase 2)
+## tl.world: the map, the frames, scans and inspects (ADR-0008 phase 2) (#70)
 
 - **A scan in the turtle's frame**: `T.scan(8)` in claude's code with the Geo
   Scanner in the inventory (a chunk controller on one side, a pickaxe on the
@@ -503,7 +491,7 @@ then `turtle.inspect*` from beside it.
 - **Views**: `print(T.map.heights(box))` and `print(T.map.slice(y, box))` on a
   scanned area read sensibly (rows run from the high z down to the low z).
 
-## turtlelib's reference and claude's prompt (ADR-0008 phase 1, 0.46.0)
+## turtlelib's reference and claude's prompt (ADR-0008 phase 1, 0.46.0) (#69)
 
 - **The index in the prompt**: start `claude` on a turtle with the ROM (or an
   updated checkout): the first request's system prompt should hold the
@@ -528,7 +516,7 @@ then `turtle.inspect*` from beside it.
   session's first replies for anything that no longer fits what the turtle
   really does; the prompt is cached, so a long session pays for it once.
 
-## turtlelib: withPeripheral, pull, moveTo, junk, the module loader (ADR-0008)
+## turtlelib: withPeripheral, pull, moveTo, junk, the module loader (ADR-0008) (#68)
 
 - **withPeripheral**: with a chunk controller on one side and a pickaxe on
   the other, `T.withPeripheral("advancedperipherals:geo_scanner", function(p)
@@ -555,7 +543,7 @@ then `turtle.inspect*` from beside it.
   "tl.x"` finding `turtle/tl/x.lua` through ccnix's `turtle/?.lua`) are tested
   only on a fixture in the sims. In game, the first module is the test.
 
-## turtlelib: the turtle API wrapped, protected areas, change hooks (ADR-0008)
+## turtlelib: the turtle API wrapped, protected areas, change hooks (ADR-0008) (#67)
 
 - **The wrap**: after turtlelib loads, `turtle.forward()`, `back`, `up`,
   `down`, `turnLeft`, `turnRight` called straight keep `T.pos` and `T.dir`
@@ -577,7 +565,7 @@ then `turtle.inspect*` from beside it.
 - **Hooks**: `T.onChange(fn)` hears digs (with the block's name and state),
   placements (with the item) and moves.
 
-## claude: http, the network, programs, memory, the web, the rest (0.39.0)
+## claude: http, the network, programs, memory, the web, the rest (0.39.0) (#66)
 
 - **The log** (0.45.0): a session, then claude.log. Each entry starts
   with its time (UTC); the first is `start: claude --cache 1h (model ...,
@@ -594,12 +582,12 @@ then `turtle.inspect*` from beside it.
 
 - `--cache 15m`: refused (0.44.0).
 
-## claude: ccnix's libraries in its code, the rest (0.38.0)
+## claude: ccnix's libraries in its code, the rest (0.38.0) (#65)
 
 - `require("turtlelib")` and `require("fs")` (0.43.5) say the code has
   them already, as the globals T and fs.
 
-## Everything: the text libraries, what's left (0.36.1-0.37.0)
+## Everything: the text libraries, what's left (0.36.1-0.37.0) (#64)
 
 Every program's parsing moved from Lua patterns to lib/scan (0.36.1),
 then onto the shared lib/text, convert, getopt, glob and path (0.37.0).
@@ -622,14 +610,14 @@ numbers, the text tools and the network tools. Still to try:
   the blanks before it dropped (a message logged on the computer itself
   keeps them, as util-linux logger does).
 
-## Editors
+## Editors (#63)
 
 - **Esc through telnet** (0.43.6): with the ccnix mod on the client,
   `telnet 10.1.1.10`, `vi /tmp/x`, `i`, text, Esc: insert mode left (the
   client now sends Esc as a lone ESC; before, it sent nothing). From a
   real terminal (PuTTY) Esc does the same.
 
-## ccsh
+## ccsh (#62)
 
 - **Background output while typing, the rest** (0.30.0). A full-screen
   program in the background isn't disturbed; the same over telnet.
@@ -653,7 +641,7 @@ numbers, the text tools and the network tools. Still to try:
   script ends the script with status 1. Plain `unset f` leaves a
   function.
 
-## Processes and services
+## Processes and services (#61)
 
 - **Panics in a row stop rebooting** (0.29.1). With init.boot on and a
   fault init hits at every boot (a temporary `error()` near the top of
@@ -678,7 +666,7 @@ numbers, the text tools and the network tools. Still to try:
   `parallel` (telnet, httpd, the miner under init) show no cost or side
   effects.
 
-## Network
+## Network (#60)
 
 - **ping, the rest** (0.29.0). `ping -s 65507` through the gateway, in
   NAT mode (the gateway's own address) and in TUN mode (a real host).
@@ -693,7 +681,7 @@ numbers, the text tools and the network tools. Still to try:
 - **Syslog forwarding in NAT mode**: `@host` rules forwarding out through a
   NAT-mode gateway.
 
-## mine
+## mine (#59)
 
 - **`mine where` between homes** (0.43.4): after a Ctrl+T part way, it
   says "`mine reset`, then `mine --resume`, carries on" (it said `mine
@@ -724,7 +712,7 @@ numbers, the text tools and the network tools. Still to try:
 - **Floor holes reported** (0.21.4): `Left N floor holes open at z=a..b` when
   it runs out of bulk blocks, and the next pass filling them.
 
-## Setup and boot
+## Setup and boot (#58)
 
 - **`syslog.maxSize` with K/M** (0.21.0): `sysctl syslog.maxSize=2M`
   (taken, tested), then a log rotating at that size.
@@ -740,19 +728,19 @@ numbers, the text tools and the network tools. Still to try:
 - **`ccnix setup` on a server with the ccnix mod** (0.20.0): settings and
   apps chosen through the ROM's setup.
 
-## screen
+## screen (#57)
 
 - **Ctrl+A a with one a** (0.43.6): in screen, Ctrl+A then a gives ccsh
   its Ctrl+A (the start of the line) at once; it wanted a second a (a char
   for Ctrl+A itself was waited for, and CC sends none while Ctrl is held).
 
-## IRC
+## IRC (#56)
 
 - **SASL on Libera** (0.35.0): `/set network.<name>.sasl_user` and
   `sasl_pass` in irc, for a channel that wants a NickServ account (as
   #minecraft there does).
 
-## The mod
+## The mod (#55)
 
 - **The exchange at 10.1.0.0/24** (ccnix-mod 0.18.0). The gateway's default
   address is 10.1.0.1/24, inside the CC networks (10.1.0.0/16), so one LAN
@@ -771,13 +759,15 @@ numbers, the text tools and the network tools. Still to try:
 ## Known issues seen, not yet looked at
 
 - The first boot's lines can appear twice in `/var/log/messages`, the first
-  copy cut short.
+  copy cut short. (#54)
+
 - `ip up` on a turtle (2026-11-11, ROM 0.40.3) seemed not to bring the
   network up: pings worked only after `ip boot` and a reboot. `ip up` was
   run before the routes and DNS were set, which apply at once anyway.
   One cause found: claude had swapped the turtle's modem out and back for
   mine's pickaxe, which leaves its channels shut (reopened since
-  0.41.1).
+  0.41.1). (#53)
+
 - httpd on Lab-B (2026-11-11, ROM 0.40.3), started at boot and logging
   "listening on port 80", later had no listener (`netstat -al` empty,
   "connection refused") while `service status` said running; `service
@@ -785,9 +775,26 @@ numbers, the text tools and the network tools. Still to try:
   (`ip neigh add`, a reboot, `ping -c 0` stopped with Ctrl+C, a `ping &`
   stopped with Ctrl+T after `fg`, `nc -w 3` to a host that was down).
   Not found by reading lib/net, lib/proc, lib/httpd yet. After the next
-  reboot it was listening (`netstat -tnl`).
+  reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-17 — ADR-0012 (ccnix 0.52.0), from the castle turtle's v3 run (16 goals over about ten hours,
+  report_harness_v3.md and its four logs):
+  - What's new: the 0.52.0 lines reached the session's first goal.
+  - Chat while it thinks: 9 of the player's messages heard, all while the model thought; the chunk
+    controller never moved. Messages said while code ran were missed (54% of the busy time), as designed:
+    ADR-0013 D2 builds the rest.
+  - Log: claude.log.1 to .3 kept, the whole run in them.
+  - The lint: found railing gaps over a 15-18 block drop, a diagonal railing and a head-height lantern,
+    and confirmed each fix; right but noisy (terrain round a plan, stair benches), see ADR-0013.
+  - Walking: `T.walkable` up the example staircase (5 steps, no falls) and through the castle.
+  - Signs: text written through `T.placeAt` on walls; standing signs on wall tops failed (fixed in 0.53).
+  - Ladders: a shaft up a tower.
+  - Top slabs: built after their stairs by the blueprint's `after` hint, the temporary block for a top
+    slab with nothing above it, 23 of 24 cells in one `T.build`; `opts.digBelow` on solid ground had no
+    way out (0.53 digs a neighbour for one).
+  - Routes: `dig = true` stopped at the turtle's own wall torch with "avoiding minecraft:wall_torch".
 
 - 2026-11-14 — A real IRC client through the gateway (ircd 0.35.0):
   irssi on a real machine registered with the ircd (its CAP LS answered,

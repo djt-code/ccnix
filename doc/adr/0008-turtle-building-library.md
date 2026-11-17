@@ -546,12 +546,16 @@ gets anything new. Then, where the new pieces make it better:
 
 ### In game, in order
 
-19. [ ] Phase 1 with claude on the castle turtle: a helper kept over a
+19. [x] Phase 1 with claude on the castle turtle: a helper kept over a
     cleared conversation, the log rotating, a protected area refusing a
     dig.
-20. [ ] A scan in the turtle's frame and a route around the moat.
-21. [ ] Stairs and slabs both ways; a small blueprint built, stopped,
+20. [x] A scan in the turtle's frame and a route around the moat.
+21. [x] Stairs and slabs both ways; a small blueprint built, stopped,
     resumed, verified.
-22. [ ] A craft (stairs from blocks) with the controller kept on; a
+22. [x] A craft (stairs from blocks) with the controller kept on; a
     smelt; a fetch from the chest wall.
-23. [ ] mine, farm and mow runs after phase 5, as before.
+23. [x] mine, farm and mow runs after phase 5, as before.
+
+Items 19 to 23: done in game by 2026-11-17, through the castle turtle's
+sessions (ADR-0011 and ADR-0012's field reports) and the user's own runs;
+what's still untried is in UNTESTED.md, each section with its issue.

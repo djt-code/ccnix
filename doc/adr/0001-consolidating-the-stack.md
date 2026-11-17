@@ -220,7 +220,7 @@ Network (`sim/net_stack`, `sim/net_tools`):
 Process and shell (`sim/proc`, `sim/ccsh`):
 18. [x] `lib/proc.lua`: `serviceDef`/`serviceNames`/`serviceStatus` as module functions; `bin/service.lua` uses them (−14; `service` itself untested).
 19. [x] `bin/ccsh.lua`: delete the `os.getenv`-without-`environ` fallback (−5; unreachable).
-20. [ ] Skip: telnetd's password reader via `T.decoder` (−12) unless telnetd is touched for another reason; untested in sims.
+20. [x] Skip: telnetd's password reader via `T.decoder` (−12) unless telnetd is touched for another reason; untested in sims. (Closed as skipped, 2026-11-17: the reader works in game as it is, a password typed over telnet doesn't show.)
 
 Turtle (`sim/mine_tunnel`, `sim/claude_drive`, `sim/turtlelib_refuel`, `sim/farm_fuel`):
 21. [x] `firstEmpty()` → `T.emptySlot()` (−5).
