@@ -702,20 +702,22 @@ function T.forgetPlacements(family)
     return true
 end
 
--- Dig the block in the target cell that this call has just placed.  It is the library's own work, so a protected
--- area round it, or a chest that the digs refuse, doesn't stop it.  True, or false and why.
-local function takeBack(kind, h, x, y, z)
+-- Dig the block at x, y, z, in direction d from the turtle, that this call has just placed.  It is the library's own
+-- work, so a protected area round it, or a chest that the digs refuse, doesn't stop it.  True, or false and why.
+local function digOwn(d, x, y, z)
     local area = T.guarded(x, y, z)
     local before = T.cfg.digContainers
     T.cfg.digContainers = true
     local ok, dug, why = pcall(function()
-        if area then return T.inside(area, T.digDir, dirOf(kind, h)) end
-        return T.digDir(dirOf(kind, h))
+        if area then return T.inside(area, T.digDir, d) end
+        return T.digDir(d)
     end)
     T.cfg.digContainers = before
     if not ok then error(dug, 0) end
     return dug, why
 end
+-- The same for the block in the target cell, from the stand of an approach.
+local function takeBack(kind, h, x, y, z) return digOwn(dirOf(kind, h), x, y, z) end
 
 -- Note the block that is now at the target in the map (the map hears a placement by the item's name only).
 local function noteInMap(x, y, z, name, state)
@@ -731,6 +733,121 @@ local function describe(name, state)
     local parts = {}
     for i, key in ipairs(keys) do parts[i] = key .. "=" .. tostring(state[key]) end
     return shortName(name) .. (#parts > 0 and ("[" .. table.concat(parts, ",") .. "]") or "")
+end
+
+--------------------------------------------------------------------------
+-- Support: a block to place against, put there for a moment
+--------------------------------------------------------------------------
+
+-- What a temporary block may be, the first found on board (opts.temp names another): plain blocks that come back as
+-- themselves when dug
+local TEMP_BLOCKS = { "cobblestone", "cobbled_deepslate", "dirt", "netherrack", "blackstone", "*_planks", "*bricks" }
+local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
+-- The cells beside a cell, as directions
+local SIDES = { "up", "down", 0, 1, 2, 3 }
+
+-- A block on board to put somewhere for a moment, not the item being placed: its name, or nil.
+local function tempBlock(item, choice)
+    for _, g in ipairs(choice and { choice } or TEMP_BLOCKS) do
+        local test = T.nameTest(g)
+        local slot = T.findSlot(function(name) return name ~= item and test(name) end)
+        if slot then return turtle.getItemDetail(slot).name end
+    end
+    return nil
+end
+
+-- A cell beside x, y, z that the map says is air, but not the one in direction `but`: its x, y, z, or nil.
+local function freeBeside(x, y, z, but)
+    for _, d in ipairs(SIDES) do
+        local v = T.DELTA[d]
+        local name = nameAt(x + v[1], y + v[2], z + v[3])
+        if d ~= but and name and AIRS[name] then return x + v[1], y + v[2], z + v[3] end
+    end
+    return nil
+end
+
+-- The ways to place from below with support, for when the plain ones have run out, and why there are none if so (a
+-- list, for the message).  A top half (a slab, stair or trapdoor) is placed from below against a block above the
+-- target; with nothing there, a temporary block goes there first (opts.temp, or one of TEMP_BLOCKS on board) and is
+-- taken away after, from a free cell beside it.  Each way is an approach as plan gives them, with support = { temp }.
+local function supportPlans(famName, fam, item, learned, want, tx, ty, tz, base, tried, opts)
+    local apps, notes = {}, {}
+    local above, below = nameAt(tx, ty + 1, tz), nameAt(tx, ty - 1, tz)
+    if fam.hang or #fam.up == 0 or not (above and AIRS[above]) then return apps, notes end
+    if below and clickable(below) then return apps, notes end
+    local turning, rowFor = headingMatters(fam, want), {}
+    for h = 0, 3 do
+        for _, row in ipairs(fam.up) do
+            if (turning or h == T.dir) and not rowFor[h] and row.when == "beyond" and gives(learned, famName, "up", row, want, h, base) then
+                rowFor[h] = row
+            end
+        end
+    end
+    if next(rowFor) == nil then return apps, notes end
+    local temp = tempBlock(item, opts.temp)
+    if not temp then
+        notes[1] = "from below it needs a block to put above it for a moment, and there is none on board (cobblestone, dirt, " ..
+            "planks, bricks; opts.temp names another)"
+    elseif not freeBeside(tx, ty + 1, tz, "down") then
+        notes[1] = "from below it needs a block above it for a moment, and the map shows no free cell beside " .. tx .. "," .. (ty + 1) ..
+            "," .. tz .. " to take it away from"
+    else
+        for h, row in pairs(rowFor) do
+            local key = "up support " .. h
+            if not tried[key] then
+                apps[#apps + 1] = { kind = "up", h = h, sx = tx, sy = ty - 1, sz = tz, row = row, certain = false, key = key,
+                                    support = { temp = temp }, cost = T.turnsTo(h) }
+            end
+        end
+        table.sort(apps, function(a, b) return a.cost < b.cost or (a.cost == b.cost and a.h < b.h) end)
+    end
+    return apps, notes
+end
+
+-- Take away a block this call put at x, y, z for a moment, from a free cell beside it.  nil, or why it is still there.
+local function takeAway(x, y, z, move)
+    local bx, by, bz = freeBeside(x, y, z)
+    if not bx then return "no free cell beside it to dig it from" end
+    local ok, why = T.moveTo(bx, by, bz, move)
+    if not ok then return "couldn't get beside it: " .. tostring(why) end
+    local dug, digWhy = digOwn(T.dirTo({ x = x, y = y, z = z }), x, y, z)
+    if not dug then return "couldn't dig it: " .. tostring(digWhy) end
+    return nil
+end
+
+-- Place the item from below with an approach's support: the temporary block put above the target (from the target
+-- cell), the item placed up against it from the cell below, a wrong block dug out at once, then the temporary block
+-- taken away.  Returns { name, state, good, failed, left }: what is at the target, whether it is as wanted, why it
+-- didn't place, and why the temporary block is still there.
+local function placeWithSupport(app, item, want, message, move, x, y, z)
+    local s, out = app.support, {}
+    local ok, why = T.moveTo(x, y, z, move)
+    if not ok then out.failed = "couldn't get to " .. x .. "," .. y .. "," .. z .. ": " .. tostring(why); return out end
+    T.selectItem(s.temp)
+    local placed, placeWhy = T.placeDir("up")
+    if not placed then out.failed = "couldn't put a " .. s.temp .. " above it: " .. tostring(placeWhy); return out end
+    ok, why = T.moveTo(x, y - 1, z, move)
+    if not ok then
+        out.failed = "couldn't get under it: " .. tostring(why)
+    else
+        T.face(app.h)
+        T.selectItem(item)
+        placed, placeWhy = T.placeDir("up", message)
+        if placed then out.name, out.state = lookAtTarget("up") end
+        if not out.name then
+            out.failed = placed and "nothing there after" or ("the game refused (" .. tostring(placeWhy) .. ")")
+        else
+            noteInMap(x, y, z, out.name, out.state)
+            out.good = accepted(item, want, out.name, out.state)
+            if not out.good and not takeBack("up", app.h, x, y, z) then out.left = "couldn't dig out the wrong " .. out.name end
+        end
+    end
+    local left = takeAway(x, y + 1, z, move)
+    if left then
+        out.left = (out.left and (out.left .. "; ") or "") .. "the " .. s.temp .. " put at " .. x .. "," .. (y + 1) .. "," .. z ..
+            " for a moment is still there: " .. left
+    end
+    return out
 end
 
 --------------------------------------------------------------------------
@@ -766,9 +883,12 @@ end
 -- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever.
 -- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
--- newline starting a line; more is refused).  A cell that already holds the item as wanted comes back as it is; one
--- holding anything else is not touched.  Returns the block's name, its state, and { approach, from, heading, tries,
--- lines } (approach is front, down or up; from the cell the turtle stood in; lines a sign's text).  A failure's why
+-- newline starting a line; more is refused), temp (a block to put above the target for a moment, below).  A cell that
+-- already holds the item as wanted comes back as it is; one holding anything else is not touched.  When the plain ways
+-- have run out, a top half with nothing above it to place against gets a temporary block there (a cobblestone, dirt,
+-- planks or bricks on board, or opts.temp), is placed from below against it, and the block is taken away again.
+-- Returns the block's name, its state, and { approach, from, heading, tries, lines, support } (approach is front, down
+-- or up; from the cell the turtle stood in; lines a sign's text; support { temp } when a block was put above).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
 -- the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 function T.placeAt(x, y, z, item, opts)
@@ -808,12 +928,27 @@ function T.placeAt(x, y, z, item, opts)
         local tries = opts.tries or TRIES
         for attempt = 1, tries do
             local apps = plan(famName, fam, item, learned, want, x, y, z, base, tried, move.dig)
+            if #apps == 0 then apps = supportPlans(famName, fam, item, learned, want, x, y, z, base, tried, opts) end
             local app = apps[1]
             if not app then break end
             tried[app.key] = true
             local words = KIND_WORDS[app.kind] .. " from " .. app.sx .. "," .. app.sy .. "," .. app.sz
-            local ok, reason = T.moveTo(app.sx, app.sy, app.sz, move)
-            if not ok then
+            local ok, reason = true, nil
+            if not app.support then ok, reason = T.moveTo(app.sx, app.sy, app.sz, move) end
+            if app.support then
+                words = words .. " with a " .. app.support.temp .. " above it for a moment"
+                local got = placeWithSupport(app, item, want, message, move, x, y, z)
+                if got.good and not got.left then
+                    return got.name, got.state, { approach = "up", from = { x = app.sx, y = app.sy, z = app.sz }, heading = app.h,
+                                                  tries = attempt, lines = lines, support = app.support }
+                end
+                if got.left then
+                    return nil, (got.name and ("placed " .. describe(got.name, got.state) .. " at " .. x .. "," .. y .. "," .. z .. ", but ")
+                        or "") .. got.left
+                end
+                lastWhy = got.failed or ("got " .. describe(got.name, got.state) .. " from " .. app.sx .. "," .. app.sy .. "," .. app.sz)
+                attempts[#attempts + 1] = words .. ": " .. lastWhy
+            elseif not ok then
                 lastWhy = "couldn't get to " .. app.sx .. "," .. app.sy .. "," .. app.sz .. ": " .. tostring(reason)
                 attempts[#attempts + 1] = words .. ": couldn't get there (" .. tostring(reason) .. ")"
             else
@@ -863,14 +998,17 @@ function T.placeAt(x, y, z, item, opts)
             " at " .. x .. "," .. y .. "," .. z
         local others = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
         local rest = #others > 0 and (" (the rest: " .. listed(others) .. ")") or ""
+        local _, notes = supportPlans(famName, fam, item, learned, want, x, y, z, base, {}, opts)
+        local noted = #notes > 0 and (" (" .. table.concat(notes, "; ") .. ")") or ""
         if lastWhy then
             return nil, "couldn't place " .. what .. ": " .. lastWhy .. " (" .. #attempts .. (#attempts == 1 and " way" or " ways")
-                .. " tried: " .. listed(attempts) .. ")" .. rest
+                .. " tried: " .. listed(attempts) .. ")" .. rest .. noted
         end
         if #others == 0 then
-            return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it"
+            return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it" .. noted
         end
         return nil, "no way to place " .. what .. ": nothing in the table gives it with what the map shows round it (" .. listed(others) .. ")"
+            .. noted
     end
     if opts.inside then return T.inside(opts.inside, run) end
     return run()

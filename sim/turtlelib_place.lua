@@ -14,6 +14,8 @@
 --     that does not know the surroundings is not learnt from; the table wrong about a facing rule;
 --   * what it refuses: a cell in use, no item, a state the family has no key for, a facing without the
 --     world origin; a cell that already holds the block as wanted is left alone;
+--   * support: a top slab with nothing above (placing from above refused) gets a temporary block above, is placed from
+--     below, and the block is taken away (opts.temp names it; none on board is refused, saying so);
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
@@ -544,6 +546,50 @@ do
     check("the map holds the wall torch (not the item's name)", n == "minecraft:wall_torch", tostring(n))
     local _, st = T.map.get(0, 0, 3)
     check("...with its state", st and st.facing == "south", tostring(st and st.facing))
+end
+
+--------------------------------------------------------------------------
+-- Support: a top half placed from below with nothing above to place against gets a temporary block there, taken away
+-- after (here the game refuses the placement from above, so from below is the only way left)
+--------------------------------------------------------------------------
+local COBBLE = "minecraft:cobblestone"
+-- T.placeDir with placing down refused, as a game that won't place from above would
+local function noPlacingDown()
+    local rawPlace = T.placeDir
+    T.placeDir = function(d, ...)
+        if d == "down" then return false, "Cannot place block here" end
+        return rawPlace(d, ...)
+    end
+end
+do
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    W.give(2, COBBLE, 3)
+    noPlacingDown()
+    local name, state, how = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("a top slab with nothing above: a temporary block above, the slab from below, the block taken away",
+        name ~= nil and has(0, 0, 3, "oak_slab", { type = "top" }) and W.get(0, 1, 3) == nil and how.approach == "up"
+        and how.support and how.support.temp == COBBLE, tostring(state) .. " " .. W.show(0, 0, 3) .. " " .. W.show(0, 1, 3))
+    check("...the cobblestone back on board, one slab used, the map with air where the block was", W.carrying(COBBLE) == 3 and W.carrying(SL) == 3
+        and T.map.get(0, 1, 3) == "minecraft:air", W.carrying(COBBLE) .. " " .. tostring(T.map.get(0, 1, 3)))
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    W.give(2, "minecraft:dirt", 2)
+    W.give(3, COBBLE, 2)
+    noPlacingDown()
+    name, state, how = T.placeAt(0, 0, 3, SL, { half = "top", temp = "minecraft:dirt" })
+    check("opts.temp names the block to use", name ~= nil and how.support and how.support.temp == "minecraft:dirt" and W.carrying("minecraft:dirt") == 2
+        and W.get(0, 1, 3) == nil, tostring(state))
+    fresh(nil, {})
+    knowAll()
+    W.give(1, SL, 4)
+    noPlacingDown()
+    local why
+    name, why = T.placeAt(0, 0, 3, SL, { half = "top" })
+    check("no block on board to hold it up: refused, saying so", name == nil and why:find("a block to put above it for a moment", 1, true) ~= nil
+        and W.get(0, 0, 3) == nil, tostring(why))
 end
 
 --------------------------------------------------------------------------
