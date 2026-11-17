@@ -140,6 +140,8 @@ T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back fa
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+tl.attach: what hangs on a block or stands on it, and would drop if the block were dug:
+T.attachedTo(x, y, z) - What in the map hangs on or stands on the block at x, y, z and would drop if it were dug: a list of { x, y, z, name, how ("on top", "on the side", "below"), sure }, and info; nil and why.
 Plans:
 T.blueprint.fill(x1, y1, z1, x2, y2, z2, item) - Make a plan that is the whole box x1, y1, z1 to x2, y2, z2 (corners either way) filled with the block `item` (a name, with a state in brackets if it has one). Returns the plan, or nil and why.
 T.blueprint.box(x1, y1, z1, x2, y2, z2, item) - Make a plan that is the six faces of the box (floor, roof and walls) in the block `item`; the inside is left alone. Returns the plan, or nil and why.

@@ -14,6 +14,7 @@ Provides:
   * building (tl.blueprint, loaded when first used): a plan is layers of text with a legend (T.blueprint.parse/fill/box/walls/fromMap); T.build puts one up layer by layer, materials checked first, progress kept so a stop or reboot carries on; T.verify says which cells differ, states included; T.replace swaps the blocks matching a glob in a box
   * the player's view (tl.lint, loaded when first used): T.lint warns of what stops a two-tall player in a build: headroom over stairs, a flight's approach and exit, railings meeting only on a diagonal, unrailed drops, a lantern at head height; T.walkable finds a way a player walks from one cell to another
   * light (tl.light, loaded when first used): T.light floods block light over the map; T.darkCells lists the cells where a mob could spawn
+  * what a block holds (tl.attach, loaded when first used): T.attachedTo names the torches, ladders, signs and the like a dig there would drop; T.digCell's opts.attached refuses or warns
   * crafting (tl.craft, loaded when first used): T.craft makes stairs, slabs, walls, doors, chests and the rest of vanilla's building basics from a chest, through the crafting table equipped as a peripheral (a chunk controller stays on); recipes are data (T.addRecipe adds more), T.canCraft says what is short; T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and T.cfg.autoDump = true does that on its own when the inventory nearly fills
   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava takes up the nearest lava source and burns it; T.fuelFor says what a route or build will cost
@@ -317,7 +318,7 @@ T.moveTo(x, y, z, opts)
 T.digCell(x, y, z, opts)
     Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
 
-    It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs it anyway), checked before it goes and again when it is there. It stands in a cell beside it the map (or what the turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default { path = true, scan = false }; digging is turned off). The dig goes into the map as every dig does. The turtle stays beside the cell.
+    It refuses what T.moveTo refuses: a protected cell (opts.inside names the area the job owns), a chest or a computer (T.cfg.digContainers), and a block with lava or a water source beside it or above it (T.liquidNear; opts.liquid digs it anyway), checked before it goes and again when it is there. It stands in a cell beside it the map (or what the turtle saw) shows empty, else one never seen, the nearest first, going there with opts.move (T.moveTo's opts, default { path = true, scan = false }; digging is turned off). The dig goes into the map as every dig does. The turtle stays beside the cell. opts.attached looks first at what the block holds, from the map (T.attachedTo: a torch on it, a ladder or a sign on its side, a lantern under it): "refuse" refuses a dig that would drop any (a maybe too), naming them; "warn" digs, and returns them as a fourth value, { attached = the list }, named in the warning (those surely held go from the map as air).
 
 T.trail()
     The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
@@ -541,6 +542,44 @@ T.refuelFrom(side, target)
 
 T.need(name)
     The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+
+tl.attach: what hangs on a block or stands on it, and would drop if the block were dug
+
+Loaded by turtlelib the first time T.attachedTo is used (T.digCell's opts.attached asks for it).  Cells are the turtle's own (the frame it counts in).
+
+A torch on a block, a ladder on its side, a lantern hanging under it: in the game they break and drop when the block that holds them goes.  T.attachedTo reads the six cells round a block in the map and names what the block holds, by a table of names and a rule a name saying where its support is:
+  top
+      it stands on the block under it: a torch, redstone dust, a repeater, a rail, a carpet, a pressure plate, a standing sign or banner, snow, a candle, a cake, a plant
+  below
+      it hangs from the block over it: a hanging sign, a spore blossom, hanging roots, weeping or cave vines
+  wall
+      it hangs on the block behind it, its facing pointing away: a wall torch, a ladder, a wall sign or banner, a tripwire hook, a coral fan on a wall
+  face
+      a button or a lever, by its face: floor (top), ceiling (below) or wall (as wall)
+  hanging
+      a lantern: hanging from the block over it, else standing on the one under it
+  lower
+      a door or a tall plant: its lower half stands on the block under it (the upper half goes too)
+  toward
+      cocoa: its facing points at the log it grows on
+  multiface
+      vines, glow lichen, sculk veins: each face it has (north, up, ...) clings to the block that way
+  vertical
+      pointed dripstone: up stands on the block under it, down hangs from the one over it
+  directional
+      amethyst buds and clusters: on the block their facing points away from
+  bell
+      by its attachment: floor, ceiling; on a wall, which wall the rule leaves open (maybe)
+  sides
+      a wall hanging sign: on a block beside it, which one the rule leaves open (maybe)
+The map has a block's state only when it was inspected (T.inspectAt, T.inspectAll; a scan gives names alone), and a compass facing needs the world origin (T.setOrigin): a block that could be held but whose state or origin is lacking is listed as maybe (sure = false).  What stands on what the block holds (a sugar cane's column, a door's upper half) goes with it and isn't listed.  Java 1.21.1's blocks; a mod's blocks the table doesn't know aren't listed.
+
+== tl.attach: what hangs on a block or stands on it, and would drop if the block were dug ==
+
+T.attachedTo(x, y, z)
+    What in the map hangs on or stands on the block at x, y, z and would drop if it were dug: a list of { x, y, z, name, how ("on top", "on the side", "below"), sure }, and info; nil and why.
+
+    A torch, redstone, a rail, a carpet, a standing sign or a door on top; a wall torch, a ladder, a wall sign, a button or a lever on a side, facing away from it; a lantern, a hanging sign or a button under it (the overview has the table). One the block may hold whose state the map lacks (or, for a facing, with no origin) is listed with sure = false and why (T.inspectAll the cells to be sure). Info is { sure, maybe (the counts), what (the list in words), summary (a line) }. T.digCell(x, y, z, { attached = "refuse" }) refuses a dig that would drop them.
 
 tl.blueprint: plans of what to build: the format, building it, checking it, and swapping blocks in a place
 

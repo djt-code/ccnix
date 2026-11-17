@@ -14,6 +14,14 @@
 --     magma cubes), magma a floor there but not in the overworld; opts.max; the list cut at opts.limit with the rest
 --     counted; the summary line; T.cfg.dimension and a dimension it doesn't know.
 --   * A big box yields to the rest of the computer as it goes, with the same answer.
+-- tl.attach (ADR-0013 D6.2), on the same mock:
+--   * T.attachedTo: a torch on top, a ladder and a wall torch facing away on the sides, a lantern hanging under, all
+--     sure; a wall sign with no state a maybe; a button on a side facing along it, a wall torch on another block, a
+--     standing lantern under it and a door's upper half not listed; a door's lower half, a ceiling button and vines
+--     clinging to it listed; no origin making a facing a maybe; a cell of whole numbers.
+--   * T.digCell's opts.attached: "refuse" refusing before it moves, naming what would drop; "warn" digging, the torches
+--     dropping in the world, gone from the map, returned and named in the warning; a bad value; and without it the dig
+--     as before (tl.attach not even loaded).
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -38,9 +46,9 @@ local W, T                                  -- the world, the library
 local SLEEPS = 0
 local MODULES = { "turtlelib", "tl.world", "tl.path", "tl.lint", "tl.light", "tl.attach" }
 
--- A new world with the turtle at 0,0,0 and the library loaded afresh, the origin told; then the blocks of the
--- scene: { x, y, z, name, state }.
-local function fresh(blocks)
+-- A new world with the turtle at 0,0,0 and the library loaded afresh, the origin told (unless noOrigin); then the
+-- blocks of the scene: { x, y, z, name, state }.
+local function fresh(blocks, noOrigin)
     W = B.new({ facing = "north" })
     W.install()
     local worldSleep = sleep
@@ -49,7 +57,7 @@ local function fresh(blocks)
     for _, name in ipairs(MODULES) do package.loaded[name] = nil end
     T = require("turtlelib")
     for _, b in ipairs(blocks or {}) do W.set(b[1], b[2], b[3], b[4], b[5]) end
-    T.setOrigin(0, 0, 0, "north")
+    if not noOrigin then T.setOrigin(0, 0, 0, "north") end
     return W, T
 end
 -- The map told what the world holds in a box (air included), states and all.
@@ -296,4 +304,92 @@ do
     cells, info = T.darkCells({ 0, 1, 0, 31, 3, 31 })
     check("a box of 3072 cells and 25 torches gives the rest of the computer turns as it goes (a clock that moves), with the same answer",
         SLEEPS > 5 and #cells .. " " .. info.spawnable == still, SLEEPS .. " " .. still)
+end
+
+--------------------------------------------------------------------------
+-- T.attachedTo
+--------------------------------------------------------------------------
+local function names(list)
+    local out = {}
+    for i, a in ipairs(list or {}) do
+        out[i] = a.name:sub(11) .. "@" .. a.x .. "," .. a.y .. "," .. a.z .. ":" .. a.how .. (a.sure and "" or "?")
+    end
+    return table.concat(out, " ")
+end
+do
+    -- a block at 2,2,3 (heading 0, +z, is north): a torch on it, a ladder on its north side, a wall torch on its east
+    -- side facing east, a wall sign on its west side with no state, a button on its south side facing west (on
+    -- another block), a lantern hanging under it
+    local around = {
+        { 2, 2, 3, STONE }, { 2, 3, 3, TORCH }, { 2, 2, 4, "minecraft:ladder", { facing = "north" } },
+        { 3, 2, 3, "minecraft:wall_torch", { facing = "east" } }, { 1, 2, 3, "minecraft:oak_wall_sign" },
+        { 2, 2, 2, "minecraft:stone_button", { face = "wall", facing = "west" } },
+        { 2, 1, 3, "minecraft:lantern", { hanging = true } },
+    }
+    fresh(around)
+    know(0, 0, 0, 4, 4, 5)
+    local list, info = T.attachedTo(2, 2, 3)
+    check("T.attachedTo: a torch on top, a ladder and a wall torch facing away on the sides, a lantern hanging under (sure), "
+        .. "a wall sign with no state (maybe); not a button facing along the side",
+        names(list) == "torch@2,3,3:on top ladder@2,2,4:on the side wall_torch@3,2,3:on the side oak_wall_sign@1,2,3:on the side? "
+            .. "lantern@2,1,3:below" and info.sure == 4 and info.maybe == 1, names(list))
+    check("...the maybe says why, and the line names them all",
+        list[4].why == "the map has no state for it (T.inspectAt)" and info.summary == "digging 2,2,3 would drop minecraft:torch at 2,3,3 "
+            .. "(on top), minecraft:ladder at 2,2,4 (on the side), minecraft:wall_torch at 3,2,3 (on the side), minecraft:oak_wall_sign "
+            .. "at 1,2,3 (on the side, maybe: the map has no state for it (T.inspectAt)), minecraft:lantern at 2,1,3 (below)", info.summary)
+
+    -- the other way round: what isn't held by it
+    fresh({ { 2, 2, 3, STONE }, { 3, 2, 3, "minecraft:wall_torch", { facing = "north" } },
+            { 2, 1, 3, "minecraft:lantern", { hanging = false } }, { 2, 3, 3, "minecraft:oak_door", { half = "upper" } } })
+    know(0, 0, 0, 4, 4, 5)
+    list, info = T.attachedTo(2, 2, 3)
+    check("...a wall torch on another block, a lantern standing under it and a door's upper half aren't held by it",
+        #list == 0 and info.summary == "nothing in the map hangs on or stands on 2,2,3", names(list))
+    fresh({ { 2, 2, 3, STONE }, { 2, 3, 3, "minecraft:oak_door", { half = "lower", facing = "north" } },
+            { 2, 2, 2, "minecraft:vine", { north = true } }, { 1, 2, 3, "minecraft:vine", { north = true } },
+            { 2, 1, 3, "minecraft:stone_button", { face = "ceiling", facing = "north" } } })
+    know(0, 0, 0, 4, 4, 5)
+    list = T.attachedTo(2, 2, 3)
+    check("...a door's lower half on top, vines on its south side clinging north (not those clinging elsewhere), a ceiling button",
+        names(list) == "oak_door@2,3,3:on top vine@2,2,2:on the side stone_button@2,1,3:below", names(list))
+
+    -- no origin: a facing can't be told
+    fresh(around, true)
+    know(0, 0, 0, 4, 4, 5)
+    list, info = T.attachedTo(2, 2, 3)
+    check("with no origin, a facing is a maybe (and says so: the button on a side too); what needs no facing is still sure",
+        info.sure == 2 and info.maybe == 4 and list[3].why == "no origin for its facing (T.setOrigin)", names(list))
+    local none, why = T.attachedTo(2, 2.5, 3)
+    check("...a cell of whole numbers", none == nil and why:find("whole numbers", 1, true) ~= nil)
+end
+
+--------------------------------------------------------------------------
+-- T.digCell and opts.attached
+--------------------------------------------------------------------------
+do
+    -- a floor at y -1; a block at 2,0,3 with a torch on it and a wall torch on its east side
+    local function scene2()
+        fresh(add(cube(-3, -1, -3, 6, -1, 8, STONE), { { 2, 0, 3, STONE }, { 2, 1, 3, TORCH },
+                                                       { 3, 0, 3, "minecraft:wall_torch", { facing = "east" } } }))
+        know(-3, -1, -3, 6, 3, 8)
+    end
+    scene2()
+    local ok, why = T.digCell(2, 0, 3, { attached = "refuse" })
+    check("T.digCell, opts.attached = \"refuse\": refused before it moves, naming what would drop",
+        ok == false and why == "digging 2,0,3 would drop minecraft:torch at 2,1,3 (on top), minecraft:wall_torch at 3,0,3 (on the side) "
+            .. "(opts.attached = \"warn\" digs anyway)" and W.get(2, 0, 3) and T.pos.x == 0 and T.pos.z == 0, tostring(why))
+    local was, warning, extra
+    ok, was, warning, extra = T.digCell(2, 0, 3, { attached = "warn" })
+    check("...\"warn\": dug, the torches dropped in the world, and returned and named in the warning",
+        ok == true and was == STONE and W.get(2, 0, 3) == nil and W.get(2, 1, 3) == nil and W.get(3, 0, 3) == nil
+        and extra and #extra.attached == 2 and warning == "warning: dug 2,0,3, which held minecraft:torch at 2,1,3 (on top), "
+            .. "minecraft:wall_torch at 3,0,3 (on the side)", tostring(warning))
+    check("...the map has them as air", T.map.get(2, 1, 3) == AIR and T.map.get(3, 0, 3) == AIR and T.map.get(2, 0, 3) == AIR)
+    ok, why = T.digCell(2, 0, 4, { attached = "yes" })
+    check("...a value it doesn't know is refused", ok == false and why == "opts.attached is \"refuse\" or \"warn\"", tostring(why))
+    scene2()
+    ok, was, warning, extra = T.digCell(2, 0, 3)
+    check("without opts.attached the dig is as before: no look at what it holds (tl.attach not loaded), the torches drop",
+        ok == true and was == STONE and warning == nil and extra == nil and package.loaded["tl.attach"] == nil and W.get(2, 1, 3) == nil,
+        tostring(warning))
 end
