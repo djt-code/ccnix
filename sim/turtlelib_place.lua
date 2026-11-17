@@ -10,6 +10,8 @@
 --     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * a door: the cell above free, a block below, set into a gap in a wall; refused otherwise, without moving;
+--   * pistons, sticky pistons, dispensers, droppers and observers in each facing, up and down too (no origin needed for
+--     those); repeaters and comparators on a floor (refused without); a wrong row learnt, a vertical facing too;
 --   * the table wrong about a row: the retry gets it right, the wrong block is dug out (in a protected area too),
 --     the correction is kept in .placements, used from then on and after a restart; a wrong guess on a map
 --     that does not know the surroundings is not learnt from; the table wrong about a facing rule;
@@ -396,6 +398,75 @@ scene("a chest facing back at a turtle that comes from the south", {
     item = "minecraft:chest", blocks = { stone(0, -1, 3) }, opts = { facing = "south" },
     expect = { { 0, 0, 3, "chest", { facing = "south" } } } })
 scene("a plain block needs no state: placed", { item = STONE, expect = { { 0, 0, 3, "stone" } } })
+
+--------------------------------------------------------------------------
+-- Pistons, dispensers, droppers and observers by facing, up and down too; repeaters and comparators on a floor
+--------------------------------------------------------------------------
+local PISTON, OBSERVER, REPEATER = "minecraft:piston", "minecraft:observer", "minecraft:repeater"
+for _, f in ipairs({ "north", "east", "south", "west", "up", "down" }) do
+    scene("a piston facing " .. f .. " in the open", {
+        item = PISTON, opts = { facing = f }, expect = { { 0, 0, 3, "piston", { facing = f } } } })
+    scene("an observer facing " .. f .. " in the open", {
+        item = OBSERVER, opts = { facing = f }, expect = { { 0, 0, 3, "observer", { facing = f } } } })
+end
+scene("a piston facing up on a floor", {
+    item = PISTON, blocks = { stone(0, -1, 3) }, opts = { facing = "up" }, expect = { { 0, 0, 3, "piston", { facing = "up" } } } })
+scene("a sticky piston facing south against a wall beyond", {
+    item = "minecraft:sticky_piston", blocks = { stone(0, 0, 4) }, opts = { facing = "south" },
+    expect = { { 0, 0, 3, "sticky_piston", { facing = "south" } } } })
+scene("a dispenser facing down", { item = "minecraft:dispenser", opts = { facing = "down" }, expect = { { 0, 0, 3, "dispenser", { facing = "down" } } } })
+scene("a dropper facing west with a floor and a block beyond (with only a floor sideways looks down at it: up)", {
+    item = "minecraft:dropper", blocks = { stone(0, -1, 3), stone(1, 0, 3) }, opts = { facing = "west" },
+    expect = { { 0, 0, 3, "dropper", { facing = "west" } } } })
+for _, f in ipairs({ "north", "east", "south", "west" }) do
+    scene("a repeater on a floor facing " .. f, {
+        item = REPEATER, blocks = { stone(0, -1, 3) }, opts = { facing = f }, expect = { { 0, 0, 3, "repeater", { facing = f } } } })
+end
+scene("a comparator facing west in a world whose heading 0 is east", {
+    facing = "east", item = "minecraft:comparator", blocks = { stone(0, -1, 3) }, opts = { facing = "west" },
+    expect = { { 0, 0, 3, "comparator", { facing = "west" } } } })
+do
+    fresh(nil, {})
+    knowAll()
+    W.give(1, REPEATER, 2)
+    local name, why = T.placeAt(0, 0, 3, REPEATER, { facing = "north" })
+    check("a repeater with no floor: refused for that, without moving", name == nil and why:find("solid block under", 1, true) ~= nil
+        and atCell(0, 0, 0) and W.get(0, 0, 3) == nil, tostring(why))
+    W.give(2, PISTON, 2)
+    name, why = T.placeAt(0, 0, 3, PISTON, { facing = "sideways" })
+    check("a piston's facing is a compass name, up or down", name == nil and why:find("up or down", 1, true) ~= nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, REPEATER, { facing = "up" })
+    check("...a repeater's only a compass name", name == nil and why:find("compass name", 1, true) ~= nil
+        and not why:find("up or down", 1, true), tostring(why))
+    fresh(nil, {}, false)
+    W.give(1, PISTON, 2)
+    name, why = T.placeAt(0, 0, 3, PISTON, { facing = "up" })
+    check("a piston facing up needs no world origin", name ~= nil and has(0, 0, 3, "piston", { facing = "up" }), tostring(why))
+    -- the table wrong about a row: what the game gives, up included, is learnt
+    fresh(nil, {})
+    knowAll()
+    W.give(1, PISTON, 4)
+    T.need("placeAt")
+    T.PLACE_TABLE.piston.front[3].set.facing = "back"
+    local state
+    name, state = T.placeAt(0, 0, 3, PISTON, { facing = "north" })
+    check("a wrong piston row: the first try comes out the other way, is dug out, and the retry faces north",
+        name == PISTON and state.facing == "north" and has(0, 0, 3, "piston", { facing = "north" }) and W.carrying(PISTON) == 3, tostring(name))
+    check("...the rule learnt relative to the heading", learnedText() == "piston front always facing=heading\n", tostring(learnedText()))
+    fresh(nil, { stone(0, -1, 3) })
+    knowAll()
+    W.give(1, PISTON, 4)
+    T.need("placeAt")
+    T.PLACE_TABLE.piston.front[2].set.facing = "back"
+    name = T.placeAt(0, 0, 3, PISTON, { facing = "north" })
+    check("...and a row that gives up where the table said a compass way: learnt as up", learnedText() == "piston front floor facing=up\n"
+        and W.get(0, 0, 3) == nil, tostring(learnedText()))
+    local info = T.placeInfo(PISTON)
+    check("placeInfo: a piston, a dispenser and a dropper are one family, an observer and a repeater their own, each by facing",
+        info.family == "piston" and info.keys.facing and T.placeInfo("minecraft:dropper").family == "piston"
+        and T.placeInfo(OBSERVER).family == "observer" and T.placeInfo(REPEATER).family == "diode"
+        and T.placeInfo("minecraft:comparator").keys.facing and T.placeInfo(REPEATER).door == false)
+end
 
 --------------------------------------------------------------------------
 -- A table that is wrong about a row: corrected by the retry, remembered

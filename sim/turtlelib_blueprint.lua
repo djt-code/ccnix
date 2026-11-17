@@ -3,7 +3,7 @@
 -- tl.blueprint (ADR-0008 phase 3): plans, T.build, T.verify and T.replace on sim/lib/buildworld's mock world.
 --   * the format: text and table forms read the same, a plan written out and read back is the same plan, the errors
 --     name the line; fill, box, walls and fromMap make plans; put and at;
---   * a railing of walls with a torch and a sign standing on top;
+--   * a railing of walls with a torch and a sign standing on top; a repeater, an observer and a piston by facing;
 --   * a small building (floor, walls, a stair bench, a torch, a door) built in the order the plan needs (walls before
 --     the stair and the torch, the door last in its layer), stopped midway with a limit, resumed after a restart of the
 --     computer, stopped by a Ctrl+T in the middle of a cell and resumed, then verified clean; the world is what
@@ -464,6 +464,20 @@ do
     local ok, why = build(plan)
     check("a railing of walls with a torch and a sign standing on top: all built", ok == true and has(2, 1, 3, "torch")
         and has(4, 1, 3, "oak_sign") and has(3, 0, 3, "cobblestone_wall"), tostring(why))
+end
+do
+    -- redstone parts by facing: a repeater on the floor, an observer facing down onto the floor, a piston facing east against the observer
+    fresh()
+    know(-1, -1, 0, 6, 3, 6)
+    W.give(1, STONE, 3)
+    W.give(2, "minecraft:repeater", 1)
+    W.give(3, "minecraft:observer", 1)
+    W.give(4, "minecraft:piston", 1)
+    local plan = "name: wiring\nanchor: 2 0 3\nS = minecraft:stone\nr = minecraft:repeater[facing=east]\no = minecraft:observer[facing=down]\np = minecraft:piston[facing=east]\n"
+        .. "layer 1:\nSSS\nlayer 2:\nrop\n"
+    local ok, why = build(plan)
+    check("a repeater, an observer and a piston in a plan go in facing as it says", ok == true and has(2, 1, 3, "repeater", { facing = "east" })
+        and has(3, 1, 3, "observer", { facing = "down" }) and has(4, 1, 3, "piston", { facing = "east" }), tostring(why))
 end
 do
     -- opts.retry = false leaves the failed cells alone

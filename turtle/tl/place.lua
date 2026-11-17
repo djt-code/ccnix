@@ -11,9 +11,13 @@
 -- below the middle of a face, so what that gives is, in short:
 --   sideways     stairs and slabs bottom half, the stair facing the turtle's heading; a log lying along the heading
 --                with a block beyond (standing with only a floor); a torch, sign, ladder, button or lever hung on
---                the block beyond; a door, gate or chest facing as the turtle does
---   placeDown    stairs and slabs bottom half if there is a block under the target, else top half
---   placeUp      stairs and slabs top half if there is a block over the target, else bottom half
+--                the block beyond; a door, gate or chest facing as the turtle does; a piston, dispenser or dropper
+--                facing back at the turtle (an observer away from it), up onto a floor (an observer down); a
+--                repeater or comparator, on a floor, facing back at the turtle
+--   placeDown    stairs and slabs bottom half if there is a block under the target, else top half; a piston up
+--                onto a block, else down (an observer the other way)
+--   placeUp      stairs and slabs top half if there is a block over the target, else bottom half; a piston down
+--                onto a block, else up (an observer the other way)
 --   (from above or below a ladder hangs on the block beside the target the way the turtle faces)
 -- (With nothing to click but the turtle's own block, a sideways stair faces back at the turtle.)
 -- The table of what each approach yields is data (T.PLACE_TABLE): per family of block, per approach (front, down,
@@ -24,7 +28,7 @@
 -- T.placeAt(x, y, z, item, { facing, half, axis }) works out which approaches the table says give that state and
 -- the map (tl.world) says are possible, goes to the nearest, places, inspects, and if the state came out wrong digs
 -- the block and tries the next.  Facing is a compass name, so it needs the world origin (T.setOrigin: the
--- compass way the turtle's frame points); half and axis do not.  Where the map does not know what is beside the
+-- compass way the turtle's frame points); half and axis do not, nor a piston's or observer's facing up or down.  Where the map does not know what is beside the
 -- target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data
 -- file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is
 -- corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it
@@ -47,6 +51,8 @@ local AXIS_OF = { north = "z", south = "z", east = "x", west = "x" }
 -- Turns to the right from the heading, for a rule that is relative to it
 local RELATIVE = { heading = 0, right = 1, back = 2, left = 3 }
 local RELATIVE_NAMES = { "heading", "right", "back", "left" }
+-- The facings that are not a compass way (a piston's, an observer's)
+local VERTICAL = { up = true, down = true }
 
 --------------------------------------------------------------------------
 -- Blocks by name: what family, what can be clicked, what holds a torch
@@ -58,6 +64,8 @@ local FAMILY_EXACT = {
     chest = "chest", trapped_chest = "chest", furnace = "chest", blast_furnace = "chest", smoker = "chest",
     crimson_stem = "log", warped_stem = "log", hay_block = "log", bone_block = "log", basalt = "log",
     polished_basalt = "log", deepslate = "log",
+    piston = "piston", sticky_piston = "piston", dispenser = "piston", dropper = "piston", observer = "observer",
+    repeater = "diode", comparator = "diode",
 }
 local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
@@ -89,7 +97,7 @@ local function shortName(name)
 end
 
 -- The family a block or item is in: stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate,
--- chest, fence, pane, wall, or block (anything else).
+-- chest, piston, observer, diode, fence, pane, wall, or block (anything else).
 local function familyOf(name)
     local s = shortName(name)
     if FAMILY_EXACT[s] then return FAMILY_EXACT[s] end
@@ -130,8 +138,8 @@ end
 -- Per family.  hang: it hangs on or stands on a solid block (beyond and floor then mean a block that can hold it, not
 -- just one that can be clicked); onPost: standing, a post will hold it up too; sturdy = false: nothing hangs on it;
 -- post: a post in the middle (a fence, a wall, a pane), which nothing hangs on but holds up on its top what stands on
--- a post (a torch, a standing sign); needs: what must be round the target; alias: other names for a state key.  An
--- approach with no rows can not place it.
+-- a post (a torch, a standing sign); needs: what must be round the target; tall: two blocks (a door); vertical: it
+-- may face up or down too; alias: other names for a state key.  An approach with no rows can not place it.
 local FAMILIES = {
     block = plain(true),
     fence = plain(false, true),
@@ -183,7 +191,7 @@ local FAMILIES = {
     -- a door is two blocks: a solid block under it and the cell above free; it faces the way the placer does.
     -- It can only be placed sideways (from above or below the turtle is in the cell the upper half needs).
     door = {
-        sturdy = false, needs = { below = "sturdy", above = "free" },
+        sturdy = false, tall = true, needs = { below = "sturdy", above = "free" },
         front = rows("beyond facing=heading", "floor facing=heading", "always facing=back"),
         down = {}, up = {},
     },
@@ -205,6 +213,30 @@ local FAMILIES = {
         front = rows("beyond facing=back", "floor facing=back", "always facing=heading"),
         down = rows("always facing=back"),
         up = rows("always facing=back"),
+    },
+    -- a piston, sticky piston, dispenser or dropper faces back at the placer, the opposite of the way it looks most
+    -- nearly, up and down too: placing onto a floor or down onto a block it looks down; down with nothing below it
+    -- looks up at the turtle, and with nothing beyond sideways it looks back at the turtle
+    piston = {
+        vertical = true,
+        front = rows("beyond facing=back", "floor facing=up", "always facing=heading"),
+        down = rows("beyond facing=up", "always facing=down"),
+        up = rows("beyond facing=down", "always facing=up"),
+    },
+    -- an observer the other way round: its face looks where the placer looks
+    observer = {
+        vertical = true,
+        front = rows("beyond facing=heading", "floor facing=down", "always facing=back"),
+        down = rows("beyond facing=down", "always facing=up"),
+        up = rows("beyond facing=up", "always facing=down"),
+    },
+    -- a repeater or comparator stands on a block and faces back at the placer, level (its delay or mode is not the
+    -- turtle's to set); from below the turtle would be its floor
+    diode = {
+        sturdy = false, needs = { below = "sturdy" },
+        front = rows("beyond facing=back", "floor facing=back", "always facing=heading"),
+        down = rows("beyond facing=back"),
+        up = {},
     },
 }
 T.PLACE_TABLE = FAMILIES                 -- (a plain field: a sim, or a person, may correct a row)
@@ -299,6 +331,7 @@ local function ruleOf(key, value, h, base)
     if value == nil then return nil end
     value = tostring(value)
     if key == "facing" then
+        if VERTICAL[value] then return value end
         if not base then return nil end
         for _, rule in ipairs(RELATIVE_NAMES) do
             if COMPASS[(base + h + RELATIVE[rule]) % 4] == value then return rule end
@@ -595,8 +628,9 @@ local function wantsOf(item, famName, fam, opts)
             want[key] = tostring(value)
         end
     end
-    if want.facing and COMPASS_AT[want.facing] == nil then
-        return nil, "facing is a compass name: north, east, south or west"
+    if want.facing and COMPASS_AT[want.facing] == nil and not (fam.vertical and VERTICAL[want.facing]) then
+        return nil, fam.vertical and "facing is a compass name (north, east, south or west), up or down"
+            or "facing is a compass name: north, east, south or west"
     end
     return want
 end
@@ -942,7 +976,8 @@ end
 
 -- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 --
--- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
+-- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, piston (and dispenser and
+-- dropper), observer, diode (a repeater or comparator), fence, pane, wall or block; keys is
 -- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
 -- type, which are the same); hang is true for a family that hangs or stands on a solid block (a torch or a standing
 -- sign stands on the post of a fence, a wall or a pane too, though nothing hangs on their sides); door is true for a
@@ -956,7 +991,7 @@ function T.placeInfo(item)
     for name, key in pairs(fam.alias or {}) do
         if keys[key] then keys[name] = true end
     end
-    return { family = famName, keys = keys, hang = fam.hang == true, door = fam.needs ~= nil }
+    return { family = famName, keys = keys, hang = fam.hang == true, door = fam.tall == true }
 end
 
 
@@ -966,7 +1001,8 @@ end
 -- It works out from the table which approaches (placing sideways, from above or from below, from each side) give the
 -- state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is
 -- wrong digs the block and tries the next approach, learning what the game actually gave (see the overview).
--- opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a
+-- opts.facing is a compass name (north, east, south, west) and needs the world origin (up or down too for a piston,
+-- dispenser, dropper or observer, which need none; a repeater or comparator stands on a block); opts.half is bottom or top for a
 -- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever.
 -- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
@@ -994,7 +1030,7 @@ function T.placeAt(x, y, z, item, opts)
     local want, why = wantsOf(item, famName, fam, opts)
     if not want then return nil, why end
     local base = compassBase()
-    if (want.facing or (want.axis and want.axis ~= "y")) and not base then
+    if ((want.facing and not VERTICAL[want.facing]) or (want.axis and want.axis ~= "y")) and not base then
         return nil, "a compass " .. (want.facing and "facing" or "axis") .. " needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local lines, message
