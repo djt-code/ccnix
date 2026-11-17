@@ -1,6 +1,7 @@
 # ADR-0009: CI, a protected main, pull requests, releases and publishing the mod
 
-**Status:** Accepted (2026-11-12). D2, D7 and D9 are the user's
+**Status:** Done (2026-11-17): every action item built and seen working.
+Accepted (2026-11-12). D2, D7 and D9 are the user's
 answers. The user took the rest as recommended, along with the lockstep
 automation (D4) and the shared board (D11) proposed after it. Revised
 after a review the same day (see Review). After the review the user
@@ -504,9 +505,14 @@ changed it as follows.
 7. [x] Both: CONTRIBUTING.md, the pull request template, CLAUDE.md (D4's rules and order, D10, D11's `--project` rule).
 8. [x] The `release` jobs (D5, D6). The first releases: ccnix v0.50.2, and ccnix-mod v0.26.9 with the jar.
 9. [x] The user makes `LOCKSTEP_TOKEN` (D4) and sets it in both repos with `gh secret set`.
-10. [ ] The lockstep jobs (D4): built (ccnix #5, ccnix-mod #4). The mod's direction was tried end to end on 2026-11-12: its release opened ccnix's `bump/mod` (#6), which merged itself, and ccnix's next run found nothing to do. ccnix's direction (a release opening ccnix-mod's `bump/ccnix`) waits for the next ccnix release that changes the ROM.
+10. [x] The lockstep jobs (D4): built (ccnix #5, ccnix-mod #4). The mod's direction was tried end to end on 2026-11-12: its release opened ccnix's `bump/mod` (#6), which merged itself, and ccnix's next run found nothing to do. ccnix's direction (a release opening ccnix-mod's `bump/ccnix`) waits for the next ccnix release that changes the ROM. (Seen 2026-11-15 and 11-16: ccnix 0.51.0 and 0.52.0 each opened ccnix-mod's `bump/ccnix`, which merged itself and released the mod, whose release opened ccnix's `bump/mod`.)
 11. [x] mods.toml: the mc-publish slugs for CC: Tweaked, and Advanced Peripherals as optional (D7).
-12. [ ] Readiness for the sites (the page text is ccnix-mod's `doc/listing.md`; the attribution check is done; the icon is still to make): the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
-13. [ ] The user creates the Modrinth (and CurseForge) projects and their tokens, and adds them as secrets and variables.
-14. [ ] The mc-publish steps (D7): built (ccnix-mod #6), each idle until its token is set. The first upload goes to moderation.
-15. [ ] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11).
+12. [x] Readiness for the sites (the page text is ccnix-mod's `doc/listing.md`; the attribution check is done; the icon is still to make): the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
+13. [x] The user creates the Modrinth (and CurseForge) projects and their tokens, and adds them as secrets and variables.
+14. [x] The mc-publish steps (D7): built (ccnix-mod #6), each idle until its token is set. The first upload goes to moderation.
+15. [x] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11). (Done 2026-11-17: one issue a section, #55 to #85, and one a known issue, #52 to #54; each section's heading carries its number, and a new section gets its issue when it ships.)
+
+Items 12 to 14: the icon was made, both projects created and their tokens
+set, and every mod release since 0.26.10 has gone to Modrinth and
+CurseForge by itself; both sites' first reviews were pending on
+2026-11-13.

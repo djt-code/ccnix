@@ -46,6 +46,9 @@ requests. Nobody tags by hand.
 
 What's built but not yet tried in a real game goes in
 [UNTESTED.md](UNTESTED.md), and moves to its Tested section once tried.
+Each section there has an issue labelled `needs-in-game-test` (its
+number in the heading): open it with the section, tick its checks as
+they're tried, and close it when the section is empty.
 
 ## Changes that touch ccnix-mod too
 

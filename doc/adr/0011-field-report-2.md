@@ -324,7 +324,8 @@ D1 to D10 as decided, one pull request per module, each with its sims:
 
 1. [x] `doc/claude-news.txt` for this release; version bump (0.51.0);
    UNTESTED.md entries; the lockstep bump in ccnix-mod.
-2. [ ] The user runs `/ccnix rom update` and gives the turtle a goal:
+2. [x] The user runs `/ccnix rom update` and gives the turtle a goal:
    read what's new, retire replaced helpers, keep
-   `/claude/report_harness_v3.md`.
+   `/claude/report_harness_v3.md`. (Done: v3 came back 2026-11-17 and
+   became ADR-0013.)
 3. [x] Mark this ADR Accepted.
