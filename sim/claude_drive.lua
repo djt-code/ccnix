@@ -447,7 +447,8 @@ check("the reply put back together from its events is printed, the thinking logg
 
 -- 13. a reply cut off at max_tokens partway through a tool call: the call
 --     isn't run, and the next turn answers it (the API wants every
---     tool_use answered in the very next turn) before asking to carry on
+--     tool_use answered in the very next turn) before telling the model it
+--     ran out of room while writing (ADR-0013 D4); max_tokens is 64000
 fresh({ "" })
 HTTP.queue = {
     reply({ text("Digging now."), toolUse("lua", { code = "turtle.dig(" }) }, "max_tokens"),
@@ -456,25 +457,44 @@ HTTP.queue = {
 run("dig a lot")
 local cutTurn = HTTP.requests[2] and HTTP.requests[2].body.messages[3]
 local cr = cutTurn and type(cutTurn.content) == "table" and cutTurn.content
-check("a tool call cut off at max_tokens is answered (not run), then told to carry on",
+check("a tool call cut off at max_tokens is answered (not run), then told it ran out of room while writing",
     cr and cr[1].type == "tool_result" and cr[1].tool_use_id == "toolu_1" and cr[1].is_error == true
-        and cr[2].type == "text" and cr[2].text:find("cut off") and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
+        and cr[2].type == "text"
+        and cr[2].text == "Your reply was cut off at the length limit while you were writing: say less and take a smaller step."
+        and DIGS == 0, cutTurn and textutils.serialiseJSON(cutTurn))
+check("...a reply may be 64000 tokens long", HTTP.requests[1] and HTTP.requests[1].body.max_tokens == 64000,
+    HTTP.requests[1] and tostring(HTTP.requests[1].body.max_tokens))
 
--- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1),
---      the second as the first (what a second one does is D4's)
+-- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1);
+--      one cut off while thinking is told so (ADR-0013 D4); a second in
+--      the same goal ends the goal with that reason, logged and shown, and
+--      the model is told at its next goal
 do
-fresh({ "" })
+fresh({ "go on", "" })
 HTTP.queue = {
-    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000, cache_read_input_tokens = 50,
-        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 31800 } } }),
-    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000,
+    reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 64000, cache_read_input_tokens = 50,
+        cache_creation_input_tokens = 25, output_tokens_details = { thinking_tokens = 64000 } } }),
+    reply({ text("Still thinking") }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 64000,
         cache_read_input_tokens = 50, cache_creation_input_tokens = 25 } }),
+    reply({ text("Smaller then.") }, "end_turn"),
 }
 run("think hard")
 local klog = Mine.files["claude.log"] or ""
 check("a cut-off at max_tokens is logged with the tokens out and thinking, each time",
-    #HTTP.requests == 2 and klog:find("cut off at max_tokens (32000 out, 31800 thinking)", 1, true)
-        and klog:find("cut off at max_tokens (32000 out)\n", 1, true), klog)
+    #HTTP.requests == 3 and klog:find("cut off at max_tokens (64000 out, 64000 thinking)", 1, true)
+        and klog:find("cut off at max_tokens (64000 out)\n", 1, true), klog)
+local k2 = HTTP.requests[2] and HTTP.requests[2].body.messages
+local kTold = k2 and k2[#k2].content
+check("cut off while thinking: told to decide with what it has and take a smaller step",
+    kTold == "Your reply was cut off at the length limit while you were thinking: decide with what you have and take a smaller step.",
+    tostring(kTold))
+local ENDED = "Your last goal ended when your reply was cut off at the length limit a second time (64000 tokens, while you were writing): take smaller steps, and think less before each."
+check("a second cut-off in the goal ends it: logged and shown",
+    klog:find("goal ended: the reply was cut off at the length limit a second time (64000 tokens, while writing)", 1, true)
+        and Mine.logHas("^%(the goal ended: the reply was cut off at the length limit a second time"), klog)
+local k3 = HTTP.requests[3] and HTTP.requests[3].body.messages
+local kNext = k3 and k3[#k3].content
+check("...and the model is told at its next goal", kNext == "go on\n\n[" .. ENDED .. "]", tostring(kNext))
 end
 
 -- 14. a request that fails after tool results: the results stay, and the

@@ -218,8 +218,15 @@ T.setting("claude.resume", false,
 local HELPERS_FILE = "claude/helpers.lua"   -- the functions the model keeps, loaded each session: the old single file,
 local HELPERS_DIR = "claude/helpers"        -- and then each file in here, one a helper (keep(name, code) writes them)
 local MAX_HEIGHT = 256          -- T.cfg.maxHeight in a session (blocks above the start; programs keep 16)
-local MAX_TOKENS = 32000        -- a reply is a short note and some code, but the
-                                -- thinking before it counts too
+local MAX_TOKENS = 64000        -- a reply is a short note and some code, but the
+                                -- thinking before it counts too (ADR-0013 D4:
+                                -- 32000 cut off a long think about a broken door)
+-- What the model is told when its reply is cut off at MAX_TOKENS, by what
+-- it was doing then; a second cut-off in a goal ends the goal
+local CUT_OFF = {
+    thinking = "Your reply was cut off at the length limit while you were thinking: decide with what you have and take a smaller step.",
+    writing = "Your reply was cut off at the length limit while you were writing: say less and take a smaller step.",
+}
 local MAX_OUTPUT = 6000         -- characters of a tool's output sent back
 local RETRIES = 4               -- on rate limits, overload and outages
 local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in CC; the
@@ -2242,11 +2249,25 @@ local function converse(goal)
                 log("reminded: " .. quiet)
             end
             messages[#messages + 1] = { role = "user", content = results }
-        elseif reply.stop_reason == "max_tokens" and not cutOff then
+        elseif reply.stop_reason == "max_tokens" then
+            -- thinking, when all it put out was thinking or it stopped in a thinking block
+            local u, last = reply.usage or {}, reply.content[#reply.content]
+            local thought = (u.output_tokens_details or {}).thinking_tokens
+            local doing = ((thought and thought >= (u.output_tokens or 0)) or (last and last.type == "thinking"))
+                and "thinking" or "writing"
+            if cutOff then
+                -- the second in this goal: the goal ends, and the model hears why with the next
+                local why = string.format("the reply was cut off at the length limit a second time (%d tokens, while %s)", MAX_TOKENS, doing)
+                say("red", "(the goal ended: " .. why .. ")")
+                log("goal ended: " .. why)
+                startNotes[#startNotes + 1] = string.format("Your last goal ended when your reply was cut off at the length limit a second time (%d tokens, while you were %s): take smaller steps, and think less before each.",
+                    MAX_TOKENS, doing)
+                return false
+            end
             cutOff = true
-            say("orange", "(the reply was cut off; asking it to carry on)")
+            say("orange", "(the reply was cut off while " .. doing .. "; asking for a smaller step)")
             local heardNote = listen.take()
-            addUser("Your reply was cut off; carry on, more briefly." .. (heardNote and "\n\n" .. heardNote or ""),
+            addUser(CUT_OFF[doing] .. (heardNote and "\n\n" .. heardNote or ""),
                 "Not run: your reply was cut off before this call was complete.")
         elseif reply.stop_reason == "refusal" then
             local d = reply.stop_details or {}
