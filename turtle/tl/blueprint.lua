@@ -69,7 +69,7 @@ local WALL_FORM = {}
 for block, item in pairs(ITEM_OF_BLOCK) do WALL_FORM[item] = block end
 -- The order of building inside a layer, by family: what others hang on first, doors last
 local RANK = { block = 0, fence = 0, pane = 0, wall = 0, log = 0, stairs = 1, slab = 1, chest = 1,
-               torch = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, door = 3 }
+               torch = 2, sign = 2, ladder = 2, button = 2, trapdoor = 2, fence_gate = 2, door = 3 }
 local RANKS = 3                                -- (0 to 3)
 
 local S = { lastYield = 0 }

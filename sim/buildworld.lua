@@ -6,7 +6,8 @@
 --   * turtle.place* in the order the game tries: the block beyond the target on its near face, for a sideways
 --     place the floor under the target, then the turtle's own block; a sideways click is at 0.45 (bottom half);
 --   * each family each way (sideways, placeDown, placeUp; with and without a block to click): stairs and slabs
---     (half, facing, shape, double), logs (axis), torches, ladders, buttons and levers (what they hang on),
+--     (half, facing, shape, double), logs (axis), torches, signs (and their text), ladders, buttons and levers
+--     (what they hang on),
 --     doors (two blocks, a floor, hinge), trapdoors, fence gates, chests and furnaces;
 --   * a cell that cannot take the block, replaceable cells, entities, items that are not blocks, buckets;
 --   * digging (the drops, a door's two halves, what hung on a dug block popping off) and inspect;
@@ -150,6 +151,15 @@ refused("ladder sideways, nothing about: refused", LA, "front", {})
 refused("ladder placeDown over a floor: refused", LA, "down", { DB })
 row("ladder with a wall to the west only: on it, facing east", LA, "front", { stone(-1, 0, 1) }, { want(F, "ladder", { facing = "east" }) })
 refused("a ladder onto the face of a ladder that looks at it, nothing else about: refused (LadderBlock)", LA, "front", { { 0, 0, 2, LA, { facing = "south" } } })
+
+-- Signs: as a torch (StandingAndWallBlockItem): on a wall facing away from it, else standing, turned to the placer
+local SI = "minecraft:oak_sign"
+row("sign sideways, a block beyond: a wall sign facing the turtle", SI, "front", { FB }, { want(F, "oak_wall_sign", { facing = "south" }) })
+row("sign sideways, only a floor: standing, turned to face the turtle (rotation 0 faces south)", SI, "front", { FU }, { want(F, "oak_sign", { rotation = 0 }) })
+row("sign sideways turned east, only a floor: rotation 4", SI, "front", { stone(1, -1, 0) }, { want({ 1, 0, 0 }, "oak_sign", { rotation = 4 }) }, { turn = 1 })
+row("sign placeDown, a block below the target: standing", SI, "down", { DB }, { want(D, "oak_sign", { rotation = 0 }) })
+refused("sign sideways, nothing about: refused", SI, "front", {})
+refused("sign placeDown, nothing below: refused", SI, "down", {})
 
 -- Buttons and levers: floor, wall or ceiling
 local TO_WALL = "minecraft:wall_torch"
@@ -325,6 +335,23 @@ do
     w.set(0, 0, 1, BU, { face = "wall", facing = "south", powered = false })
     w.set(0, 0, 2, nil); w.settle(0, 0, 2)
     check("a button too", w.get(0, 0, 1) == nil)
+end
+do
+    local w = world(nil, { FB })
+    w.give(1, SI, 3)
+    turtle.place("Welcome to\nthe castle")
+    local t = w.get(0, 0, 1) and w.get(0, 0, 1).text
+    check("a sign's text: two lines start on the second", t and t[1] == "" and t[2] == "Welcome to" and t[3] == "the castle" and t[4] == "")
+    w.set(0, 0, 1, nil)
+    turtle.place("a\nb\nc\nd\ne")
+    t = w.get(0, 0, 1).text
+    check("four lines from the first, a fifth dropped", t[1] == "a" and t[4] == "d")
+    w.set(0, 0, 1, nil)
+    turtle.place("a line of twenty chars")
+    t = w.get(0, 0, 1).text
+    check("a line longer than 15 is cut", t[2] == "a line of twent")
+    w.set(0, 0, 2, nil); w.settle(0, 0, 2)
+    check("a wall sign pops off without its wall and lies as a sign", w.get(0, 0, 1) == nil and w.ground["0,0,1"][1].name == SI)
 end
 do
     local w = world(nil, { stone(0, 0, 1), { 0, 0, 2, TO_WALL, { facing = "north" } } })

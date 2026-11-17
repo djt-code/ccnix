@@ -1418,13 +1418,13 @@ function T.digDir(d)
     return impl.dig()
 end
 
--- Face direction d (0 to 3, "up" or "down") and place the selected item there.  Returns
--- turtle.place's results.
-function T.placeDir(d)
-    if d == "up" then return impl.placeUp() end
-    if d == "down" then return impl.placeDown() end
+-- Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign.
+-- Returns turtle.place's results.
+function T.placeDir(d, text)
+    if d == "up" then return impl.placeUp(text) end
+    if d == "down" then return impl.placeDown(text) end
     T.face(d)
-    return impl.place()
+    return impl.place(text)
 end
 
 -- Face direction d (0 to 3, "up" or "down") and attack there.  Returns turtle.attack's results.

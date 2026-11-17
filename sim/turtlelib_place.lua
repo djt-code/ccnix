@@ -251,6 +251,47 @@ scene("a lever on the floor, from above", {
     expect = { { 0, 0, 3, "lever", { face = "floor" } } } })
 
 --------------------------------------------------------------------------
+-- Signs: on a wall when the block beyond holds one, else standing; opts.text written, 4 lines of 15
+--------------------------------------------------------------------------
+local SIGN = "minecraft:oak_sign"
+local function signLines(x, y, z)
+    local b = W.get(x, y, z)
+    return b and b.text and table.concat(b.text, "|") or "no text"
+end
+do
+    local _, _, how = scene("a sign on the wall beyond: a wall sign facing back at the turtle", {
+        item = SIGN, blocks = { stone(0, 0, 4) }, opts = { text = "Welcome to the castle" },
+        expect = { { 0, 0, 3, "oak_wall_sign", { facing = "south" } } }, approach = "front", from = { 0, 0, 2 } })
+    check("...its text wrapped to lines of 15 (two lines start on the sign's second)", signLines(0, 0, 3) == "|Welcome to the|castle|",
+        signLines(0, 0, 3))
+    check("...and the lines come back in how", how and how.lines and #how.lines == 2 and how.lines[1] == "Welcome to the",
+        tostring(how and how.lines))
+    scene("a sign with a floor and no wall: it stands", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Keep\nout" }, expect = { { 0, 0, 3, "oak_sign" } } })
+    check("...the lines as given, each its own", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
+    scene("a sign facing north goes round its wall to the north side", {
+        item = SIGN, blocks = { stone(0, 0, 2) }, opts = { facing = "north", text = "north" },
+        expect = { { 0, 0, 3, "oak_wall_sign", { facing = "north" } } }, from = { 0, 0, 4 } })
+    fresh(nil, { stone(0, 0, 4) })
+    knowAll()
+    W.give(1, SIGN, 4)
+    local name, why = T.placeAt(0, 0, 3, SIGN, { text = "one two three four five six seven eight nine ten eleven twelve" })
+    check("text that will not fit 4 lines of 15 is refused with why, nothing placed, no move", name == nil
+        and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    W.give(2, STONE, 4)
+    name, why = T.placeAt(0, 0, 3, STONE, { text = "hello" })
+    check("text on a block that is not a sign is refused", name == nil and why:find("only a sign", 1, true) ~= nil and W.get(0, 0, 3) == nil,
+        tostring(why))
+    fresh(nil, { stone(0, 0, 2) })
+    W.give(1, SIGN, 2)
+    T.selectItem(SIGN)
+    local ok = T.placeDir(0, "by hand")
+    check("T.placeDir(d, text) writes the text on a sign", ok == true and signLines(0, 0, 1) == "|by hand||", signLines(0, 0, 1))
+    local info = T.placeInfo(SIGN)
+    check("placeInfo: a sign is its own family, hangs, placed by facing", info.family == "sign" and info.hang == true and info.keys.facing == true)
+end
+
+--------------------------------------------------------------------------
 -- Doors, trapdoors, gates, chests
 --------------------------------------------------------------------------
 local DOOR = "minecraft:oak_door"

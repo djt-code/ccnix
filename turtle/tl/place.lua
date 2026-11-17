@@ -10,8 +10,8 @@
 -- block under the target (clicked on its top), and last the turtle's own block.  A sideways click lands just
 -- below the middle of a face, so what that gives is, in short:
 --   sideways     stairs and slabs bottom half, the stair facing the turtle's heading; a log lying along the heading
---                with a block beyond (standing with only a floor); a torch, ladder, button or lever hung on the
---                block beyond; a door, gate or chest facing as the turtle does
+--                with a block beyond (standing with only a floor); a torch, sign, ladder, button or lever hung on
+--                the block beyond; a door, gate or chest facing as the turtle does
 --   placeDown    stairs and slabs bottom half if there is a block under the target, else top half
 --   placeUp      stairs and slabs top half if there is a block over the target, else bottom half
 -- (With nothing to click but the turtle's own block, a sideways stair faces back at the turtle.)
@@ -27,7 +27,8 @@
 -- target the approaches are only guesses and go last.  What actually came out is remembered per family, in the data
 -- file .placements, but only when the map knew every fact the row depended on: a table row that was wrong is
 -- corrected once, for every later placement.  A door goes in after the walls round it, and needs a solid block under it
--- and the cell above free; T.ignite lights a fire from above with flint and steel.
+-- and the cell above free; T.ignite lights a fire from above with flint and steel.  A sign takes its text
+-- (opts.text), which the game writes when the turtle places it.
 
 local T = require("turtlelib")
 local text = require("text")
@@ -61,11 +62,16 @@ local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
     { "_fence_gate", "fence_gate" }, { "_button", "button" }, { "_log", "log" }, { "_wood", "log" },
     { "_hyphae", "log" }, { "_pillar", "log" }, { "_stem", "log" }, { "_fence", "fence" }, { "_pane", "pane" },
-    { "_wall", "wall" },
+    { "_wall", "wall" }, { "_hanging_sign", "block" }, { "_sign", "sign" },
 }
+-- (a hanging sign is not a sign of the table's: it hangs under a block, and goes in as it comes)
 
--- The torches that hang on a wall have a name of their own
+-- The torches and signs that hang on a wall have a name of their own: a torch's by name, a sign's by its ending
 local WALL_NAME = { torch = "wall_torch", soul_torch = "soul_wall_torch", redstone_torch = "redstone_wall_torch" }
+local WALL_ENDING = { { "_sign", "_wall_sign" } }
+
+-- A sign's text: lines of 15 characters at most, 4 lines at most (as CC:Tweaked writes it)
+local SIGN_WIDTH, SIGN_LINES = 15, 4
 
 -- Blocks you cannot click to place against, because they are not there or the next block replaces them
 local NOT_CLICKABLE = {}
@@ -81,8 +87,8 @@ local function shortName(name)
     return rest or name
 end
 
--- The family a block or item is in: stairs, slab, log, torch, ladder, button, door, trapdoor, fence_gate, chest,
--- fence, pane, wall, or block (anything else).
+-- The family a block or item is in: stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate,
+-- chest, fence, pane, wall, or block (anything else).
 local function familyOf(name)
     local s = shortName(name)
     if FAMILY_EXACT[s] then return FAMILY_EXACT[s] end
@@ -149,6 +155,13 @@ local FAMILIES = {
     },
     -- a torch hangs on the block beyond (a wall torch, facing the turtle), or stands on the floor or the block below
     torch = {
+        hang = true, sturdy = false,
+        front = rows("beyond block=wall facing=back", "floor"),
+        down = rows("beyond"),
+        up = {},
+    },
+    -- a sign as a torch: on the wall beyond (the wall form, facing the turtle), or standing on the floor
+    sign = {
         hang = true, sturdy = false,
         front = rows("beyond block=wall facing=back", "floor"),
         down = rows("beyond"),
@@ -567,6 +580,19 @@ local function needsMet(fam, tx, ty, tz)
     return nil
 end
 
+-- A sign's text as its lines: opts.text wrapped to SIGN_WIDTH, each newline starting a line; nil and why if it is not
+-- a sign, or the text takes more than SIGN_LINES lines.
+local function signLines(item, famName, said)
+    if famName ~= "sign" then return nil, "only a sign takes text, and " .. item .. " is not one" end
+    if type(said) ~= "string" then return nil, "a sign's text is a string" end
+    local lines = text.wrap(said, SIGN_WIDTH)
+    if #lines > SIGN_LINES then
+        return nil, "a sign holds " .. SIGN_LINES .. " lines of " .. SIGN_WIDTH .. " characters, and this text wraps to " .. #lines
+            .. " (\"" .. table.concat(lines, "|") .. "\")"
+    end
+    return lines
+end
+
 --------------------------------------------------------------------------
 -- Looking at what came out, and taking it back
 --------------------------------------------------------------------------
@@ -578,10 +604,21 @@ local function lookAtTarget(kind, h)
     return nil
 end
 
--- Is the block the item's, or the wall version of it (a torch)?
+-- The name of the wall version of an item (a torch or a sign), or nil if it has none.
+local function wallNameOf(item)
+    local space, short = text.cut(item, ":")
+    if not short then space, short = "minecraft", item end
+    if WALL_NAME[short] then return space .. ":" .. WALL_NAME[short] end
+    for _, ending in ipairs(WALL_ENDING) do
+        local stem = text.stripSuffix(short, ending[1])
+        if stem then return space .. ":" .. stem .. ending[2] end
+    end
+    return nil
+end
+
+-- Is the block the item's, or the wall version of it (a torch or a sign)?
 local function isItem(item, name)
-    local wall = WALL_NAME[shortName(item)]
-    return name == item or (wall ~= nil and name == "minecraft:" .. wall)
+    return name == item or (name ~= nil and name == wallNameOf(item))
 end
 
 -- Does the block at the target have the item's name (or the wall version of it) and every state wanted?
@@ -598,7 +635,7 @@ end
 local function learnFrom(learned, famName, kind, row, h, base, item, name, state)
     local keys = {}
     for key in pairs(row.set) do keys[key] = true end
-    if WALL_NAME[shortName(item)] then keys.block = true end
+    if wallNameOf(item) then keys.block = true end
     local id = rowId(famName, kind, row)
     local set = learned[id] or {}
     local changed = false
@@ -680,7 +717,7 @@ end
 
 -- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 --
--- family is stairs, slab, log, torch, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
+-- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, fence, pane, wall or block; keys is
 -- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
 -- type, which are the same); hang is true for a family that hangs or stands on a solid block; door is true for a
 -- family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
@@ -697,8 +734,8 @@ function T.placeInfo(item)
 end
 
 
--- Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis): the block, its state and
--- how; nil and why if it can't.
+-- Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the
+-- block, its state and how; nil and why if it can't.
 --
 -- It works out from the table which approaches (placing sideways, from above or from below, from each side) give the
 -- state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is
@@ -706,11 +743,12 @@ end
 -- opts.facing is a compass name (north, east, south, west) and needs the world origin; opts.half is bottom or top for a
 -- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever.
 -- Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
--- dig and walk in), tries (approaches to try, default 6).  A cell that already holds the item as wanted comes back
--- as it is; one holding anything else is not touched.  Returns the block's name, its state, and { approach, from,
--- heading, tries } (approach is front, down or up; from the cell the turtle stood in).  A failure's why names the
--- approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above the target,
--- and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
+-- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
+-- newline starting a line; more is refused).  A cell that already holds the item as wanted comes back as it is; one
+-- holding anything else is not touched.  Returns the block's name, its state, and { approach, from, heading, tries,
+-- lines } (approach is front, down or up; from the cell the turtle stood in; lines a sign's text).  A failure's why
+-- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
+-- the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 function T.placeAt(x, y, z, item, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -725,6 +763,12 @@ function T.placeAt(x, y, z, item, opts)
     local base = compassBase()
     if (want.facing or (want.axis and want.axis ~= "y")) and not base then
         return nil, "a compass " .. (want.facing and "facing" or "axis") .. " needs the world origin: T.setOrigin(x, y, z, facing)"
+    end
+    local lines, message
+    if opts.text ~= nil then
+        lines, why = signLines(item, famName, opts.text)
+        if not lines then return nil, why end
+        message = table.concat(lines, "\n")
     end
     if T.countItem(item) == 0 then return nil, "no " .. item .. " on board" end
     local blocked = needsMet(fam, x, y, z)
@@ -760,7 +804,7 @@ function T.placeAt(x, y, z, item, opts)
                     return nil, was .. " is in the way at " .. x .. "," .. y .. "," .. z
                 end
                 T.selectItem(item)
-                local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h))
+                local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h), message)
                 if not placed then
                     lastWhy = "the game would not place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," ..
                         app.sz .. " (" .. app.kind .. "): " .. tostring(placeWhy)
@@ -777,7 +821,7 @@ function T.placeAt(x, y, z, item, opts)
                         end
                         if accepted(item, want, name, state) then
                             return name, state, { approach = app.kind, from = { x = app.sx, y = app.sy, z = app.sz },
-                                                  heading = app.h, tries = attempt }
+                                                  heading = app.h, tries = attempt, lines = lines }
                         end
                         lastWhy = "got " .. describe(name, state) .. " from " .. app.sx .. "," .. app.sy .. "," ..
                             app.sz .. " (" .. app.kind .. ")"
