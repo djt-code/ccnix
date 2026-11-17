@@ -3,7 +3,9 @@
 -- The junk policy (ADR-0008, D5): T.isJunk never calls crafted items, T.keep
 -- items, tools, fuel or peripherals junk; T.dumpJunk goes to the junk chest
 -- and back, and nothing is ever dropped into the world: no chest there, no
--- way there, or a full chest leaves everything in the turtle.
+-- way there, or a full chest leaves everything in the turtle.  T.cfg.tools
+-- (ADR-0013 D5): with it set, only the tools equipped and those it lists are
+-- essential, so a looted sword is junk; unset, every tool is, as before.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -19,6 +21,7 @@ local W, CH = {}, {}                    -- blocks by cell; the chests' contents 
 local function get(x, y, z) return W[M.key(x, y, z)] or (CH[M.key(x, y, z)] and { name = "minecraft:chest" }) or nil end
 S.get = get
 local GROUND = 0                        -- items the turtle has thrown into the world
+EQ = {}                                 -- the upgrades on each side
 
 local function inspectAt(x, y, z)
     local b = get(x, y, z)
@@ -29,6 +32,7 @@ turtle = M.merge(
     M.inventoryApi(S), M.fuelApi(S), M.noAttackApi(),
     M.movementApi(S, function(b) return b == nil end),
     M.lookingApi(S, inspectAt, function(b) return b ~= nil end),
+    M.equipmentApi(S),
     M.actingApi(S, "dig", function() return false, "Nothing to dig here" end),
     M.actingApi(S, "drop", function(x, y, z, _, n)
         local c = CH[M.key(x, y, z)]
@@ -105,6 +109,37 @@ do
     check("...while what it doesn't name is dumped", T.wouldDump() == true)
     S.inv = {}
     T.keep = was
+end
+
+-- T.cfg.tools: the tools a job keeps (ADR-0013 D5)
+do
+    local SWORD, AXE, HOE = "minecraft:iron_sword", "minecraft:golden_axe", "minecraft:iron_hoe"
+    EQ.left = PICK
+    check("T.cfg.tools unset: every tool is essential, a looted sword too", T.cfg.tools == nil and T.isEssential(SWORD)
+        and not T.isJunk(SWORD) and not T.isJunk(AXE) and not T.isJunk("minecraft:iron_pickaxe"))
+    T.cfg.tools = { "*_hoe" }
+    check("T.cfg.tools set: a tool neither equipped nor listed is junk", T.isJunk(SWORD) and T.isJunk(AXE) and not T.isEssential(SWORD))
+    check("...a tool it lists is kept (a glob)", not T.isJunk(HOE) and T.isEssential("minecraft:diamond_hoe"))
+    check("...the tool equipped is kept, another kind of pickaxe is not", T.isEssential(PICK) and not T.isJunk(PICK)
+        and T.isJunk("minecraft:iron_pickaxe"))
+    check("...fuel, buckets, a crafting table and peripherals are as before", not T.isJunk(COAL) and not T.isJunk("minecraft:bucket")
+        and not T.isJunk("minecraft:crafting_table") and not T.isJunk(SCANNER))
+    check("...T.keep still keeps a tool", (function()
+        T.keep[SWORD] = true
+        local kept = not T.isJunk(SWORD)
+        T.keep[SWORD] = nil
+        return kept and T.isJunk(SWORD)
+    end)())
+    T.cfg.tools = {}
+    check("T.cfg.tools = {}: only what is equipped", T.isJunk(HOE) and not T.isJunk(PICK))
+    EQ.left, EQ.right = nil, PICK
+    check("...on either side", T.isEssential(PICK) and T.isJunk(HOE))
+    T.cfg.tools = { [SWORD] = true, ["*_axe"] = true }
+    check("T.cfg.tools as a set of names and globs", T.isEssential(SWORD) and T.isEssential(AXE) and T.isJunk(HOE))
+    T.cfg.tools = "iron_hoe"
+    check("...or one name without its namespace", T.isEssential(HOE) and T.isJunk(SWORD) and T.isJunk("minecraft:diamond_hoe"))
+    T.cfg.tools, EQ.left, EQ.right = nil, nil, nil
+    check("unset again: every tool is essential", T.isEssential(SWORD) and T.isEssential(HOE))
 end
 
 --------------------------------------------------------------------------
@@ -221,3 +256,13 @@ ok, dropped = T.dumpJunk()
 check("a wall in the way: T.dumpJunk walks round it with the path finder, drops, and comes back",
     ok == true and dropped == 84 and inChest(CH["3,1,0"], DIRT) == 64 and GROUND == 0 and at() == "(0,0,0) facing 0", tostring(dropped) .. " " .. at())
 W = {}
+
+-- with T.cfg.tools set the looted sword goes in the junk chest; the pickaxe it lists stays
+CH = { ["3,1,0"] = {} }
+stock(); put(9, "minecraft:iron_sword"); home(0, 0, 0, 0); GROUND = 0
+T.cfg.tools = { "*_pickaxe" }
+ok, dropped = T.dumpJunk()
+T.cfg.tools = nil
+check("T.cfg.tools: T.dumpJunk puts the looted sword in the junk chest, the listed pickaxe stays aboard",
+    ok == true and dropped == 85 and inChest(CH["3,1,0"], "minecraft:iron_sword") == 1 and carrying(PICK) == 1 and GROUND == 0,
+    tostring(dropped))

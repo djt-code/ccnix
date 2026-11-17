@@ -53,7 +53,7 @@
 --     T.smelt runs a furnace; T.fuelTicks and T.smeltsTo are what burns and what smelts
 --   * the chests at home (tl.store, loaded when first used): T.addChest tells it where they are, T.catalogue
 --     goes round them and writes down what each holds, T.where says which have an item, T.fetch goes and takes
---     some, T.stow puts what the turtle carries away (into a chest that holds it, else the bulk chest), and
+--     some, T.stow puts what it carries away (a chest for it, one holding it, the bulk chest), T.sortChests tidies, and
 --     T.cfg.autoDump = true does that on its own when the inventory nearly fills
 --   * taking blocks by name and fuel (tl.harvest, loaded when first used): T.harvest digs the blocks matching a glob in a
 --     place, nearest first and top down, leaving lava-touched, protected and falling-supported ones; T.refuelFromLava
@@ -116,6 +116,9 @@ T.cfg = {
     maxClimb   = 3,     -- terrain stepping: max climb per column
     maxDrop    = 12,    -- max blocks below start level
     maxHeight  = 16,    -- max blocks above start level
+    -- tools: nil, the tools a job keeps (T.isEssential).  Unset, every tool aboard is essential, never junk or
+    -- stowed; set to names or globs ({ "*_pickaxe", "*_hoe" }, a set too; {} for none), only the tools equipped
+    -- (or parked aboard by a swap) and those it names are, so T.stow and T.dumpJunk put looted ones away.
 }
 
 -- Block names the move functions are allowed to dig through.
@@ -987,6 +990,20 @@ function T.isTool(name)
     return false
 end
 
+-- The tools a swap has parked in the inventory (T.withTool, T.equipPeripheral) until it puts them back, by name: the
+-- turtle's own, kept whatever T.cfg.tools says.  On the turtle table, so every copy of the library sees the same.
+local parkHolder = turtle or {}
+local parked = parkHolder._ccnixParked
+if not parked then
+    parked = {}
+    parkHolder._ccnixParked = parked
+end
+local function park(name) parked[name] = (parked[name] or 0) + 1 end
+local function unpark(name)
+    local n = (parked[name] or 0) - 1
+    parked[name] = n > 0 and n or nil
+end
+
 -- `what`, here and in the inventory helpers below, names an item or is a
 -- function(name, item) that picks one.
 local function picks(what, it)
@@ -1056,6 +1073,7 @@ function T.usePrimaryTool(name)
     local sel = turtle.getSelectedSlot()
     local freed
 
+    local off = {}
     for _, side in ipairs({ "left", "right" }) do
         local item = before[side]
         if item and item ~= name and T.isTool(item) then
@@ -1063,6 +1081,8 @@ function T.usePrimaryTool(name)
             if not empty then error("Need an empty inventory slot to unequip the " .. item, 0) end
             turtle.select(empty)
             equipSide(side)
+            park(item)
+            off[#off + 1] = item
             freed = freed or side
         end
     end
@@ -1095,6 +1115,8 @@ function T.usePrimaryTool(name)
             end
         end
         turtle.select(cur)
+        for _, item in ipairs(off) do unpark(item) end
+        off = {}
     end
 end
 
@@ -1199,12 +1221,15 @@ function T.equipPeripheral(name, opts)
     local ok, err = equipSide(side)
     turtle.select(sel)
     if not ok then return nil, "couldn't equip the " .. name .. (err and (": " .. tostring(err)) or "") end
+    local tool = was and T.isTool(was) and was
+    if tool then park(tool) end
     local done = false
     -- puts back what was on the side (an empty slot selected takes the
     -- peripheral off when there was nothing); true, or false and why
     local function restore()
         if done then return true end
         done = true
+        if tool then unpark(tool) end
         local cur = turtle.getSelectedSlot()
         local from = was and T.findSlot(was) or T.emptySlot()
         if not from then
@@ -2883,10 +2908,27 @@ function T.markCrafted(name) crafted[name] = true end
 -- Forget what T.markCrafted named: the end of a job.
 function T.clearCrafted() crafted = {} end
 
--- Is the item `name` something a turtle needs whatever the job: a tool, fuel, a bucket, a crafting
--- table or a peripheral?  (Never junk, and never put away in a chest by T.stow.)
+-- Does the turtle keep the tool `name` (T.cfg.tools)?  Unset, every tool; set, one equipped, parked by a swap or
+-- named in it.  (The sides are asked last: on an old CC:Tweaked that takes a swap through an empty slot.)
+local function toolKept(name)
+    local keep = T.cfg.tools
+    if keep == nil or parked[name] or listed(keep, name) then return true end
+    for _, side in ipairs({ "left", "right" }) do
+        local ok, held = pcall(T.equipped, side)
+        if ok and held == name then return true end
+    end
+    return false
+end
+
+-- Is the item `name` something a turtle needs whatever the job: a tool (with T.cfg.tools set, one equipped or
+-- named), fuel, a bucket, a crafting table or a peripheral?  (Never junk, and never put away in a chest by T.stow.)
+--
+-- Every tool is, unless T.cfg.tools is set: then only the tools equipped (or parked aboard by T.withTool or
+-- T.equipPeripheral until they go back on) and those it names, a list or set of names or globs
+-- (T.cfg.tools = { "*_pickaxe", "minecraft:iron_hoe" }; {} keeps only what is equipped).  The rest are junk unless
+-- T.keep names them, so T.stow and T.dumpJunk put away the swords and axes a job picked up.
 function T.isEssential(name)
-    if T.fuel[name] or T.isTool(name) or NEVER_JUNK[name] then return true end
+    if T.fuel[name] or NEVER_JUNK[name] or (T.isTool(name) and toolKept(name)) then return true end
     for _, prefix in ipairs(NEVER_JUNK_PREFIXES) do
         if text.startsWith(name, prefix) then return true end
     end
@@ -2895,6 +2937,8 @@ end
 
 -- Is the item `name` junk?  False for what's in T.keep (a set or a list of names, globs too: put the job's
 -- materials there), tools, fuel, buckets, a crafting table, peripherals and what was crafted this job.
+--
+-- Tools: the ones T.isEssential keeps (all of them, unless T.cfg.tools names the job's).
 function T.isJunk(name)
     return not (crafted[name] or T.isEssential(name) or listed(T.keep, name))
 end
@@ -3026,7 +3070,7 @@ T.registry = {
     craftBatch = "tl.craft", smeltAt = "tl.craft", craftPlan = "tl.craft",
     -- tl.store: the chests at home, what is in them, putting away and fetching
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
-    fetch = "tl.store", stow = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
+    fetch = "tl.store", stow = "tl.store", sortChests = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
     inventoryReport = "tl.store", prepare = "tl.store", recount = "tl.store",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
