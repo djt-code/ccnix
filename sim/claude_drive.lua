@@ -1902,3 +1902,23 @@ HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("small notes")
 check("...under it, no note", HTTP.requests[1] and HTTP.requests[1].body.messages[1].content == "small notes")
 end
+
+-- 41. the prompt and the manual (ADR-0013 phase 2): what a turtle can't
+--     do and the player tests, a block put back with T.placeAt, a why
+--     read whole before it's shortened, notes kept short
+do
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("what can't I do")
+local sys41 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt: no doors, buttons, repeater delays or portals for a turtle: the player tests them",
+    sys41:find("A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal", 1, true) ~= nil)
+check("...a block put back with T.placeAt, not placed up from the hole",
+    sys41:find("put a block back with T.placeAt", 1, true) ~= nil)
+check("...a why read whole before it's shortened",
+    sys41:find("read the whole why before you shorten it", 1, true) ~= nil)
+check("...notes kept short, the old outside /memories",
+    sys41:find("the old moved to an archive file outside /memories", 1, true) ~= nil)
+check("the manual's overview says what a turtle can't do",
+    REAL_MANUAL:find("A turtle can't open doors or trapdoors, press buttons, set a repeater's delay or pass a nether portal", 1, true) ~= nil)
+end

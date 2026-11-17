@@ -83,6 +83,11 @@
 -- Programs configure it by setting fields on T.cfg and T.diggable before
 -- moving.  Everything is relative to where the turtle starts: (0,0,0)
 -- facing +z, with +x to its right.
+--
+-- A turtle can't open doors or trapdoors, press buttons, set a repeater's
+-- delay or pass a nether portal (it gets "Movement obstructed"): the
+-- player tests those.  Put a block back with T.placeAt, which stands
+-- outside the cell, not by placing up from the hole.
 
 local T = {}
 
