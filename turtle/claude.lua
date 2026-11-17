@@ -162,6 +162,13 @@
 -- pays for many calls.  When the API says the conversation is too long
 -- all the same, it's sent again with more of it cleared.  A reply paused
 -- partway through its web searches is carried on.
+-- Summaries (the API's compaction): when a goal ends with the last call's
+-- input over 100k tokens, the conversation is summarized while you type
+-- the next goal (if you're quicker, the goal waits for it; a /new or an
+-- empty line doesn't).  The model writes the summary, having read all of
+-- it: the goal and how far it got, what you said, places, what's built,
+-- lessons, its helpers; and it goes on from that in place of what it
+-- summarized.  /new is cheaper still between unrelated goals.
 --
 -- Position: it picks up turtlelib's saved position (.turtlepos) if there
 -- is one, so `home` still works afterwards; otherwise here is (0,0,0)
@@ -262,6 +269,32 @@ local CLEAR = { mark = 180000, keep = 6, trigger = 100000 }
 -- rest of the conversation: sooner, fewer results kept, whatever it frees,
 -- and the thinking of the last 3 turns kept
 local HARD_TRIGGER, HARD_KEEP, HARD_AT_LEAST, HARD_THINKING = 50000, 2, 0, 3
+-- Compaction (ADR-0013 D9).  On request (the beta header COMPACT.beta) the
+-- API summarizes the conversation, its thinking included, into one signed
+-- block that then stands first in place of what it summarized: the model
+-- goes on from a summary of everything, not from a clear's placeholders.
+-- When a goal ends with the last call's input over COMPACT.boundary, the
+-- conversation is summarized while the player types the next goal (and
+-- before it's sent, if they're quicker).  The summary call may think too,
+-- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
+-- INSTRUCTIONS replace the API's own summary prompt (at most 16384
+-- characters, and they must say not to call tools).
+local COMPACT = { boundary = 100000, maxTokens = 16000, beta = "compact-2026-09-04",
+    INSTRUCTIONS = table.concat({
+        "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
+        "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
+        "the current goal, the plan, and how far it got (what's done, what's next);",
+        "open tasks and anything promised to the player;",
+        "the player's own words that matter (requests, preferences, corrections), quoted;",
+        "places and coordinates (the turtle's frame and the world origin if set, the base, the chests, builds, hazards);",
+        "what was built and how (blueprints, materials, protected areas);",
+        "lessons and mistakes not to repeat;",
+        "the names of kept helpers (keep) and skills, and what each is for;",
+        "the T calls and code that worked, briefly.",
+        "Leave out what is finished and no longer matters, raw tool output, and what the notes in /memories already hold.",
+        "Keep it short: a few hundred words, at most about 1500.",
+        "Do not call any tool: answer with the summary text only.",
+    }, " ") }
 -- How long the cache keeps the conversation with no request reading it:
 -- the API has 5 minutes and an hour (writing for an hour costs 2x the
 -- input price, for 5 minutes 1.25x; reading 0.05x on Opus 5.5), and how
@@ -1873,12 +1906,15 @@ local function contextEdits()
     return { edits = edits or { { type = "clear_thinking_20251015", keep = "all" } } }
 end
 
-local function body()
+-- The request's body: the conversation, or with `compact` ({ messages,
+-- maxTokens }) a compaction request for those messages, which carries no
+-- context edits (the API refuses them with it) and no fallback model.
+local function body(compact)
     -- (unicode_strings: without it each byte past ASCII is sent as a
     -- character of its own, and the API reads its "×" back as "Ã—")
     return textutils.serialiseJSON(asUTF8({
         model = MODEL,
-        max_tokens = MAX_TOKENS,
+        max_tokens = compact and compact.maxTokens or MAX_TOKENS,
         -- cached: the system prompt and tools (they never change), and
         -- the conversation up to its last block, read back by the next
         -- call (the top-level cache_control: the API moves that mark on
@@ -1887,7 +1923,7 @@ local function body()
         system = { { type = "text", text = SYSTEM, cache_control = CACHE } },
         cache_control = CACHE,
         tools = TOOLS,
-        messages = messages,
+        messages = compact and compact.messages or messages,
         output_config = { effort = EFFORT },
         -- streamed, with the thinking summarised as it goes: CC's timeout
         -- is for 60 s with nothing coming in, so the reply has to keep
@@ -1897,12 +1933,13 @@ local function body()
         thinking = { type = "adaptive", display = "summarized" },
         -- a refusal by the safety classifiers is retried on a fallback
         -- model server-side (see the API docs: server-side fallback)
-        fallbacks = "default",
+        fallbacks = not compact and "default" or nil,
         -- a long session's old tool calls and thinking are cleared
         -- server-side in one go at a mark (the newest kept, the memory
         -- tool's never), so each round trip doesn't carry all of them
         -- (contextEdits; see the API docs: context editing)
-        context_management = contextEdits(),
+        context_management = not compact and contextEdits() or nil,
+        compaction = compact and { type = "summarize", instructions = COMPACT.INSTRUCTIONS } or nil,
     }), { allow_repetitions = true, unicode_strings = true })
 end
 
@@ -1912,6 +1949,17 @@ local HEADERS = {
     ["anthropic-version"] = API_VERSION,
     ["anthropic-beta"] = "server-side-fallback-2026-07-01,context-management-2025-06-27",
 }
+
+-- The headers: with compaction's beta header too on a compaction request
+-- and on every request whose conversation starts with a summary
+function COMPACT.headers(compact)
+    local first = messages[1]
+    local block = first and type(first.content) == "table" and first.content[1]
+    if not (compact or block and block.type == "compaction") then return HEADERS end
+    local h = tables.copy(HEADERS)
+    h["anthropic-beta"] = HEADERS["anthropic-beta"] .. "," .. COMPACT.beta
+    return h
+end
 
 -- The events' data in a streamed reply: what follows each "data: ", up to
 -- the end of its line.
@@ -1992,13 +2040,15 @@ end
 local RETRY_CODES = { [429] = true, [500] = true, [502] = true, [503] = true, [529] = true }
 local RETRY_ERRORS = { overloaded_error = true, api_error = true, rate_limit_error = true }
 
--- Send the conversation; the reply as a table, or nil and why.  Rate
--- limits, overloads and outages are retried with a growing wait, and so
--- is a stream cut off by an overload.
-local function request()
+-- Send the conversation (or `compact`'s compaction request, as body has
+-- it); the reply as a table, or nil and why.  Rate limits, overloads and
+-- outages are retried with a growing wait, and so is a stream cut off by
+-- an overload.
+local function request(compact)
     local wait = 2
     for attempt = 1, RETRIES + 2 do         -- (one more for the harder clear)
-        local h, err, failed = http.post({ url = API_URL, headers = HEADERS, body = body(), timeout = HTTP_TIMEOUT })
+        local h, err, failed = http.post({ url = API_URL, headers = COMPACT.headers(compact), body = body(compact),
+                                           timeout = HTTP_TIMEOUT })
         local code, got
         if h then
             code, got = h.getResponseCode(), h.readAll()
@@ -2025,7 +2075,7 @@ local function request()
             end
             again = (not code) or RETRY_CODES[code] == true
         end
-        if tooLong and not hardClear then
+        if tooLong and not hardClear and not compact then
             -- once, at once: the same conversation with more of it cleared
             hardClear = true
             say("orange", "API: the conversation is too long; trying again with more of it cleared.")
@@ -2181,6 +2231,103 @@ function replyLog.add(reply, started)
         log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
             thought and string.format(", %d thinking", thought) or ""))
     end
+end
+
+-- A compaction reply's usage, for count: its own counts are 0, the
+-- summary call's are in usage.iterations
+function COMPACT.usage(reply)
+    local u = { input_tokens = 0, output_tokens = 0, cache_read_input_tokens = 0, cache_creation_input_tokens = 0 }
+    for _, it in ipairs((reply.usage or {}).iterations or {}) do
+        for k in pairs(u) do u[k] = u[k] + (tonumber(it[k]) or 0) end
+    end
+    return { usage = u }
+end
+
+-- The conversation from the summary on: the block first, as an assistant
+-- message of its own (with the cache's mark after it), in place of the
+-- messages it summarized, then the ones kept as they were.  What was
+-- cleared or counted of the old conversation goes with it.
+function COMPACT.swap(cut, block)
+    block.cache_control = CACHE
+    local kept = {}
+    for i = cut + 1, #messages do kept[#kept + 1] = messages[i] end
+    for i = #messages, 1, -1 do messages[i] = nil end
+    messages[1] = { role = "assistant", content = { block } }
+    for _, m in ipairs(kept) do messages[#messages + 1] = m end
+    hardClear = false
+    replyLog.reset()
+end
+
+-- Summarize messages 1 to cut (`why` for the log), keeping the rest word
+-- for word after the summary: true once the conversation starts with it,
+-- false (logged) when no summary came.
+function COMPACT.run(cut, why)
+    local part = {}
+    for i = 1, cut do part[i] = messages[i] end
+    log(string.format("compacting at %s: %d messages, %d kept as they are; the last call had %d tokens in",
+        why, cut, #messages - cut, CLEAR.lastInput or 0))
+    local asked = { messages = part, maxTokens = COMPACT.maxTokens }
+    for _ = 1, 2 do
+        local started = now()
+        local reply, err = request(asked)
+        if not reply then
+            log("compaction failed: " .. tostring(err))
+            return false
+        end
+        local spent = COMPACT.usage(reply)
+        count(spent, now() - started)
+        local block = reply.content and reply.content[1]
+        if reply.stop_reason == "compaction" and block and block.type == "compaction" then
+            COMPACT.swap(cut, block)
+            local u = spent.usage
+            log(string.format("compacted: %d messages into a summary of %d tokens (%d characters); the call read %d tokens, %d of them from the cache",
+                cut, u.output_tokens, #tostring(block.content or ""),
+                u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens, u.cache_read_input_tokens))
+            return true
+        end
+        local short = reply.stop_reason == "max_tokens"
+        log(string.format("compaction: no summary (stop_reason %s)%s", tostring(reply.stop_reason),
+            short and string.format("; asked again with %d tokens", asked.maxTokens * 2) or ""))
+        if not short then return false end
+        asked.maxTokens = asked.maxTokens * 2
+    end
+    return false
+end
+
+-- Is a goal's end the time to compact: the last call's input over
+-- COMPACT.boundary (nil after a web search: not this time)
+function COMPACT.due()
+    return (CLEAR.lastInput or 0) > COMPACT.boundary and #messages > 1
+end
+
+-- The player's next line, the conversation summarized meanwhile when it's
+-- due: while they type (as a routine beside the prompt), and before their
+-- goal is sent if they're quicker (with no parallel, always after they
+-- type); not when they quit or start a new conversation (COMPACT.DROPPED).
+-- All of it: an assistant turn whose tool calls have no results (the API
+-- refuses that) stays out, kept.
+COMPACT.DROPPED = { [""] = true, ["/new"] = true }
+function COMPACT.whileAsking(label)
+    if not COMPACT.due() then return ask(label) end
+    say("grey", string.format("(the conversation, %dk tokens, is summarized while you type)", math.floor(CLEAR.lastInput / 1000 + 0.5)))
+    local cut = #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+    if not (parallel and parallel.waitForAny) then
+        local line = ask(label)
+        if not COMPACT.DROPPED[text.trim(line)] then COMPACT.run(cut, "a goal's end") end
+        return line
+    end
+    local w = {}
+    parallel.waitForAny(
+        function()
+            COMPACT.run(cut, "a goal's end")
+            w.done = true
+            while w.line == nil do os.pullEvent() end
+        end,
+        function()
+            w.line = ask(label)
+            while not w.done and not COMPACT.DROPPED[text.trim(w.line)] do os.pullEvent() end
+        end)
+    return w.line
 end
 
 local function converse(goal)
@@ -2354,7 +2501,7 @@ local function main()
             say("grey", line)
             log("goal done: " .. line)
             fs.delete(resume.file)
-            goal = ask("> ")
+            goal = COMPACT.whileAsking("> ")
         end
     end
 end

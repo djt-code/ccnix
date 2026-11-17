@@ -2055,8 +2055,8 @@ HTTP.queue = {
     reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inp(185000)),
     reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inp(100000)),
     reply({ toolUse("lua", { code = "return 4" }) }, "tool_use", inp(101000)),
-    reply({ text("Done.") }, "end_turn", inp(102000)),
-    reply({ text("More.") }, "end_turn", inp(103000)),
+    reply({ text("Done.") }, "end_turn", inp(99000)),
+    reply({ text("More.") }, "end_turn", inp(99500)),
 }
 run("grow")
 local function edits42(n) return HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {} end
@@ -2080,4 +2080,173 @@ check("after it: the same clear, the counts grown by what came since (a lua call
     kept(4) == "1/7" and kept(5) == "1/8" and kept(6) == "2/8", kept(4) .. " " .. kept(5) .. " " .. kept(6))
 local _, marks = (Mine.files["claude.log"] or ""):gsub("context: a deep clear", "")
 check("...and under the mark again, no second deep clear", marks == 1, marks)
+end
+
+-- The calls' usage for the scenarios on compaction: n tokens in, all but
+-- 100 of them read from the cache
+local function inTokens(n)
+    return { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = n - 100, cache_creation_input_tokens = 0 } }
+end
+-- The compaction block request n starts with, or nil
+local function blockOf(n)
+    local first = HTTP.requests[n] and HTTP.requests[n].body.messages[1]
+    local b = first and type(first.content) == "table" and first.content[1]
+    return b and b.type == "compaction" and b or nil, first
+end
+local function hasBeta(n)
+    local h = HTTP.requests[n] and HTTP.requests[n].headers or {}
+    return tostring(h["anthropic-beta"] or ""):find("compact-2026-09-04", 1, true) ~= nil
+end
+
+-- 43. compaction at a goal's end (ADR-0013 D9): a goal that ends with the
+--     last call's input over 100k has the conversation summarized before
+--     the next goal is sent: a request of its own, the conversation as it
+--     stands with our summary prompt (no tool calls, text only), several
+--     thousand tokens, no context edits, the beta header; the next goal's
+--     request starts with the block, an assistant message of its own with
+--     the cache's mark after it, in place of all it summarized; later
+--     requests carry the header too; compacting again starts from the
+--     block, and only the newest is sent; under 100k, none; logged
+do
+fresh({ "and the next", "and a third", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(90000)),
+    reply({ text("Done.") }, "end_turn", inTokens(120000)),
+    M.compactionReply("Summary one: dug at 0,0,2."),
+    reply({ text("Next done.") }, "end_turn", inTokens(130000)),
+    M.compactionReply("Summary two: one and the next."),
+    reply({ text("Third done.") }, "end_turn", inTokens(50000)),
+}
+run("grow big")
+local c3 = HTTP.requests[3] and HTTP.requests[3].body or {}
+check("a goal ending over 100k: the next request is a compaction of the conversation as it stands (4 messages, the last the reply)",
+    c3.compaction and c3.compaction.type == "summarize" and #c3.messages == 4 and c3.messages[4].role == "assistant"
+        and c3.messages[1].content == "grow big", textutils.serialiseJSON(c3.compaction or {}))
+check("...with our own summary prompt: the goal, the player's words, places, lessons, helpers and skills; no tool calls, text only",
+    c3.compaction and c3.compaction.instructions:find("the player's own words", 1, true) and c3.compaction.instructions:find("coordinates", 1, true)
+        and c3.compaction.instructions:find("lessons and mistakes", 1, true) and c3.compaction.instructions:find("skills", 1, true)
+        and c3.compaction.instructions:find("Do not call any tool: answer with the summary text only.", 1, true) and #c3.compaction.instructions <= 16384)
+check("...the same model, system prompt, tools and thinking; several thousand tokens; no context edits, no fallback model; the beta header",
+    c3.model == HTTP.requests[2].body.model and c3.system[1].text == HTTP.requests[2].body.system[1].text
+        and #c3.tools == #HTTP.requests[2].body.tools and c3.thinking.type == "adaptive" and c3.max_tokens == 16000
+        and c3.context_management == nil and c3.fallbacks == nil and hasBeta(3) and not hasBeta(2), tostring(c3.max_tokens))
+local b4, first4 = blockOf(4)
+local m4 = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+check("the next goal's request starts with the block, as returned, an assistant message of its own, the cache's mark after it; then the goal alone",
+    b4 and b4.content == "Summary one: dug at 0,0,2." and b4.signature == "csig" and #first4.content == 1 and first4.role == "assistant"
+        and b4.cache_control and b4.cache_control.type == "ephemeral" and #m4 == 2 and m4[2].role == "user"
+        and m4[2].content == "and the next", textutils.serialiseJSON(m4))
+check("...with the beta header, and its usual context edit (all thinking kept)", hasBeta(4)
+    and HTTP.requests[4].body.context_management.edits[1].keep == "all")
+local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
+check("compacting again: the request starts with the current block and has the rest after it",
+    c5.compaction and blockOf(5) and blockOf(5).content == "Summary one: dug at 0,0,2." and #c5.messages == 3, #(c5.messages or {}))
+local m6 = HTTP.requests[6] and HTTP.requests[6].body.messages or {}
+local blocks6 = 0
+for _, m in ipairs(m6) do
+    for _, b in ipairs(type(m.content) == "table" and m.content or {}) do if b.type == "compaction" then blocks6 = blocks6 + 1 end end
+end
+check("...and then only the newest block is sent", blocks6 == 1 and blockOf(6) and blockOf(6).content == "Summary two: one and the next."
+    and #m6 == 2 and hasBeta(6), blocks6)
+check("a goal ending under 100k: no compaction (six calls in all)", #HTTP.requests == 6, #HTTP.requests)
+local log43 = Mine.files["claude.log"] or ""
+check("the log: what was compacted and into what",
+    log43:find("compacting at a goal's end: 4 messages, 0 kept as they are; the last call had 120000 tokens in", 1, true)
+        and log43:find("compacted: 4 messages into a summary of 1200 tokens (26 characters); the call read 95000 tokens, 90000 of them from the cache", 1, true),
+    log43:match("compacted[^\n]*"))
+check("...and the summary call's tokens counted in the session's (210040, then its 96200, then 130020: 436260)",
+    Mine.logHas("^%[130000 tokens in: 129900 from the cache, 0 written to it, 100 new; 20 out; 436260 in all%]"))
+check("...and the screen says it's summarized while the player types", Mine.logHas("^%(the conversation, 120k tokens, is summarized while you type%)"))
+end
+
+-- 43b. the summary at a goal's end runs beside the prompt (CC's parallel:
+--      each scripted event goes to the routines waiting for it; read()
+--      waits for "sim_read", the summary's request for "sim_http"): the
+--      player typing first has their goal wait for the summary and go
+--      after it; the summary done first, the prompt goes on; a /new isn't
+--      kept waiting (nothing more is sent for it).  And a goal that ended
+--      on a reply with a tool call (a second cut-off) leaves that turn out
+--      of the summary, kept after the block, its call answered.
+do
+local SCRIPT, inParallel, ORDER = {}, 0, {}
+parallel = { waitForAny = function(...)
+    inParallel = inParallel + 1
+    local cos, filters, ev = {}, {}, { n = 0 }
+    for i, f in ipairs({ ... }) do cos[i] = coroutine.create(f) end
+    while true do
+        for i, co in ipairs(cos) do
+            if filters[i] == nil or filters[i] == ev[1] then
+                local ok, f = coroutine.resume(co, table.unpack(ev, 1, ev.n))
+                if not ok then inParallel = inParallel - 1; error(f, 0) end
+                if coroutine.status(co) == "dead" then inParallel = inParallel - 1; return i end
+                filters[i] = f
+            end
+        end
+        local nxt = table.remove(SCRIPT, 1)
+        if not nxt then error("waited with no event scripted") end
+        ev = table.pack(table.unpack(nxt))
+    end
+end }
+local pullWas, readWas, postWas = os.pullEvent, read, HTTP.api.post
+os.pullEvent = function(filter) return coroutine.yield(filter) end
+peripheral.find = function() return nil end         -- (no chat box: the listener has nothing to do)
+read = function()
+    if inParallel == 0 then return readWas() end
+    local _, line = os.pullEvent("sim_read")
+    ORDER[#ORDER + 1] = "typed"
+    return line
+end
+HTTP.api.post = function(...)
+    if inParallel > 0 then
+        os.pullEvent("sim_http")
+        ORDER[#ORDER + 1] = "summarized"
+    end
+    return postWas(...)
+end
+local function big(n) return reply({ text("Done.") }, "end_turn", inTokens(n)) end
+
+fresh({ "" })
+SCRIPT, ORDER = { { "sim_read", "the next goal" }, { "sim_http" } }, {}
+HTTP.queue = { big(120000), M.compactionReply("S1."), big(50000) }
+run("typed first")
+local m3 = HTTP.requests[3] and HTTP.requests[3].body.messages or {}
+check("the player typing first: their goal waits for the summary, then goes after it",
+    table.concat(ORDER, " ") == "typed summarized" and HTTP.requests[2].body.compaction and blockOf(3)
+        and m3[2] and m3[2].content:sub(1, 15) == "the next goal\n\n", table.concat(ORDER, " "))
+
+fresh({ "" })
+SCRIPT, ORDER = { { "sim_http" }, { "sim_read", "go on" } }, {}
+HTTP.queue = { big(120000), M.compactionReply("S1."), big(50000) }
+run("summary first")
+check("the summary done first: the prompt goes on, and the goal goes after it",
+    table.concat(ORDER, " ") == "summarized typed" and blockOf(3) and #HTTP.requests == 3, table.concat(ORDER, " "))
+
+fresh({ "", "" })
+SCRIPT, ORDER = { { "sim_read", "/new" } }, {}
+HTTP.queue = { big(120000) }
+run("then new")
+check("a /new isn't kept waiting for the summary, and nothing is sent for it",
+    #HTTP.requests == 1 and table.concat(ORDER, " ") == "typed" and Mine.logHas("^A new conversation"), #HTTP.requests)
+
+os.pullEvent, read, HTTP.api.post = pullWas, readWas, postWas
+parallel, peripheral.find = nil, nil
+
+fresh({ "go on", "" })
+local cutUsage = inTokens(120000)
+cutUsage.usage.output_tokens = 64000
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "max_tokens", cutUsage),
+    reply({ toolUse("lua", { code = "return 2" }) }, "max_tokens", cutUsage),
+    M.compactionReply("S2."),
+    big(50000),
+}
+run("cut twice")
+local c3b = HTTP.requests[3] and HTTP.requests[3].body or {}
+local m4b = HTTP.requests[4] and HTTP.requests[4].body.messages or {}
+local kept4 = m4b[2] and m4b[2].content or {}
+local answered = m4b[3] and type(m4b[3].content) == "table" and m4b[3].content[1] or {}
+check("a goal ended on a tool call: the summary leaves that turn out, kept after the block, its call answered with the next goal",
+    c3b.compaction and #c3b.messages == 3 and blockOf(4) and m4b[2].role == "assistant" and kept4[1] and kept4[1].type == "tool_use"
+        and answered.type == "tool_result" and answered.tool_use_id == kept4[1].id and answered.is_error == true,
+    #(c3b.messages or {}))
 end
