@@ -216,11 +216,11 @@ local HTTP_TIMEOUT = 60         -- seconds with nothing coming in, at most 60 in
                                 -- reply is streamed, so a long one keeps coming
 local NEAR_AREAS = 16          -- blocks: how close a protected area is "near" in status
 local MEMORY_DIR = "claude/memories"   -- where the memory tool's /memories is kept
--- Memory over MEMORY_LARGE bytes in all is a start note: a file viewed
+-- Memory over NOTES.large bytes in all is a start note: a file viewed
 -- stays in the conversation, never cleared, so it is sent on every call
--- (about BYTES_A_TOKEN bytes a token: the field's 80 KB notes.md came to
--- about 28k tokens)
-local MEMORY_LARGE, BYTES_A_TOKEN = 32 * 1024, 3
+-- (about NOTES.bytesAToken bytes a token: the field's 80 KB notes.md came
+-- to about 28k tokens)
+local NOTES = { large = 32 * 1024, bytesAToken = 3 }
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
 local NEWS = "help/claude-news.txt"     -- what changed, for the model (doc/claude-news.txt, copied to help/)
 local WEB_USES = 5              -- web searches, and fetches, at most per reply
@@ -1563,21 +1563,21 @@ local function whatsNew()
 end
 
 -- The bytes in a folder and every folder in it
-local function folderSize(dir)
+function NOTES.size(dir)
     local total = 0
     for _, name in ipairs(fs.exists(dir) and fs.isDir(dir) and fs.list(dir) or {}) do
         local file = fs.combine(dir, name)
-        total = total + (fs.isDir(file) and folderSize(file) or fs.getSize(file))
+        total = total + (fs.isDir(file) and NOTES.size(file) or fs.getSize(file))
     end
     return total
 end
 
--- The note on memory grown past MEMORY_LARGE, or nil
-local function memoryNote()
-    local size = folderSize(MEMORY_DIR)
-    if size <= MEMORY_LARGE then return nil end
+-- The note on memory grown past NOTES.large, or nil
+function NOTES.note()
+    local size = NOTES.size(MEMORY_DIR)
+    if size <= NOTES.large then return nil end
     return string.format("Your notes in %s are %d KB, about %dk tokens on every call once viewed: move what you no longer need to an archive file outside %s (under /%s/, read with fs when it's wanted).",
-        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / BYTES_A_TOKEN / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
+        MEMORY_ROOT, math.floor(size / 1024 + 0.5), math.floor(size / NOTES.bytesAToken / 1000 + 0.5), MEMORY_ROOT, WRITE_DIR)
 end
 
 -- Keep the version the model has had the news for.
@@ -1957,10 +1957,21 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
--- Each kind of context edit the API applies: the log's line for it, from
--- the fields it reports, and what it does to the cache when it changes
--- (another kind: its type, and the tokens it freed)
-local EDITS = {
+-- What the log says of a reply besides its tokens: each context edit the
+-- API applied (by its kind), the cache written again, a cut-off.
+--
+-- EDITS: each kind of edit's line, from the fields it reports, and what
+-- it does to the cache when it changes (another kind: its type, and the
+-- tokens it freed).  cleared: the last line logged for each kind (the API
+-- reports the same clear on every call after it, so a line is logged
+-- when it differs from its own kind's last one).  last: the last call,
+-- what it had in all and when it came back (nil: nothing to compare with,
+-- at a conversation's start or after a web search, whose usage adds up
+-- the search's passes).  A call that read from the cache at least
+-- rewriteMin tokens less than the last call had in all, and wrote at
+-- least that much, wrote the conversation to the cache again from where
+-- it changed (an hour's cache costs twice the input's price to write).
+local replyLog = { cleared = {}, rewriteMin = 20000, EDITS = {
     clear_thinking_20251015 = { why = "old thinking cleared", line = function(e)
         return string.format("context: old thinking cleared (%d turns, %d tokens)",
             e.cleared_thinking_turns or 0, e.cleared_input_tokens or 0)
@@ -1969,38 +1980,46 @@ local EDITS = {
         return string.format("context: %d old tool results cleared (%d tokens)",
             e.cleared_tool_uses or 0, e.cleared_input_tokens or 0)
     end },
-}
-local function editLine(e)
-    local kind = EDITS[e.type]
-    if kind then return kind.line(e), kind.why end
-    return string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0), tostring(e.type)
+} }
+
+-- A new conversation: no clears seen, nothing to compare with
+function replyLog.reset()
+    replyLog.cleared, replyLog.last = {}, nil
 end
--- The last `context:` line logged for each kind of edit: the API reports
--- the same clear on every call after it, so a line is logged when it
--- differs from its own kind's last one
-local lastCleared = {}
--- The last call: what it had in all and when it came back, so the next
--- one can tell when the cache was written again (nil: nothing to compare
--- with, at a conversation's start or after a web search, whose usage adds
--- up the search's passes)
-local lastCall
--- A call that read from the cache at least REWRITE_MIN tokens less than the
--- last call had in all, and wrote at least that much, wrote the
--- conversation to the cache again from where it changed (an hour's cache
--- costs twice the input's price to write): logged with why, when the
--- harness saw why (`cleared`: the edits that changed in this reply;
--- `started`: when this call was made)
-local REWRITE_MIN = 20000
-local function cacheCheck(u, started, cleared)
-    local read, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
-    if not lastCall or lastCall.input - read < REWRITE_MIN or written < REWRITE_MIN then return end
-    local why = tables.copy(cleared)
-    if started - lastCall.at >= CACHE_SECONDS[opts.cache or "5m"] then
-        why[#why + 1] = "over the cache's " .. CACHE_TTLS[opts.cache or "5m"] .. " since the last call"
+
+-- Log what changed in `reply` (asked for at `started`)
+function replyLog.add(reply, started)
+    local why = {}             -- (what wrote the cache again, if it was)
+    for _, e in ipairs((reply.context_management or {}).applied_edits or {}) do
+        local kind = replyLog.EDITS[e.type]
+        local line = kind and kind.line(e)
+            or string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0)
+        if line ~= replyLog.cleared[e.type] then
+            log(line)
+            replyLog.cleared[e.type] = line
+            why[#why + 1] = kind and kind.why or tostring(e.type)
+        end
     end
-    log(string.format("cache: written again (%d tokens written, %d read from it; the last call had %d in): %s",
-        written, read, lastCall.input, #why > 0 and table.concat(why, ", ") or "why not seen"))
+    local u, last = reply.usage or {}, replyLog.last
+    local read, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+    if last and last.input - read >= replyLog.rewriteMin and written >= replyLog.rewriteMin then
+        if started - last.at >= CACHE_SECONDS[opts.cache or "5m"] then
+            why[#why + 1] = "over the cache's " .. CACHE_TTLS[opts.cache or "5m"] .. " since the last call"
+        end
+        log(string.format("cache: written again (%d tokens written, %d read from it; the last call had %d in): %s",
+            written, read, last.input, #why > 0 and table.concat(why, ", ") or "why not seen"))
+    end
+    replyLog.last = { input = (u.input_tokens or 0) + read + written, at = now() }
+    for _, b in ipairs(reply.content) do
+        if b.type == "server_tool_use" then replyLog.last = nil end
+    end
+    if reply.stop_reason == "max_tokens" then
+        local thought = (u.output_tokens_details or {}).thinking_tokens
+        log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
+            thought and string.format(", %d thinking", thought) or ""))
+    end
 end
+
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -2034,30 +2053,7 @@ local function converse(goal)
                 log(what)
             end
         end
-        -- (logged when it differs from the last one of its kind: a clear
-        -- stays applied, and is reported again, on every call until a
-        -- bigger one)
-        local cleared = {}
-        for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            local line, why = editLine(edit)
-            if line ~= lastCleared[edit.type] then
-                log(line)
-                lastCleared[edit.type] = line
-                cleared[#cleared + 1] = why
-            end
-        end
-        local u = reply.usage or {}
-        cacheCheck(u, started, cleared)
-        lastCall = { input = (u.input_tokens or 0) + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0),
-                     at = now() }
-        for _, b in ipairs(reply.content) do
-            if b.type == "server_tool_use" then lastCall = nil end
-        end
-        if reply.stop_reason == "max_tokens" then
-            local thought = (u.output_tokens_details or {}).thinking_tokens
-            log(string.format("cut off at max_tokens (%d out%s)", u.output_tokens or 0,
-                thought and string.format(", %d thinking", thought) or ""))
-        end
+        replyLog.add(reply, started)
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):
             -- sent back as it is, it carries on where it was
@@ -2114,12 +2110,13 @@ end
 local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
-    hardClear, lastCleared, lastCall, startNotes = false, {}, nil, {}
+    hardClear, startNotes = false, {}
+    replyLog.reset()
     startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
     say("yellow", "A new conversation: the old one is put aside (the memory and the files stay); the helpers are loaded again.")
-    local memory = memoryNote()
+    local memory = NOTES.note()
     if memory then say("yellow", memory); startNotes[#startNotes + 1] = memory end
     log("new conversation")
 end
@@ -2148,7 +2145,7 @@ local function main()
         log("news: " .. news)
         startNotes[#startNotes + 1] = news
     end
-    local memory = memoryNote()
+    local memory = NOTES.note()
     if memory then
         say("yellow", memory)
         log("memory: " .. memory)

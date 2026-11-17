@@ -463,6 +463,7 @@ check("a tool call cut off at max_tokens is answered (not run), then told to car
 
 -- 13b. each cut-off is logged with what the reply used (ADR-0013 phase 1),
 --      the second as the first (what a second one does is D4's)
+do
 fresh({ "" })
 HTTP.queue = {
     reply({ thinking() }, "max_tokens", { usage = { input_tokens = 100, output_tokens = 32000, cache_read_input_tokens = 50,
@@ -475,6 +476,7 @@ local klog = Mine.files["claude.log"] or ""
 check("a cut-off at max_tokens is logged with the tokens out and thinking, each time",
     #HTTP.requests == 2 and klog:find("cut off at max_tokens (32000 out, 31800 thinking)", 1, true)
         and klog:find("cut off at max_tokens (32000 out)\n", 1, true), klog)
+end
 
 -- 14. a request that fails after tool results: the results stay, and the
 --     next goal goes on from them in the same turn
@@ -750,6 +752,7 @@ check("the same clear reported on three calls is logged once, a new one again",
 -- each logged by its own type (old thinking as turns, not as "0 old tool
 -- results"), and each once until it changes, the other's line between
 -- them notwithstanding
+do
 fresh({ "" })
 local function bothCleared(turns, thinkTokens)
     return { context_management = { applied_edits = {
@@ -770,12 +773,14 @@ local _, think4 = blog:gsub("context: old thinking cleared %(4 turns, 18000 toke
 check("both edits in a reply: old thinking logged as turns, each edit once until it changes",
     toolLines == 1 and think3 == 1 and think4 == 1 and not blog:find("context: 0 old tool results", 1, true),
     toolLines .. " " .. think3 .. " " .. think4)
+end
 
 -- the cache written again (ADR-0013 phase 1): a call that reads much less
 -- from the cache than the last call had in all is logged, with why when
 -- the harness saw why (a clear in that reply, a wait past the cache's
 -- TTL); the growth of a conversation isn't, nor the call after a web
 -- search (its usage adds up the search's passes), nor a new conversation
+do
 fresh({ "/new", "fresh start", "" })
 local function used(read, written, more)
     local r = { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = read,
@@ -814,6 +819,7 @@ check("the cache written again is logged with why: a clear, the cache's TTL pass
         and rewrites[2] == "cache: written again (80000 tokens written, 27000 read from it; the last call had 105100 in): over the cache's 5 minutes since the last call"
         and rewrites[3] == "cache: written again (60000 tokens written, 80000 read from it; the last call had 114100 in): why not seen",
     table.concat(rewrites, "\n"))
+end
 
 -- 19b. the rest of the sandbox (scenario 2 has the start of it): write
 --     and io.write come back a line at a time (print after a write
