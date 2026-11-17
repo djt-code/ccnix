@@ -756,6 +756,50 @@ check("both edits in a reply: old thinking logged as turns, each edit once until
     toolLines == 1 and think3 == 1 and think4 == 1 and not blog:find("context: 0 old tool results", 1, true),
     toolLines .. " " .. think3 .. " " .. think4)
 
+-- the cache written again (ADR-0013 phase 1): a call that reads much less
+-- from the cache than the last call had in all is logged, with why when
+-- the harness saw why (a clear in that reply, a wait past the cache's
+-- TTL); the growth of a conversation isn't, nor the call after a web
+-- search (its usage adds up the search's passes), nor a new conversation
+fresh({ "/new", "fresh start", "" })
+local function used(read, written, more)
+    local r = { usage = { input_tokens = 100, output_tokens = 20, cache_read_input_tokens = read,
+                          cache_creation_input_tokens = written } }
+    for k, v in pairs(more or {}) do r[k] = v end
+    return r
+end
+local thinkCleared = { context_management = { applied_edits = {
+    { type = "clear_thinking_20251015", cleared_thinking_turns = 1, cleared_input_tokens = 9000 } } } }
+local timeWas19, sleepWas19 = os.time, sleep
+local skipped = 0
+os.time = function(t) if t ~= nil then return timeWas19(t) end return timeWas19() + skipped end
+sleep = function(s) skipped = skipped + (tonumber(s) or 0) end
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", used(27000, 70000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", used(97000, 3000)),
+    reply({ toolUse("lua", { code = "return 3" }) }, "tool_use", used(27000, 76000, thinkCleared)),
+    reply({ toolUse("lua", { code = "sleep(400) return 4" }) }, "tool_use", used(103000, 2000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 5" }) }, "tool_use", used(27000, 80000, thinkCleared)),
+    reply({ { type = "server_tool_use", id = "srvtoolu_9", name = "web_search", input = { query = "x" } },
+            { type = "web_search_tool_result", tool_use_id = "srvtoolu_9", content = {} },
+            toolUse("lua", { code = "return 6" }) }, "tool_use", used(300000, 5000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 7" }) }, "tool_use", used(110000, 4000, thinkCleared)),
+    reply({ toolUse("lua", { code = "return 8" }) }, "tool_use", used(80000, 60000, thinkCleared)),
+    reply({ text("Done.") }, "end_turn", used(140000, 2000, thinkCleared)),
+    reply({ text("New here.") }, "end_turn", used(27000, 1000)),
+}
+run("rewrites")
+os.time, sleep = timeWas19, sleepWas19
+local rlog = Mine.files["claude.log"] or ""
+local rewrites = {}
+for line in rlog:gmatch("cache: written again[^\n]*") do rewrites[#rewrites + 1] = line end
+check("the cache written again is logged with why: a clear, the cache's TTL passed, or not seen; growth and a web search's sum aren't",
+    #rewrites == 3
+        and rewrites[1] == "cache: written again (76000 tokens written, 27000 read from it; the last call had 100100 in): old thinking cleared"
+        and rewrites[2] == "cache: written again (80000 tokens written, 27000 read from it; the last call had 105100 in): over the cache's 5 minutes since the last call"
+        and rewrites[3] == "cache: written again (60000 tokens written, 80000 read from it; the last call had 114100 in): why not seen",
+    table.concat(rewrites, "\n"))
+
 -- 19b. the rest of the sandbox (scenario 2 has the start of it): write
 --     and io.write come back a line at a time (print after a write
 --     finishes its line), printError too, and the plain Lua bits a helper

@@ -1930,27 +1930,50 @@ end
 -- Work at `goal` until the model stops: run its tool calls and send the
 -- results back, call after call, up to MAX_STEPS of them.
 local startNotes = {}   -- what the model is told with its next goal: helpers that failed to load, a new conversation
--- The log's line for each kind of context edit the API applied, from the
--- fields it reports (another kind: its type, and the tokens it freed)
-local EDIT_LINES = {
-    clear_thinking_20251015 = function(e)
+-- Each kind of context edit the API applies: the log's line for it, from
+-- the fields it reports, and what it does to the cache when it changes
+-- (another kind: its type, and the tokens it freed)
+local EDITS = {
+    clear_thinking_20251015 = { why = "old thinking cleared", line = function(e)
         return string.format("context: old thinking cleared (%d turns, %d tokens)",
             e.cleared_thinking_turns or 0, e.cleared_input_tokens or 0)
-    end,
-    clear_tool_uses_20250919 = function(e)
+    end },
+    clear_tool_uses_20250919 = { why = "old tool results cleared", line = function(e)
         return string.format("context: %d old tool results cleared (%d tokens)",
             e.cleared_tool_uses or 0, e.cleared_input_tokens or 0)
-    end,
+    end },
 }
 local function editLine(e)
-    local line = EDIT_LINES[e.type]
-    if line then return line(e) end
-    return string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0)
+    local kind = EDITS[e.type]
+    if kind then return kind.line(e), kind.why end
+    return string.format("context: %s (%d tokens)", tostring(e.type), e.cleared_input_tokens or 0), tostring(e.type)
 end
 -- The last `context:` line logged for each kind of edit: the API reports
 -- the same clear on every call after it, so a line is logged when it
 -- differs from its own kind's last one
 local lastCleared = {}
+-- The last call: what it had in all and when it came back, so the next
+-- one can tell when the cache was written again (nil: nothing to compare
+-- with, at a conversation's start or after a web search, whose usage adds
+-- up the search's passes)
+local lastCall
+-- A call that read from the cache at least REWRITE_MIN tokens less than the
+-- last call had in all, and wrote at least that much, wrote the
+-- conversation to the cache again from where it changed (an hour's cache
+-- costs twice the input's price to write): logged with why, when the
+-- harness saw why (`cleared`: the edits that changed in this reply;
+-- `started`: when this call was made)
+local REWRITE_MIN = 20000
+local function cacheCheck(u, started, cleared)
+    local read, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+    if not lastCall or lastCall.input - read < REWRITE_MIN or written < REWRITE_MIN then return end
+    local why = tables.copy(cleared)
+    if started - lastCall.at >= CACHE_SECONDS[opts.cache or "5m"] then
+        why[#why + 1] = "over the cache's " .. CACHE_TTLS[opts.cache or "5m"] .. " since the last call"
+    end
+    log(string.format("cache: written again (%d tokens written, %d read from it; the last call had %d in): %s",
+        written, read, lastCall.input, #why > 0 and table.concat(why, ", ") or "why not seen"))
+end
 local function converse(goal)
     startNotes[#startNotes + 1] = listen.take()     -- (chat heard since the last reply)
     local said = #startNotes > 0 and goal .. "\n\n[" .. table.concat(startNotes, "]\n[") .. "]" or goal
@@ -1987,9 +2010,21 @@ local function converse(goal)
         -- (logged when it differs from the last one of its kind: a clear
         -- stays applied, and is reported again, on every call until a
         -- bigger one)
+        local cleared = {}
         for _, edit in ipairs((reply.context_management or {}).applied_edits or {}) do
-            local line = editLine(edit)
-            if line ~= lastCleared[edit.type] then log(line); lastCleared[edit.type] = line end
+            local line, why = editLine(edit)
+            if line ~= lastCleared[edit.type] then
+                log(line)
+                lastCleared[edit.type] = line
+                cleared[#cleared + 1] = why
+            end
+        end
+        local u = reply.usage or {}
+        cacheCheck(u, started, cleared)
+        lastCall = { input = (u.input_tokens or 0) + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0),
+                     at = now() }
+        for _, b in ipairs(reply.content) do
+            if b.type == "server_tool_use" then lastCall = nil end
         end
         if reply.stop_reason == "pause_turn" and pauses < PAUSES then
             -- the API stopped partway through its own tools (web searches):
@@ -2047,7 +2082,7 @@ end
 local NEW = "/new"
 local function newConversation()
     for i = #messages, 1, -1 do messages[i] = nil end
-    hardClear, lastCleared, startNotes = false, {}, {}
+    hardClear, lastCleared, lastCall, startNotes = false, {}, nil, {}
     startNotes[1] = "This is a new conversation: the one before it was put aside. Your memory and your files are as they were."
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[2] = failed end
