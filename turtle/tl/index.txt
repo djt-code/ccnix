@@ -268,7 +268,7 @@ T.map.cube(cx, cy, cz) - The cube at cx, cy, cz (map frame) as its 4096 bytes an
 Scans:
 T.scan(r, opts) - Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 T.mergeScan(entries, r, opts) - Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
-T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
+T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed, partial }.
 Inspecting:
 T.inspectAt(x, y, z, opts) - Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 T.inspectAll(list, opts) - T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed: the way to get block states over an area (T.scan gives names only).

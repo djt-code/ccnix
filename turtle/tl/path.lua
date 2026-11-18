@@ -35,6 +35,7 @@
 -- in the map and plans again from where it is, a few times.
 
 local T = require("turtlelib")
+local text = require("text")
 
 local UNKNOWN, PASS, DIG, WALL = 0, 1, 2, 3      -- what a cell is to a route
 local DIG_COST = 3                                -- a dig costs this much more than a move (a move is 1)
@@ -687,7 +688,10 @@ function T.travel(x, y, z, opts)
         if name and T.map then pcall(T.map.set, cell.x, cell.y, cell.z, name) end
         banned[#banned + 1] = { x = cell.x, y = cell.y, z = cell.z }
         local fresh, noRoute = plan(T.here(), goal, ruleOpts)
-        if not fresh then return false, stopped .. " (no route round: " .. tostring(noRoute) .. ")" end
+        if not fresh then
+            noRoute = tostring(noRoute)
+            return false, stopped .. " (no route round: " .. (text.stripPrefix(noRoute, "no route: ") or noRoute) .. ")"
+        end
         route = fresh
     end
     return false, "gave up after " .. replans .. " re-plans: " .. tostring(last)

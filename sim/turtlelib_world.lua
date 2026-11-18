@@ -856,8 +856,12 @@ T = fresh()
 tp(T, 0, 0, 0, 0)
 put(8, 2, 2, STONE); put(1, 0, 0, STONE)               -- the first centre is solid
 report = T.scanBox({ 0, 0, 0, 19, 4, 4 })
-check("a centre it cannot get to is a failure; the other scan is made", report and report.scanned == 1 and #report.failed == 1
-    and report.failed[1].x == 8 and report.failed[1].why:find("blocked by", 1, true), report and report.failed[1] and tostring(report.failed[1].why) or "nil")
+check("a centre it cannot get to (solid) is scanned from where it got to, within the scan, and listed as partial (ADR-0015)",
+    report and report.scanned == 2 and #report.failed == 0 and #report.partial == 1 and report.partial[1].x == 8
+        and report.partial[1].from and report.partial[1].why, report and tostring(report.partial[1] and report.partial[1].why) or "nil")
+check("...its why says each thing once (no \"no route: no route:\", no cell blocked twice over)", report and report.partial[1]
+    and not report.partial[1].why:find("no route: no route", 1, true) and select(2, report.partial[1].why:gsub("blocked by", "")) == 1,
+    report and report.partial[1] and report.partial[1].why)
 report = T.scanBox({ 0, 0, 0, 19, 4, 4 }, { move = { dig = true } })
 check("...with opts.move = { dig = true } it digs its way there", report and report.scanned == 2 and #report.failed == 0)
 EQ.left = nil

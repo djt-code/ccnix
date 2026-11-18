@@ -1453,10 +1453,15 @@ local function centres(lo, hi, r)
     return out
 end
 
--- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed }.
+-- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles,
+-- scanned, failed, partial }.
 --
--- It goes to each scan's centre first (T.moveTo with opts.move, such as { dig = true }); opts.radius for less (over 8 is refused, as
--- T.scan says why, unless opts.force: 8 or less is cheap).  Refuses a box that takes over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no good.
+-- It goes to each scan's centre first (T.moveTo with opts.move, default { path = true, scan = false }: round what's in
+-- the way; { path = true, dig = true } digs); a centre it can't get to (solid, or no way there) is scanned from where it
+-- got to when the centre is within the scan from there, and listed in partial as { x, y, z, from, why }.  opts.radius
+-- for less (over 8 is refused, as T.scan says why, unless opts.force: 8 or less is cheap).  Refuses a box that takes
+-- over 27 scans unless opts.force.  failed lists { x, y, z, why } for the scans not made; nil and why if the box is no
+-- good.
 function T.scanBox(box, opts)
     opts = opts or {}
     local x1, y1, z1, x2, y2, z2 = normBox(box)
@@ -1475,7 +1480,8 @@ function T.scanBox(box, opts)
     if #tiles > MAX_TILES and not opts.force then
         return nil, "that box takes " .. #tiles .. " scans (at most " .. MAX_TILES .. " unless forced): scan it in parts"
     end
-    local report = { tiles = #tiles, scanned = 0, failed = {} }
+    local report = { tiles = #tiles, scanned = 0, failed = {}, partial = {} }
+    local move = opts.move or { path = true, scan = false }
     local here = T.here()
     while #tiles > 0 do
         local best = 1
@@ -1483,11 +1489,17 @@ function T.scanBox(box, opts)
             if T.dist(here, tiles[i]) < T.dist(here, tiles[best]) then best = i end
         end
         local t = table.remove(tiles, best)
-        local ok, why = T.moveTo(t.x, t.y, t.z, opts.move)
-        if ok then
+        local ok, why = T.moveTo(t.x, t.y, t.z, move)
+        local at = T.here()
+        local near = not ok and math.max(math.abs(at.x - t.x), math.abs(at.y - t.y), math.abs(at.z - t.z)) <= r
+        if ok or near then
             local cells, info = T.scan(r, { force = opts.force })
             if cells then
                 report.scanned = report.scanned + 1
+                if near then
+                    report.partial[#report.partial + 1] = { x = t.x, y = t.y, z = t.z, from = { x = at.x, y = at.y, z = at.z },
+                                                            why = why }
+                end
             else
                 report.failed[#report.failed + 1] = { x = t.x, y = t.y, z = t.z, why = info }
                 break

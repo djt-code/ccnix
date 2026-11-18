@@ -1445,12 +1445,28 @@ function T.sideDir(side)
     return T.dir
 end
 
+-- An error for a cell given as something else, saying what was meant: T.posKey({ 1, 2, 3 }) is a list, not a cell.
+local function cellWanted(fn, got)
+    local was = type(got) ~= "table" and tostring(got)
+        or (got[1] ~= nil and ("a list { " .. tostring(got[1]) .. ", " .. tostring(got[2]) .. ", " .. tostring(got[3]) .. " }"))
+        or "a table with no x"
+    local hint = type(got) == "table" and got[1] ~= nil
+        and (": write { x = " .. tostring(got[1]) .. ", y = " .. tostring(got[2]) .. ", z = " .. tostring(got[3]) .. " }") or ""
+    error(fn .. " wants a cell { x =, y =, z = }, not " .. was .. hint, 3)
+end
+
 -- A copy of T.pos: { x, y, z }.
 function T.here() return { x = T.pos.x, y = T.pos.y, z = T.pos.z } end
 -- Is the turtle at p ({ x, y, z })?
-function T.at(p) return T.pos.x == p.x and T.pos.y == p.y and T.pos.z == p.z end
+function T.at(p)
+    if type(p) ~= "table" or p.x == nil then cellWanted("T.at", p) end
+    return T.pos.x == p.x and T.pos.y == p.y and T.pos.z == p.z
+end
 -- The key "x,y,z" for a position p.
-function T.posKey(p) return p.x .. "," .. p.y .. "," .. p.z end
+function T.posKey(p)
+    if type(p) ~= "table" or p.x == nil then cellWanted("T.posKey", p) end
+    return p.x .. "," .. p.y .. "," .. p.z
+end
 -- Inverse of posKey: the x, y, z of "x,y,z" (whole numbers, as posKey
 -- writes them); nil if k isn't one.
 function T.keyPos(k)
@@ -1459,7 +1475,11 @@ function T.keyPos(k)
     return convert.toInteger(part[1]), convert.toInteger(part[2]), convert.toInteger(part[3])
 end
 -- The taxicab distance between two positions.
-function T.dist(a, b) return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z) end
+function T.dist(a, b)
+    if type(a) ~= "table" or a.x == nil then cellWanted("T.dist", a) end
+    if type(b) ~= "table" or b.x == nil then cellWanted("T.dist", b) end
+    return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z)
+end
 
 -- The block next to the turtle in direction d.
 function T.neighbour(d)
@@ -1783,7 +1803,13 @@ function T.moveTo(x, y, z, opts)
                             if mine and noRoute then return true, mine .. "; " .. tostring(noRoute) end
                             return true, mine or noRoute
                         end
-                        if noRoute then why = why .. " (no route: " .. tostring(noRoute) .. ")" end
+                        if noRoute then
+                            -- (the finder's why most often says "no route", or starts with this one, itself: not twice)
+                            noRoute = tostring(noRoute)
+                            if text.startsWith(noRoute, why) then why = noRoute
+                            elseif text.startsWith(noRoute, "no route") then why = why .. " (" .. noRoute .. ")"
+                            else why = why .. " (no route: " .. noRoute .. ")" end
+                        end
                     end
                     return false, why, name, cell
                 end
