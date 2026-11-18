@@ -1322,6 +1322,10 @@ local SET32 = { ["turtle.player"] = "Steve" }
 settings = { define = function() end, get = function(n) return SET32[n] end }
 local SCRIPT = {}
 local inParallel = 0
+-- The clocks while waiting: a scripted timer event moves game time
+-- (os.clock) on by what the timer asked for, and real time (os.epoch when
+-- a scenario gives one) by that at CLK.tps ticks a second
+local CLK = { game = 0, real = 1000000, tps = 20, last = 1 }
 parallel = { waitForAny = function(...)
     inParallel = inParallel + 1
     local cos, filters, ev = {}, {}, { n = 0 }
@@ -1337,12 +1341,14 @@ parallel = { waitForAny = function(...)
         end
         local nxt = table.remove(SCRIPT, 1)
         if not nxt then error("waited with no event scripted") end
+        if nxt[1] == "timer" then CLK.game, CLK.real = CLK.game + CLK.last, CLK.real + CLK.last * 20 / CLK.tps end
         ev = table.pack(table.unpack(nxt))
     end
 end }
-local pullWas, readWas, timerWas = os.pullEvent, read, os.startTimer
+local pullWas, readWas, timerWas, clockWas = os.pullEvent, read, os.startTimer, os.clock
 os.pullEvent = function(filter) return coroutine.yield(filter) end
-os.startTimer = function() return 1 end
+os.startTimer = function(t) CLK.last = t or 1; return 1 end
+os.clock = function() return CLK.game end
 -- (the goal's prompt, outside a wait, reads the scripted answers as before)
 read = function()
     if inParallel == 0 then return readWas() end
@@ -1433,6 +1439,26 @@ check("no answer: the wait stops short of the cache's 5 minutes, a normal result
         and #SCRIPT == 0 and chatBack(), c4 and c4.content)
 check("...the question said again every 2 minutes meanwhile", #CHATSENT == 3 and CHATSENT[2].message == "still waiting for an answer: Anyone?", #CHATSENT)
 
+-- the server at 60 ticks a second (/tick rate 60): a timer of 1 s fires
+-- after a third of a real one, and the wait still lasts 270 real seconds
+-- (ADR-0015 D9), not the 90 that 270 one-second timers would make
+chatFresh()
+timers(900)
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Anyone, fast?", ask = true }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+CLK.tps = 60
+os.epoch = function() return math.floor(CLK.real * 1000) end
+CLK.realFrom, CLK.gameFrom = CLK.real, CLK.game
+run("ask nobody on a fast server")
+os.epoch, CLK.tps = nil, 20
+check("a server at 60 ticks a second: the wait lasts 270 real seconds (810 game ones), not 90",
+    resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content:find("^no answer in 270 s") and CLK.real - CLK.realFrom >= 270
+        and CLK.real - CLK.realFrom < 272 and CLK.game - CLK.gameFrom >= 790 and #SCRIPT > 0,
+    string.format("%.1f real s, %.1f game s", CLK.real - CLK.realFrom, CLK.game - CLK.gameFrom))
+check("...reminded every 2 real minutes", #CHATSENT == 3 and CHATSENT[3].message == "still waiting for an answer: Anyone, fast?", #CHATSENT)
+
 chatFresh()
 timers(3)
 HTTP.queue = {
@@ -1507,7 +1533,7 @@ check("the prompt tells of the chat tool and T.report.ask, and to ask in the gam
         and sys32:find("the chat tool with ask = true reaches the player in the game, ask_user only the keyboard", 1, true))
 
 peripheral.wrap, peripheral.getType, peripheral.find = rawWrap, rawType, nil
-os.pullEvent, read, os.startTimer = pullWas, readWas, timerWas
+os.pullEvent, read, os.startTimer, os.clock = pullWas, readWas, timerWas, clockWas
 parallel, settings = nil, nil
 
 -- 33. keeping the player told (ADR-0011 D5): after claude.remindChat

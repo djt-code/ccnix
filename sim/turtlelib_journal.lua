@@ -23,7 +23,11 @@ local realCheck = M.check
 -- (a check's detail is only shown when it fails)
 local function check(label, ok, detail) realCheck(label, ok, (not ok) and detail or nil) end
 
-os.epoch = function() return 1000 * 1000 end
+-- real time (os.epoch): stands still but for the timers T.report.ask waits
+-- on (TPS: the server's ticks a second; a timer for t game seconds lasts
+-- t * 20 / TPS real ones)
+local EPOCH, TPS = 1000 * 1000, 20
+os.epoch = function() return math.floor(EPOCH) end
 local CLK = 0
 os.clock = function() CLK = CLK + 0.001; return CLK end
 local SETTINGS, DEFAULTS = {}, {}
@@ -617,11 +621,15 @@ end
 -- layouts), only from the player and only after the prefix; a timer a second counts the wait, flushes the cooldown and
 -- reminds; the other messages go to T.hooks.heard; T.report.lastTold says when the player was last told anything
 do
-    local EVENTS = {}
-    os.startTimer = function() return 1 end
+    local EVENTS, lastTimer = {}, 1
+    os.startTimer = function(t) lastTimer = t; return 1 end
     os.pullEvent = function()
         local e = table.remove(EVENTS, 1)
         if not e then error("os.pullEvent with no event scripted") end
+        if e[1] == "timer" then
+            CLK = CLK + lastTimer
+            EPOCH = EPOCH + lastTimer * 1000 * 20 / TPS
+        end
         return table.unpack(e)
     end
     local function timers(n) for _ = 1, n do EVENTS[#EVENTS + 1] = { "timer", 1 } end end
@@ -642,8 +650,8 @@ do
     T.hooks.heard = function(e) passed[#passed + 1] = e.player .. ": " .. e.text end
     text, who, at = T.report.ask("which stair?")
     T.hooks.heard = nil
-    check("the answer: the text after the prefix (any case, its colon off), the player and when",
-        text == "the oak one" and who == "Steve" and at == 1000, tostring(text) .. " / " .. tostring(who) .. " / " .. tostring(at))
+    check("the answer: the text after the prefix (any case, its colon off), the player and when (a second in)",
+        text == "the oak one" and who == "Steve" and at == 1001, tostring(text) .. " / " .. tostring(who) .. " / " .. tostring(at))
     check("...not another player's, nor a message without the prefix as a word of its own, nor a hidden one", #EVENTS == 0)
     check("...those (the hidden one aside) handed to T.hooks.heard, the answer not (ADR-0013 D2)",
         table.concat(passed, " | ") == "Alex: claude no | Steve: hello there | Steve: claudette yes", table.concat(passed, " | "))
@@ -660,6 +668,20 @@ do
     check("...reminded every opts.remind seconds", #SENT == 3 and SENT[2].message == "still waiting for an answer: still there?"
         and SENT[3].message == SENT[2].message, #SENT)
     check("...and the chat box put back", EQ.right == nil and carrying(CHAT) == 1)
+
+    -- ADR-0015 D9: a server at 60 ticks a second (/tick rate 60): a timer
+    -- of 1 game second lasts a third of a real one, and the wait still
+    -- lasts opts.timeout real seconds, reminders too
+    SENT, TPS = {}, 60
+    timers(2000)
+    local from, clockFrom = EPOCH, CLK
+    text, who = T.report.ask("fast server?", { timeout = 600, remind = 120 })
+    local took, game = (EPOCH - from) / 1000, CLK - clockFrom
+    check("a server at 60 ticks a second: a 600 s wait lasts 600 real seconds (1800 game ones), not 200",
+        text == nil and who == "no answer in 600 s" and took >= 600 and took < 601 and game > 1790 and #EVENTS > 0,
+        string.format("%s; %.1f real s, %.1f game s", tostring(who), took, game))
+    check("...reminded every 120 real seconds", #SENT == 5, #SENT)
+    EVENTS, TPS = {}, 20
 
     SENT, BUSY = {}, 1
     EVENTS = { { "timer", 1 }, { "chat", "Steve", "claude go", "uuid-s", false } }
@@ -690,6 +712,6 @@ do
     fresh()
     W.give(1, CHAT, 1)
     T.report("the walls are up")
-    check("T.report stamps T.report.lastTold too", T.report.lastTold() == 1000)
+    check("T.report stamps T.report.lastTold too", T.report.lastTold() == math.floor(EPOCH / 1000))
     os.pullEvent, os.startTimer = nil, nil
 end

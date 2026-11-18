@@ -22,6 +22,7 @@
 local T = require("turtlelib")
 local text = require("text")
 local tables = require("tables")
+local realtime = require("realtime")
 
 local BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 local BUCKET_FUEL = 1000                      -- what a bucket of lava burns for
@@ -244,9 +245,9 @@ end
 -- (opts.inside names the area the job owns) and a chest or a computer (T.cfg.digContainers).  A block with no free cell
 -- beside it is skipped unless opts.move lets it dig a way in, and so is one in opts.exclude (protected areas' names and boxes,
 -- as T.refuelFromLava takes).  It stops when the inventory is full (T.cfg.autoDump keeps room), the fuel is out, it has
--- spent opts.maxFuel fuel (scanning included) or run opts.timeout seconds.  Info is { got, target, items = { name = count
--- aboard now that were not before }, seen, gone, skipped, failed, more, scanned, spent, stopped }, the lists of { x, y, z,
--- name, why }, spent the fuel it used.  opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default
+-- spent opts.maxFuel fuel (scanning included) or run opts.timeout seconds (real ones, at any tick rate).  Info is { got,
+-- target, items = { name = count aboard now that were not before }, seen, gone, skipped, failed, more, scanned, spent,
+-- stopped }, the lists of { x, y, z, name, why }, spent the fuel it used.  opts: scan, limit (cells at most, default 1000), move (for T.moveTo, default
 -- { path = true, scan = false }), inside, liquid, item, exclude, maxFuel, timeout.
 function T.harvest(pattern, where, target, opts)
     opts = opts or {}
@@ -263,7 +264,7 @@ function T.harvest(pattern, where, target, opts)
     local outside, badExclude = excluded(opts.exclude)
     if not outside then return nil, badExclude end
     -- the fuel spent so far (what the tank lost; a refuel on the way isn't taken off) and the clock
-    local began, spent, lastLevel = os.clock(), 0, turtle.getFuelLevel()
+    local began, spent, lastLevel = realtime.now(), 0, turtle.getFuelLevel()
     local function spend()
         local level = turtle.getFuelLevel()
         if level == "unlimited" then return 0 end
@@ -372,7 +373,7 @@ function T.harvest(pattern, where, target, opts)
                 info.stopped = "spent " .. spent .. " fuel (opts.maxFuel " .. opts.maxFuel .. ")"
                 break
             end
-            if opts.timeout and os.clock() - began >= opts.timeout then
+            if opts.timeout and realtime.now() - began >= opts.timeout then
                 info.stopped = "ran " .. opts.timeout .. " s (opts.timeout)"
                 break
             end

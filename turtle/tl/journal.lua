@@ -28,6 +28,7 @@ local convert = require("convert")
 local fileio = require("fileio")
 local tables = require("tables")
 local scan = require("scan")
+local realtime = require("realtime")
 
 local JOB_FILE = ".job"
 local UNDO_FILE = ".undo"
@@ -342,8 +343,9 @@ local function answerIn(said, prefix)
 end
 
 -- Ask with `chat` (lib/mc, one that hears) and wait: the question told (to `who`, or everyone when nil), then the chat
--- events read until an answer comes from `who` (anyone's when nil).  A timer each second counts the wait, sends what
--- the chat box's cooldown held back and says the question again every opts.remind seconds.
+-- events read until an answer comes from `who` (anyone's when nil).  A timer each second sends what the chat box's
+-- cooldown held back and says the question again every opts.remind seconds.  The seconds are real ones, as the player
+-- counts them (lib/realtime), at any server tick rate.
 local function waitForAnswer(chat, question, opts, who)
     local prefix = opts.prefix or "claude"
     local timeout = math.ceil(opts.timeout or 300)
@@ -356,15 +358,18 @@ local function waitForAnswer(chat, question, opts, who)
     local ok, why = tell(question .. ' (answer in chat: "' .. prefix .. ' <your answer>")')
     if not ok then return nil, why end
     S.told = nowSeconds()
-    local waited, timer = 0, os.startTimer(1)
+    local started, nextRemind, timer = realtime.now(), remind, realtime.timer(1)
     while true do
         local ev = table.pack(os.pullEvent())
         if ev[1] == "timer" and ev[2] == timer then
-            waited = waited + 1
+            local waited = realtime.now() - started
             chat.flush()
-            if waited >= timeout then return nil, "no answer in " .. timeout .. " s" end
-            if remind > 0 and waited % remind == 0 then tell("still waiting for an answer: " .. question) end
-            timer = os.startTimer(1)
+            if waited >= timeout - 0.05 then return nil, "no answer in " .. timeout .. " s" end
+            if remind > 0 and waited >= nextRemind - 0.05 then
+                tell("still waiting for an answer: " .. question)
+                nextRemind = nextRemind + remind
+            end
+            timer = realtime.timer(math.min(1, timeout - waited))
         else
             local e = chat.event(table.unpack(ev, 1, ev.n))
             if e and e.kind == "chat" and (who == nil or text.equalFold(tostring(e.player), who)) then
