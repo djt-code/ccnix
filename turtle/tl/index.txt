@@ -235,7 +235,7 @@ T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (def
 What there is, everywhere:
 T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:
-T.stow(opts) - Put what the turtle carries away: into a chest for the item (its holds), else one that holds it already, else the bulk chest. Returns true, info; false, why, info when something stayed aboard; nil, why if no chest is known.
+T.stow(opts) - Put what the turtle carries away, each item into the nearest chest that will have it, within 48 blocks (as near: one for it, then one holding it, then the bulk chest). True, info; false, why, info if some stayed aboard; nil, why.
 Sorting the chests:
 T.sortChests(opts) - Move what is in the wrong chest to the chest it belongs in (T.addChest's holds), at most opts.limit stacks (32). Returns true, info; false, why, info when some couldn't move; nil, why.
 Getting ready for a job:
