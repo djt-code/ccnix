@@ -10,6 +10,18 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
+## ADR-0016: gpsd (ccnix 0.54.0) (#106)
+
+In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
+
+- **Serving**: `service status gpsd` on each says "serving x, y, z, from gpsd.x, gpsd.y and gpsd.z (3 other hosts agree) on top" (the modem's side); a turtle's `gps locate` (and `T.setOrigin()`) gives its block; a pocket computer's too.
+- **A typo**: one host with a coordinate one block off (`sysctl gpsd.z=...`, `service restart gpsd`): it says in red on the console that its position is wrong and doesn't serve; set right, it serves within a minute.
+- **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
+- **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
+- **Refused**: `gpsd` on a turtle and on a pocket computer says why.
+- **Modems**: a second wireless modem attached while it runs is answered on ("answering on ... too"); both removed, it warns.
+- **The count**: after 10 minutes of turtles locating, "served N requests" in /var/log/messages.
+
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
 In-game order: `/ccnix rom update`; on a computer `ccnix` (it says the server's tick rate while it isn't 20); then
