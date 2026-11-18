@@ -123,6 +123,9 @@ T.cfg = {
     maxClimb   = 3,     -- terrain stepping: max climb per column
     maxDrop    = 12,    -- max blocks below start level
     maxHeight  = 16,    -- max blocks above start level
+    -- digNeedsRoom: true, a dig with no slot for what it drops (none free, no stack of it with room) is refused
+    -- with a why, rather than the drop spilling on the ground.  Off for programs (mine, farm and mow make room
+    -- their own way); claude's sessions turn it on.
     -- tools: nil, the tools a job keeps (T.isEssential).  Unset, every tool aboard is essential, never junk or
     -- stowed; set to names or globs ({ "*_pickaxe", "*_hoe" }, a set too; {} for none), only the tools equipped
     -- (or parked aboard by a swap) and those it names are, so T.stow and T.dumpJunk put looted ones away.
@@ -796,9 +799,25 @@ reframers[#reframers + 1] = function(move)
     for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
 end
 
+-- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom
+local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
+                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone" }
+
+-- Is there a slot for what digging `name` drops: a free one, or a stack of it with room?
+local function roomForDrop(name)
+    local drop = DIG_DROP[name] or name
+    for s = 1, 16 do
+        if turtle.getItemCount(s) == 0 then return true end
+        local it = turtle.getItemDetail(s)
+        if it and it.name == drop and turtle.getItemSpace(s) > 0 then return true end
+    end
+    return false
+end
+
 -- The wrapped digs: refuse what's protected, look at what's there (the
 -- listeners are told it), then dig (with the tool side the caller named,
--- if any).  A dig of a block a hoe tills is looked at again after, since
+-- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
+-- refused too.  A dig of a block a hoe tills is looked at again after, since
 -- the block may still be there, changed.
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
@@ -810,6 +829,10 @@ for name, side in pairs(DIG_SIDE) do
         if inspect then ok, data = inspect() end
         if ok and type(data) == "table" and data.name and not T.cfg.digContainers and T.neverDig(data.name) then
             return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
+        end
+        if T.cfg.digNeedsRoom and ok and type(data) == "table" and data.name and not roomForDrop(data.name) then
+            return false, "no room for what digging " .. data.name .. " drops: every slot is full (T.cfg.digNeedsRoom; "
+                .. "stow or drop something first, or set it false to let drops fall)"
         end
         needTool()
         return afterwards(function()

@@ -1620,6 +1620,20 @@ local lua34 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].input_schema.p
 check("the prompt tells of maxHeight 256 and review = true; the lua tool takes review",
     sys34:find("In this session T.cfg.maxHeight is 256", 1, true) and sys34:find("A lua call with review = true shows its code", 1, true)
         and lua34 and lua34.type == "boolean")
+-- ADR-0015 D3: in a session a dig with no slot for its drop is refused, with why, not spilled; the prompt says so
+fresh({ "" })
+for s = 1, 16 do Mine.inv[s] = { name = "minecraft:oak_log", count = 64 } end
+local digsBefore = DIGS
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return T.cfg.digNeedsRoom, turtle.dig()" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig when full")
+local d34 = resultsIn(2).toolu_1
+check("T.cfg.digNeedsRoom in a session: a dig with every slot full is refused, saying why, nothing dug",
+    d34 and d34.content:find("^%-> true\n%-> false\n%-> no room for what digging minecraft:[%w_]+ drops: every slot is full") and DIGS == digsBefore,
+    d34 and d34.content)
+check("...and the prompt says so", (HTTP.requests[1].body.system[1].text or ""):find("A dig with no slot for its drop is refused, not spilled", 1, true) ~= nil)
 fresh({ "" })
 Mine.files["claude/helpers.lua"] = "T.cfg.maxHeight = 20"
 HTTP.queue = { reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
