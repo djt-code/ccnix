@@ -144,8 +144,8 @@ Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
 tl.area: work over a box: paving its floor, clearing it out, picking up what lies in it:
 T.pave(box, item, opts) - Pave a floor: every cell of the layer `box` (y1 = y2: the floor's own layer) made `item`, the turtle going over it in rows a block above, digging down what's there and placing down: one move a cell. True, info; false, why, info.
-T.clearBox(box, opts) - Clear a box (a tunnel, a room) to air, three layers a pass: the turtle goes along the middle layer of each three, digging ahead, above and below as it goes: about a third of the moves of digging it cell by cell. True, info; false, why, info.
-T.sweep(box, opts) - Pick up what lies in a box (the drops of digs, what a player threw): the turtle goes over each layer of it, sucking in front of it, above and below, into the empty cells only, so it never takes from a chest or another container. True, info; false, why, info.
+T.clearBox(box, opts) - Clear a box (a tunnel, a room) to air, three layers a pass: along the middle layer of each three, digging ahead, above and below, a third of the moves of digging cell by cell. True, info; false, why, info.
+T.sweep(box, opts) - Pick up what lies in a box (the drops of digs, what a player threw), going over each layer, sucking ahead, above and below from empty cells only: never from a chest. True, info; false, why, info.
 tl.attach: what hangs on a block or stands on it, and would drop if the block were dug:
 T.attachedTo(x, y, z) - What in the map hangs on or stands on the block at x, y, z and would drop if it were dug: a list of { x, y, z, name, how ("on top", "on the side", "below"), sure }, and info; nil and why.
 Plans:

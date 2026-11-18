@@ -126,9 +126,8 @@ function T.pave(box, item, opts)
     return run()
 end
 
--- Clear a box (a tunnel, a room) to air, three layers a pass: the turtle goes along the middle layer of each three,
--- digging ahead, above and below as it goes: about a third of the moves of digging it cell by cell.  True, info;
--- false, why, info.
+-- Clear a box (a tunnel, a room) to air, three layers a pass: along the middle layer of each three, digging ahead,
+-- above and below, a third of the moves of digging cell by cell.  True, info; false, why, info.
 --
 -- It digs only inside the box (not what opts.exclude lists or a protected area holds), going to the box through what
 -- the map shows open, and refuses a dig with lava or a water source beside it as T.moveTo does (opts.liquid digs it).
@@ -202,9 +201,8 @@ function T.clearBox(box, opts)
     return run()
 end
 
--- Pick up what lies in a box (the drops of digs, what a player threw): the turtle goes over each layer of it,
--- sucking in front of it, above and below, into the empty cells only, so it never takes from a chest or another
--- container.  True, info; false, why, info.
+-- Pick up what lies in a box (the drops of digs, what a player threw), going over each layer, sucking ahead, above and
+-- below from empty cells only: never from a chest.  True, info; false, why, info.
 --
 -- It moves only through what the map shows open (no digs), and stops when the inventory is full or opts.maxFuel is
 -- spent.  opts: exclude, maxFuel, inside, move (T.moveTo's; default { path = true, scan = false }).  Info is { picked

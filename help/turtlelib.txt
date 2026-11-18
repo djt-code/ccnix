@@ -565,12 +565,12 @@ T.pave(box, item, opts)
     A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
 
 T.clearBox(box, opts)
-    Clear a box (a tunnel, a room) to air, three layers a pass: the turtle goes along the middle layer of each three, digging ahead, above and below as it goes: about a third of the moves of digging it cell by cell. True, info; false, why, info.
+    Clear a box (a tunnel, a room) to air, three layers a pass: along the middle layer of each three, digging ahead, above and below, a third of the moves of digging cell by cell. True, info; false, why, info.
 
     It digs only inside the box (not what opts.exclude lists or a protected area holds), going to the box through what the map shows open, and refuses a dig with lava or a water source beside it as T.moveTo does (opts.liquid digs it). What the digs give comes aboard; it stops when the inventory is full (T.stow, then call it again: it goes on where the box is still solid), the fuel runs out or opts.maxFuel is spent. opts: exclude, maxFuel, inside, liquid. Info is { dug, failed, stopped, spent }.
 
 T.sweep(box, opts)
-    Pick up what lies in a box (the drops of digs, what a player threw): the turtle goes over each layer of it, sucking in front of it, above and below, into the empty cells only, so it never takes from a chest or another container. True, info; false, why, info.
+    Pick up what lies in a box (the drops of digs, what a player threw), going over each layer, sucking ahead, above and below from empty cells only: never from a chest. True, info; false, why, info.
 
     It moves only through what the map shows open (no digs), and stops when the inventory is full or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's; default { path = true, scan = false }). Info is { picked (items), failed, stopped, spent }.
 
