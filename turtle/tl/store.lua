@@ -527,17 +527,21 @@ end
 -- read; nil, why when there is nothing to do.
 --
 -- `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest, holds as T.addChest takes), which are remembered
--- (T.addChest); nil goes round the ones already known.  The two halves of a double chest become one chest as they are
--- read (see the top of this module).  opts.find, a box in the map (six numbers, as T.map.find
--- takes), adds the chests and barrels the map shows in it, each from a free cell beside it.  opts.move is T.moveTo's
+-- (T.addChest) and read, and only they; nil goes round every chest already known.  The two halves of a double chest
+-- become one chest as they are read (see the top of this module).  opts.find, a box in the map (six numbers, as
+-- T.map.find takes), adds the chests and barrels the map shows in it, each from a free cell beside it, and reads those
+-- (with the spots, if any given) and no others.  opts.move is T.moveTo's
 -- (default { path = true, scan = false }).  The nearest comes next and the turtle ends where it began, facing as
 -- before.  Info is { chests, kinds, items, failed = { { x, y, z, side, why } } }.
 function T.catalogue(spots, opts)
     opts = opts or {}
     local move = opts.move or MOVE
+    -- the chests asked for (spots, the box's), as T.addChest's places: only they are read; none asked for, all are
+    local asked = (spots ~= nil or opts.find ~= nil) and {} or nil
     for _, s in ipairs(spots or {}) do
         local ok, why = T.addChest(s.x, s.y, s.z, s.side, { bulk = s.bulk, holds = s.holds })
         if not ok then return nil, why end
+        asked[#asked + 1] = { x = s.x, y = s.y, z = s.z, side = sideOf(s.side) }
     end
     local info = { chests = 0, kinds = 0, items = 0, failed = {} }
     if opts.find then
@@ -550,6 +554,7 @@ function T.catalogue(spots, opts)
             if s then
                 local ok, why2 = T.addChest(s.x, s.y, s.z, s.side)
                 if not ok then return nil, why2 end
+                asked[#asked + 1] = { x = s.x, y = s.y, z = s.z, side = sideOf(s.side) }
             else
                 info.failed[#info.failed + 1] = { x = cell.x, y = cell.y, z = cell.z, side = "?", why = "no free cell the map knows next to it" }
             end
@@ -557,10 +562,20 @@ function T.catalogue(spots, opts)
     end
     local list = load()
     if #list == 0 and #info.failed == 0 then return nil, "no chests to go round: T.addChest, or give T.catalogue the places" end
+    local only
+    if asked then
+        only = {}
+        for _, a in ipairs(asked) do
+            local c = find(list, a) or chestAt(list, cellOf(a))
+            if c then only[c] = true end
+        end
+    end
     local read = {}
     local ok, why = round(move, function()
         local todo = {}
-        for i, c in ipairs(list) do todo[i] = c end
+        for _, c in ipairs(list) do
+            if not only or only[c] then todo[#todo + 1] = c end
+        end
         while #todo > 0 do
             local best = 1
             for i = 2, #todo do

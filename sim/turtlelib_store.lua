@@ -231,6 +231,15 @@ do
     ok, info = T.catalogue({ { x = 3, y = 0, z = 0, side = 0 }, { x = 0, y = 0, z = -2, side = 2, bulk = true } })
     check("chests given as places are visited and remembered", ok == true and info.chests == 2 and #T.chests() == 2 and line(T.chests(), 0, -2, 2).bulk == true
         and line(T.chests(), 0, -2, 2).items[DIRT] == 30)
+    -- ADR-0015: the spots given are the ones gone round, not every chest known (328 fuel for 5 chests side by side, the
+    -- others a base away)
+    T.addChest(Bc.x, Bc.y, Bc.z, Bc.side)
+    fill(3, 0, 1, { [1] = { COBBLE, 9 } })
+    fill(-3, 0, 1, { [1] = { STONE, 3 } })
+    ok, info = T.catalogue({ { x = 3, y = 0, z = 0, side = 0 } })
+    check("T.catalogue(spots): only the spots are read, not every chest known", ok == true and info.chests == 1
+        and line(T.chests(), 3, 0, 0).items[COBBLE] == 9 and line(T.chests(), -3, 0, 0).items[STONE] == nil and here(),
+        tostring(info and info.chests))
 end
 
 do
@@ -249,7 +258,8 @@ do
     check("opts.find: the chest the map shows in the box, from a free cell beside it", ok == true and info.chests == 1 and #T.chests() == 1
         and line(T.chests(), 3, 0, 0) and line(T.chests(), 3, 0, 0).items[COBBLE] == 64, tostring(ok) .. " " .. tostring(info and info.chests) .. " " .. #T.chests())
     ok, info = T.catalogue(nil, { find = { -4, 0, 1, -1, 0, 4 } })
-    check("...a barrel counts, and what was known stays", ok == true and #T.chests() == 3 and info.chests == 3 and (function()
+    check("...a barrel counts, and what was known stays (and isn't read again: only the box's are)", ok == true and #T.chests() == 3
+        and info.chests == 2 and (function()
         for _, c in ipairs(T.chests()) do if c.items["minecraft:wheat"] == 12 then return true end end
     end)())
     check("...and the turtle ends where it began", here())
