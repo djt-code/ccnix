@@ -1166,8 +1166,11 @@ local function bridged(water)
     end
     WATERY = water
     if water then
-        set(3, 1, 22, { name = "minecraft:water", level = 0 })
-        flow(3, 1, 22)
+        -- (in the near wall: water from the far one drains into the pit under
+        -- columns 1-2 and never crosses the floor lane, so it isn't seen,
+        -- as the dry pit isn't)
+        set(-1, 1, 22, { name = "minecraft:water", level = 0 })
+        flow(-1, 1, 22)
         settleWater()
     end
     startAt()
@@ -1211,7 +1214,7 @@ run("--resume")
 WATERY = false
 local farAfter = 0
 for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farAfter = farAfter + 1 end end end end
-check("water through the far wall of a 64-block segment: dried", farWet > 50 and farAfter == 0,
+check("water through the far wall of a 64-block segment: dried", farWet > 20 and farAfter == 0,
     farWet .. " wet before, " .. farAfter .. " after")
 check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.workMoves() < 1300,
     Mine.workMoves() .. " moves")

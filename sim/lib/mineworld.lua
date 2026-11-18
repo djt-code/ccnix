@@ -165,10 +165,11 @@ local function gravity(x, y, z)
 end
 
 --------------------------------------------------------------------------
--- Water, roughly as Minecraft runs it: an open block (not the turtle's)
--- beside or under water fills: a source if two sources sit beside it on
--- something solid or a source, falling water under water, flowing water
--- beside water that isn't spent; flowing water nothing feeds drains away.
+-- Water, as Minecraft runs it: it spreads down first, and sideways only
+-- toward the nearest drop within 4 blocks (see spread); a block it
+-- spreads to becomes a source if two sources sit beside it on something
+-- solid or a source, falling water under water, flowing water beside
+-- water that isn't spent; flowing water nothing feeds drains away.
 -- It takes time: water reacts to a change next to it 5 ticks on, and each
 -- turtle move, turn, dig or place takes 8.  A turtle moving into flowing
 -- water pushes it out; one moving into a source is waterlogged and leaves
@@ -236,6 +237,54 @@ local function fillAt(a, b, c, t)
     set(a, b, c, new)
     due(a, b, c, t + 5)
 end
+-- Where water goes from a block of it, as Minecraft's FlowingFluid.spread
+-- has it: down, if the block under it is open (and then nowhere else);
+-- otherwise, if it's a source or isn't over falling water, sideways, but
+-- only the way (or ways) to the nearest drop within 4 blocks (the slope
+-- search), or every way if there's none.  Never up.
+local function wateryOpen(x, y, z)              -- water may pass through: open, or flowing water
+    if z < 1 or (x == P.x and y == P.y and z == P.z) then return false end
+    local b = get(x, y, z)
+    return b == nil or isTorch(b) or (isWater(b) and b.level ~= 0)
+end
+local function dropUnder(x, y, z) return wateryOpen(x, y - 1, z) end
+local SLOPE = 4
+local function slopeFrom(x, y, z, depth, back)
+    local best = 1000
+    for i, d in ipairs(M.SIDES4) do
+        if i ~= back then
+            local nx, nz = x + d[1], z + d[2]
+            if wateryOpen(nx, y, nz) then
+                if dropUnder(nx, y, nz) then return depth end
+                if depth < SLOPE then
+                    local opp
+                    for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then opp = j end end
+                    best = math.min(best, slopeFrom(nx, y, nz, depth + 1, opp))
+                end
+            end
+        end
+    end
+    return best
+end
+local function spread(a, b, c, t)
+    local lv = wlevel(get(a, b, c))
+    if wateryOpen(a, b - 1, c) then fillAt(a, b - 1, c, t); return end
+    if not (lv == 0 or not dropUnder(a, b, c)) then return end
+    local dist, best = {}, 1000
+    for i, d in ipairs(M.SIDES4) do
+        local nx, nz = a + d[1], c + d[2]
+        if wateryOpen(nx, b, nz) then
+            local opp
+            for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then opp = j end end
+            dist[i] = dropUnder(nx, b, nz) and 0 or slopeFrom(nx, b, nz, 1, opp)
+            best = math.min(best, dist[i])
+        end
+    end
+    for i, d in ipairs(M.SIDES4) do
+        if dist[i] and dist[i] == best then fillAt(a + d[1], b, c + d[2], t) end
+    end
+end
+
 -- Let `ticks` pass (a turtle action's 8 by default).  A water block that
 -- ticks drains if nothing feeds it (or changes level), and spreads into
 -- the open blocks next to it, which tick 5 ticks later.
@@ -261,9 +310,7 @@ local function waterStep(ticks)
                     for _, d in ipairs(M.SIDES6) do due(a + d[1], b + d[2], c + d[3], t + 5) end
                 end
             end
-            if wlevel(get(a, b, c)) then
-                for _, d in ipairs(M.SIDES6) do fillAt(a + d[1], b + d[2], c + d[3], t) end
-            end
+            if wlevel(get(a, b, c)) then spread(a, b, c, t) end
         end
     end
 end
