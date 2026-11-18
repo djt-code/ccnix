@@ -19,7 +19,7 @@ T.darkCells: info.unsure lists the cells to inspect; the summary says when the l
 The sandbox has no load, loadstring, _G or coroutine: check(code) compiles without running. helpers() lists what each helper file defines and the names T has too: run it and retire what the library does now.
 Your helpers/task41.lua sets T.keep = {...} wholesale, wiping what your settings helper keeps each session: add to T.keep instead (T.keep[name] = true).
 A goal is summarized at 150k now (was 250k), and the summary keeps these notes until you act on them. Repeated lines in a result come once with (xN).
--- ADR-0015 (#100-#102): real seconds, mojibake, two bases, crafting counts, placement, the model's helpers as library functions.
+-- ADR-0015 (#98-#101, #103; in-game checks #102): real seconds, mojibake, two bases, crafting counts, placement, the model's helpers as library functions.
 
 == 0.53.0
 Your conversation is no longer cleared into placeholders: when a goal ends with it over 100k tokens it is summarized while you wait for the next goal, and inside a goal at 250k it is summarized keeping your last few turns. All your thinking is kept until then. Write what matters into your notes and skills as you go.
