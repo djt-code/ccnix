@@ -313,27 +313,27 @@ by one. That way a correction can't hide a regression.
 ## Action items
 
 ### Phase 0
-1. [ ] The baseline: `python sim/run.py` twice, byte for byte, saved.
-2. [ ] The sim learns chest facing and double chests, digging a chest and
+1. [x] The baseline: `python sim/run.py` twice, byte for byte, saved.
+2. [x] The sim learns chest facing and double chests, digging a chest and
    dropping into air (D9's part for the features). Today's checks are
    unchanged.
 
 ### Phase 1: the decisions
-1. [ ] D7: the stop message names the chest.
-2. [ ] D2: growing home chests (and picking them up), with scenarios:
+1. [x] D7: the stop message names the chest.
+2. [x] D2: growing home chests (and picking them up), with scenarios:
    - a segment whose bulk and valuables overflow a single chest;
    - a torch niche at z-1;
    - a 1-wide tunnel.
-3. [ ] D3: bulk overflow thrown on the floor, counted.
-4. [ ] D1: hauling when full, and `mine.haulEvery`, with scenarios
+3. [x] D3: bulk overflow thrown on the floor, counted.
+4. [x] D1: hauling when full, and `mine.haulEvery`, with scenarios
    (also the start's chest full).
-5. [ ] D4: waiting for supplies, with a scenario that restocks while it
+5. [x] D4: waiting for supplies, with a scenario that restocks while it
    waits.
-6. [ ] D5: `--new` over the same tunnel, and `--resume` of a finished
+6. [x] D5: `--new` over the same tunnel, and `--resume` of a finished
    tunnel that is now longer.
-7. [ ] D6: supplies home at the end, and `mine haul --supplies`.
-8. [ ] D8: the turtlelib items accepted.
-9. [ ] Help: `help/mine.txt`, the file's header, `help/autostart.txt`
+7. [x] D6: supplies home at the end, and `mine haul --supplies`.
+8. [x] D8: the turtlelib items accepted.
+9. [x] Help: `help/mine.txt`, the file's header, `help/autostart.txt`
    where it says what stops a tunnel.
 
 ### Phase 2: the sim corrections (D9)
