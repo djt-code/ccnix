@@ -575,8 +575,8 @@ local function geoScanner()
                         out[#out + 1] = { x = tz + 1000, y = ty + 1000, z = tx + 1000, name = b.name, tags = tags }
                     else
                         local f, rt = (P.d + SCAN_TURN) % 4, (P.d + SCAN_TURN + 1) % 4
+                        -- (no block state: AP's scan gives none, ADR-0012)
                         out[#out + 1] = { x = tz + 0.0, y = ty + 0.0, z = tx + 0.0, name = b.name, tags = tags,
-                            state = { waterlogged = b.waterlogged, level = b.level },
                             -- SCAN_TURN: a scanner whose idea of forward is turned
                             f = tx * M.DX[f] + tz * M.DZ[f] + 0.0, u = ty + 0.0,
                             r = tx * M.DX[rt] + tz * M.DZ[rt] + 0.0 }
