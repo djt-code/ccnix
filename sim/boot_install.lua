@@ -320,6 +320,21 @@ W = world(true)
 r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "--no-reboot", "--autostart=router" }) end)
 check("setup --autostart=router: the autostart and the network at boot, a router", STORE["ccnix.autostart"] == "router"
     and STORE["net.boot"] == true and STORE["net.forward"] == true, show(r.out) .. show(r.errText))
+-- setup --at x,y,z: gpsd's position (and gpsd, a service under init)
+W = world(true)
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "--no-reboot", "--at", "100,64,-200" }) end)
+check("setup --at 100,64,-200: gpsd named, its position set, a service at boot with init and syslogd",
+    STORE["gpsd.x"] == 100 and STORE["gpsd.y"] == 64 and STORE["gpsd.z"] == -200 and STORE["service.gpsd.cmd"] == "gpsd"
+        and STORE["service.gpsd.enabled"] == true and STORE["init.boot"] == true and STORE["service.syslogd.cmd"] == "syslogd"
+        and r.out:find("gpsd answers GPS at 100, 64, -200", 1, true), show(r.out) .. show(r.errText))
+W = world(true)
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "gpsd", "--no-reboot" }) end)
+check("setup gpsd alone: no position set, it says it will locate itself", STORE["gpsd.x"] == nil
+    and STORE["service.gpsd.cmd"] == "gpsd" and r.out:find("where the other hosts say it is", 1, true), show(r.out))
+W = world(true)
+r = W:session({}, function() return W:osRun("rom/ccnix/deploy/setup.lua", { "gpsd", "--at=1,2", "--no-reboot" }) end)
+check("setup --at with two numbers: the usage, nothing set", STORE["gpsd.x"] == nil and STORE["service.gpsd.cmd"] == nil
+    and r.out:find("Usage: setup", 1, true), show(r.out))
 
 -- setup in ROM mode moves an install from before ccnix off: the startup
 -- lines that ran its programs run them by name (ip up goes: boot starts

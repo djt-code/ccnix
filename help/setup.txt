@@ -32,9 +32,11 @@ Apps (any number; none means everything for this kind of device):
       the IRC server as a service, with init and the network: NickServ, ChanServ, #minecraft (`help ircd`)
   screen
       windows that stay when you detach (or telnet drops): screen -r; with init
+  gpsd
+      a GPS host as a service, with init (--at x,y,z: its position; `help gpsd`)
 git and deploy/ always come; so do the help files of what you pick.
 
-Options: --autostart <app> (a turtle runs it at every boot: resumes its job, or starts one from the settings; see turtle/autostart.lua; on a computer: router, its status screen at every boot), --example (httpd, and a guestbook in its script root: /cgi/guestbook), --ccsh, --net, --router, --init (what ccsh, net, router and init set, without naming them), --no-reboot, --all (everything, sim/ too), --skip <dir> (leave out more).
+Options: --autostart <app> (a turtle runs it at every boot: resumes its job, or starts one from the settings; see turtle/autostart.lua; on a computer: router, its status screen at every boot), --at x,y,z (gpsd's position: gpsd.x, gpsd.y, gpsd.z), --example (httpd, and a guestbook in its script root: /cgi/guestbook), --ccsh, --net, --router, --init (what ccsh, net, router and init set, without naming them), --no-reboot, --all (everything, sim/ too), --skip <dir> (leave out more).
 
   setup mine --autostart mine
       a miner that carries on after reboots

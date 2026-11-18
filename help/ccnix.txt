@@ -33,6 +33,7 @@ Anywhere (bin/):
   false: do nothing, unsuccessfully (POSIX false)
   find: find files by name, type, size or age (POSIX find)
   git: minimal git client for CC:Tweaked
+  gpsd: a GPS host: answers CC's GPS, where computers ask where they are
   grep: print the lines that match a pattern (POSIX grep)
   head: copy the first part of files to standard output (POSIX head)
   help: the help pages, in ccnix's pager
