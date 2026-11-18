@@ -37,6 +37,7 @@ package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunni
 local cu = require("cu").init("ping",
     "ping [-q] [-c count] [-i seconds] [-t ttl] [-W seconds] [-w deadline] [-s size] [-I iface|addr] host")
 local net = require("net")
+local realtime = require("realtime")
 local netdb = require("netdb")
 local opts, operands = cu.getopt({ ... }, "qc:i:t:W:w:s:I:")
 if #operands ~= 1 then cu.usageError() end
@@ -93,9 +94,9 @@ io.write(string.format("PING %s (%s)%s%s\n", host, net.ipString(dst),
     src and (" from " .. net.ipString(src) .. (iface and (" " .. iface) or "")) or "",
     size and (": " .. size .. " data bytes") or ""))
 
-local started = os.clock()
+local started = realtime.now()
 -- seconds left before the deadline (nil: there's none)
-local function remaining() return deadline and deadline - (os.clock() - started) end
+local function remaining() return deadline and deadline - (realtime.now() - started) end
 
 -- What came back for request seq, said and counted.  (A reply: its TTL
 -- and data; an error: its code.)
@@ -153,7 +154,7 @@ local function pings()
             local pause = interval - ms / 1000
             left = remaining()
             if left then pause = math.min(pause, left) end
-            if pause > 0 then sleep(pause) end
+            if pause > 0 then realtime.sleep(pause) end
         end
     end
 end

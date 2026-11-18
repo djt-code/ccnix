@@ -74,6 +74,7 @@
 local net = require("net")
 local text = require("text")
 local convert = require("convert")
+local realtime = require("realtime")
 local D = {}
 
 local TIMEOUT, ROUNDS = 2, 2    -- seconds a server has to answer; times round them all
@@ -246,7 +247,7 @@ local function ask(S, server, name, qtype)
     local sent, why = S.udpSend(port, dst, 53, D.dnsQuery(id, name, qtype))
     local reply
     if sent then
-        local timer = os.startTimer(TIMEOUT)
+        local timer = realtime.timer(TIMEOUT)
         local ok, e = pcall(function()
             while true do
                 local d = S.udpTake(port)
@@ -290,7 +291,7 @@ local function query(name, qtype, servers)
     if #servers == 0 then return nil, "no DNS servers are set (ip dns)", "noservers" end
     local S, why = net.stack()
     if not S then return nil, why, "system" end
-    local now = os.clock()
+    local now = S.clock()
     S.dnsCache, S.dnsDown = S.dnsCache or { n = 0 }, S.dnsDown or {}
     local key = table.concat(servers, ",") .. " " .. qtype .. " " .. name
     local hit = S.dnsCache[key]
@@ -310,13 +311,13 @@ local function query(name, qtype, servers)
                 local ttl = (m.rcode == 3 or #m.answers == 0) and NEGATIVE_TTL or CACHE_MAX
                 for _, rr in ipairs(m.answers) do ttl = math.min(ttl, rr.ttl) end
                 if S.dnsCache.n >= CACHE_SIZE then S.dnsCache = { n = 0 } end
-                local at = os.clock()
+                local at = S.clock()
                 S.dnsCache[key] = { m = m, expires = at + ttl, at = at, server = server, name = name, qtype = qtype,
                                     servers = servers }
                 S.dnsCache.n = S.dnsCache.n + 1
                 return m, { server = server, cached = false, age = 0 }
             end
-            S.dnsDown[server] = os.clock() + DOWN_FOR
+            S.dnsDown[server] = S.clock() + DOWN_FOR
             problems[server] = err or (m.tc and "truncated") or RCODES[m.rcode] or ("rcode " .. m.rcode)
         end
     end
@@ -529,7 +530,7 @@ end
 function D.cache()
     local S, why = net.stack()
     if not S then return nil, why end
-    local now = os.clock()
+    local now = S.clock()
     local entries, down = {}, {}
     for key, e in pairs(S.dnsCache or {}) do
         if key ~= "n" and e.expires > now then
@@ -553,7 +554,7 @@ end
 function D.flush()
     local S, why = net.stack()
     if not S then return nil, why end
-    local n, now = 0, os.clock()
+    local n, now = 0, S.clock()
     for key, e in pairs(S.dnsCache or {}) do
         if key ~= "n" and e.expires > now then n = n + 1 end
     end

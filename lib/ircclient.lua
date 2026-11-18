@@ -42,6 +42,7 @@ local glob = require("glob")
 local path = require("path")
 local tables = require("tables")
 local fileio = require("fileio")
+local realtime = require("realtime")
 
 local C = {}
 C.VERSION = "1.0"
@@ -156,7 +157,7 @@ function C.new(opts)
         signals = {}, commands = {}, scripts = {}, statusItems = {},
         settingDefs = {}, values = {}, aliases = {}, ignores = {},
         history = {}, dirty = true, nextId = 1,
-        clock = opts.clock or os.clock,
+        clock = opts.clock or realtime.now,
     }, Client)
     for _, d in ipairs(C.SETTINGS) do self:defineSetting(d[1], d[2], d[3], d[4]) end
     for name, exp in pairs(C.ALIASES) do self.aliases[name] = exp end
@@ -342,7 +343,7 @@ end
 -- Script timers: irc.timeout_add(ms, fn); each fires through a CC timer.
 function Client:timeoutAdd(ms, fn, once, script)
     local t = { ms = ms, fn = fn, once = once, script = script }
-    t.timer = os.startTimer(math.max(0.05, ms / 1000))
+    t.timer = realtime.timer(math.max(0.05, ms / 1000))
     self.timers[t.timer] = t
     return t
 end
@@ -362,7 +363,7 @@ function Client:event(name, ...)
         if t then
             self.timers[id] = nil
             if not t.once then
-                t.timer = os.startTimer(math.max(0.05, t.ms / 1000))
+                t.timer = realtime.timer(math.max(0.05, t.ms / 1000))
                 self.timers[t.timer] = t
             end
             local ok, err = pcall(t.fn)

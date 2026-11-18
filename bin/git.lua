@@ -76,6 +76,7 @@ local convert = require("convert")
 local getopt = require("getopt")
 local fileio = require("fileio")
 local tables = require("tables")
+local realtime = require("realtime")
 
 -- Show lines in pager.lua when it can be found (deploy/setup's copy of
 -- git has the text libraries but no pager), otherwise a screenful at a
@@ -134,7 +135,7 @@ local function request(url, headers, binary)
             die(what)
         end
         printError(what .. "; trying again in " .. wait .. " s")
-        sleep(wait)
+        realtime.sleep(wait)
         wait = wait * 2
     end
 end
