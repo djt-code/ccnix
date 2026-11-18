@@ -881,11 +881,11 @@ local function putCell(cell, move, look, support)
             -- (nothing seen there: some other way in may do)
         end
     end
-    local opts = { move = move, digBelow = support.digBelow, temp = support.temp }
+    local opts = { move = move, digBelow = support.digBelow, temp = support.temp, exit = support.exit }
     for key, value in pairs(want) do opts[key] = value end
     local name, stateOrWhy, how = T.placeAt(cell.x, cell.y, cell.z, cell.name, opts)
     if not name then return false, stateOrWhy end
-    return true, how.approach == "already there"
+    return true, how.approach == "already there", how.warning
 end
 
 -- The shortfall of a tally against what is on board: a list of { item, need, have, short }, sorted by name, each with
@@ -985,11 +985,13 @@ end
 -- opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan =
 -- false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart,
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
--- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow and temp
--- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow).
+-- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow, temp and exit
+-- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow; a
+-- cell that would cut the way to exit is refused).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
--- warnings, previous }.
+-- warnings, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning; opts.exit
+-- refuses those instead, each cell failing with why) }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
 -- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
 -- at 3,1,4: ..."), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never
@@ -1058,7 +1060,7 @@ function T.build(plan, opts)
         return nil, "this plan names a compass facing or axis, which needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local info = { name = target.name, done = job.done, total = job.total, failed = {}, placed = 0, there = 0, resumed = job.resumed == true,
-                   finished = false, order = job.order, previous = previous }
+                   finished = false, order = job.order, previous = previous, sealed = {} }
     local short = shortOf(need)
     if #short > 0 and not opts.partial then
         info.short = short
@@ -1079,7 +1081,8 @@ function T.build(plan, opts)
     info.fuel = watch and { estimate = math.ceil(watch.approach), spent = 0, perCell = watch.perCell } or nil
 
     local function attempt(cell)
-        local good, extra = putCell(cell, move, opts.look, opts)      -- (extra: already there, or why not)
+        local good, extra, sealed = putCell(cell, move, opts.look, opts)      -- (extra: already there, or why not)
+        if sealed then info.sealed[#info.sealed + 1] = cell.x .. "," .. cell.y .. "," .. cell.z .. ": " .. sealed end
         attempted = attempted + 1
         if good then
             job.failed[cell.n] = nil

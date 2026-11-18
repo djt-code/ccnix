@@ -201,6 +201,31 @@ scene("an x log in a world whose heading 0 is east: the compass's x is the turtl
 scene("a log across a hole: lying along x with nothing to click is the turtle's own block, along the heading", {
     item = LOG, opts = { axis = "z" }, expect = { { 0, 0, 3, "oak_log", { axis = "z" } } } })
 
+-- ADR-0015 D5: a placement that closes the turtle in: a corridor walled in stone whose only way out is the cell
+-- placed (the turtle sealed itself in so in the field, and wrote down the wrong lesson); with opts.exit, refused
+do
+    local walls = {}
+    for x = -1, 1 do for y = -1, 1 do for z = -1, 4 do
+        if not (x == 0 and y == 0 and z >= 0) then walls[#walls + 1] = stone(x, y, z) end
+    end end end
+    fresh(nil, walls)
+    knowAll()
+    W.give(1, STONE, 4)
+    local name, why = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0, 6 } })
+    check("opts.exit: a block that would close the last way to it is refused, saying why", name == nil
+        and why:find("won't place stone at 0,0,3: no way from 0,0,2 to opts.exit 0,0,6 after it", 1, true) ~= nil and W.get(0, 0, 3) == nil,
+        tostring(why))
+    local placed, _, how = T.placeAt(0, 0, 3, STONE)
+    check("...without it, placed with a warning that the turtle is closed in", placed == STONE and how and how.warning
+        and how.warning:find("warning: placed stone at 0,0,3, but the turtle at 0,0,2 is closed in after it", 1, true) ~= nil,
+        tostring(how and how.warning))
+    fresh(nil, { stone(0, -1, 3) })
+    knowAll()
+    W.give(1, STONE, 4)
+    placed, _, how = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0, 6 } })
+    check("...in the open, no warning and no refusal", placed == STONE and how and how.warning == nil, tostring(how and how.warning))
+end
+
 -- ADR-0015: a chain lies as a log does (it had no axis to place by); a lantern stands or hangs (opts.hanging)
 local CHAIN, LANTERN = "minecraft:chain", "minecraft:lantern"
 scene("a chain hanging down (axis y) with a floor to click", {

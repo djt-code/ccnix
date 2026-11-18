@@ -333,7 +333,8 @@ end
 local WANTED = { "facing", "half", "axis", "face", "type", "rotation", "hanging" }
 -- Every option T.placeAt takes (one it doesn't is named, not ignored)
 local PLACE_OPTS = { facing = true, half = true, axis = true, face = true, type = true, rotation = true, hanging = true,
-                     toward = true, move = true, inside = true, tries = true, text = true, temp = true, digBelow = true }
+                     toward = true, move = true, inside = true, tries = true, text = true, temp = true, digBelow = true,
+                     exit = true }
 
 --------------------------------------------------------------------------
 -- What the game found out, kept
@@ -898,6 +899,45 @@ local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
 
+-- (ADR-0015 D5) Would a block at x, y, z close the turtle in: no way out, through cells the map shows empty (air or
+-- water) or has never seen, to `exit` ({ x, y, z }), or with none to a cell OPEN_AT blocks from where it stands?
+-- Why, if so; nil if there is a way, or the search can't tell (it looks at SEAL_CELLS cells at most).  A way out that
+-- needs a dig (through the build) isn't one.
+local OPEN_AT, SEAL_CELLS = 12, 4000
+local PASSES = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:water"] = true }
+local function closesIn(x, y, z, exit)
+    local start = T.here()
+    local key = function(a, b, c) return a .. "," .. b .. "," .. c end
+    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [key(x, y, z)] = true }, { start }, 1
+    local goal = exit and key(exit.x or exit[1], exit.y or exit[2], exit.z or exit[3])
+    while queue[head] do
+        local c = queue[head]
+        head = head + 1
+        if head > SEAL_CELLS then return nil end
+        for _, d in ipairs(SIDES) do
+            local v = T.DELTA[d]
+            local nx, ny, nz = c.x + v[1], c.y + v[2], c.z + v[3]
+            local k = key(nx, ny, nz)
+            if k == goal then return nil end
+            if not seen[k] then
+                seen[k] = true
+                local name = nameAt(nx, ny, nz)
+                if name == nil or PASSES[name] then
+                    if not goal and (name == nil or math.max(math.abs(nx - start.x), math.abs(ny - start.y), math.abs(nz - start.z)) >= OPEN_AT) then
+                        return nil
+                    end
+                    queue[#queue + 1] = { x = nx, y = ny, z = nz }
+                end
+            end
+        end
+    end
+    if goal then
+        return "no way from " .. T.posKey(start) .. " to opts.exit " .. goal .. " after it (the map shows none round)"
+    end
+    return "the turtle at " .. T.posKey(start) .. " is closed in after it: the map shows no way out of the " .. (head - 1) ..
+        " cells it's in but by digging"
+end
+
 -- A block on board to put somewhere for a moment, not the item being placed: its name, or nil.
 local function tempBlock(item, choice)
     for _, g in ipairs(choice and { choice } or TEMP_BLOCKS) do
@@ -1327,8 +1367,10 @@ end
 -- rotations (how.toward says which, and how many degrees off the reader's way it is).  Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
 -- newline starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
--- (below).  A cell that already holds the item as wanted comes back as it is; one holding anything else is not
--- touched.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
+-- (below), exit ({ x, y, z }: below).  A cell that already holds the item as wanted comes back as it is; one holding
+-- anything else is not touched.  A placement that closes the turtle in (no way, through what the map shows empty or
+-- unknown, out of where it stands: a dozen blocks, or to opts.exit) is made with how.warning saying so; with
+-- opts.exit it's refused.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
 -- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
@@ -1425,6 +1467,10 @@ function T.placeAt(x, y, z, item, opts)
                 if was and clickable(was) then
                     return nil, was .. " is in the way at " .. x .. "," .. y .. "," .. z
                 end
+                local sealed = closesIn(x, y, z, opts.exit)
+                if sealed and opts.exit then
+                    return nil, "won't place " .. shortName(item) .. " at " .. x .. "," .. y .. "," .. z .. ": " .. sealed
+                end
                 T.selectItem(item)
                 local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h), message)
                 if not placed then
@@ -1443,7 +1489,9 @@ function T.placeAt(x, y, z, item, opts)
                         end
                         if accepted(item, want, name, state) then
                             return name, state, { approach = app.kind, from = { x = app.sx, y = app.sy, z = app.sz },
-                                                  heading = app.h, tries = attempt, lines = lines }
+                                                  heading = app.h, tries = attempt, lines = lines,
+                                                  warning = sealed and ("warning: placed " .. shortName(item) .. " at " .. x .. ","
+                                                      .. y .. "," .. z .. ", but " .. sealed) or nil }
                         end
                         lastWhy = "got " .. describe(name, state) .. " from " .. app.sx .. "," .. app.sy .. "," ..
                             app.sz .. " (" .. app.kind .. ")"
