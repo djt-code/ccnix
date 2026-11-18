@@ -2154,7 +2154,8 @@ local function hasBeta(n)
 end
 
 -- 42. context editing for the cache (ADR-0013 D1, as D9 amends it): every
---     request keeps all thinking and clears no tool call, past 180k too
+--     request keeps all thinking and clears no tool call, up to the 150k
+--     where a goal is summarized (ADR-0015 D7)
 --     (D1's mark is gone: compaction keeps the conversation in bounds, 44;
 --     the deep clear stands in when no summary comes, 45; the hard clear
 --     is 3c's)
@@ -2162,8 +2163,8 @@ do
 fresh({ "and more", "" })
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(120000)),
-    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(185000)),
-    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(240000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(135000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(148000)),
     reply({ text("Done.") }, "end_turn", inTokens(99000)),
     reply({ text("More.") }, "end_turn", inTokens(99500)),
 }
@@ -2173,7 +2174,7 @@ for n = 1, 5 do
     local e = HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {}
     keepsAll = keepsAll and #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all"
 end
-check("every request keeps all thinking and clears no tool call, at 185k and 240k too", keepsAll and #HTTP.requests == 5,
+check("every request keeps all thinking and clears no tool call, at 135k and 148k too", keepsAll and #HTTP.requests == 5,
     #HTTP.requests)
 check("...and no deep clear is logged", not (Mine.files["claude.log"] or ""):find("deep clear", 1, true))
 end
@@ -2372,9 +2373,9 @@ check("compacting again in the goal: from the block on, the last 3 turns kept; t
         and blockOf(8) and blockOf(8).content == "Mid two." and #HTTP.requests[8].body.messages == 7, #(c7.messages or {}))
 local log44 = Mine.files["claude.log"] or ""
 check("logged: where it was compacted, what was kept, and what came of it",
-    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 255000 tokens in", 1, true)
+    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 155000 tokens in", 1, true)
         and log44:find("compacted: 3 messages into a summary of 1200 tokens (12 characters)", 1, true), log44:match("compacting[^\n]*"))
-check("...and shown", Mine.logHas("^%(the conversation, 255k tokens, is summarized; the last 3 turns kept%)"))
+check("...and shown", Mine.logHas("^%(the conversation, 155k tokens, is summarized; the last 3 turns kept%)"))
 check("the goal carried on to its end", Mine.logHas("^Done%.$"))
 end
 
