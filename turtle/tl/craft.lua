@@ -928,12 +928,17 @@ local function stashAll(side)
 end
 
 -- One round: fill the grid from the chest for r.p crafts and craft.  Returns how many of the item that made, and why it
--- stopped short (a cell ran dry, the crafting refused) or nil.
+-- stopped short (a cell came up short: which ingredient and how many; the crafting refused) or nil.
 local function oneRound(bench, side, outName, r)
     for _, c in ipairs(r.layout) do T.takeInto(side, c.item, r.p, c.slot) end
-    local most = r.p
-    for _, c in ipairs(r.layout) do most = math.min(most, turtle.getItemCount(c.slot)) end
-    if most < 1 then return 0, "the chest ran out of an ingredient" end
+    local most, short = r.p, nil
+    for _, c in ipairs(r.layout) do
+        local n = turtle.getItemCount(c.slot)
+        if n < most then most, short = n, c end
+    end
+    local shortWhy = short and ("short of " .. shortName(short.item) .. ": a round of " .. r.p .. " crafts needs " .. r.p ..
+        " a cell, the chest gave " .. most .. " (" .. tostring(T.countContainer(side, short.item) or "?") .. " still in it)")
+    if most < 1 then return 0, shortWhy end
     turtle.select(16)                                    -- (what is made goes in from here)
     local before = T.countItem(outName)
     local ok, res, msg = pcall(bench.craft, most)
@@ -943,7 +948,7 @@ local function oneRound(bench, side, outName, r)
         return made, "the crafting failed: " .. tostring(res)
     end
     if res == false then return made, "the crafting table would not craft: " .. tostring(msg or "no recipe matched") end
-    return made
+    return made, shortWhy
 end
 
 -- Rounds of one recipe, the inventory stashed already: fill the grid, craft, stash the product, round after round.
@@ -1170,13 +1175,14 @@ end
 -- Craft a batch with the chest on `side`: all of it but the walking.  See T.craftBatch.
 local function batchAt(side, list, entries, opts)
     if not readable(side) then return nil, "no container I can read on the " .. side end
-    local biggest = 0
-    for _, e in ipairs(entries) do biggest = math.max(biggest, math.ceil(e.n / stackOf(e.name))) end
+    -- (every product stays in the chest till the end, a stack or more each: all of them need room, not the biggest)
+    local products = 0
+    for _, e in ipairs(entries) do products = products + math.ceil(e.n / stackOf(e.name)) end
     local info = { crafted = {}, failed = {}, taken = {}, left = {} }
     local take = takeTest(list, entries, opts.take)
     local function failed(e, why) info.failed[#info.failed + 1] = { name = e.name, n = e.n, why = why } end
     local stashWhy
-    local ran, benchWhy = atBench(side, biggest, "the biggest product", function(bench)
+    local ran, benchWhy = atBench(side, products, "the products", function(bench)
         stashWhy = workWith(side, function()
             for i, e in ipairs(entries) do
                 if T.freeSlots() < 16 then                -- (a stash that didn't all go in: the chest is full)

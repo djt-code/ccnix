@@ -2729,8 +2729,11 @@ end
 -- from it takes from.  Whatever is in slot 1 goes to an empty slot, or,
 -- with the container full, into an empty turtle slot (taken with `suck`,
 -- the turtle.suck for the container's side) that is returned so the
--- caller can put it back.  Returns found, held.
-local function frontStack(chest, name, suck)
+-- caller can put it back.  Returns found, held.  That slot is never
+-- `keep` (the slot the caller fills: T.takeInto's), and is one outside the
+-- crafting grid when there is one (the last empty slot), as a craft round
+-- fills the grid's cells one by one.
+local function frontStack(chest, name, suck, keep)
     local items = chest.list()
     local from
     for slot, it in pairs(items) do
@@ -2748,7 +2751,9 @@ local function frontStack(chest, name, suck)
         if empty then
             chest.pushItems(self, 1, 64, empty)
         else
-            held = findEmptySlot()
+            for s = 16, 1, -1 do
+                if s ~= keep and turtle.getItemCount(s) == 0 then held = s; break end
+            end
             if not held then return false end
             turtle.select(held)
             suck(64)
@@ -2851,7 +2856,7 @@ function T.takeInto(side, name, n, slot)
     for _ = 1, 64 do
         local have = turtle.getItemCount(slot)
         if have >= n then break end
-        local found, held = frontStack(chest, name, suck)
+        local found, held = frontStack(chest, name, suck, slot)
         if not found then break end
         turtle.select(slot)
         local got = suck(n - have)
