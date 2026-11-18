@@ -105,6 +105,12 @@ T.protections()
 T.guarded(x, y, z)
     The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
 
+T.boxOf(box)
+    The six numbers of a box, the smallest corner first, or nil and why. A box is { x1, y1, z1, x2, y2, z2 } or has the fields x1 to z2, the corners in any order.
+
+T.excludeTest(list)
+    A test of cells against an opts.exclude list (protected areas' names and boxes): test(c) is true for a cell { x, y, z } in any of them. Nil and why for an entry that is neither.
+
 T.inside(names, fn, ...)
     Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
 
@@ -544,6 +550,29 @@ T.refuelFrom(side, target)
 
 T.need(name)
     The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+
+tl.area: work over a box: paving its floor, clearing it out, picking up what lies in it
+
+Loaded by turtlelib the first time T.pave, T.clearBox or T.sweep is used.  Cells are the turtle's own (the frame it counts in).  From the claude model's own helpers (ADR-0015 D8): its serpentine road floor, its three-rows-a-move tunnel, and the pickup of what its digs dropped.
+
+Each goes over the box in rows along its longer side, one way and back (a serpentine), starting at the corner nearest the turtle, so a cell costs one move.  opts.exclude (protected areas' names and boxes, as T.harvest takes) leaves cells alone; protected areas hold as they do for every dig; opts.maxFuel stops it, saying so; opts.inside names the area the job owns.  Each returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.  Info has failed = { { x, y, z, why } } and stopped (why it stopped early, if it did).
+
+== tl.area: work over a box: paving its floor, clearing it out, picking up what lies in it ==
+
+T.pave(box, item, opts)
+    Pave a floor: every cell of the layer `box` (y1 = y2: the floor's own layer) made `item`, the turtle going over it in rows a block above, digging down what's there and placing down: one move a cell. True, info; false, why, info.
+
+    A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
+
+T.clearBox(box, opts)
+    Clear a box (a tunnel, a room) to air, three layers a pass: the turtle goes along the middle layer of each three, digging ahead, above and below as it goes: about a third of the moves of digging it cell by cell. True, info; false, why, info.
+
+    It digs only inside the box (not what opts.exclude lists or a protected area holds), going to the box through what the map shows open, and refuses a dig with lava or a water source beside it as T.moveTo does (opts.liquid digs it). What the digs give comes aboard; it stops when the inventory is full (T.stow, then call it again: it goes on where the box is still solid), the fuel runs out or opts.maxFuel is spent. opts: exclude, maxFuel, inside, liquid. Info is { dug, failed, stopped, spent }.
+
+T.sweep(box, opts)
+    Pick up what lies in a box (the drops of digs, what a player threw): the turtle goes over each layer of it, sucking in front of it, above and below, into the empty cells only, so it never takes from a chest or another container. True, info; false, why, info.
+
+    It moves only through what the map shows open (no digs), and stops when the inventory is full or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's; default { path = true, scan = false }). Info is { picked (items), failed, stopped, spent }.
 
 tl.attach: what hangs on a block or stands on it, and would drop if the block were dug
 

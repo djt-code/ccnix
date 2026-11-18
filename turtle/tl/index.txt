@@ -17,6 +17,8 @@ T.areaSet(names) - The names in `names` (one area's name, a list or a set of the
 T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name or a list of names, leaves those areas out (see T.guarded).
 T.protections() - The protected areas, as a list of tables with named fields: { name =, x1 =, y1 =, z1 =, x2 =, y2 =, z2 = } (p.name, p.x1, ...; copies: changing one changes nothing).
 T.guarded(x, y, z) - The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
+T.boxOf(box) - The six numbers of a box, the smallest corner first, or nil and why. A box is { x1, y1, z1, x2, y2, z2 } or has the fields x1 to z2, the corners in any order.
+T.excludeTest(list) - A test of cells against an opts.exclude list (protected areas' names and boxes): test(c) is true for a cell { x, y, z } in any of them. Nil and why for an entry that is neither.
 T.inside(names, fn, ...) - Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
 T.withUnprotected(names, fn, ...) - Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
 T.neverDig(name) - Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
@@ -140,6 +142,10 @@ T.dumpJunk() - Go to the junk chest, put every junk stack in it and come back fa
 T.refuelFrom(side, target) - Burn fuel from the container on `side` until the tank holds `target`, fuel on board first; empty buckets go back in. True if the target was reached.
 Modules loaded when first used:
 T.need(name) - The function T.<name>: as it is, or from the module the registry names, loading that first. Returns it, or nil and why (not a function of T, or its module wouldn't load or lacks it).
+tl.area: work over a box: paving its floor, clearing it out, picking up what lies in it:
+T.pave(box, item, opts) - Pave a floor: every cell of the layer `box` (y1 = y2: the floor's own layer) made `item`, the turtle going over it in rows a block above, digging down what's there and placing down: one move a cell. True, info; false, why, info.
+T.clearBox(box, opts) - Clear a box (a tunnel, a room) to air, three layers a pass: the turtle goes along the middle layer of each three, digging ahead, above and below as it goes: about a third of the moves of digging it cell by cell. True, info; false, why, info.
+T.sweep(box, opts) - Pick up what lies in a box (the drops of digs, what a player threw): the turtle goes over each layer of it, sucking in front of it, above and below, into the empty cells only, so it never takes from a chest or another container. True, info; false, why, info.
 tl.attach: what hangs on a block or stands on it, and would drop if the block were dug:
 T.attachedTo(x, y, z) - What in the map hangs on or stands on the block at x, y, z and would drop if it were dug: a list of { x, y, z, name, how ("on top", "on the side", "below"), sure }, and info; nil and why.
 Plans:

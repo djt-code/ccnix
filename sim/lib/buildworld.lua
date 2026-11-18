@@ -1031,6 +1031,16 @@ function B.new(opts)
     end
     local function suckFrom(x, y, z, face, n)
         local b = W[M.key(x, y, z)]
+        -- (no block: the items lying in the cell, as TurtleSuckCommand picks up item entities there)
+        local ground = not b and w.ground[M.key(x, y, z)]
+        if ground and #ground > 0 then
+            local size = #ground
+            local got = M.suckFrom(S, ground, size, n)
+            local left = {}
+            for i = 1, size do if ground[i] then left[#left + 1] = ground[i] end end
+            w.ground[M.key(x, y, z)] = left
+            return got
+        end
         if not (b and b.inv) then return false end
         if familyOf(b.name) == "chest" then return M.suckFrom(S, b.inv, 27, n) end
         for _, slot in ipairs(FURNACE_TAKE[faceKind(face)]) do

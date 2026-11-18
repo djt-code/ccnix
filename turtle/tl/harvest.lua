@@ -54,17 +54,7 @@ local function whole(n) return type(n) == "number" and n == math.floor(n) end
 -- one also matches the short name).  turtlelib's, as for every list of names.
 local matcher = T.nameTest
 
--- The six numbers of a box, smallest corner first, or nil and why.  A box is { x1, y1, z1, x2, y2, z2 } or has the
--- fields x1 to z2, the corners in any order.
-local function boxOf(box)
-    local v
-    if type(box) ~= "table" then return nil, "a box is six numbers" end
-    if box.x1 ~= nil then v = { box.x1, box.y1, box.z1, box.x2, box.y2, box.z2 } else v = { box[1], box[2], box[3], box[4], box[5], box[6] } end
-    for i = 1, 6 do
-        if not whole(v[i]) then return nil, "a box is six whole numbers" end
-    end
-    return math.min(v[1], v[4]), math.min(v[2], v[5]), math.min(v[3], v[6]), math.max(v[1], v[4]), math.max(v[2], v[5]), math.max(v[3], v[6])
-end
+local boxOf = T.boxOf
 
 -- What kind of place `where` is: "box", "scan" (a scan's { ["x,y,z"] = name }), "list" (cells), or nil.
 local function kindOf(where)
@@ -146,26 +136,7 @@ end
 
 -- A test for the cells opts.exclude leaves alone: a list of protected areas' names and boxes (six numbers, or x1 to z2
 -- fields).  The test, or nil and why for an entry that is neither.
-local function excluded(list)
-    local boxes = {}
-    for _, e in ipairs(list or {}) do
-        if type(e) == "string" then
-            for _, a in ipairs(T.protections()) do
-                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
-            end
-        else
-            local x1, y1, z1, x2, y2, z2 = boxOf(e)
-            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
-            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
-        end
-    end
-    return function(c)
-        for _, b in ipairs(boxes) do
-            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
-        end
-        return false
-    end
-end
+local excluded = T.excludeTest
 
 
 -- The cells of `where` whose block matches the test, as { x, y, z, name }, and true if cut to `limit`.  Scans a box the map

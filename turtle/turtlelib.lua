@@ -732,6 +732,41 @@ function T.guarded(x, y, z)
     return T.protected(x, y, z, T.cfg.inside)
 end
 
+-- The six numbers of a box, the smallest corner first, or nil and why.  A box is { x1, y1, z1, x2, y2, z2 } or has the
+-- fields x1 to z2, the corners in any order.
+function T.boxOf(box)
+    local v
+    if type(box) ~= "table" then return nil, "a box is six numbers" end
+    if box.x1 ~= nil then v = { box.x1, box.y1, box.z1, box.x2, box.y2, box.z2 } else v = { box[1], box[2], box[3], box[4], box[5], box[6] } end
+    for i = 1, 6 do
+        if not isWhole(v[i]) then return nil, "a box is six whole numbers" end
+    end
+    return math.min(v[1], v[4]), math.min(v[2], v[5]), math.min(v[3], v[6]), math.max(v[1], v[4]), math.max(v[2], v[5]), math.max(v[3], v[6])
+end
+
+-- A test of cells against an opts.exclude list (protected areas' names and boxes): test(c) is true for a cell
+-- { x, y, z } in any of them.  Nil and why for an entry that is neither.
+function T.excludeTest(list)
+    local boxes = {}
+    for _, e in ipairs(list or {}) do
+        if type(e) == "string" then
+            for _, a in ipairs(T.protections()) do
+                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
+            end
+        else
+            local x1, y1, z1, x2, y2, z2 = T.boxOf(e)
+            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
+            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
+        end
+    end
+    return function(c)
+        for _, b in ipairs(boxes) do
+            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
+        end
+        return false
+    end
+end
+
 -- Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them
 -- is allowed meanwhile (other areas still hold).  Puts it back after, even if fn errors (the error goes on); returns fn's results.
 --
@@ -3226,6 +3261,8 @@ T.registry = {
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
     fetch = "tl.store", stow = "tl.store", sortChests = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
     inventoryReport = "tl.store", prepare = "tl.store", recount = "tl.store",
+    -- tl.area: work over a box: paving its floor, clearing it, picking up what lies in it
+    pave = "tl.area", clearBox = "tl.area", sweep = "tl.area",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
     -- tl.journal: the job journal, the undo journal and reports to the player
