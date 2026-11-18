@@ -1,7 +1,10 @@
 -- ccnix.lua -- this computer's ccnix: where it comes from, and updates
 --
 --   ccnix            what the ROM has (its version and commit), and this
---                    computer's updates over it, if any
+--                    computer's updates over it, if any; and the server's
+--                    tick rate when it isn't Minecraft's 20 a second
+--                    (CraftOS's timers count ticks; ccnix's network and
+--                    timeouts count real seconds: lib/realtime)
 --   ccnix version    the version in use (semantic: major.minor.patch), and
 --                    the one a reboot brings if an update or reset changed it
 --   ccnix update     the latest from the ROM's repo into /ccnix with git,
@@ -101,6 +104,11 @@ if cmd == nil or cmd == "status" then
     end
     if fs.exists("/cc-turtles/.gitlite") then
         print("An install from before ccnix runs this computer (/cc-turtles); deploy/setup moves it over.")
+    end
+    local rate = ccnix and ccnix.tickRate and ccnix.tickRate()
+    if rate and rate ~= 20 then
+        print(string.format("The server ticks %.0f times a second (20 is normal): sleep and os.startTimer run %.1fx; "
+            .. "ccnix's network and timeouts keep real time.", rate, rate / 20))
     end
 
 elseif cmd == "version" then

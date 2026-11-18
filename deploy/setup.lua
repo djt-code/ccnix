@@ -88,11 +88,12 @@ local REPO = "https://github.com/djt-code/ccnix"
 local RAW = "https://raw.githubusercontent.com/djt-code/ccnix/main/"
 local DIR = "/ccnix"
 
--- The text libraries (lib/scan and those on it), for setup and for git.
+-- The text libraries (lib/scan and those on it), and lib/realtime (git's
+-- waits), for setup and for git.
 -- On a ccnix computer, or in a checkout this setup sits in, they're on
 -- disk.  Run alone (wget run), setup fetches them, in memory as it does
 -- git below; git, loaded in setup's environment, finds them there too.
-local TEXT_LIBS = { "scan", "text", "convert", "path", "getopt", "fileio", "tables" }
+local TEXT_LIBS = { "scan", "text", "convert", "path", "getopt", "fileio", "tables", "realtime" }
 package.path = (ccnix and ccnix.lib or "/" .. fs.getDir(fs.getDir(shell.getRunningProgram())) .. "/lib/?.lua;")
     .. package.path
 for _, name in ipairs(TEXT_LIBS) do
@@ -149,7 +150,7 @@ local APPS = {
 }
 -- (the text libraries, which nearly everything uses: see lib/scan's header)
 local TEXT = { "lib/scan.lua", "lib/text.lua", "lib/convert.lua", "lib/getopt.lua", "lib/glob.lua", "lib/path.lua",
-               "lib/fileio.lua", "lib/tables.lua" }
+               "lib/fileio.lua", "lib/tables.lua", "lib/realtime.lua" }
 local ALWAYS = { "bin/git.lua", "lib/pager.lua", TEXT, "deploy/", "help/ccnix.txt", "help/setup.txt" }
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
 
