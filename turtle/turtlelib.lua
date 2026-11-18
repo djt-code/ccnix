@@ -123,6 +123,9 @@ T.cfg = {
     maxClimb   = 3,     -- terrain stepping: max climb per column
     maxDrop    = 12,    -- max blocks below start level
     maxHeight  = 16,    -- max blocks above start level
+    -- digNeedsRoom: true, a dig with no slot for what it drops (none free, no stack of it with room) is refused
+    -- with a why, rather than the drop spilling on the ground.  Off for programs (mine, farm and mow make room
+    -- their own way); claude's sessions turn it on.
     -- tools: nil, the tools a job keeps (T.isEssential).  Unset, every tool aboard is essential, never junk or
     -- stowed; set to names or globs ({ "*_pickaxe", "*_hoe" }, a set too; {} for none), only the tools equipped
     -- (or parked aboard by a swap) and those it names are, so T.stow and T.dumpJunk put looted ones away.
@@ -712,8 +715,8 @@ function T.protected(x, y, z, skip)
     end
 end
 
--- The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 }
--- (copies: changing one changes nothing).
+-- The protected areas, as a list of tables with named fields: { name =, x1 =, y1 =, z1 =, x2 =, y2 =, z2 = } (p.name,
+-- p.x1, ...; copies: changing one changes nothing).
 function T.protections()
     local out = {}
     for i, a in ipairs(areas()) do
@@ -727,6 +730,41 @@ end
 -- inside (T.cfg.inside, set by T.inside).  nil if none.
 function T.guarded(x, y, z)
     return T.protected(x, y, z, T.cfg.inside)
+end
+
+-- The six numbers of a box, the smallest corner first, or nil and why.  A box is { x1, y1, z1, x2, y2, z2 } or has the
+-- fields x1 to z2, the corners in any order.
+function T.boxOf(box)
+    local v
+    if type(box) ~= "table" then return nil, "a box is six numbers" end
+    if box.x1 ~= nil then v = { box.x1, box.y1, box.z1, box.x2, box.y2, box.z2 } else v = { box[1], box[2], box[3], box[4], box[5], box[6] } end
+    for i = 1, 6 do
+        if not isWhole(v[i]) then return nil, "a box is six whole numbers" end
+    end
+    return math.min(v[1], v[4]), math.min(v[2], v[5]), math.min(v[3], v[6]), math.max(v[1], v[4]), math.max(v[2], v[5]), math.max(v[3], v[6])
+end
+
+-- A test of cells against an opts.exclude list (protected areas' names and boxes): test(c) is true for a cell
+-- { x, y, z } in any of them.  Nil and why for an entry that is neither.
+function T.excludeTest(list)
+    local boxes = {}
+    for _, e in ipairs(list or {}) do
+        if type(e) == "string" then
+            for _, a in ipairs(T.protections()) do
+                if a.name == e then boxes[#boxes + 1] = { a.x1, a.y1, a.z1, a.x2, a.y2, a.z2 } end
+            end
+        else
+            local x1, y1, z1, x2, y2, z2 = T.boxOf(e)
+            if not x1 then return nil, "opts.exclude lists protected areas' names and boxes: " .. y1 end
+            boxes[#boxes + 1] = { x1, y1, z1, x2, y2, z2 }
+        end
+    end
+    return function(c)
+        for _, b in ipairs(boxes) do
+            if c.x >= b[1] and c.x <= b[4] and c.y >= b[2] and c.y <= b[5] and c.z >= b[3] and c.z <= b[6] then return true end
+        end
+        return false
+    end
 end
 
 -- Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them
@@ -796,9 +834,25 @@ reframers[#reframers + 1] = function(move)
     for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
 end
 
+-- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom
+local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
+                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone" }
+
+-- Is there a slot for what digging `name` drops: a free one, or a stack of it with room?
+local function roomForDrop(name)
+    local drop = DIG_DROP[name] or name
+    for s = 1, 16 do
+        if turtle.getItemCount(s) == 0 then return true end
+        local it = turtle.getItemDetail(s)
+        if it and it.name == drop and turtle.getItemSpace(s) > 0 then return true end
+    end
+    return false
+end
+
 -- The wrapped digs: refuse what's protected, look at what's there (the
 -- listeners are told it), then dig (with the tool side the caller named,
--- if any).  A dig of a block a hoe tills is looked at again after, since
+-- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
+-- refused too.  A dig of a block a hoe tills is looked at again after, since
 -- the block may still be there, changed.
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
@@ -810,6 +864,10 @@ for name, side in pairs(DIG_SIDE) do
         if inspect then ok, data = inspect() end
         if ok and type(data) == "table" and data.name and not T.cfg.digContainers and T.neverDig(data.name) then
             return false, "won't dig " .. data.name .. " (set T.cfg.digContainers = true to allow it)"
+        end
+        if T.cfg.digNeedsRoom and ok and type(data) == "table" and data.name and not roomForDrop(data.name) then
+            return false, "no room for what digging " .. data.name .. " drops: every slot is full (T.cfg.digNeedsRoom; "
+                .. "stow or drop something first, or set it false to let drops fall)"
         end
         needTool()
         return afterwards(function()
@@ -1821,6 +1879,19 @@ function T.moveTo(x, y, z, opts)
     return run()
 end
 
+-- Blocks a dig destroys (a turtle's pickaxe has no silk touch): what each gives instead.  T.digCell refuses them
+-- unless opts.lossy.
+local LOSSY = { glowstone = "2 to 4 glowstone dust", sea_lantern = "2 or 3 prismarine crystals",
+                ice = "nothing (water, where it stood on a block)", packed_ice = "nothing", blue_ice = "nothing",
+                glass = "nothing", glass_pane = "nothing" }
+local function lossyDrop(name)
+    local short = name and (text.stripPrefix(name, "minecraft:") or name)
+    if not short then return nil end
+    if LOSSY[short] then return LOSSY[short] end
+    if text.endsWith(short, "_stained_glass") or text.endsWith(short, "_stained_glass_pane") then return "nothing" end
+    return nil
+end
+
 -- Names a turtle may stand in to dig a cell beside it
 local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true,
                     ["minecraft:water"] = true, ["minecraft:flowing_water"] = true }
@@ -1836,7 +1907,8 @@ local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["m
 -- stays beside the cell.  opts.attached looks first at what the block holds, from the map (T.attachedTo: a torch on it,
 -- a ladder or a sign on its side, a lantern under it): "refuse" refuses a dig that would drop any (a maybe too), naming
 -- them; "warn" digs, and returns them as a fourth value, { attached = the list }, named in the warning (those surely held
--- go from the map as air).
+-- go from the map as air).  A block the dig would destroy (glowstone gives dust; glass, its panes and ice give nothing)
+-- is refused, saying what it gives, unless opts.lossy = true.
 function T.digCell(x, y, z, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -1851,6 +1923,10 @@ function T.digCell(x, y, z, opts)
     local function refusal(name)
         local area = T.guarded(x, y, z)
         if area then return "protected: " .. area .. " (" .. (name or "the block") .. " at " .. at .. ")" end
+        local gives = not opts.lossy and lossyDrop(name)
+        if gives then
+            return "digging " .. name .. " at " .. at .. " destroys it: it gives " .. gives .. " (no silk touch); opts.lossy = true digs it anyway"
+        end
         if not opts.liquid then return liquidRefusal(name or "the block", cell) end
     end
     local function run()
@@ -3170,13 +3246,13 @@ T.registry = {
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
     placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place", forgetPlacements = "tl.place", signFor = "tl.place",
-    itemOfBlock = "tl.place", blockOfItem = "tl.place",
+    itemOfBlock = "tl.place", blockOfItem = "tl.place", dropsItself = "tl.place",
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
     -- tl.lint: a build as a two-tall player meets it
     lint = "tl.lint", walkable = "tl.lint", blockKind = "tl.lint",
     -- tl.light: block light over the map, and where mobs could spawn
-    light = "tl.light", darkCells = "tl.light",
+    light = "tl.light", darkCells = "tl.light", planLights = "tl.light",
     -- tl.craft: recipes, crafting from a chest, and smelting
     craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",
@@ -3185,6 +3261,8 @@ T.registry = {
     addChest = "tl.store", forgetChest = "tl.store", chests = "tl.store", catalogue = "tl.store", where = "tl.store",
     fetch = "tl.store", stow = "tl.store", sortChests = "tl.store", autoDump = "tl.store", reframeChests = "tl.store",
     inventoryReport = "tl.store", prepare = "tl.store", recount = "tl.store",
+    -- tl.area: work over a box: paving its floor, clearing it, picking up what lies in it
+    pave = "tl.area", clearBox = "tl.area", sweep = "tl.area",
     -- tl.harvest: blocks by name, fuel from lava, and what a job will cost in fuel
     harvest = "tl.harvest", refuelFromLava = "tl.harvest", fuelFor = "tl.harvest",
     -- tl.journal: the job journal, the undo journal and reports to the player

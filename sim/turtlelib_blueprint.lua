@@ -632,6 +632,23 @@ end
 -- T.replace
 --------------------------------------------------------------------------
 do
+    -- ADR-0015 D8.5: a trapped block (every neighbour solid) swapped by way of a neighbour with air over it: a floor of
+    -- planks two deep, a stone in the lower layer
+    local blocks = cube(-1, -2, 3, 3, -1, 7, "minecraft:oak_planks")
+    blocks[#blocks + 1] = { 1, -2, 5, STONE }
+    blocks[#blocks + 1] = { 1, -3, 5, STONE }
+    fresh(blocks)
+    know(-3, -4, 1, 5, 3, 9)
+    W.give(1, BRICKS, 4)
+    local ok, why, info = replace({ 1, -2, 5, 1, -2, 5 }, "minecraft:stone", BRICKS)
+    check("T.replace: a block with no free side is trapped, the why naming opts.digBelow", ok == false and #info.trapped == 1
+        and info.trapped[1].why:find("opts.digBelow goes in by way of one", 1, true) ~= nil, tostring(info and info.trapped[1] and info.trapped[1].why))
+    ok, why, info = replace({ 1, -2, 5, 1, -2, 5 }, "minecraft:stone", BRICKS, { digBelow = true })
+    check("...with opts.digBelow: swapped from the neighbour above it, dug and stood in, then put back (planks give planks)",
+        ok == true and info.replaced == 1 and info.via == 1 and has(1, -2, 5, "stone_bricks") and has(1, -1, 5, "oak_planks"),
+        tostring(why) .. " " .. W.show(1, -1, 5))
+end
+do
     fresh(cube(0, 0, 4, 2, 2, 6, STONE))
     know(-3, -3, 1, 5, 5, 9)
     W.give(1, BRICKS, 40)

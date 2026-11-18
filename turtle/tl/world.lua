@@ -1453,8 +1453,8 @@ local function centres(lo, hi, r)
     return out
 end
 
--- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles,
--- scanned, failed, partial }.
+-- Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next, going to
+-- each with opts.move ({ path = true, dig = true } digs): { tiles, scanned, failed, partial }.
 --
 -- It goes to each scan's centre first (T.moveTo with opts.move, default { path = true, scan = false }: round what's in
 -- the way; { path = true, dig = true } digs); a centre it can't get to (solid, or no way there) is scanned from where it

@@ -10,6 +10,37 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
+## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
+
+In-game order: `/ccnix rom update`; on a computer `ccnix` (it says the server's tick rate while it isn't 20); then
+turtle 10's goal: "read what's new, retire the helpers it names, fix your placement-tricks skill and task41.lua,
+and keep /claude/report_harness_v5.md as you work". The v5 report says what held.
+
+- **The tick rate**: with `/tick rate 60`, `ccnix` says "The server ticks 60 times a second"; `sleep 10` takes ten
+  real seconds; a chat ask with a 60 s timeout ends after a real minute, reminders on real time; `T.harvest
+  { timeout = 60 }` stops after a real minute; `ping -c 3` a second apart; a TCP connection (telnet, irc, curl) to a
+  machine outside the game no longer times out early. Back at 20 after `/tick rate 20`, within about 10 seconds.
+- **Chat and signs**: an arrow and a dash in what the model says in chat, and on a sign it writes, show as -> and -
+  (no "a-hat" and boxes).
+- **Two bases**: at one base, `T.stow` with a chest for the item only at the other: it stays aboard, the why naming
+  the far chest and how far; `T.stow{ far = true }` goes. `T.sortChests` at one base moves nothing to the other.
+  `T.addChest` with "*brick*" beside a "*_stairs" chest warns; brick stairs go to the stairs chest.
+- **`T.catalogue(spots)`**: five chests side by side cost about their own walk, not the round of every chest.
+- **Crafting from a full chest**: a `T.craftBatch` of nether brick stairs and slabs from a nearly full chest makes
+  every round in full; a short one names the ingredient and counts; a batch that would fill the chest is refused.
+- **Placement**: a chain with `axis`, a lantern with `hanging = true` under a block and `false` on a floor; an
+  option `T.placeAt` doesn't take is refused; a placement that closes the turtle in warns, and with `opts.exit` is
+  refused.
+- **`T.build`**: a new plan after one whose every cell was tried (some failed) starts.
+- **Digs**: `T.digCell` of glowstone is refused unless `lossy = true`; a full inventory in a claude session refuses
+  a dig ("no room for what digging ... drops") instead of dropping it.
+- **`T.travel` far**: a target 100+ blocks off goes in legs, "hopped: N legs".
+- **The new functions**: `T.planLights` over a dark road; `T.pave` of a road floor (one move a cell); `T.clearBox`
+  of a 3-high tunnel (a move a column); `T.sweep` after a dig job (a chest in the box untouched); `T.replace{
+  digBelow = true }` of a buried block; `T.walkable{ with }`.
+- **The harness**: a goal summarized at 150k, the summary keeping what's new; `check(code)`; `helpers()` naming what
+  the library has now; a loop printing the same why comes back once with "(xN)"; the "was local" note once a name.
+
 ## ADR-0014: mine keeps going (ccnix 0.54.0) (#95)
 
 In-game order: `/ccnix rom update`, then the 10x10 endless tunnel that stopped with a full chest: `mine haul`, then

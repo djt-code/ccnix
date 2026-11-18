@@ -1620,12 +1620,44 @@ local lua34 = HTTP.requests[1] and HTTP.requests[1].body.tools[1].input_schema.p
 check("the prompt tells of maxHeight 256 and review = true; the lua tool takes review",
     sys34:find("In this session T.cfg.maxHeight is 256", 1, true) and sys34:find("A lua call with review = true shows its code", 1, true)
         and lua34 and lua34.type == "boolean")
+-- ADR-0015 D3: in a session a dig with no slot for its drop is refused, with why, not spilled; the prompt says so
+fresh({ "" })
+for s = 1, 16 do Mine.inv[s] = { name = "minecraft:oak_log", count = 64 } end
+local digsBefore = DIGS
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return T.cfg.digNeedsRoom, turtle.dig()" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig when full")
+local d34 = resultsIn(2).toolu_1
+check("T.cfg.digNeedsRoom in a session: a dig with every slot full is refused, saying why, nothing dug",
+    d34 and d34.content:find("^%-> true\n%-> false\n%-> no room for what digging minecraft:[%w_]+ drops: every slot is full") and DIGS == digsBefore,
+    d34 and d34.content)
+check("...and the prompt says so", (HTTP.requests[1].body.system[1].text or ""):find("A dig with no slot for its drop is refused, not spilled", 1, true) ~= nil)
 fresh({ "" })
 Mine.files["claude/helpers.lua"] = "T.cfg.maxHeight = 20"
 HTTP.queue = { reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "tool_use"), reply({ text("Done.") }, "end_turn") }
 run("not so high")
 Mine.files["claude/helpers.lua"] = nil
 check("...unless the helpers set it otherwise", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 20")
+-- ADR-0015 D8.7: check(code) compiles without running; helpers() says what each helper file defined, and the names T
+-- has too; the lua tool says what the sandbox lacks
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "function digCell() end\nfunction myThing() end"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "ran = false\nlocal ok, err = check('x =')\nreturn ok, err, check('ran = true'), ran" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return helpers()" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("what have I got")
+Mine.files["claude/helpers.lua"] = nil
+local ch, hp = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("check(code): nil and the error for code that doesn't compile, true for code that does, and nothing run",
+    ch and ch.content:find("^%-> nil\n%-> check:1:") and ch.content:find("\n%-> true\n%-> false$") ~= nil, ch and ch.content)
+check("helpers(): each helper file's globals, and the names T has too", hp
+    and hp.content == "-> /claude/helpers.lua: digCell, myThing; T has digCell too", hp and hp.content)
+check("...and the lua tool says what's absent and how to check code", (HTTP.requests[1].body.tools[1].description or "")
+    :find("There's no load, loadstring, _G or coroutine: check(code) compiles code without running it", 1, true) ~= nil)
 end
 
 -- 35. what's new (ADR-0011 D9): claude keeps the ccnix version it last ran
@@ -2122,7 +2154,8 @@ local function hasBeta(n)
 end
 
 -- 42. context editing for the cache (ADR-0013 D1, as D9 amends it): every
---     request keeps all thinking and clears no tool call, past 180k too
+--     request keeps all thinking and clears no tool call, up to the 150k
+--     where a goal is summarized (ADR-0015 D7)
 --     (D1's mark is gone: compaction keeps the conversation in bounds, 44;
 --     the deep clear stands in when no summary comes, 45; the hard clear
 --     is 3c's)
@@ -2130,8 +2163,8 @@ do
 fresh({ "and more", "" })
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(120000)),
-    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(185000)),
-    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(240000)),
+    reply({ toolUse("lua", { code = "return 2" }) }, "tool_use", inTokens(135000)),
+    reply({ toolUse("lua", { code = "return 3" }), toolUse("memory", { command = "view", path = "/memories" }) }, "tool_use", inTokens(148000)),
     reply({ text("Done.") }, "end_turn", inTokens(99000)),
     reply({ text("More.") }, "end_turn", inTokens(99500)),
 }
@@ -2141,7 +2174,7 @@ for n = 1, 5 do
     local e = HTTP.requests[n] and HTTP.requests[n].body.context_management.edits or {}
     keepsAll = keepsAll and #e == 1 and e[1].type == "clear_thinking_20251015" and e[1].keep == "all"
 end
-check("every request keeps all thinking and clears no tool call, at 185k and 240k too", keepsAll and #HTTP.requests == 5,
+check("every request keeps all thinking and clears no tool call, at 135k and 148k too", keepsAll and #HTTP.requests == 5,
     #HTTP.requests)
 check("...and no deep clear is logged", not (Mine.files["claude.log"] or ""):find("deep clear", 1, true))
 end
@@ -2173,6 +2206,7 @@ check("a goal ending over 100k: the next request is a compaction of the conversa
 check("...with our own summary prompt: the goal, the player's words, places, lessons, helpers and skills; no tool calls, text only",
     c3.compaction and c3.compaction.instructions:find("the player's own words", 1, true) and c3.compaction.instructions:find("coordinates", 1, true)
         and c3.compaction.instructions:find("lessons and mistakes", 1, true) and c3.compaction.instructions:find("skills", 1, true)
+        and c3.compaction.instructions:find("what's new in this release", 1, true)
         and c3.compaction.instructions:find("Do not call any tool: answer with the summary text only.", 1, true) and #c3.compaction.instructions <= 16384)
 check("...the same model, system prompt, tools and thinking; several thousand tokens; no context edits, no fallback model; the beta header",
     c3.model == HTTP.requests[2].body.model and c3.system[1].text == HTTP.requests[2].body.system[1].text
@@ -2299,28 +2333,28 @@ check("a goal ended on a tool call: the summary leaves that turn out, kept after
     #(c3b.messages or {}))
 end
 
--- 44. compaction inside a goal (ADR-0013 D9): once a call's input reaches
---     250k, right after its tool results the conversation is summarized
+-- 44. compaction inside a goal (ADR-0013 D9; 150k since ADR-0015 D7): once a call's input reaches
+--     150k, right after its tool results the conversation is summarized
 --     but for the last 3 turns (a reply and its results each): the
 --     compaction request ends where an earlier request ended (results, not
 --     a reply waiting on them); the next request is the block, then the
 --     kept turns word for word (their thinking too), nothing else; the
 --     goal carries on; compacting again in the goal sends only the newest
---     block; under 250k in a goal, none; logged and shown
+--     block; under 150k in a goal, none; logged and shown
 do
 fresh({ "" })
 local function step(n, at) return reply({ thinking(), toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
 HTTP.queue = {
-    step(1, 200000), step(2, 220000), step(3, 240000), step(4, 255000),
+    step(1, 100000), step(2, 120000), step(3, 140000), step(4, 155000),
     M.compactionReply("Mid summary."),
-    step(5, 260000),
+    step(5, 160000),
     M.compactionReply("Mid two."),
     reply({ text("Done.") }, "end_turn", inTokens(42000)),
 }
 run("long job")
 local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
 local last5 = c5.messages and c5.messages[#c5.messages] or {}
-check("under 250k in a goal no compaction; at 255k one, right after that call's results",
+check("under 150k in a goal no compaction; at 155k one, right after that call's results",
     c5.compaction and not HTTP.requests[4].body.compaction and #HTTP.requests == 8, #HTTP.requests)
 check("...of what came before the last 3 turns: the goal and the first turn, ending on its results",
     #(c5.messages or {}) == 3 and last5.role == "user" and type(last5.content) == "table" and last5.content[1].type == "tool_result"
@@ -2339,9 +2373,9 @@ check("compacting again in the goal: from the block on, the last 3 turns kept; t
         and blockOf(8) and blockOf(8).content == "Mid two." and #HTTP.requests[8].body.messages == 7, #(c7.messages or {}))
 local log44 = Mine.files["claude.log"] or ""
 check("logged: where it was compacted, what was kept, and what came of it",
-    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 255000 tokens in", 1, true)
+    log44:find("compacting at a goal's middle: 3 messages, 6 kept as they are; the last call had 155000 tokens in", 1, true)
         and log44:find("compacted: 3 messages into a summary of 1200 tokens (12 characters)", 1, true), log44:match("compacting[^\n]*"))
-check("...and shown", Mine.logHas("^%(the conversation, 255k tokens, is summarized; the last 3 turns kept%)"))
+check("...and shown", Mine.logHas("^%(the conversation, 155k tokens, is summarized; the last 3 turns kept%)"))
 check("the goal carried on to its end", Mine.logHas("^Done%.$"))
 end
 

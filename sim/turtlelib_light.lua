@@ -367,6 +367,38 @@ do
 end
 
 --------------------------------------------------------------------------
+-- T.planLights (ADR-0015 D8.1: the model's roadlights.lua, a greedy cover over the light model)
+--------------------------------------------------------------------------
+do
+    -- a roofed corridor 20 long (feet cells y 0, x 0..19), stone walls at z -1 and 1, the roof at y 2
+    local blocks = add(cube(-3, -1, -3, 22, -1, 3, STONE), cube(-1, 0, -1, 20, 1, -1, STONE))
+    add(blocks, cube(-1, 0, 1, 20, 1, 1, STONE))
+    add(blocks, cube(-1, 2, -1, 20, 2, 1, STONE))
+    add(blocks, { { -1, 0, 0, STONE }, { -1, 1, 0, STONE }, { 20, 0, 0, STONE }, { 20, 1, 0, STONE } })
+    fresh(blocks)
+    know(-3, -1, -3, 22, 3, 3)
+    local cells, candidates = {}, {}
+    for x = 0, 19 do
+        cells[#cells + 1] = { x, 0, 0 }
+        candidates[#candidates + 1] = { x, 1, 1 }           -- (in the wall at head height)
+    end
+    local picks, info = T.planLights(cells, candidates)
+    check("T.planLights: a dark corridor of 20, lanterns in the wall: 2 lights bring every cell to 8", picks and #picks == 2
+        and info.covered == 20 and #info.left == 0 and info.lit == 0 and picks[1].name == "minecraft:lantern", info and info.summary)
+    local with = {}
+    for _, p in ipairs(picks or {}) do with[#with + 1] = { p.x, p.y, p.z, p.name } end
+    local level = T.light({ 0, 0, 0, 19, 0, 0 }, { with = with })
+    local darkest = 15
+    for x = 0, 19 do darkest = math.min(darkest, level(x, 0, 0)) end
+    check("...and the light model, with them in place, agrees: the darkest cell is 8 or more", darkest >= 8, darkest)
+    picks, info = T.planLights(cells, candidates, { item = "torch", min = 12 })
+    check("...torches to 12 take more, and the cells none reaches are listed", picks and #picks > 2 and info.covered + #info.left == 20,
+        info and info.summary)
+    local none, why = T.planLights(cells, { { 0, 1, 1, "stone" } })
+    check("...a candidate that gives no light: nil and why", none == nil and why == "minecraft:stone gives no light", tostring(why))
+end
+
+--------------------------------------------------------------------------
 -- T.digCell and opts.attached
 --------------------------------------------------------------------------
 do
@@ -395,4 +427,15 @@ do
     check("without opts.attached the dig is as before: no look at what it holds (tl.attach not loaded), the torches drop",
         ok == true and was == STONE and warning == nil and extra == nil and package.loaded["tl.attach"] == nil and W.get(2, 1, 3) == nil,
         tostring(warning))
+    -- ADR-0015 D6: a dig that destroys the block (glowstone gives dust, glass nothing) is refused, saying what it gives
+    fresh(add(cube(-3, -1, -3, 6, -1, 8, STONE), { { 2, 0, 3, "minecraft:glowstone" }, { 2, 0, 5, "minecraft:white_stained_glass" } }))
+    know(-3, -1, -3, 6, 3, 8)
+    ok, why = T.digCell(2, 0, 3)
+    check("T.digCell of glowstone: refused before it moves, saying what it gives and the option", ok == false
+        and why == "digging minecraft:glowstone at 2,0,3 destroys it: it gives 2 to 4 glowstone dust (no silk touch); opts.lossy = true digs it anyway"
+        and W.get(2, 0, 3) and T.pos.x == 0 and T.pos.z == 0, tostring(why))
+    ok, why = T.digCell(2, 0, 5)
+    check("...stained glass too: it gives nothing", ok == false and why:find("gives nothing", 1, true) ~= nil and W.get(2, 0, 5), tostring(why))
+    ok, was = T.digCell(2, 0, 3, { lossy = true })
+    check("...opts.lossy = true digs it", ok == true and was == "minecraft:glowstone" and W.get(2, 0, 3) == nil, tostring(was))
 end

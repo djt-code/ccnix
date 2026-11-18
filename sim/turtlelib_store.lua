@@ -676,6 +676,56 @@ do
 end
 
 do
+    -- ADR-0015 D1: two bases.  A chest for glowstone at the far base (100 blocks east) and the bulk chest here: what
+    -- goes in stays here (it went the 100 blocks, and back, for 6 glowstone); with no chest for it here it stays
+    -- aboard, the why saying where the far one is; opts.far goes
+    local GLOW = "minecraft:glowstone"
+    setUp()
+    W.set(100, 0, 1, "minecraft:chest")
+    T.addChest(100, 0, 0, 0, { holds = "*glowstone*" })
+    T.catalogue()
+    W.give(1, GLOW, 6)
+    local moves = W.S.moves
+    local ok, why, info = T.stow()
+    check("two bases: an item whose chest is at the far base goes to the bulk chest here, not 100 blocks off", ok == true
+        and chestHas(0, 0, -3, GLOW) == 6 and chestHas(100, 0, 1, GLOW) == 0 and W.S.moves - moves < 20, tostring(why))
+    T.forgetChest(C.x, C.y, C.z, C.side)
+    W.give(1, GLOW, 6)
+    ok, why, info = T.stow()
+    check("...with nowhere for it here: aboard, the why naming the far chest, how far and opts.far", ok == false and carrying(GLOW) == 6
+        and why:find("the nearest chest for it is at 100,0,1, 100 blocks off (over opts.maxDistance 48: opts.far = true goes)", 1, true) ~= nil,
+        tostring(why))
+    ok, why = T.stow({ far = true })
+    check("...opts.far = true goes there", ok == true and chestHas(100, 0, 1, GLOW) == 6 and carrying(GLOW) == 0 and here(), tostring(why))
+    -- sorting stays within a site: the far base's chest for glowstone doesn't pull it from the bulk chest here
+    T.addChest(C.x, C.y, C.z, C.side, true)
+    fill(0, 0, -3, { [1] = { GLOW, 5 } })
+    T.catalogue({ { x = C.x, y = C.y, z = C.z, side = C.side } })
+    moves = W.S.moves
+    ok, why = T.sortChests()
+    check("T.sortChests sorts the site the turtle is at: the glowstone in the bulk chest here stays, nowhere far gone",
+        ok == true and chestHas(0, 0, -3, GLOW) == 5 and chestHas(100, 0, 1, GLOW) == 6 and W.S.moves == moves, tostring(why))
+end
+
+do
+    -- ADR-0015 D2: holds that overlap: the most specific glob wins (fewer wildcards, then more letters), and
+    -- T.addChest says so
+    local STAIRS = "minecraft:stone_brick_stairs"
+    setUp()
+    T.catalogue()
+    local _, note1 = T.addChest(D.x, D.y, D.z, D.side, { holds = "*_stairs" })
+    local _, note2 = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
+    check("T.addChest: holds that overlap another chest's are said, with an item both take and which wins",
+        not tostring(note1):find("warning", 1, true) and note2 and note2:find("warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_stairs\" (both take", 1, true)
+        and note2:find("the more specific glob wins, \"*_stairs\" (that chest's)", 1, true) ~= nil, tostring(note2))
+    W.give(1, STAIRS, 8)
+    W.give(2, "minecraft:bricks", 4)
+    local ok, why = T.stow()
+    check("...stone brick stairs go to the chest for *_stairs, bricks to the one for *brick*", ok == true
+        and chestHas(2, -1, -2, STAIRS) == 8 and chestHas(3, 0, 1, STAIRS) == 0 and chestHas(3, 0, 1, "minecraft:bricks") == 4, tostring(why))
+end
+
+do
     -- T.sortChests
     setUp()
     T.catalogue()

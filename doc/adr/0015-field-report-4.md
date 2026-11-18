@@ -100,6 +100,38 @@ older than the log and rests on the report alone.
 D1 to D8 as recommended (the user, 2026-11-17: "all recommendations
 approved"), and D9.
 
+**As built** (where the build had to choose):
+- **D1:** "just as close" is within 8 blocks of the nearest chest. Between
+  chests that close, the kinds decide (a chest for the item, then one
+  holding it, then the bulk chest), so a single base keeps sending items to
+  their own chests. The reach is measured from where the stow began.
+  `T.sortChests` sorts the site nearest the turtle (or `opts.near`, or the
+  sites in `opts.box`).
+- **D2:** "more specific" is fewer wildcards, then more letters. The overlap
+  warning finds a name both globs take from their letters and the names in
+  the chests, so it can miss an overlap; it warns, nothing more.
+- **D3:** a dig is refused when no slot is free and no stack of its drop has
+  room. The drop is the block itself, or cobblestone for stone and the like.
+- **D4:** each leg is about 16 blocks and searches with the default limit.
+  A leg that fails tries 3 higher, 3 lower and 6 higher; at most 64 legs.
+- **D5:** the check looks for a way out over the map, through cells empty or
+  never seen (a cell never seen counts as open), to 12 blocks or to
+  `opts.exit`. It runs before each placement; `T.build` passes `opts.exit`
+  to every cell and lists the warnings in `info.sealed`.
+- **D8:**
+  - `T.pave`, `T.clearBox` and `T.sweep` are a new module, `tl.area`.
+  - `T.replace` goes through a neighbour with `opts.digBelow`, plain blocks
+    only.
+  - `T.boxOf`, `T.excludeTest` and `T.dropsItself` became the library's
+    (each was a module's own).
+- **D9:** the first measure comes 2 real seconds after boot, then every 10 or
+  more; a span over a minute is thrown away.
+  - What else moved to real seconds: DNS (its timeout and TTLs), httpc,
+    httpd's idle cut, IRC, ping, nc, git's backoff, claude's API retries and
+    the geo scanner's retries.
+  - What stayed on ticks: crops, furnaces, redraws, and the checks that
+    give the computer a turn.
+
 ## Options considered
 
 ### D1. Two bases: stow and sort by distance
@@ -267,8 +299,8 @@ All recommended. Left out: a scout line (world-specific).
 ## Action items
 
 ### Phase 0
-1. [ ] Baseline twice, byte for byte (done: identical).
-2. [ ] Each field failure a scenario first, failing on today's code:
+1. [x] Baseline twice, byte for byte (done: identical).
+2. [x] Each field failure a scenario first, failing on today's code:
    - chat with an arrow;
    - a sign with one;
    - the harvest timeout on a fast clock;
@@ -279,43 +311,43 @@ All recommended. Left out: a scout line (world-specific).
    - a fully tried build.
 
 ### Phase 1: no decision
-1. [ ] Chat and sign text through `convert.fromUTF8` (lib/mc's queue,
+1. [x] Chat and sign text through `convert.fromUTF8` (lib/mc's queue,
    place.lua's sign lines).
-2. [ ] Timeouts in real seconds (`os.epoch("utc")`): `T.harvest`,
+2. [x] Timeouts in real seconds (`os.epoch("utc")`): `T.harvest`,
    `T.report.ask`, and the others that count seconds by ticks.
-3. [ ] `T.catalogue(spots)` goes round only the spots.
-4. [ ] Crafting:
+3. [x] `T.catalogue(spots)` goes round only the spots.
+4. [x] Crafting:
    - a short round says which ingredient came up short and how many;
    - the batch's room check counts every product;
    - the cause of the short rounds found and fixed (suspected:
      `frontStack` borrowing a grid slot when the chest is full; mine and
      farm restock through it, so they get a scenario too).
-5. [ ] Placement:
+5. [x] Placement:
    - chain gets an axis family;
    - lanterns get `hanging`;
    - `T.placeInfo` says they hang;
    - an option placeAt doesn't know is named in the why or the info, not
      ignored.
-6. [ ] A build with every cell tried no longer blocks the next. Its
+6. [x] A build with every cell tried no longer blocks the next. Its
    failures stay listed, and the refusal of an unfinished one counts
    them.
-7. [ ] `T.darkCells`:
+7. [x] `T.darkCells`:
    - `info.unsure` is a list of cells;
    - the summary says "listed N of M".
-8. [ ] `T.lint`: `opts.rules` picks the rules, and a limit is shared
+8. [x] `T.lint`: `opts.rules` picks the rules, and a limit is shared
    between them, so one rule can't take it all.
-9. [ ] `T.scanBox` routes with `path = true` and scans from where it got
+9. [x] `T.scanBox` routes with `path = true` and scans from where it got
    to when a tile's centre can't be reached.
-10. [ ] `T.posKey`, `T.dist` and `T.at` say what they want when given a
+10. [x] `T.posKey`, `T.dist` and `T.at` say what they want when given a
     list.
-11. [ ] Wording: no "no route: no route:".
-12. [ ] The harness:
+11. [x] Wording: no "no route: no route:".
+12. [x] The harness:
     - repeated lines in a lua result shown once, with a count;
     - the "local to this call" note not given for a global;
     - no "(3 characters left out)".
 
 ### Phase 2: what the model reads
-1. [ ] Index lines:
+1. [x] Index lines:
    - digBelow;
    - darkCells' limit and `info.more`;
    - lint's `info.rules` and `info.more`;
@@ -325,21 +357,22 @@ All recommended. Left out: a scout line (world-specific).
    - a bare craft list makes no intermediates (use `T.craftPlan`);
    - scanBox `opts.move`;
    - stow's order.
-2. [ ] The tool text: what the sandbox lacks, and `loadfile` as a
+2. [x] The tool text: what the sandbox lacks, and `loadfile` as a
    compile check.
-3. [ ] "What's new" for 0.54.0, in the model's terms:
+3. [x] "What's new" for 0.54.0, in the model's terms:
    - the retirements;
    - the wrong lantern lesson;
    - `task41.lua` and T.keep;
    - the server's fast ticks.
 
 ### Phase 3: the decisions
-1. [ ] D1 to D8 as decided.
-2. [ ] D9: `lib/realtime` and `ccnix.tickRate()`, and the timers that
+1. [x] D1 to D8 as decided.
+2. [x] D9: `lib/realtime` and `ccnix.tickRate()`, and the timers that
    mean real time moved onto it (Phase 1 item 2 becomes part of this).
 
 ### Phase 4: release (on the user's ok) and hand back
-1. [ ] News, version bump, UNTESTED.md section with its issue.
-2. [ ] The next goal: "read what's new, retire the helpers it names, fix
+1. [x] News (doc/claude-news.txt 0.54.0) and UNTESTED.md's section with its issue (#102).
+2. [ ] Version bump and release: on the owner's ok, with ADR-0014's.
+3. [ ] The next goal: "read what's new, retire the helpers it names, fix
    your placement-tricks skill and task41.lua, and keep
    /claude/report_harness_v5.md as you work".
