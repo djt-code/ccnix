@@ -10,8 +10,9 @@
 -- it ends, and logs.  It answers on every wireless modem (ender modems
 -- too), and on modems attached later.
 --
--- Where it is: gpsd.x, gpsd.y and gpsd.z (the computer's coordinates, F3
--- in the game).  Without them, a command computer knows its own; another
+-- Where it is: gpsd.x, gpsd.y and gpsd.z, the computer's own block (F3's
+-- "Targeted Block" while you look at it): CC measures distances from the
+-- block the modem is on, exactly, so a block off is wrong.  Without them, a command computer knows its own; another
 -- locates itself from the other hosts (tried every 10 s until there's a
 -- fix; not saved: a computer moved locates again at boot).  A position
 -- from the settings is checked when it starts: it pings, and weighs each
@@ -20,13 +21,17 @@
 -- the position is wrong, or the computer was moved, and gpsd doesn't serve:
 -- it says so in red on the console and checks again every minute.  A host
 -- that disagrees while most agree is named in the log: its position, or
--- this one, is wrong.  gpsd.check=false skips the check.
+-- this one, is wrong.  If no host answers (they all started at once), it
+-- serves, and checks again every minute until one does.  gpsd.check=false
+-- skips the check.
 --
 -- A constellation: four hosts at least, not all at one height (four in one
 -- plane leave two answers), as far apart as the modems reach, high up (a
 -- wireless modem reaches farther the higher it is; an ender modem reaches
--- the whole dimension).  Then more where the turtles work: a client needs
--- four in range.  Pocket computers and turtles can't host: they move.
+-- the whole dimension, but not another).  Around where the turtles work,
+-- not off to one side: outside the hosts a small error grows (a host one
+-- block out moves a fix 1000 blocks away by tens of blocks).  A client
+-- needs four in range.  Pocket computers and turtles can't host: they move.
 --
 -- Settings: gpsd.x, gpsd.y, gpsd.z; gpsd.check (true: check the position
 -- at start); gpsd.facility (daemon: the system log's facility).

@@ -184,11 +184,42 @@ end
 check("one host out, none agreeing: serving (one can't say which is wrong)", verdict({ B1 }) == "serving")
 check("two out, one agreeing: not serving", verdict({ A1, B1, B2 }) == "refusing")
 check("two out, two agreeing: serving", verdict({ A1, A2, B1, B2 }) == "serving")
-check("within 2.5 blocks (modems a block from their computers): agrees", verdict({ host(0, 90, -100, 2.4), host(200, 90, -300, -2.4) }) == "serving")
-check("2.6 out: disagrees", verdict({ host(0, 90, -100, 2.6), host(200, 90, -300, -2.6) }) == "refusing")
+check("within 0.1 block (CC's distances are exact, corner to corner): agrees", verdict({ host(0, 90, -100, 0.09), host(200, 90, -300, -0.09) }) == "serving")
+check("0.2 out: disagrees", verdict({ host(0, 90, -100, 0.2), host(200, 90, -300, -0.2) }) == "refusing")
+do  -- a typo of one block (z 199 for 200): the other hosts' distances show it
+    local w = world({ settings = at(100, 64, -199) })
+    local d = G.new(w.env)
+    d:start()
+    hostsAnswer(d, "top", { A1, A2, A3 })
+    fire(w, d)
+    check("a position one block off: not serving", d.state == "refusing", d.state)
+end
 do
     local state, w = verdict({})
     check("no other host: serving, unchecked, said", state == "serving" and w.logged("^info: no other host answered"))
+    local _, t = w.lastTimer()
+    check("...and checked again in a minute (all the hosts started at once)", t.s == 60 and t.real)
+end
+do  -- a server restart: every host checks at once, none answering; the next check finds the position wrong
+    local w = world({ settings = at(100, 64, -200) })
+    local d = G.new(w.env)
+    d:start()
+    fire(w, d)                                          -- (no replies)
+    fire(w, d)                                          -- (a minute on: the check again)
+    check("checking again while serving: still answering", d.state == "serving" and pinged(w, d, "top", 65534, 30) ~= nil)
+    hostsAnswer(d, "top", { B1, B2, B3 })
+    fire(w, d)
+    check("...then most hosts disagree: it stops serving", d.state == "refusing" and pinged(w, d, "top", 65534, 30) == nil)
+    w = world({ settings = at(100, 64, -200) })
+    d = G.new(w.env)
+    d:start()
+    fire(w, d)
+    fire(w, d)
+    hostsAnswer(d, "top", { A1, A2 })
+    local nlogs = #w.logs
+    fire(w, d)
+    check("...or they agree: said, and no more checks", d.state == "serving" and #w.logs == nlogs + 1
+        and w.logs[#w.logs]:find("^info: checked: 2 other hosts agree") and w.timers[w.lastTimer()].s ~= 60, w.logs[#w.logs])
 end
 do
     local w = world({ settings = { ["gpsd.x"] = 1, ["gpsd.y"] = 2, ["gpsd.z"] = 3, ["gpsd.check"] = false } })

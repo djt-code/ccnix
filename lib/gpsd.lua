@@ -22,15 +22,20 @@
 -- fix; not saved, so a computer moved locates again).  A position from the
 -- settings is checked first (unless gpsd.check is false): a ping, and each
 -- host's reply weighed, the distance the modem measured against the one
--- between the two positions.  Out by more than TOL blocks, it disagrees.
+-- between the two positions.  Out by more than TOL blocks, it disagrees:
+-- CC measures from the lower corner of the block each modem is attached to
+-- (the computer's own block, its F3 coordinates), so a right position gives
+-- the distance exactly, and a typo of one block shows.
 -- Disagreeing hosts outnumbering agreeing ones, and two or more: the
 -- position is wrong (or the computer was moved), and it doesn't serve; it
 -- checks again every minute.  Otherwise it serves, naming each host that
--- disagrees (that host's position, or ours, is wrong).
+-- disagrees (that host's position, or ours, is wrong).  No host answering
+-- (they all started at once, a server restart): it serves, and checks again
+-- every minute, serving meanwhile, until one has answered.
 local G = {}
 
 G.CHANNEL = 65534       -- CC's GPS channel (gps.CHANNEL_GPS)
-G.TOL = 2.5             -- blocks: distances are modem to modem, a modem a block from its computer
+G.TOL = 0.1             -- blocks: distances are exact, corner to corner (and a typo moves a far client's fix by tens of blocks)
 G.WINDOW = 2            -- seconds a check waits for replies (game time, as CC's gps.locate)
 G.RETRY = 10            -- real seconds between tries at a fix
 G.RECHECK = 60          -- real seconds between checks while not serving
@@ -170,9 +175,10 @@ function D:locate()
     self:timer("locate", G.RETRY, true)
 end
 
--- a position from the settings: a ping, and the replies weighed
+-- a position from the settings: a ping, and the replies weighed (serving
+-- meanwhile, if it is: the other hosts may be checking too)
 function D:check()
-    self.state = "checking"
+    if self.state ~= "serving" then self.state = "checking" end
     self.replies = {}
     for name in pairs(self.modems) do
         self.env.peripheral.call(name, "transmit", G.CHANNEL, G.CHANNEL, "PING")
@@ -192,20 +198,29 @@ function D:checked()
             self:log("crit", "gpsd.x, gpsd.y and gpsd.z say " .. fmt(self.pos) .. ", but " .. #v.disagree .. " of "
                 .. #replies .. " hosts disagree (the one at " .. fmt(d.pos) .. " is " .. num(d.distance, 1)
                 .. " blocks away, not " .. num(d.expected, 1) .. "): the position is wrong, or the computer was"
-                .. " moved. Not serving; checking again every minute (gpsd.check=false serves anyway).")
+                .. " moved (or the modem isn't on the computer itself). Not serving; checking again every minute"
+                .. " (gpsd.check=false serves anyway).")
         end
         self.state = "refusing"
         self:timer("recheck", G.RECHECK, true)
         return
     end
-    if #replies == 0 then
-        self:log("info", "no other host answered: the position isn't checked")
+    if #replies == 0 then                       -- (checked again in a minute, until a host answers)
+        if self.state ~= "serving" then
+            self:log("info", "no other host answered: the position isn't checked yet (again in a minute)")
+        end
     end
     for _, d in ipairs(v.disagree) do
         self:log("warning", "the host at " .. fmt(d.pos) .. " answers from " .. num(d.distance, 1)
             .. " blocks, but its position is " .. num(d.expected, 1) .. " from ours: its position (or ours) is wrong")
     end
-    return self:serve(v)
+    if self.state == "serving" then             -- (a check while serving: said only if a host answered)
+        if #v.agree > 0 then self:log("info", "checked: " .. #v.agree .. " other host" .. (#v.agree == 1 and "" or "s") .. " agree") end
+    else
+        self:serve(v)
+    end
+    if #replies == 0 then self:timer("recheck", G.RECHECK, true) end
+    return true
 end
 
 function D:serve(v)
