@@ -1,6 +1,8 @@
 # ADR-0015: What the turtle learned on 0.53: two bases, crafting counts, real seconds, and text the game can show (fourth pass)
 
-**Status:** Proposed (2026-11-17)
+**Status:** Accepted (2026-11-17): D1 to D8 as recommended (D7: 150k);
+D9 added the same day: the server runs `/tick rate 60` for testing, so
+ccnix learns the tick rate
 **Date:** 2026-11-17
 **Deciders:** Dan Theisen
 
@@ -95,8 +97,8 @@ older than the log and rests on the report alone.
 
 ## Decision
 
-Phase 1 (defects) and Phase 2 (what the model reads) go ahead. D1 to D8
-are the user's.
+D1 to D8 as recommended (the user, 2026-11-17: "all recommendations
+approved"), and D9.
 
 ## Options considered
 
@@ -199,6 +201,40 @@ Each comes with a sim and a help entry, and the turtle retires its copy.
 
 All recommended. Left out: a scout line (world-specific).
 
+### D9. The tick rate (added 2026-11-17)
+
+- **The cause:** the dev server runs `/tick rate 60` to speed testing.
+- **What it breaks:** CC's timers and `os.clock` count game ticks, so
+  every "seconds" in ccnix runs 3x fast there:
+  - the turtle's harvest and chat-ask timeouts;
+  - lib/net's TCP timers (retransmit, `await` deadlines, the 0.5 s tick,
+    lib/net.lua:1145, 1313, 1339);
+  - sleeps.
+
+  About 29 files use `os.startTimer` or `os.clock`.
+- **Decision (the user's ask: "the tick rate should be known to ccnix"):**
+  - ccnix measures it: game seconds (`os.clock`) against real ones
+    (`os.epoch("utc")`) since the computer started, settled after a few
+    seconds and re-measured now and then. The server's `/tick rate` can
+    change while it runs.
+  - It's exposed as `ccnix.tickRate()` (20 normally) and a small
+    `lib/realtime`:
+    - `realtime.now()` gives real seconds;
+    - `realtime.timer(s)` is a timer that fires after s real seconds;
+    - `realtime.sleep(s)`.
+  - Timeouts and protocol timers that mean wall-clock time use it:
+    - TCP's retransmit and keepalive (a peer outside the game counts real
+      seconds);
+    - chat asks;
+    - `T.harvest`'s timeout;
+    - claude's status line.
+  - What means game time stays on ticks: a crop's growth, a furnace, the
+    in-game clock.
+- **Sims:** a sim clock at 60 ticks a second shows a 600 s ask lasting
+  600 real seconds, and TCP's retransmit keeping real time.
+- **ccnix-mod:** the gateway's TCP runs in Java on real time, so it needs
+  nothing. `/ccnix` could show the tick rate (later).
+
 ## Trade-off analysis
 
 - **D1:** distance-first can leave an item in a chest of the wrong kind
@@ -299,6 +335,8 @@ All recommended. Left out: a scout line (world-specific).
 
 ### Phase 3: the decisions
 1. [ ] D1 to D8 as decided.
+2. [ ] D9: `lib/realtime` and `ccnix.tickRate()`, and the timers that
+   mean real time moved onto it (Phase 1 item 2 becomes part of this).
 
 ### Phase 4: release (on the user's ok) and hand back
 1. [ ] News, version bump, UNTESTED.md section with its issue.
