@@ -35,6 +35,14 @@ to try `--new` over it and the supplies coming home.
 - **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
   on and off with the chunk controller staying put, the scanner and bucket still aboard after.
 - **Too wide to light**: a tunnel over 24 wide says so at the start.
+- **Waiting before hitting**: stand in the turtle's way: it waits about 3 seconds for you to step aside before
+  hitting (T.cfg.waitBeforeHit); a mob or a minecart in the way is hit after the wait.
+- **Clay**: a tunnel through clay keeps the clay balls in the homes' bulk chests, none hauled to the start.
+- **A reboot mid-move**: a chunk unload while it mines, then `mine reset`: "The chests are a block off from where
+  it thought" and it carries on, instead of asking to be put back by hand.
+- **What the sim now assumes, to confirm in game**: a torch won't go in water or stand on a chest; red sand and
+  suspicious sand and gravel fall; the Geo Scanner's cooldown (how long, and its message); copper, lapis and
+  redstone drop counts with a plain pickaxe; whether digging a chest pulls its contents into the turtle.
 
 ## ADR-0013: compaction, skills, chat while code runs, building fixes (ccnix 0.53.0) (#90)
 
