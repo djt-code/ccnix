@@ -10,6 +10,8 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
             start a fresh tunnel, forgetting the old one
         mine haul
             shuttle the valuables in the homes back to the start, as many trips as it takes
+        mine haul --supplies
+            ...and the supplies in the last home too
         mine reset
             back to the last home it built, after a Ctrl+T or restart
         mine reset --to-start
@@ -25,9 +27,18 @@ A tunnel saved before a re-zero that moved the start (another program started aw
 
 width  = blocks to the RIGHT of the turtle (negative = to the LEFT)
 height = blocks UP from the turtle (negative = DOWN)
-length = blocks the tunnel runs ahead; leave it out to keep going until the turtle can't (out of chests or fuel, a full chest, bedrock)
+length = blocks the tunnel runs ahead; leave it out to keep going until the turtle can't (the start's chest full, bedrock)
 
 With no size, it digs the one in the settings: 3x3, 32 long unless changed (`sysctl mine.width=5`, `sysctl mine.length=0` for no end; also mine.height, mine.spacing, mine.lights).  A size given here is saved there, so the next `mine` (or the autostart) digs the same.
+
+Asked for again from the same start (`mine 10 10 --new`, or the settings' tunnel), a tunnel of the same width and height is carried on from its last home, as `--resume` does, keeping its own spacing: the part dug already is gone over, not dug again.  A finished tunnel is carried on when the length asked for now is longer (or has no end).
+
+It keeps going rather than stopping (each a setting):
+ * A home's chest that fills grows into a double chest: a second chest put beside it joins it (only from chests to spare beyond the next home's two).  When a haul empties a grown valuables chest, its second chest is picked up again, so homes use as few chests as they can.
+ * A home's valuables chest full with nothing to grow it: the turtle hauls every home's valuables to the start (as many trips as it takes), goes straight back out and carries on (`sysctl mine.haul=false` stops instead).  Only the start's chest being full stops it.  `sysctl mine.haulEvery=N` hauls after every N homes too.
+ * A bulk chest full with nothing to grow it: what doesn't fit is thrown on the floor behind the home (it despawns), and the run goes on.
+ * Out of chests for the next home, or of fuel: it goes back to the start (hauling on the way), says what it needs (and tells the player, with mine.report), and looks in the top chest every minute until it's there, then goes back out and on (`sysctl mine.wait=false` stops instead).
+ * A finished tunnel brings its last home's supplies (chests, fuel, torches, wood, the crafting table) back to the start, for the next tunnel; one that stopped leaves them there for `--resume`.
 
 The turtle's own column and row are part of the tunnel: it stands in the mouth at one bottom (or top, for negative heights) corner, and the tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3 tunnel 32 long, up and to the right of the turtle.
 

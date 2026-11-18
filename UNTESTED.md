@@ -10,6 +10,32 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
+## ADR-0014: mine keeps going (ccnix 0.54.0) (#95)
+
+In-game order: `/ccnix rom update`, then the 10x10 endless tunnel that stopped with a full chest: `mine haul`, then
+`mine --resume` (its spacing stays 16), with `sysctl mine.report=true` to hear the waits. Then a fresh short tunnel
+to try `--new` over it and the supplies coming home.
+
+- **Chests join**: a full home chest grows: the second chest (valuables in the wall at z-1, or z+1 past a torch
+  niche; bulk under the floor at z-1) joins it into a double chest ("... is a double chest now"); one that doesn't
+  join is taken back and said. Open both halves as a player (the block above the new valuables half is cleared).
+- **Hauling when full**: a full valuables chest with no chest to spare: "is full: back to the start with the
+  valuables", the trips, "Back out to home N", and on. Only the start's chest being full stops it.
+- **Picking chests up**: after a haul empties a grown valuables chest, its second half is dug (the home's fuel
+  stock lifted out first and put back), the wall filled, the chest back at the start; nothing on the ground.
+- **`mine.haulEvery=N`**: a haul after every Nth home.
+- **Bulk overflow**: a full bulk chest with nothing to grow it throws the rest behind the home (it despawns);
+  "Threw away N bulk blocks"; no stop.
+- **Waiting**: out of chests (or fuel) it goes home, says what it needs (and in chat with mine.report), looks
+  every minute, and carries on after you put them in; `service stop mine` or Ctrl+T ends the wait.
+- **`--new` over the same tunnel**: "is the same one: carrying it on from home N", the finished part gone
+  over, not dug again; `--resume` of a finished tunnel with a longer `mine.length`.
+- **Supplies home**: a finished tunnel brings its last home's chests, fuel, torches and table back to the start;
+  `mine haul --supplies` after a stop.
+- **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
+  on and off with the chunk controller staying put, the scanner and bucket still aboard after.
+- **Too wide to light**: a tunnel over 24 wide says so at the start.
+
 ## ADR-0013: compaction, skills, chat while code runs, building fixes (ccnix 0.53.0) (#90)
 
 In-game order: `/ccnix rom update`, then on the castle turtle give claude a goal like "read what's new, retire

@@ -13,8 +13,10 @@
 --                last home if it's elsewhere, then `mine --resume`.  No
 --                tunnel yet: a new one, as the settings say (mine.width,
 --                mine.height, mine.length: 3x3, 32 long unless changed).
---                A tunnel it finished, or stopped itself (out of chests or
---                fuel): it says so and leaves it to you.
+--                A tunnel it finished, or stopped itself (the start's chest
+--                full, bedrock; out of chests or fuel only with mine.wait
+--                off, since it waits for them): it says so and leaves it
+--                to you.
 --   farm         a saved farm: home if it's elsewhere, then farm it.  No
 --                farm yet: learn the one the settings give (farm.width,
 --                farm.length), then farm it.

@@ -22,7 +22,10 @@
 -- Ctrl+T after so many digs), ONMOVE(ox, oy, oz, nx, ny, nz).  Minecarts:
 -- Mine.ENTITIES[key] = { item = name, inv = {...} } (a chest minecart has
 -- an inv); what they spill lies in Mine.GROUND[key].  BURNT[name]: what
--- refuelling burnt; CRAFTED[name]: what a crafting table made.
+-- refuelling burnt; CRAFTED[name]: what a crafting table made.  Chests
+-- face the turtle that placed them and pair up into double chests
+-- (Mine.sizeOf); dug, they spill (CHEST_SPILLED); dropped into nothing,
+-- items lie on the ground (THROWN).
 
 local M = require("mock")
 local Mine = M.state()
@@ -78,6 +81,7 @@ function Mine.setup(stock)
     turtle._ccnixWorld = nil
     if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
     Mine.ENTITIES, Mine.GROUND, BURNT, CRAFTED = {}, {}, {}, {}
+    THROWN, CHEST_SPILLED, SLEPT, ONSLEEP = 0, 0, 0, nil
     set(0, 1, 0, Mine.chest(stock))                 -- valuables and supplies
     set(0, -1, 0, Mine.chest())                     -- bulk
 end
@@ -258,6 +262,66 @@ local function chestAt(x, y, z)
 end
 Mine.chestAt = chestAt
 
+-- Chests as the game has them.  One a turtle places faces the turtle (the
+-- way it faces, turned round; placing up or down keeps its yaw), and joins
+-- a single chest beside it, left or right of that facing, that faces the
+-- same way: a double chest, 54 slots (CC's turtle player never sneaks).
+-- The two halves share one inv, SIZES[inv] = 54.  Each half keeps its own
+-- 27 slots (half 1: 1-27, half 2: 28-54): dug, a chest spills its own onto
+-- the ground (CHEST_SPILLED counts them) and the turtle gets the chest.
+local SIZES = setmetatable({}, { __mode = "k" })
+local function sizeOf(c) return SIZES[c] or SIZE end
+Mine.sizeOf = sizeOf
+-- A chest of 54 slots, as a double chest a player put there (at the start, say).
+function Mine.bigChest(items)
+    local b = Mine.chest(items)
+    SIZES[b.inv] = 2 * SIZE
+    return b
+end
+
+local function placeChestBlock(x, y, z)
+    local f = (P.d + 2) % 4
+    local c = { name = "minecraft:chest", inv = {}, facing = f }
+    for _, side in ipairs({ (f + 1) % 4, (f + 3) % 4 }) do
+        local px, pz = x + M.DX[side], z + M.DZ[side]
+        local b = get(px, y, pz)
+        if b and b.name == "minecraft:chest" and b.inv and b.facing == f and not b.pair then
+            c.inv, c.half, c.pair = b.inv, 2, { px, y, pz }
+            b.half, b.pair = 1, { x, y, z }
+            SIZES[b.inv] = 2 * SIZE
+            break
+        end
+    end
+    set(x, y, z, c)
+end
+
+local function digChest(x, y, z, b)
+    local c = b.inv
+    local lo = b.half == 2 and SIZE + 1 or 1
+    local key = k(x, y, z)
+    for s = lo, lo + SIZE - 1 do
+        if c[s] then
+            Mine.GROUND[key] = Mine.GROUND[key] or {}
+            table.insert(Mine.GROUND[key], c[s])
+            CHEST_SPILLED = (CHEST_SPILLED or 0) + c[s].count
+            c[s] = nil
+        end
+    end
+    if b.pair then
+        local other = get(b.pair[1], b.pair[2], b.pair[3])
+        if b.half == 1 then                  -- the other half's slots are its own now
+            for s = 1, SIZE do c[s], c[s + SIZE] = c[s + SIZE], nil end
+        end
+        other.half, other.pair = nil, nil
+        SIZES[c] = nil
+    end
+    set(x, y, z, nil)
+    LAST_DUG = key
+    DIGS = (DIGS or 0) + 1
+    M.addItem(Mine, "minecraft:chest", 1)
+    return true
+end
+
 local function dig(x, y, z)
     if STOP_AT_DIG and (DIGS or 0) >= STOP_AT_DIG then    -- as if Ctrl+T
         STOP_AT_DIG = nil
@@ -265,6 +329,7 @@ local function dig(x, y, z)
         error("Terminated", 0)
     end
     local b = get(x, y, z)
+    if b and b.inv and not passable(b) then return digChest(x, y, z, b) end
     if not b or passable(b) or b.inv or b.name == "minecraft:bedrock" then return false end
     set(x, y, z, b.waterlogged and { name = WATER_NAME, level = 0 } or nil)
     if isTorch(b) then TORCHES_DUG = (TORCHES_DUG or 0) + 1 end
@@ -313,7 +378,7 @@ local function place(x, y, z, dir)
     end
     if it.name:find("raw_") or M.FUEL_VALUE[it.name] or it.name == "minecraft:diamond"
         or it.name == "minecraft:emerald" then return false end
-    if it.name == "minecraft:chest" then set(x, y, z, Mine.chest())
+    if it.name == "minecraft:chest" then placeChestBlock(x, y, z)
     elseif it.name == "minecraft:torch" and hangsOn then set(x, y, z, { name = "minecraft:wall_torch", on = on })
     else set(x, y, z, { name = it.name, on = on }) end
     M.useSel(Mine)
@@ -326,15 +391,27 @@ local function drop(x, y, z, _, n)
     local c = chestAt(x, y, z)
     local e = Mine.ENTITIES[k(x, y, z)]
     if not c and e and e.inv then c = e.inv end     -- a turtle drops into a chest minecart too
-    if not c then error("dropped on the ground") end
-    return M.dropInto(Mine, c, SIZE, n)
+    if not c then
+        -- nothing to drop into: thrown out as an item, as in game (onto
+        -- the turtle's own cell when a block is in the way); THROWN counts
+        local it = Mine.inv[Mine.sel]
+        if not it then return false end
+        local m = math.min(n or it.count, it.count)
+        local key = passable(get(x, y, z)) and k(x, y, z) or k(P.x, P.y, P.z)
+        Mine.GROUND[key] = Mine.GROUND[key] or {}
+        table.insert(Mine.GROUND[key], { name = it.name, count = m })
+        THROWN = (THROWN or 0) + m
+        M.useSel(Mine, m)
+        return true
+    end
+    return M.dropInto(Mine, c, sizeOf(c), n)
 end
 
 local function suck(x, y, z, _, n)
     local c = chestAt(x, y, z)
     local e = Mine.ENTITIES[k(x, y, z)]
     if not c and e and e.inv then c = e.inv end
-    if c then return M.suckFrom(Mine, c, SIZE, n) end
+    if c then return M.suckFrom(Mine, c, sizeOf(c), n) end
     local items = Mine.GROUND[k(x, y, z)]          -- items lying there: one stack
     if not (items and items[1]) then return false end
     local it = table.remove(items, 1)
@@ -524,7 +601,7 @@ peripheral = {
         elseif side == "top" then c = chestAt(M.above(Mine))
         elseif side == "bottom" then c = chestAt(M.below(Mine)) end
         if not c then return nil end
-        return M.containerPeripheral(c, SIZE, side)
+        return M.containerPeripheral(c, sizeOf(c), side)
     end,
     getName = function(p) return p._name end,
     getType = function(side)
@@ -560,7 +637,14 @@ end
 fs = M.fsApi(Mine)
 textutils = textutils or M.textutilsApi()   -- (lib/fileio, under turtlelib, reads JSON with it)
 shell = M.shellApi("mine.lua")
-sleep = function() end
+-- Time doesn't pass, but a wait does: SLEPT adds up the seconds, ONSLEEP(n)
+-- runs at each (a scenario restocking the start while mine waits), and a
+-- wait of over a day stops the run as Ctrl+T would (a wait that never ends).
+sleep = function(n)
+    SLEPT = (SLEPT or 0) + (n or 0)
+    if ONSLEEP then ONSLEEP(n) end
+    if SLEPT > 86400 then error("Terminated", 0) end
+end
 os.startTimer = function() return 1 end
 os.getComputerID = function() return 7 end
 os.getComputerLabel = function() return nil end
@@ -575,6 +659,7 @@ SIM_WORLD = { W = { get = get }, P = P, moves = function() return Mine.moves end
 -- The program's output; a trip home ("... at (x,y,z): back to home") is
 -- noted, to count what's dug on it (TRAVEL_DIGS)
 M.capturePrint(Mine, function(line)
+    if line:find("for the supplies.", 1, true) and not SUPPLIES_FROM then SUPPLIES_FROM = Mine.moves end
     local bx, by, bz = line:match("at %((-?%d+),(-?%d+),(-?%d+)%): back to home")
     if bx then TRAVELLING, LEFT_SPOT, BACK = true, false, { tonumber(bx), tonumber(by), tonumber(bz) } end
 end)
@@ -584,14 +669,18 @@ end)
 --------------------------------------------------------------------------
 Mine.check = M.check
 function Mine.logHas(pat) return M.logHas(Mine, pat) end
-function Mine.contents(c) return M.contents(c, SIZE) end
+-- The moves of the run before it went for the supplies at the end (a
+-- finished tunnel's last home's supplies come back to the start).
+function Mine.workMoves() return SUPPLIES_FROM or Mine.moves end
+
+function Mine.contents(c) return M.contents(c, c and sizeOf(c) or SIZE) end
 
 -- Run mine.lua with these arguments (see mock.runner): the water settles
 -- afterwards; the "Segment ..." lines are left out of the report.
 function Mine.runner(proj)
     local stoppedHere
     return M.runner(Mine, proj .. "/turtle/mine.lua", {
-        before = function() SPLIT, DIGS = 0, 0 end,
+        before = function() SPLIT, DIGS, SUPPLIES_FROM = 0, 0, nil end,
         after = function()
             if WATERY then Mine.settleWater() end
             stoppedHere, STOPPED_HERE = STOPPED_HERE, nil
