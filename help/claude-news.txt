@@ -2,6 +2,25 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.54.0
+The server ticks 60 times a second, not 20: sleep, os.clock and os.startTimer count game ticks and ran 3x fast. Timeouts are real seconds now (T.report.ask, the chat tool's ask, T.harvest's opts.timeout); require("realtime") gives now(), sleep(s), timer(s) and tickRate() in real seconds. Waits your notes timed were about a third as long as they said.
+Chat no longer shows mojibake: arrows and dashes you write are spelled out (-> and -) for the game.
+Two bases: T.stow takes the nearest chest that will have an item, within 48 blocks of where it began (opts.far goes farther; the why says where the far one is); T.sortChests sorts the site you're at, never between bases. Where holds overlap ("*brick*" and "*_stairs") the more specific wins, and T.addChest warns.
+T.catalogue(spots) reads only the spots now, not every chest known.
+Crafting from a full chest no longer comes up short (the first stack set aside took a grid cell); a short round says which ingredient and how many. T.craftBatch counts room for every product. A bare list makes only what it names: T.craftPlan makes the sticks for torches; T.prepare{need = plan.base} fetches it first.
+T.placeAt: chain has an axis; lanterns take opts.hanging (true hangs under the block above); an option it doesn't know is refused, named. Your placement-tricks chain steps can go.
+Your placement-tricks skill's "Near fresh lanterns" lesson is wrong: that time you had placed the lantern that closed your only way out. T.placeAt now warns when a placement closes you in (how.warning), and refuses with opts.exit = {x, y, z}. Fix the skill.
+T.build no longer refuses a new plan after one whose every cell was tried; info.previous lists its failures.
+T.digCell refuses a dig that destroys the block (glowstone gives dust; glass, panes and ice give nothing) unless opts.lossy.
+In your sessions a dig with no slot for its drop is refused, not spilled (T.cfg.digNeedsRoom).
+T.travel goes in legs of about 16 when its search gives up on a far target, scanning at each (opts.maxFuel caps it). Your helpers/hop.lua can go.
+New: T.planLights(cells, candidates, opts) picks the fewest lights to bring cells to light 8 (12 in the nether): your roadlights.lua coverPlan can go. T.pave(box, item) lays a floor a move a cell: roadfloor.lua can go (your road and bridge cell lists stay). T.clearBox(box) clears a tunnel three layers a pass: tunnel3 and serp3 can go. T.sweep(box) picks up what lies in a box, never from a chest. T.replace(..., {digBelow = true}) swaps a trapped block through a neighbour. T.walkable(from, to, {with = ...}) takes what-if cells.
+T.darkCells: info.unsure lists the cells to inspect; the summary says when the list is cut. T.lint: opts.rules, and the limit is shared between rules. T.scanBox routes round and scans from near a centre it can't reach. T.posKey and T.dist say so when given a list.
+The sandbox has no load, loadstring, _G or coroutine: check(code) compiles without running. helpers() lists what each helper file defines and the names T has too: run it and retire what the library does now.
+Your helpers/task41.lua sets T.keep = {...} wholesale, wiping what your settings helper keeps each session: add to T.keep instead (T.keep[name] = true).
+A goal is summarized at 150k now (was 250k), and the summary keeps these notes until you act on them. Repeated lines in a result come once with (xN).
+-- ADR-0015 (#100-#102): real seconds, mojibake, two bases, crafting counts, placement, the model's helpers as library functions.
+
 == 0.53.0
 Your conversation is no longer cleared into placeholders: when a goal ends with it over 100k tokens it is summarized while you wait for the next goal, and inside a goal at 250k it is summarized keeping your last few turns. All your thinking is kept until then. Write what matters into your notes and skills as you go.
 Skills: the session's first message lists them (name, description, path). Before a goal, read any that fit with fs; their steps come before your habits. skill(name, description, body) writes your own (/claude/skills/<name>/skill.md, a one-line "use when" description); yours win over a shipped one of the same name. /skills lists them.
