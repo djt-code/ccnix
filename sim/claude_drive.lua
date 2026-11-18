@@ -1640,6 +1640,24 @@ HTTP.queue = { reply({ toolUse("lua", { code = "return T.cfg.maxHeight" }) }, "t
 run("not so high")
 Mine.files["claude/helpers.lua"] = nil
 check("...unless the helpers set it otherwise", resultsIn(2).toolu_1 and resultsIn(2).toolu_1.content == "-> 20")
+-- ADR-0015 D8.7: check(code) compiles without running; helpers() says what each helper file defined, and the names T
+-- has too; the lua tool says what the sandbox lacks
+fresh({ "" })
+Mine.files["claude/helpers.lua"] = "function digCell() end\nfunction myThing() end"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "ran = false\nlocal ok, err = check('x =')\nreturn ok, err, check('ran = true'), ran" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return helpers()" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("what have I got")
+Mine.files["claude/helpers.lua"] = nil
+local ch, hp = resultsIn(2).toolu_1, resultsIn(3).toolu_2
+check("check(code): nil and the error for code that doesn't compile, true for code that does, and nothing run",
+    ch and ch.content:find("^%-> nil\n%-> check:1:") and ch.content:find("\n%-> true\n%-> false\n", 1) ~= nil, ch and ch.content)
+check("helpers(): each helper file's globals, and the names T has too", hp
+    and hp.content == "-> /claude/helpers.lua: digCell, myThing; T has digCell too", hp and hp.content)
+check("...and the lua tool says what's absent and how to check code", (HTTP.requests[1].body.tools[1].description or "")
+    :find("There's no load, loadstring, _G or coroutine: check(code) compiles code without running it", 1, true) ~= nil)
 end
 
 -- 35. what's new (ADR-0011 D9): claude keeps the ccnix version it last ran

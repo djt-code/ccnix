@@ -514,7 +514,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; helpers() lists what each helper file defined, and the names T has too; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. There's no load, loadstring, _G or coroutine: check(code) compiles code without running it (true, or nil and the error), and loadfile compiles a file without running it. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = {
@@ -996,13 +996,49 @@ end
 modWorld.require = ccRequire
 API.require = ccRequire
 
+-- Run fn, noting the globals of the code's world it adds, under `file` (ADR-0015 D8.7: helpers() says them).
+local noteDefs
+do
+-- (the globals each helper file defined as it loaded, by file)
+local HELPER_DEFS = {}
+function noteDefs(file, fn)
+    local before = {}
+    for k in pairs(env) do before[k] = true end
+    local results = table.pack(fn())
+    local defs = {}
+    for k in pairs(env) do
+        if not before[k] and type(k) == "string" then defs[#defs + 1] = k end
+    end
+    table.sort(defs)
+    HELPER_DEFS[file] = defs
+    return table.unpack(results, 1, results.n)
+end
+
+-- helpers() in the code: each helper file loaded this session (and each keep()), the globals it defined, and those
+-- with the name of a T function (a helper of yours the library has now, or that hides nothing but may confuse), as
+-- text, a line a file.
+API.helpers = function()
+    local lines = {}
+    for _, file in ipairs(tables.sortedKeys(HELPER_DEFS)) do
+        local defs, same = HELPER_DEFS[file], {}
+        for _, name in ipairs(defs) do
+            if type(rawget(T, name)) == "function" or T.need(name) then same[#same + 1] = name end
+        end
+        lines[#lines + 1] = "/" .. file .. ": " .. (#defs > 0 and table.concat(defs, ", ") or "(nothing global)")
+            .. (#same > 0 and ("; T has " .. table.concat(same, ", ") .. " too") or "")
+    end
+    if #lines == 0 then return "no helper files loaded" end
+    return table.concat(lines, "\n")
+end
+end
+
 -- Run one helper file in the code's world: nil, or what went wrong, as a
 -- sentence for the model.
 local function loadHelperFile(file)
     local chunk, err = codeLoadfile(file, "t", env)
     local ok = chunk ~= nil
     if chunk then
-        ok, err = pcall(chunk)
+        ok, err = noteDefs(file, function() return pcall(chunk) end)
         flushPartial()
         if err == "Terminated" then error(err, 0) end
     end
@@ -1055,7 +1091,7 @@ API.keep = function(name, code)
     if type(code) ~= "string" then error("keep: the code is a string of Lua", 2) end
     local chunk, err = load(code, "=" .. name, "t", env)
     if not chunk then error("keep: " .. name .. " doesn't compile, so nothing was kept: " .. tostring(err), 2) end
-    local ok, why = pcall(chunk)
+    local ok, why = noteDefs(HELPERS_DIR .. "/" .. name .. ".lua", function() return pcall(chunk) end)
     if not ok then
         if why == "Terminated" then error(why, 0) end
         error("keep: " .. name .. " failed as it ran, so nothing was kept: " .. tostring(why), 2)
@@ -1065,6 +1101,14 @@ API.keep = function(name, code)
     local saved, notSaved = fileio.write(file, code)
     if not saved then error("keep: " .. tostring(notSaved), 2) end
     return true, "/" .. file
+end
+
+-- check(code) in the code: does it compile?  True, or nil and the error; nothing is run (the sandbox has no load).
+API.check = function(code)
+    if type(code) ~= "string" then return nil, "check wants the code as a string" end
+    local chunk, err = load(code, "=check", "t", env)
+    if not chunk then return nil, err end
+    return true
 end
 
 -- Why skill() refuses these, or nil
