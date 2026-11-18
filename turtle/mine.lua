@@ -1704,19 +1704,9 @@ end
 -- it crafts the wood into as many chests as it can (two build a home),
 -- keeping back the planks for the sticks of the torches that light the
 -- segments those chests start, and crafts those torches from coal it can
--- spare.  It needs a crafting table, kept with the supplies and swapped
--- in for the pickaxe while it crafts (as the Geo Scanner is).  A turtle
--- crafts from its inventory, which must hold nothing but the recipe, so
--- everything goes into the home's chests first, the pickaxe too while
--- the table is on.
-
--- Where each recipe's items go: the turtle's slots, 4 to a row.
-RECIPE_SLOTS = {
-    planks = { 1 },                          -- a log: 4 planks
-    sticks = { 1, 5 },                       -- planks over planks: 4 sticks
-    torch = { 1, 5 },                        -- coal over a stick: 4 torches
-    chest = { 1, 2, 3, 5, 7, 9, 10, 11 },    -- planks round an empty middle: a chest
-}
+-- spare.  It needs a crafting table, kept with the supplies; turtlelib's
+-- T.craftBatch does the crafting at the home's valuables chest (see
+-- craftSupplies).
 
 -- Torches to light one segment.
 function torchesPerSegment()
@@ -1771,79 +1761,21 @@ function craftPlan(n)
     return { logs = 0, sticks = 0, torches = 0, chests = 0 }, have
 end
 
--- Put everything the turtle holds in the home's chests (bulk in the bulk
--- chest).  True if it's empty.
-function emptyOut()
-    for s = 1, 16 do
-        local it = turtle.getItemDetail(s, true)
-        if it then
-            turtle.select(s)
-            dropSide(isBulk(it) and home.bulk or home.val)
-        end
-    end
-    turtle.select(1)
-    return T.freeSlots() == 16
-end
-
--- Free slots in the container on `side`.
-function roomIn(side)
-    local c = peripheral.wrap(side)
-    if not (c and c.list and c.size) then return 0 end
-    local used = 0
-    for _ in pairs(c.list()) do used = used + 1 end
-    return c.size() - used
-end
-
--- Fill the recipe's slots with `steps` each of items picked by `pick(name)`
--- from the valuables chest (any mix of names: oak and spruce planks make
--- a chest), craft, and put it all back.  How many steps it crafted.
-function craftSteps(side, recipe, picks, steps)
-    local slots = RECIPE_SLOTS[recipe]
-    local most = steps
-    for i, slot in ipairs(slots) do
-        local pick = picks[i] or picks[1]
-        for _ = 1, 8 do
-            local short = steps - turtle.getItemCount(slot)
-            if short <= 0 then break end
-            local counts, name = chestCounts(home.val), nil
-            for _, nm in ipairs(tables.sortedKeys(counts)) do
-                local it = turtle.getItemDetail(slot)
-                if pick(nm) and (not it or it.name == nm) then name = nm; break end
-            end
-            if not name then break end
-            T.takeInto(home.val, name, steps, slot)
-            local it = turtle.getItemDetail(slot)
-            if not it or it.name ~= name then break end
-        end
-        most = math.min(most, turtle.getItemCount(slot))
-    end
-    local made = 0
-    if most > 0 then
-        local before = turtle.getItemCount(slots[1])
-        turtle.select(16)                  -- (what's made goes in from here)
-        pcall(peripheral.call, side, "craft", most)
-        turtle.select(1)
-        made = before - turtle.getItemCount(slots[1])   -- each step uses one from every slot
-    end
-    emptyOut()
-    return made
-end
-
-function pickaxeOn()
-    return T.equipped("left") == pickaxe or T.equipped("right") == pickaxe
-end
-
--- Craft what craftPlan says.  The turtle is at the home, facing it.
+-- Craft what craftPlan says, at the home's valuables chest, with
+-- turtlelib's crafting (T.craftPlan, T.craftBatch): it stashes the
+-- inventory in the chest once (the bulk goes down into the bulk chest
+-- first, for room), puts the crafting table on (from the chest or the
+-- inventory; the chunk controller stays put) and each stack back in its
+-- slot after; the chests and torches stay in the chest, with the
+-- supplies.  The turtle is at the home, facing it.
 warnedTable = false
 function craftSupplies()
     if home.val == "front" then T.face(home.face) end
     local n = atHand()
     local plan, have = craftPlan(n)
     if plan.chests + plan.torches == 0 then return end
-    local tableIn = (n[CRAFTING_TABLE] or 0) > 0
-    local side = (T.equipped("left") == CRAFTING_TABLE and "left") or (T.equipped("right") == CRAFTING_TABLE and "right")
-    if not side and not pickaxeOn() then return end   -- (a pickaxe in the inventory isn't swapped)
-    if not tableIn and not side then
+    local equipped = T.equipped("left") == CRAFTING_TABLE or T.equipped("right") == CRAFTING_TABLE
+    if (n[CRAFTING_TABLE] or 0) == 0 and not equipped then
         if not warnedTable then
             warnedTable = true
             print(string.format("There's wood for %d chests, but no crafting table: put one in the start's top chest.",
@@ -1851,61 +1783,19 @@ function craftSupplies()
         end
         return
     end
-    local scanners = {}
-    for s = 1, 16 do
-        local it = turtle.getItemDetail(s)
-        if it and (isScanner(it.name) or it.name == BUCKET) then scanners[#scanners + 1] = it.name end
-    end
-    if roomIn(home.val) < 16 - T.freeSlots() + 3 then
-        print("No room in home " .. home.k .. "'s chest to craft in; not crafting.")
-        return
-    end
+    unload("bulk")                         -- (room in the valuables chest to work in)
+    local targets = {}
+    if plan.torches > 0 then targets[#targets + 1] = { "minecraft:torch", 4 * plan.torches } end
+    if plan.chests > 0 then targets[#targets + 1] = { "minecraft:chest", plan.chests } end
     print(string.format("Crafting %d chests and %d torches at home %d.", plan.chests, 4 * plan.torches, home.k))
-    if not emptyOut() then restockKit(); return end
-    if not side then
-        side = (T.equipped("left") == pickaxe and "left") or (T.equipped("right") == pickaxe and "right")
-        if not side or T.takeInto(home.val, CRAFTING_TABLE, 1, 1) == 0 then
-            print("Couldn't swap the crafting table in for the pickaxe; not crafting.")
-            side = nil
-        else
-            turtle.select(1)
-            if side == "left" then turtle.equipLeft() else turtle.equipRight() end
-            emptyOut()                     -- the pickaxe, into the chest for now
-        end
+    local steps, why = T.craftPlan(targets, { chest = home.val })
+    if steps then
+        local ok, info
+        ok, why, info = T.craftBatch(steps, { chest = home.val, partial = true })
+        if ok == nil then print("Not crafting: " .. tostring(why) .. ".") end
+    else
+        print("Not crafting: " .. tostring(why) .. ".")
     end
-    if side then
-        for _ = 1, 20 do                   -- (a moment before it shows up)
-            if peripheral.getType(side) == "workbench" then break end
-            sleep(0.1)
-        end
-        local function steps(recipe, picks, total, per)
-            local done = 0
-            while done < total do
-                local n = craftSteps(side, recipe, picks, math.min(per, total - done))
-                if n == 0 then break end
-                done = done + n
-            end
-            return done
-        end
-        steps("planks", { isLog }, plan.logs, 16)
-        steps("sticks", { isPlanks }, plan.sticks, 16)
-        local function isCoal(nm) return COAL[nm] end
-        local function isStick(nm) return nm == STICK end
-        steps("torch", { isCoal, isStick }, plan.torches, 16)
-        steps("chest", { isPlanks }, plan.chests, 64)
-    end
-    if side and not pickaxeOn() then       -- the pickaxe back on, the table into the chest
-        T.takeInto(home.val, pickaxe, 1, 1)
-        turtle.select(1)
-        if turtle.getItemCount(1) > 0 then
-            if side == "left" then turtle.equipLeft() else turtle.equipRight() end
-        end
-        emptyOut()
-    end
-    if not pickaxeOn() then
-        stop("The pickaxe didn't go back on after crafting: it's in home " .. home.k .. "'s chest.")
-    end
-    for _, name in ipairs(scanners) do T.takeInto(home.val, name, 1, T.emptySlot() or 16) end
     restockKit()                           -- filler, torches and fuel back on board
     local _, now = craftPlan(atHand())
     print(string.format("Crafted %d chests and %d torches.", now.chests - have.chests, now.torches - have.torches))
