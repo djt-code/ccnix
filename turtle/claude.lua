@@ -178,7 +178,7 @@
 -- compaction) to keep it in bounds: when a goal ends with the last call's
 -- input over 100k tokens, while you type the next goal (if you're
 -- quicker, the goal waits for it; a /new or an empty line doesn't); and
--- inside a long goal once a call's input reaches 250k, right after the
+-- inside a long goal once a call's input reaches 150k, right after the
 -- code's results, the last 3 turns kept word for word.  The model writes
 -- the summary, having read all of it: the goal and how far it got, what
 -- you said, places, what's built, lessons, its helpers; and it goes on
@@ -324,7 +324,7 @@ CLEAR.HARD = { trigger = 50000, keep = 2, atLeast = 0, thinking = 3 }
 -- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
 -- INSTRUCTIONS replace the API's own summary prompt (at most 16384
 -- characters, and they must say not to call tools).
-local COMPACT = { boundary = 100000, mid = 250000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
+local COMPACT = { boundary = 100000, mid = 150000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
     INSTRUCTIONS = table.concat({
         "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
         "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
@@ -335,6 +335,7 @@ local COMPACT = { boundary = 100000, mid = 250000, keep = 3, maxTokens = 16000, 
         "what was built and how (blueprints, materials, protected areas);",
         "lessons and mistakes not to repeat;",
         "the names of kept helpers (keep) and skills, and what each is for;",
+        "what's new in this release (the news the session began with: changed functions, helpers to retire), until it has been acted on;",
         "the T calls and code that worked, briefly.",
         "Leave out what is finished and no longer matters, raw tool output, and what the notes in /memories already hold.",
         "Keep it short: a few hundred words, at most about 1500.",

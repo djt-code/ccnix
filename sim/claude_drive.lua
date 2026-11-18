@@ -2173,6 +2173,7 @@ check("a goal ending over 100k: the next request is a compaction of the conversa
 check("...with our own summary prompt: the goal, the player's words, places, lessons, helpers and skills; no tool calls, text only",
     c3.compaction and c3.compaction.instructions:find("the player's own words", 1, true) and c3.compaction.instructions:find("coordinates", 1, true)
         and c3.compaction.instructions:find("lessons and mistakes", 1, true) and c3.compaction.instructions:find("skills", 1, true)
+        and c3.compaction.instructions:find("what's new in this release", 1, true)
         and c3.compaction.instructions:find("Do not call any tool: answer with the summary text only.", 1, true) and #c3.compaction.instructions <= 16384)
 check("...the same model, system prompt, tools and thinking; several thousand tokens; no context edits, no fallback model; the beta header",
     c3.model == HTTP.requests[2].body.model and c3.system[1].text == HTTP.requests[2].body.system[1].text
@@ -2299,28 +2300,28 @@ check("a goal ended on a tool call: the summary leaves that turn out, kept after
     #(c3b.messages or {}))
 end
 
--- 44. compaction inside a goal (ADR-0013 D9): once a call's input reaches
---     250k, right after its tool results the conversation is summarized
+-- 44. compaction inside a goal (ADR-0013 D9; 150k since ADR-0015 D7): once a call's input reaches
+--     150k, right after its tool results the conversation is summarized
 --     but for the last 3 turns (a reply and its results each): the
 --     compaction request ends where an earlier request ended (results, not
 --     a reply waiting on them); the next request is the block, then the
 --     kept turns word for word (their thinking too), nothing else; the
 --     goal carries on; compacting again in the goal sends only the newest
---     block; under 250k in a goal, none; logged and shown
+--     block; under 150k in a goal, none; logged and shown
 do
 fresh({ "" })
 local function step(n, at) return reply({ thinking(), toolUse("lua", { code = "return " .. n }) }, "tool_use", inTokens(at)) end
 HTTP.queue = {
-    step(1, 200000), step(2, 220000), step(3, 240000), step(4, 255000),
+    step(1, 100000), step(2, 120000), step(3, 140000), step(4, 155000),
     M.compactionReply("Mid summary."),
-    step(5, 260000),
+    step(5, 160000),
     M.compactionReply("Mid two."),
     reply({ text("Done.") }, "end_turn", inTokens(42000)),
 }
 run("long job")
 local c5 = HTTP.requests[5] and HTTP.requests[5].body or {}
 local last5 = c5.messages and c5.messages[#c5.messages] or {}
-check("under 250k in a goal no compaction; at 255k one, right after that call's results",
+check("under 150k in a goal no compaction; at 155k one, right after that call's results",
     c5.compaction and not HTTP.requests[4].body.compaction and #HTTP.requests == 8, #HTTP.requests)
 check("...of what came before the last 3 turns: the goal and the first turn, ending on its results",
     #(c5.messages or {}) == 3 and last5.role == "user" and type(last5.content) == "table" and last5.content[1].type == "tool_result"
