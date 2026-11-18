@@ -54,6 +54,7 @@ local net = require("net")
 local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
+local realtime = require("realtime")
 
 local H = {}
 H.AGENT = "ccnix-httpc"
@@ -135,7 +136,7 @@ end
 local function reader(conn, deadline)
     local R = { buf = "" }
     local function more()
-        local left = deadline and deadline - os.clock()
+        local left = deadline and deadline - realtime.now()
         if left and left <= 0 then return nil, "timeout" end
         local s, e = conn:read(left)
         if not s then return nil, e end
@@ -250,10 +251,10 @@ local function exchange(u, method, body, opts, auth, deadline, canFollow)
     local ip, why = net.resolve(u.host)
     if not ip then return nil, "couldn't resolve host " .. u.host .. (why and (" (" .. why .. ")") or ""), "resolve" end
     debug("info", "Trying " .. net.ipString(ip) .. ":" .. u.port .. "...")
-    local left = deadline and math.max(deadline - os.clock(), 0.05)
+    local left = deadline and math.max(deadline - realtime.now(), 0.05)
     local conn, err = net.connect(ip, u.port, left)
     if not conn then
-        if deadline and os.clock() >= deadline then return nil, "timed out connecting to " .. u.host, "timeout" end
+        if deadline and realtime.now() >= deadline then return nil, "timed out connecting to " .. u.host, "timeout" end
         return nil, "failed to connect to " .. u.host .. " port " .. u.port .. ": " .. tostring(err), "connect"
     end
     debug("info", "Connected to " .. u.host .. " (" .. net.ipString(ip) .. ") port " .. u.port)
@@ -333,7 +334,7 @@ end
 
 function H.request(opts)
     if type(opts) == "string" then opts = { url = opts } end
-    local deadline = opts.timeout and os.clock() + opts.timeout
+    local deadline = opts.timeout and realtime.now() + opts.timeout
     local method = (opts.method or (opts.body and "POST" or "GET")):upper()
     local body, url = opts.body, opts.url
     local max = opts.maxRedirects or H.MAX_REDIRECTS

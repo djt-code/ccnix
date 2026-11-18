@@ -255,6 +255,21 @@ do
     check("opts.timeout: past it, it stops and says so", ok == false and why == "ran 0 s (opts.timeout)" and info.got == 0, tostring(why))
     ok, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { timeout = 1000 })
     check("...a long enough one is no stop", ok == true and info.got == 9)
+    -- ADR-0015 D9: on a server at 60 ticks a second each dig here takes a
+    -- game second, a third of a real one; opts.timeout counts real seconds
+    -- (2 of them: 6 digs), where game time stopped it after 2 digs
+    fresh()
+    W.fill(2, 0, 2, 4, 0, 4, BSTONE)
+    know(-1, -1, -1, 6, 2, 6)
+    local clockWas, epochWas = os.clock, os.epoch
+    local game, real = 0, 1000 * 1000
+    os.clock, os.epoch = function() return game end, function() return math.floor(real) end
+    local off = T.onChange(function(e) if e.kind == "dig" then game, real = game + 1, real + 1000 / 3 end end)
+    ok, why, info = T.harvest("blackstone", { 2, 0, 2, 4, 0, 4 }, nil, { timeout = 2 })
+    off()
+    os.clock, os.epoch = clockWas, epochWas
+    check("opts.timeout on a server at 60 ticks a second: real seconds (2 of them, 6 digs), not game ones (2 digs)",
+        ok == false and why == "ran 2 s (opts.timeout)" and info.got == 6, tostring(why) .. " " .. tostring(info and info.got))
     fresh()
     W.fill(2, 0, 2, 4, 0, 4, BSTONE)
     know(-1, -1, -1, 6, 2, 6)

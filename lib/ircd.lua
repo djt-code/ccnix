@@ -48,6 +48,7 @@ local scan = require("scan")
 local text = require("text")
 local convert = require("convert")
 local tables = require("tables")
+local realtime = require("realtime")
 
 local D = {}
 D.VERSION = "ccnix-ircd-1.0"
@@ -161,7 +162,7 @@ function D.new(opts)
         operPass = opts.oper,
         version = opts.version or D.VERSION,
         time = opts.time or function() return math.floor(os.epoch("utc") / 1000) end,
-        clock = opts.clock or os.clock,
+        clock = opts.clock or realtime.now,
         log = opts.log or function() end,
         clients = {},           -- id -> client
         nicks = {},             -- folded nick -> client

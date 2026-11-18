@@ -106,6 +106,7 @@
 local scan = require("scan")
 local text = require("text")
 local tables = require("tables")
+local realtime = require("realtime")
 
 local N = {}
 N.CHANNEL = 60000             -- (VLANs up to 64094: clear of CC's own, 65533-65535, and of
@@ -257,7 +258,8 @@ end
 --------------------------------------------------------------------------
 -- opts: id (the computer's), transmit(ifc, frame) (ifc.modem, ifc.channel),
 -- queue(event, ...)
--- (os.queueEvent), clock() (seconds), forward (a router), rpfilter
+-- (os.queueEvent), clock() (seconds; realtime.now, real ones: a peer
+-- outside the game counts those, whatever the server's tick rate), forward (a router), rpfilter
 -- ("loose", "strict" or "off"; see N.rpfilter), log(msg, severity) (each
 -- note: a dropped packet, no ARP answer; severity 3 for the hook's own
 -- errors, else nil).
@@ -269,7 +271,7 @@ function N.new(opts)
         log = {},
         taps = {},          -- fn(dir, iface, frame): every frame in ("in") or out ("out"), as tcpdump wants
     }
-    local clock = opts.clock or os.clock
+    local clock = opts.clock or realtime.now
     -- the process that opens a socket (under init), for netstat -p
     local owner = opts.owner or function()
         local proc = rawget(_G, "proc")
@@ -1142,7 +1144,7 @@ function N.hook(S, osT)
     local raw = osT.pullEventRaw
     local seen = setmetatable({}, { __mode = "k" })
     local timer
-    S.wantTick = function() if not timer then timer = osT.startTimer(0.5) end end
+    S.wantTick = function() if not timer then timer = osT.startTimer(realtime.ticks(0.5)) end end
     local function handle(ev, a, b, c, d)
         if S.dead then return end           -- (taken down, but something hooked on top of it)
         if ev == "modem_message" then
@@ -1307,10 +1309,10 @@ function N.resolve(name)
     return N.parseIP(h.addr_list[1])
 end
 
--- Wait up to `timeout` seconds (nil: for ever) for an event `name` that
--- `want(...)` accepts; its values, or nil on timeout.
+-- Wait up to `timeout` real seconds (nil: for ever) for an event `name`
+-- that `want(...)` accepts; its values, or nil on timeout.
 function N.await(name, want, timeout)
-    local timer = timeout and os.startTimer(timeout)
+    local timer = timeout and realtime.timer(timeout)
     while true do
         local ev = table.pack(os.pullEvent())
         if ev[1] == name and (not want or want(table.unpack(ev, 2, ev.n))) then
@@ -1336,11 +1338,11 @@ end
 -- between tries for an event `name` about `v` (one can be about something
 -- already taken: try again).
 local function poll(take, name, v, timeout)
-    local deadline = timeout and os.clock() + timeout
+    local deadline = timeout and realtime.now() + timeout
     while true do
         local got = take()
         if got then return got end
-        local left = deadline and deadline - os.clock()
+        local left = deadline and deadline - realtime.now()
         if left and left <= 0 then return nil end
         N.await(name, function(x) return x == v end, left)
     end

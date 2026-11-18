@@ -56,6 +56,7 @@ local path = require("path")
 local httpc = require("httpc")
 local tables = require("tables")
 local fileio = require("fileio")
+local realtime = require("realtime")
 
 local H = {}
 H.SERVER = "ccnix-httpd"
@@ -315,7 +316,7 @@ function Server:run()
             elseif ev[1] == "net_accept" and ev[2] == self.port then
                 local c = listener:poll()
                 while c do
-                    conns[c:id()] = { conn = c, buf = "", since = os.clock(), remote = (c:remote()) }
+                    conns[c:id()] = { conn = c, buf = "", since = realtime.now(), remote = (c:remote()) }
                     serve(c:id())
                     c = listener:poll()
                 end
@@ -323,7 +324,7 @@ function Server:run()
                 serve(ev[2])
             elseif ev[1] == "timer" and ev[2] == sweep then
                 for id, k in pairs(conns) do
-                    if os.clock() - k.since > H.IDLE then
+                    if realtime.now() - k.since > H.IDLE then
                         k.conn:send(H.response(H.page(408)))
                         drop(id)
                     end

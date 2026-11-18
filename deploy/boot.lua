@@ -101,9 +101,17 @@ if vf then
 end
 -- (roots: the layers in the order find looks, for what lists a folder
 -- across them, as claude does its shipped skills)
+-- (ticks: lib/realtime's measure of the server's tick rate, started here;
+-- tickRate() loads it the first time it's asked)
+local realtime
 _G.ccnix = { find = find, lib = table.concat(lib), version = version or "unversioned",
              updates = roots[1] == OVER and romMode,    -- (whether this boot took the updates)
-             roots = roots }
+             roots = roots,
+             ticks = { clock = os.clock(), epoch = os.epoch("utc") },
+             tickRate = function()
+                 realtime = realtime or dofile(find("lib/realtime.lua"))
+                 return realtime.tickRate()
+             end }
 
 -- CC's keys table has no Esc: in the game the key closes the computer's
 -- screen, so it never came.  It does now (the ccnix mod's client gives it

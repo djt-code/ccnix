@@ -1,7 +1,7 @@
 ccnix: this computer's ccnix: where it comes from, and updates
 
   ccnix
-      what the ROM has (its version and commit), and this computer's updates over it, if any
+      what the ROM has (its version and commit), and this computer's updates over it, if any; and the server's tick rate when it isn't Minecraft's 20 a second (CraftOS's timers count ticks; ccnix's network and timeouts count real seconds: lib/realtime)
   ccnix version
       the version in use (semantic: major.minor.patch), and the one a reboot brings if an update or reset changed it
   ccnix update

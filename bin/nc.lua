@@ -45,6 +45,7 @@ local net = require("net")
 local netdb = require("netdb")
 local text = require("text")
 local convert = require("convert")
+local realtime = require("realtime")
 local opts, operands = cu.getopt({ ... }, "ulnvzp:w:")
 local socktype = opts.u and netdb.SOCK_DGRAM or netdb.SOCK_STREAM
 local numeric = opts.n and netdb.AI_NUMERICHOST + netdb.AI_NUMERICSERV or 0
@@ -155,7 +156,7 @@ if opts.u then
                 local sent, why2 = sock:send(host, port, line)
                 if not sent then cu.fail(why2) end
             end
-            sleep(wait or 1)
+            realtime.sleep(wait or 1)
         end,
         function() printing(sock) end)
     sock:close()
@@ -197,7 +198,7 @@ guarded(parallel.waitForAny,
             if not conn:send(line .. "\n") then return end
         end
         conn:close()
-        if wait then sleep(wait) else while true do os.pullEvent("never") end end
+        if wait then realtime.sleep(wait) else while true do os.pullEvent("never") end end
     end,
     function()
         while true do

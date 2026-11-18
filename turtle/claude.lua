@@ -145,8 +145,8 @@
 -- The code has the turtle, turtlelib, peripherals, the plain Lua bits,
 -- CC's http, `require` for CraftOS's cc.* modules (cc.strings, cc.pretty,
 -- ...) and ccnix's libraries for text, the network and the world (text,
--- scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb,
--- httpc, mc), and the files: fs, io, loadfile and dofile read anything
+-- scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net,
+-- netdb, httpc, mc), and the files: fs, io, loadfile and dofile read anything
 -- but the API key, and write only under /claude/ (so it can't rewrite the
 -- programs or the startup).  No shell.
 --
@@ -215,6 +215,7 @@ local path = require("path")
 local syntax = require("syntax")
 local sysenv = require("sysenv")
 local tables = require("tables")
+local realtime = require("realtime")
 
 -- Colour on an advanced computer or turtle, plain text on the others.
 local COLOUR = term ~= nil and term.isColour ~= nil and term.isColour() and colours ~= nil
@@ -491,6 +492,7 @@ Libraries: `local text = require("text")` and so on give ccnix's own; use them r
 - glob: match(pattern, s) with * ? [a-z] [[:alpha:]] (a whole-string match; good for block names: glob.match("minecraft:*_ore", name)), compile(pattern) -> a test, hasWildcards, escape.
 - regex: regex.compile(pattern, { ere = true, icase = true }) -> re, or nil and why; re:test(s [, whole]), re:find(s [, init]) -> start, stop, captures (POSIX regular expressions).
 - tables: sortedKeys(t), copy(t). fileio: read(path), write(path, data) (under /claude/ only), readJSON(path). getopt: parse(args, "ab:") -> options, operands.
+- realtime: now() (real seconds), sleep(s), timer(s), tickRate(). sleep, os.clock and os.startTimer count game ticks, and a server can run faster than 20 a second: use these for real seconds.
 - mc: require("mc").new() -> the world through what's attached (Advanced Peripherals' chat box, player detector, environment detector): time(), weather(), players(), say(text, from) into the game's chat, tell(player, text, from); a function whose peripheral isn't there returns nil and why.
 - httpc, net, netdb: ccnix's own network stack over modems (IPv4, UDP, TCP, DNS), when it's up (`status` says): httpc.get(url) / httpc.post(url, body, headers) / httpc.request({ url, method, body, headers, follow, timeout }) -> { status, headers, body } or nil and why (http:// only, no TLS); net.connect(host, port) -> a TCP connection (conn:send(s), conn:read(timeout), conn:close()); net.udp(); netdb.getaddrinfo(name).
 
@@ -511,7 +513,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = {
@@ -921,6 +923,7 @@ local CC_MODULES = {
 local CCNIX_MODULES = {
     scan = true, text = true, convert = true, getopt = true, glob = true, path = true,
     regex = true, tables = true, fileio = true, mc = true, net = true, netdb = true, httpc = true,
+    realtime = true,
 }
 local modWorld = {
     fs = codeFs,
@@ -2278,7 +2281,7 @@ local function request(compact)
         else
             say("orange", string.format("API: %s; trying again in %ds.", detail, wait))
             log(string.format("API: %s; trying again in %ds", detail, wait))
-            sleep(wait)
+            realtime.sleep(wait)
             wait = wait * 2
         end
     end

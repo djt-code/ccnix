@@ -35,6 +35,7 @@ local text = require("text")
 local scan = require("scan")
 local convert = require("convert")
 local fileio = require("fileio")
+local realtime = require("realtime")
 
 local CUBE, CELLS = 16, 4096                  -- a cube is 16 cells each way
 local FORMAT = "ccnix-cube 1"                 -- the first line of a cube's file
@@ -776,7 +777,7 @@ local function rawScan(radius)
             if ok and entries then return entries end
             if not ok and entries == "Terminated" then error(entries, 0) end
             why = ok and err or entries
-            if try < SCAN_TRIES then sleep(1) end
+            if try < SCAN_TRIES then realtime.sleep(1) end       -- (its cooldown is in real time)
         end
         return nil, "the scan didn't come back: " .. tostring(why)
     end))
