@@ -119,7 +119,7 @@ local FAMILY_EXACT = {
     crimson_stem = "log", warped_stem = "log", hay_block = "log", bone_block = "log", basalt = "log",
     polished_basalt = "log", deepslate = "log",
     piston = "piston", sticky_piston = "piston", dispenser = "piston", dropper = "piston", observer = "observer",
-    repeater = "diode", comparator = "diode",
+    repeater = "diode", comparator = "diode", chain = "chain", lantern = "lantern", soul_lantern = "lantern",
     short_grass = "plant", tall_grass = "plant", fern = "plant", large_fern = "plant", dead_bush = "plant",
     vine = "plant", seagrass = "plant", fire = "plant", snow = "plant",
     redstone_wire = "dust", wheat = "crop", carrots = "crop", potatoes = "crop", beetroots = "crop",
@@ -356,6 +356,27 @@ FAMILIES = {
 
     -- a log or pillar lies along the axis of the face that was clicked
     log = { sturdy = yes, full = yes, place = function(ctx) return { axis = AXIS[ctx.face] } end },
+    -- a chain (ChainBlock, a RotatedPillarBlock): the same; standing up (axis y) its ends hold the centre of a lantern
+    -- or a torch, above and below
+    chain = {
+        sturdy = function(b, face, center) return center == true and b.state.axis == "y" and (face == "up" or face == "down") end,
+        full = no, place = function(ctx) return { axis = AXIS[ctx.face] } end,
+    },
+    -- a lantern (LanternBlock.getStateForPlacement): the looking order's up or down, the first that holds it: down
+    -- stands it on the block below, up hangs it under the block above (the centre of the face is enough)
+    lantern = {
+        sturdy = no, full = no,
+        place = function(ctx)
+            for _, d in ipairs(ctx.look) do
+                if d == "down" and sturdy(ctx.near("down"), "up", true) then return { hanging = false, waterlogged = false } end
+                if d == "up" and sturdy(ctx.near("up"), "down", true) then return { hanging = true, waterlogged = false } end
+            end
+        end,
+        survives = function(w, x, y, z, b)
+            if b.state.hanging then return sturdy(w.near(x, y, z, "up"), "down", true) end
+            return sturdy(w.near(x, y, z, "down"), "up", true)
+        end,
+    },
 
     -- a torch: a wall torch on the first side in the looking order that has support, else standing on the floor
     torch = {

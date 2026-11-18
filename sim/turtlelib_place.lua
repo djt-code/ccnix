@@ -201,6 +201,38 @@ scene("an x log in a world whose heading 0 is east: the compass's x is the turtl
 scene("a log across a hole: lying along x with nothing to click is the turtle's own block, along the heading", {
     item = LOG, opts = { axis = "z" }, expect = { { 0, 0, 3, "oak_log", { axis = "z" } } } })
 
+-- ADR-0015: a chain lies as a log does (it had no axis to place by); a lantern stands or hangs (opts.hanging)
+local CHAIN, LANTERN = "minecraft:chain", "minecraft:lantern"
+scene("a chain hanging down (axis y) with a floor to click", {
+    item = CHAIN, blocks = { stone(0, -1, 3) }, opts = { axis = "y" }, expect = { { 0, 0, 3, "chain", { axis = "y" } } } })
+scene("a chain lying along x onto a block beyond to the east", {
+    item = CHAIN, blocks = { stone(1, 0, 3) }, opts = { axis = "x" },
+    expect = { { 0, 0, 3, "chain", { axis = "x" } } }, approach = "front", from = { -1, 0, 3 } })
+scene("a lantern hanging under a block (opts.hanging = true), nothing under the cell", {
+    item = LANTERN, blocks = { stone(0, 1, 3) }, opts = { hanging = true },
+    expect = { { 0, 0, 3, "lantern", { hanging = true } } } })
+scene("a lantern standing on the floor (opts.hanging = false)", {
+    item = LANTERN, blocks = { stone(0, -1, 3), stone(0, 1, 3) }, opts = { hanging = false },
+    expect = { { 0, 0, 3, "lantern", { hanging = false } } } })
+scene("a lantern under a chain hanging from a block", {
+    item = LANTERN, blocks = { { 0, 1, 3, "minecraft:chain", { axis = "y" } }, stone(0, 2, 3) }, opts = { hanging = true },
+    expect = { { 0, 0, 3, "lantern", { hanging = true } } } })
+do
+    fresh(nil, { stone(0, 1, 3) })
+    knowAll()
+    W.give(1, LANTERN, 2)
+    local name, why = T.placeAt(0, 0, 3, LANTERN, { hanging = false })
+    check("a lantern wanted standing with only a block above: refused, a block under the target named", name == nil
+        and why:find("needs a block to hang it on under the target", 1, true) and W.get(0, 0, 3) == nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, LANTERN, { hang = true })
+    check("an option placeAt doesn't take is refused, named, with the ones it does (not ignored)", name == nil
+        and why:find("placeAt has no option hang (it takes ", 1, true) and why:find("hanging", 1, true) and W.get(0, 0, 3) == nil,
+        tostring(why))
+    local info = T.placeInfo(LANTERN)
+    check("T.placeInfo: a lantern hangs, by opts.hanging; a chain has an axis", info.family == "lantern" and info.hang == true
+        and info.keys.hanging == true and T.placeInfo(CHAIN).keys.axis == true and T.placeInfo("minecraft:sea_lantern").family == "block")
+end
+
 --------------------------------------------------------------------------
 -- Torches, ladders, buttons and levers: hung on the block beyond
 --------------------------------------------------------------------------
