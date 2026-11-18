@@ -63,6 +63,26 @@ and, on what to call it:
   - without the clock term, four and five.
 - **Nothing has to be faked.** Noisy ranges plus least squares produce
   every effect the user named. No fuzz is scaled by hand to the host count.
+- **The bubble already exists in CC, for errors in host positions.** CC's
+  ranges are exact, but a host's claimed position is only as right as
+  whoever typed it, and the geometry amplifies that error the same way a
+  DOP amplifies range noise. A check with textbook trilateration, for four
+  hosts at (0,200,0), (300,150,0), (0,180,300) and (300,250,300):
+  - **Exact ranges, four hosts not in one plane:** the fix is exact to
+    1e-10 anywhere, even 5000 blocks out.
+  - **Four hosts in one plane:** two mirror candidates both fit the
+    fourth range. It can't be resolved.
+  - **The fourth host 1 block off the plane, the client 3000 out:** still
+    exact, but the fourth range separates the two candidates by only 0.07.
+    Any noise at all makes that a coin toss.
+  - **One host's claimed position 1 block off (a typo):** the worst fix
+    error is
+    - 0.98 to 1.89 blocks inside the hull;
+    - 47 blocks at about 1000 out;
+    - 243 blocks at about 5000 out.
+
+  So noisy ranges add a second error source to a geometry that already
+  amplifies the first. Weighted least squares and RAIM (D8) deal with both.
 - **Not simulated:**
   - multipath;
   - signals blocked by terrain (modems go through blocks);
@@ -72,18 +92,25 @@ and, on what to call it:
 
 ### What CC does today (CC: Tweaked 1.120.2, read from its jar)
 
-- **A distance is exact.** It is `√(distanceToSqr)` between the receiver's
-  and the sender's positions, in `WirelessNetwork.tryTransmit`. It reaches
-  Lua as the fifth value of `modem_message` (`ModemPeripheral.
-  receiveSameDimension`). So stock trilateration is exact, and any fuzz has
-  to come from somewhere.
+- **A distance is exact.** `WirelessNetwork.tryTransmit` computes
+  `receiver.getPosition().distanceToSqr(sender.getPosition())` and calls
+  `receiveSameDimension(packet, Math.sqrt(distanceSq))`, the range being
+  `max(range, receiver.getRange())`. The distance reaches Lua as the fifth
+  value of `modem_message` (`ModemPeripheral.receiveSameDimension`). So
+  stock trilateration is exact, and any fuzz has to come from somewhere.
 - **What a position is:**
-  - A modem block's position is the block it is attached to (the
-    computer), at its lower corner (`WirelessModemBlockEntity$Peripheral.
-    getPosition`: `getBlockPos().relative(getDirection())`, `atLowerCornerOf`).
-    So between two computers the distances are square roots of integers.
-  - A turtle's modem uses the turtle's block position (`TurtleModem$
-    Peripheral`). How it turns that into a point isn't checked here.
+  - **A modem block:** `WirelessModemBlockEntity`'s `getPosition` is
+    `Vec3.atLowerCornerOf(entity.getBlockPos().relative(entity.
+    getDirection()))`. `WirelessModemBlock` sets `FACING` to
+    `getClickedFace().getOpposite()`, so it points into the block the modem
+    is attached to. A modem's position is therefore the lower corner of its
+    computer's block: exactly the computer's integer F3 coordinates. (A
+    modem stuck to some other block gives that block's corner.)
+  - **A turtle's modem:** `TurtleModem`'s `getPosition` is the turtle's
+    block coordinates, with no +0.5.
+  - **So:** between computers and turtles, ranges are corner to corner and
+    exact. A host's configured position can be checked to a tenth of a
+    block.
   - A pocket computer's modem uses its holder's position, so its distances
     have fractions.
 - **Across dimensions there is no distance at all.** When the sender and
@@ -103,7 +130,8 @@ and, on what to call it:
 - **gpsd (ADR-0016)** answers the stock protocol: a `"PING"` on 65534,
   answered with `{x, y, z}` on the ping's reply channel. Its accepted D3
   checks its configured position against each reply's measured distance,
-  within 2.5 blocks.
+  within 0.1 block. That is tight because ranges are corner to corner and
+  exact.
 
 ### What ccnix-mod has to work with
 
@@ -373,13 +401,13 @@ dimensions, as now.
 
 ### D10. gpsd's position check (ADR-0016 D3) under noise
 
-- **(a) Tolerance `max(2.5, 4σ)` per reply, from the stamp.
+- **(a) Tolerance `max(0.1, 4σ)` per reply, from the stamp.
   Recommended.**
   - gpsd checks against the replies on 65534 it hears. Those are exact
     unless `stock = "noisy"`, and never carry a clock bias.
   - Replies across dimensions are left out of the check.
-- **(b) Keep 2.5 flat:** with `stock = "noisy"` and wireless hosts far
-  away, honest hosts would look wrong.
+- **(b) Keep 0.1 flat:** with `stock = "noisy"`, every honest host would
+  look wrong.
 
 ## Trade-off analysis
 
