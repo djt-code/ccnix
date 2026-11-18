@@ -1636,3 +1636,30 @@ scanWorld(true)
 SCAN_COOLDOWN = nil
 check("the scanner on cooldown: it waited and scanned again", (COOLED or 0) > 0 and logHas("lined up")
     and oreGone(-5, 1, 12) and oreGone(7, 0, 20), (COOLED or 0) .. " too soon, " .. SCANS .. " scans")
+
+-- 22. lava that flows (LAVA_FLOWS, as in game: the field saw it pour in
+--     from above): a shaft over the tunnel's ceiling with a lava source at
+--     its top, the lava fallen down it onto the ceiling.  Digging the
+--     top row under it lets it pour in: mine seals it, and leaves no lava
+--     touching the tunnel; and a pocket of lava in a wall that runs out
+--     when the wall's dug is sealed too
+setup(stock(4, 64))
+for y = 3, 7 do set(1, y, 10, nil) end
+set(1, 8, 10, { name = "minecraft:lava", level = 0 })
+set(4, 1, 14, { name = "minecraft:lava", level = 0 }); set(3, 1, 14, nil)     -- (behind the wall, an open cell before it)
+LAVA_FLOWS = true
+flow(1, 8, 10); flow(4, 1, 14)
+settleWater()
+local fallen = get(1, 3, 10)
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 2000, 2000, 0
+BOX, LAVA_IN = { 0, 2, 0, 2 }, 0
+run("3", "3", "16")
+LAVA_FLOWS, BOX = nil, nil
+check("lava from a shaft above: it had fallen onto the ceiling", fallen and fallen.name == "minecraft:lava",
+    tostring(fallen and fallen.name))
+checkLava(16)
+check("...the tunnel dug and no lava in it", leftIn(0, 2, 0, 2, 1, 16) == 0, leftIn(0, 2, 0, 2, 1, 16) .. " blocks left, "
+    .. (LAVA_IN or 0) .. " lava flowed in")
+check("...done, back at the start", jobState() == "done" and atStart(), tostring(jobState()))
+check("never moved on an empty tank", DRY == 0, "tried " .. DRY)

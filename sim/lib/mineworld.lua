@@ -215,9 +215,11 @@ local function due(a, b, c, t)
 end
 -- Something changed at (x,y,z) now: the water there and next to it ticks
 -- 5 ticks on.
+local lavaWake                  -- (set below, with the lava)
 local function flow(x, y, z)
     due(x, y, z, clock + 5)
     for _, d in ipairs(M.SIDES6) do due(x + d[1], y + d[2], z + d[3], clock + 5) end
+    if LAVA_FLOWS and lavaWake then lavaWake(x, y, z) end
 end
 Mine.flow = flow
 -- The open block (not the turtle's) at (a,b,c) gets the water due it.
@@ -247,49 +249,144 @@ local function wateryOpen(x, y, z)              -- water may pass through: open,
     local b = get(x, y, z)
     return b == nil or isTorch(b) or (isWater(b) and b.level ~= 0)
 end
-local function dropUnder(x, y, z) return wateryOpen(x, y - 1, z) end
-local SLOPE = 4
-local function slopeFrom(x, y, z, depth, back)
+local function opposite(i)
+    local d = M.SIDES4[i]
+    for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then return j end end
+end
+-- How far from (x,y,z) the nearest drop is, going through cells open(),
+-- up to `reach` blocks (1000: none), not back the way it came.
+local function slopeFrom(open, reach, x, y, z, depth, back)
     local best = 1000
     for i, d in ipairs(M.SIDES4) do
         if i ~= back then
             local nx, nz = x + d[1], z + d[2]
-            if wateryOpen(nx, y, nz) then
-                if dropUnder(nx, y, nz) then return depth end
-                if depth < SLOPE then
-                    local opp
-                    for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then opp = j end end
-                    best = math.min(best, slopeFrom(nx, y, nz, depth + 1, opp))
-                end
+            if open(nx, y, nz) then
+                if open(nx, y - 1, nz) then return depth end
+                if depth < reach then best = math.min(best, slopeFrom(open, reach, nx, y, nz, depth + 1, opposite(i))) end
             end
         end
     end
     return best
 end
-local function spread(a, b, c, t)
-    local lv = wlevel(get(a, b, c))
-    if wateryOpen(a, b - 1, c) then fillAt(a, b - 1, c, t); return end
-    if not (lv == 0 or not dropUnder(a, b, c)) then return end
+-- The sides a fluid at (a,b,c) spreads to: those toward the nearest drop.
+local function sidesToward(open, reach, a, b, c)
     local dist, best = {}, 1000
     for i, d in ipairs(M.SIDES4) do
         local nx, nz = a + d[1], c + d[2]
-        if wateryOpen(nx, b, nz) then
-            local opp
-            for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then opp = j end end
-            dist[i] = dropUnder(nx, b, nz) and 0 or slopeFrom(nx, b, nz, 1, opp)
+        if open(nx, b, nz) then
+            dist[i] = open(nx, b - 1, nz) and 0 or slopeFrom(open, reach, nx, b, nz, 1, opposite(i))
             best = math.min(best, dist[i])
         end
     end
+    local out = {}
     for i, d in ipairs(M.SIDES4) do
-        if dist[i] and dist[i] == best then fillAt(a + d[1], b, c + d[2], t) end
+        if dist[i] and dist[i] == best then out[#out + 1] = d end
+    end
+    return out
+end
+local function spread(a, b, c, t)
+    if wateryOpen(a, b - 1, c) then fillAt(a, b - 1, c, t); return end
+    for _, d in ipairs(sidesToward(wateryOpen, 4, a, b, c)) do fillAt(a + d[1], b, c + d[2], t) end
+end
+
+--------------------------------------------------------------------------
+-- Lava, as the overworld has it (LAVA_FLOWS; it ticks with the water):
+-- every 30 ticks it falls if it can, else spreads sideways toward the
+-- nearest drop within 2 blocks, 2 levels a block (3 blocks from a source),
+-- and makes no new sources.  Touching water it hardens, a source into
+-- obsidian and flowing lava into cobblestone; falling onto water it makes
+-- stone.  A torch it reaches burns.
+--------------------------------------------------------------------------
+local LAVA_NAME = "minecraft:lava"
+local function llevel(b) if b and b.name == LAVA_NAME then return b.level or 0 end end
+local lavaPending = {}
+local function lavaDue(a, b, c, t)
+    if not llevel(get(a, b, c)) then return end
+    local key = k(a, b, c)
+    local q = lavaPending[key]
+    if not q or q[1] > t then lavaPending[key] = { t, a, b, c } end
+end
+local function lavaOpen(x, y, z)
+    if z < 1 or (x == P.x and y == P.y and z == P.z) then return false end
+    local b = get(x, y, z)
+    return b == nil or isTorch(b) or (llevel(b) ~= nil and b.level ~= 0)
+end
+local function lavaFor(x, y, z)
+    if llevel(get(x, y + 1, z)) then return { name = LAVA_NAME, level = 8 } end
+    local feed
+    for _, d in ipairs(M.SIDES4) do
+        local lv = llevel(get(x + d[1], y, z + d[2]))
+        if lv then
+            local l = lv >= 8 and 0 or lv
+            if l + 2 <= 6 then feed = math.min(feed or 99, l + 2) end
+        end
+    end
+    return feed and { name = LAVA_NAME, level = feed } or nil
+end
+local function hardens(a, b, c)
+    local lv = llevel(get(a, b, c))
+    if not lv then return false end
+    for _, d in ipairs(M.SIDES6) do
+        if d[2] ~= -1 and isWater(get(a + d[1], b + d[2], c + d[3])) then
+            set(a, b, c, { name = lv == 0 and "minecraft:obsidian" or "minecraft:cobblestone" })
+            return true
+        end
+    end
+    return false
+end
+local function lavaFill(a, b, c, t)
+    local cur = get(a, b, c)
+    if c < 1 or (a == P.x and b == P.y and c == P.z) or not (cur == nil or isTorch(cur)) then return end
+    local new = lavaFor(a, b, c)
+    if not new then return end
+    if isTorch(cur) then BURNT_TORCHES = (BURNT_TORCHES or 0) + 1 end
+    if BOX and a >= BOX[1] and a <= BOX[2] and b >= BOX[3] and b <= BOX[4] and k(a, b, c) ~= LAST_DUG then
+        LAVA_IN = (LAVA_IN or 0) + 1
+    end
+    set(a, b, c, new)
+    lavaDue(a, b, c, t + 30)
+end
+local function lavaSpread(a, b, c, t)
+    if isWater(get(a, b - 1, c)) then set(a, b - 1, c, { name = "minecraft:stone" }); return end
+    if lavaOpen(a, b - 1, c) then lavaFill(a, b - 1, c, t); return end
+    for _, d in ipairs(sidesToward(lavaOpen, 2, a, b, c)) do lavaFill(a + d[1], b, c + d[2], t) end
+end
+local function lavaTicks()
+    for _ = 1, 100000 do
+        local first
+        for key, q in pairs(lavaPending) do
+            if q[1] <= clock and (not first or q[1] < first[1] or (q[1] == first[1] and key < first[5])) then
+                first = q
+                q[5] = key
+            end
+        end
+        if not first then return end
+        local t, a, b, c = first[1], first[2], first[3], first[4]
+        lavaPending[k(a, b, c)] = nil
+        local cur = get(a, b, c)
+        if llevel(cur) and not (a == P.x and b == P.y and c == P.z) and not hardens(a, b, c) then
+            if cur.level ~= 0 then
+                local new = lavaFor(a, b, c)
+                if (new and new.level) ~= cur.level then
+                    set(a, b, c, new)
+                    for _, d in ipairs(M.SIDES6) do lavaDue(a + d[1], b + d[2], c + d[3], t + 30) end
+                end
+            end
+            if llevel(get(a, b, c)) then lavaSpread(a, b, c, t) end
+        end
     end
 end
 
 -- Let `ticks` pass (a turtle action's 8 by default).  A water block that
 -- ticks drains if nothing feeds it (or changes level), and spreads into
 -- the open blocks next to it, which tick 5 ticks later.
+lavaWake = function(x, y, z)
+    lavaDue(x, y, z, clock + 30)
+    for _, d in ipairs(M.SIDES6) do lavaDue(x + d[1], y + d[2], z + d[3], clock + 30) end
+end
 local function waterStep(ticks)
     clock = clock + (ticks or 8)
+    if LAVA_FLOWS then lavaTicks() end
     for _ = 1, 100000 do
         local first
         for key, q in pairs(pending) do      -- the earliest; ties by place, so runs repeat
@@ -316,8 +413,8 @@ local function waterStep(ticks)
 end
 -- Let the water settle (at the end of a run).
 function Mine.settleWater()
-    for _ = 1, 400 do
-        if next(pending) == nil then return end
+    for _ = 1, 2000 do
+        if next(pending) == nil and (not LAVA_FLOWS or next(lavaPending) == nil) then return end
         waterStep(5)
     end
 end
@@ -418,7 +515,7 @@ local function dig(x, y, z)
         M.addItem(Mine, DROP[b.name] or b.name, DROP_COUNT[b.name] or 1)
     end
     gravity(x, y, z)
-    if WATERY then flow(x, y, z); waterStep() end
+    if WATERY or LAVA_FLOWS then flow(x, y, z); waterStep() end
     return true
 end
 
@@ -458,7 +555,7 @@ local function place(x, y, z, dir)
     else set(x, y, z, { name = it.name, on = on }) end
     M.useSel(Mine)
     PLACED = (PLACED or 0) + 1
-    if WATERY then flow(x, y, z); waterStep() end
+    if WATERY or LAVA_FLOWS then flow(x, y, z); waterStep() end
     return true
 end
 
@@ -584,7 +681,7 @@ local function moved(ox, oy, oz)
             error("Terminated", 0)
         end
     end
-    if WATERY then
+    if WATERY or LAVA_FLOWS then
         local b = get(P.x, P.y, P.z)
         if isWater(b) and b.level ~= 0 then set(P.x, P.y, P.z, nil) end   -- pushed out
         flow(ox, oy, oz)
@@ -649,7 +746,7 @@ turtle = M.merge(
             return true
         end,
         moved = moved,
-        turned = function() if WATERY then waterStep() end end,
+        turned = function() if WATERY or LAVA_FLOWS then waterStep() end end,
     }),
     M.lookingApi(Mine, inspectAt, function(b) return not passable(b) end),
     M.actingApi(Mine, "dig", dig),
@@ -803,7 +900,7 @@ function Mine.runner(proj)
     return M.runner(Mine, proj .. "/turtle/mine.lua", {
         before = function() SPLIT, DIGS, SUPPLIES_FROM = 0, 0, nil end,
         after = function()
-            if WATERY then Mine.settleWater() end
+            if WATERY or LAVA_FLOWS then Mine.settleWater() end
             stoppedHere, STOPPED_HERE = STOPPED_HERE, nil
         end,
         stats = function()
