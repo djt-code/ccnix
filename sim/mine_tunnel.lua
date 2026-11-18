@@ -624,7 +624,7 @@ setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, 
 local FIELD = { { -4, 1, 6 }, { -5, 1, 8 }, { -4, 0, 10 }, { -6, 2, 11 }, { -5, 1, 13 }, { -3, 2, 14 }, { -6, 0, 15 } }
 for _, o in ipairs(FIELD) do set(o[1], o[2], o[3], ore("minecraft:iron_ore")) end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { right = "minecraft:diamond_pickaxe" }   -- (no chunk controller here: the scanner swaps onto the free side)
 FUEL, DRY, SCANS = 2000, 0, 0
 local entries = 0
 ONMOVE = function(x, y, z, nx, ny, nz)
@@ -656,7 +656,7 @@ local function mapHas(lib, x, y, z, name)
 end
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 run("3", "3", "12")
 local tlib = require("turtlelib")
@@ -692,7 +692,7 @@ check("a second run adds to the map: the far part is in it, the first part still
 
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 local defaults, chosen = {}, { ["mine.map"] = false }
 settings = { define = function(name, o) defaults[name] = o.default end,
@@ -721,7 +721,7 @@ for _, case in ipairs({ { "a fetch through a lit niche", true, THROUGH, "TORCHES
     if case[2] then table.insert(chestAt(0, 1, 0), { name = SCANNER, count = 1 }) end
     for _, o in ipairs(case[3]) do set(o[1], o[2], o[3], ore(o[4])) end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, SCANS, TORCHES_DUG, TORCHES_DROPPED = 2000, 0, 0, 0, 0
     run("3", "3", "60")
     local gone = 0
@@ -751,7 +751,7 @@ for _, it in ipairs({ { name = "minecraft:cobblestone", count = 64 }, { name = "
     table.insert(chestAt(0, -1, 0), it)                 -- bulk to seal with
 end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, PLACED, SCANS = 300, 0, 0, 0
 WATERY = true
 run("3", "3", "30")
@@ -780,7 +780,7 @@ check("back at the start", atStart())
 --      heading were off): it says so and stops trusting scans
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 SCAN_TURN = 1
 run("3", "3", "30")
@@ -800,7 +800,7 @@ local function wetWalls(withScanner)
     for x = 3, 6 do for y = -1, 3 do for z = 6, 30 do set(x, y, z, { name = "minecraft:water", level = 0 }) end end end
     for x = -1, 7 do for z = 5, 31 do set(x, 4, z, { name = "minecraft:stone" }); set(x, -2, z, { name = "minecraft:stone" }) end end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, PLACED, SCANS, WASHED, INGRESS = 3000, 0, 0, 0, 0, 0
     WATERY, BOX = true, { 0, 2, 0, 2 }
     run("3", "3", "36")
@@ -835,7 +835,7 @@ local function lichenWorld(withScanner)
     set(1, 4, 22, { name = "minecraft:water", level = 0 }); set(1, 5, 22, { name = "minecraft:water", level = 0 })
     set(3, 0, 26, { name = "minecraft:glow_lichen" })                          -- dry, in the right wall
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, WASHED, INGRESS, SCANS = 3000, 0, 0, 0, 0
     WATERY, BOX = true, { 0, 2, 0, 2 }
     run("3", "3", "30")
@@ -862,7 +862,7 @@ lichenWorld(true)
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 } })
 for x = -5, -6, -1 do for y = 0, 1 do set(x, y, 10, ore("minecraft:coal_ore")) end end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, LOWEST, DRY = 250, math.huge, 0
 run("3", "3", "40")
 check("went for the coal when low", logHas("going for the coal"))
@@ -880,7 +880,7 @@ local function dugTunnel()
     for _, z in ipairs({ 16, 32 }) do set(-1, 0, z, chest()); set(0, -1, z, chest()) end
     Mine.files = { ["mine.job"] = "3 3 0 16 2 active" }    -- homes at 16 and 32: dug to 32
     Mine.inv = {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY = 500, 0
 end
 dugTunnel()
@@ -1193,7 +1193,7 @@ for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do set(x, y, z, nil) end end end
 for _, z in ipairs({ 64, 128 }) do set(-1, 0, z, chest()); set(0, -1, z, chest()) end
 Mine.files = { ["mine.job"] = "3 3 128 64 2 active" }
 Mine.inv = {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
 table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
 table.insert(chestAt(0, -1, 64), { name = "minecraft:cobblestone", count = 64 })
@@ -1280,7 +1280,7 @@ local function holeWorld()
     setup(stock(4, 64, 64))
     for _ = 1, 3 do table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 }) end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY = 3000, 0
 end
 holeWorld()
@@ -1377,7 +1377,7 @@ for k = 1, 6 do
 end
 Mine.files = { ["mine.job"] = "3 3 384 64 6 active" }
 Mine.inv = {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 startAt()
 Mine.files[".turtlepos"] = "0 0 0 0 flat"
 FUEL, DRY = 500, 0

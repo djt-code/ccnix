@@ -82,6 +82,9 @@ function Mine.setup(stock)
     if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
     Mine.ENTITIES, Mine.GROUND, BURNT, CRAFTED = {}, {}, {}, {}
     THROWN, CHEST_SPILLED, SLEPT, ONSLEEP = 0, 0, 0, nil
+    -- as in the field: a chunk controller on the left, the pickaxe on the
+    -- right (a scenario sets EQ after this for anything else)
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     set(0, 1, 0, Mine.chest(stock))                 -- valuables and supplies
     set(0, -1, 0, Mine.chest())                     -- bulk
 end
