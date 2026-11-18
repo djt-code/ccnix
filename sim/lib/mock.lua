@@ -340,7 +340,8 @@ end
 -- Fuel: the global FUEL, a number (as on a survival server) or nil for a
 -- turtle that needs none.  Burning fuel is worth what `values` says
 -- (coal 80, charcoal 80, a lava bucket 1000, which leaves the bucket).
-M.FUEL_VALUE = { ["minecraft:coal"] = 80, ["minecraft:charcoal"] = 80, ["minecraft:lava_bucket"] = 1000 }
+M.FUEL_VALUE = { ["minecraft:coal"] = 80, ["minecraft:charcoal"] = 80, ["minecraft:coal_block"] = 800,
+                 ["minecraft:lava_bucket"] = 1000 }
 M.FUEL_LIMIT = 20000
 function M.fuelApi(S, values)
     values = values or M.FUEL_VALUE
