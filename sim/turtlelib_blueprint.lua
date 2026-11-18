@@ -414,6 +414,26 @@ do
     check("T.build() then carries on the new one: it is finished", ok == true and fileText(".build"):find("name: second", 1, true), tostring(why))
     ok, why = build(a)
     check("a different plan after a finished build is simply built", ok == true and has(5, 0, 2, "stone"), tostring(why))
+end
+do
+    -- ADR-0015: a build with every cell tried, one failing, no longer stands in the way of the next; its failures
+    -- come with the new one's info
+    fresh({ { 3, 0, 3, "minecraft:dirt" } })
+    W.give(1, STONE, 40)
+    local a = "name: first\nanchor: 2 0 3\nB = minecraft:stone\nlayer 1:\nBBBB\nBBBB\n"
+    local b = "name: second\nanchor: 2 0 9\nB = minecraft:stone\nlayer 1:\nBB\n"
+    local ok, why, info = build(a)
+    check("a build with every cell tried and one failed (dirt in the way)", ok == false and info.done == info.total and #info.failed == 1, tostring(why))
+    ok, why, info = build(b)
+    check("...doesn't block the next plan: it's built, the old failures in info.previous", ok == true and has(2, 0, 9, "stone")
+        and info.previous and info.previous.name == "first" and #info.previous.failed == 1
+        and tostring(info.previous.failed[1].why):find("dirt is in the way", 1, true) ~= nil, tostring(why))
+    W.set(2, 0, 9, nil); W.set(3, 0, 9, nil)
+    T.map.set(2, 0, 9, "minecraft:air"); T.map.set(3, 0, 9, "minecraft:air")
+    build(b, { restart = true, limit = 1 })
+    ok, why = build(a)
+    check("one with cells not yet tried still does, the refusal counting what was tried", ok == nil
+        and why:find("\"second\" is unfinished (1 of 2 cells tried)", 1, true), tostring(why))
     -- a re-zero while a build is unfinished (ADR-0012): its cells are in the old frame
     fresh()
     W.give(1, STONE, 40)

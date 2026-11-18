@@ -967,8 +967,10 @@ end
 -- circles.  Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 --
 -- `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a
--- reboot.  The same plan again carries on too; a different plan while one is unfinished is refused unless
--- opts.restart.  It first counts what the cells still to do need against what is on board, and refuses if anything is
+-- reboot.  The same plan again carries on too (its failed cells tried again); a different plan while one has cells
+-- not yet tried is refused unless opts.restart (the refusal counts what was tried and what failed).  One whose every
+-- cell was tried, some failing, doesn't stand in the way: the new plan starts, and info.previous = { name, failed }
+-- lists the old one's failures.  It first counts what the cells still to do need against what is on board, and refuses if anything is
 -- short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a
 -- function) unless opts.partial; cells with no item left fail one by one.  A cell that fails is noted and the build goes
 -- on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them).  Nothing is dug
@@ -987,7 +989,7 @@ end
 -- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
--- warnings }.
+-- warnings, previous }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
 -- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
 -- at 3,1,4: ..."), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never
@@ -1010,7 +1012,7 @@ function T.build(plan, opts)
         saved = nil
     end
     if opts.order ~= nil and not ORDERS[opts.order] then return nil, "opts.order is \"layer\" or \"column\", not " .. tostring(opts.order) end
-    local job
+    local job, previous
     if plan == nil then
         if not saved then return nil, "no build in progress: give T.build a plan" end
         job = { plan = saved.plan, text = saved.text, order = saved.order, done = saved.done, failed = saved.failed, total = saved.total,
@@ -1027,15 +1029,22 @@ function T.build(plan, opts)
         -- (the name is part of the plan as it is kept, so it goes in before the plan is compared with the saved one)
         if opts.name then p.name = opts.name end
         local planText = formatPlan(p)
-        local unfinished = saved and (saved.done < saved.total or next(saved.failed) ~= nil)
+        local untried = saved and saved.done < saved.total
+        local unfinished = saved and (untried or next(saved.failed) ~= nil)
         if saved and saved.text == planText and unfinished and not opts.restart then
             job = { plan = saved.plan, text = saved.text, order = saved.order, done = saved.done, failed = saved.failed, total = saved.total,
                     resumed = true }
         else
-            if saved and unfinished and not opts.restart then
-                return nil, "the build \"" .. (saved.plan.name or "build") .. "\" is unfinished (" .. saved.done .. " of " .. saved.total ..
-                    " cells tried): T.build() carries it on, or pass restart = true to start this plan instead"
+            local failedBefore = {}
+            for _, n in ipairs(saved and tables.sortedKeys(saved.failed) or {}) do
+                failedBefore[#failedBefore + 1] = { n = n, why = saved.failed[n] }
             end
+            if untried and not opts.restart then
+                return nil, "the build \"" .. (saved.plan.name or "build") .. "\" is unfinished (" .. saved.done .. " of " .. saved.total ..
+                    " cells tried" .. (#failedBefore > 0 and (", " .. #failedBefore .. " failed") or "") ..
+                    "): T.build() carries it on, or pass restart = true to start this plan instead"
+            end
+            if #failedBefore > 0 then previous = { name = saved.plan.name or "build", failed = failedBefore } end
             local order = opts.order or "layer"
             local total = 0
             eachBuildCell(p, function() total = total + 1 end, order)
@@ -1049,7 +1058,7 @@ function T.build(plan, opts)
         return nil, "this plan names a compass facing or axis, which needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local info = { name = target.name, done = job.done, total = job.total, failed = {}, placed = 0, there = 0, resumed = job.resumed == true,
-                   finished = false, order = job.order }
+                   finished = false, order = job.order, previous = previous }
     local short = shortOf(need)
     if #short > 0 and not opts.partial then
         info.short = short

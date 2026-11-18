@@ -359,9 +359,10 @@ end
 -- them).  opts: dimension ("overworld", "nether", "end"; else the setting T.cfg.dimension, else the overworld: the
 -- turtle can't tell), max (the limit, overriding the dimension's), limit (cells listed, default 50), with (as T.light).
 -- Info is { dimension, max, spawnable (cells), dark (cells at or under the limit), more (past the limit), groups (a
--- list of { max, mobs, count }), anyLight and anyLightCount (the nether), unsure (cells over a slab or stair whose
--- half the map lacks, taken as a bottom one: inspect them, since a top one is a floor), unseen (cells of the box the
--- map never saw), sources, guessed, cut (as T.light), summary (a line) }.  Mods can change spawning: check in game.
+-- list of { max, mobs, count }), anyLight and anyLightCount (the nether), unsure (a list of the cells, { x, y, z },
+-- over a slab or stair whose half the map lacks, taken as a bottom one: inspect them, since a top one is a floor),
+-- unseen (cells of the box the map never saw), sources, guessed, cut (as T.light), summary (a line, which says "listed
+-- the darkest N of M" when the list is cut) }.  Mods can change spawning: check in game.
 function T.darkCells(box, opts)
     opts = opts or {}
     local asked = opts.dimension or T.cfg.dimension or "overworld"
@@ -376,7 +377,7 @@ function T.darkCells(box, opts)
     local f, why = flood(box, opts)
     if not f then return nil, why end
     local limit = opts.limit or LIMIT
-    local info = { dimension = dimName, max = max, spawnable = 0, dark = 0, more = 0, groups = {}, unsure = 0, unseen = 0,
+    local info = { dimension = dimName, max = max, spawnable = 0, dark = 0, more = 0, groups = {}, unsure = {}, unseen = 0,
                    sources = f.info.sources, guessed = f.info.guessed, cut = f.info.cut }
     local dark, lit = {}, {}
     for y = f.y1, f.y2 do
@@ -385,7 +386,7 @@ function T.darkCells(box, opts)
                 if f.at(x, y, z).unseen then info.unseen = info.unseen + 1 end
                 local can = spawnable(f, x, y, z, dim.fireproof)
                 if can == "unsure" then
-                    info.unsure = info.unsure + 1
+                    info.unsure[#info.unsure + 1] = { x = x, y = y, z = z }
                 elseif can then
                     info.spawnable = info.spawnable + 1
                     local cell = { x = x, y = y, z = z, light = f.level(x, y, z) }
@@ -431,11 +432,14 @@ function T.darkCells(box, opts)
         parts[1] = dimName .. ": of " .. info.spawnable .. " spawnable cells, " .. table.concat(words, ", ")
             .. "; the darkest " .. key(dark[1].x, dark[1].y, dark[1].z) .. " at " .. dark[1].light
     end
+    if info.more > 0 then
+        parts[#parts + 1] = "listed the darkest " .. limit .. " of " .. #dark .. " (opts.limit; info.more " .. info.more .. ")"
+    end
     if dim.anyLight and #lit > 0 then
         parts[#parts + 1] = #lit .. " more take " .. dim.anyLight .. " whatever the light (a slab or glass floor, or no room, stops them)"
     end
-    if info.unsure > 0 then
-        parts[#parts + 1] = info.unsure .. " over a slab or stair whose half the map lacks (T.inspectAll them: a top one is a floor)"
+    if #info.unsure > 0 then
+        parts[#parts + 1] = #info.unsure .. " over a slab or stair whose half the map lacks (info.unsure: T.inspectAll them; a top one is a floor)"
     end
     if info.guessed > 0 then parts[#parts + 1] = info.guessed .. " lights at the game's default state (the map lacks theirs)" end
     if info.unseen > 0 then parts[#parts + 1] = info.unseen .. " cells of the box the map never saw" end

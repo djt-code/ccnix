@@ -524,6 +524,45 @@ do
 end
 
 --------------------------------------------------------------------------
+do
+    -- ADR-0015: a full chest, the wanted item not in its first slot: frontStack sets the first stack aside in an empty
+    -- slot of the turtle, and that was the very slot T.takeInto fills (a grid cell, in a craft round: "made 85 of the 107
+    -- asked: the rest is short", the bricks still in the chest)
+    fresh()
+    local full = { [1] = { "minecraft:cobblestone", 64 }, [2] = { "minecraft:stone_bricks", 7 } }
+    for slot = 3, 27 do full[slot] = { "minecraft:dirt", 64 } end
+    fill(0, 0, 1, full)
+    local got = T.takeInto("front", "minecraft:stone_bricks", 6, 1)
+    check("T.takeInto from a full chest, the item not first: the slot asked for gets it, nothing else comes aboard",
+        got == 6 and inventory() == "1=6 minecraft:stone_bricks" and chestHas("minecraft:cobblestone") == 64
+        and chestHas("minecraft:stone_bricks") == 1, inventory() .. " / " .. chestLine())
+    -- a round that comes up short says which ingredient and how many (here the chest gives one brick less than asked)
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:stone_bricks", 30 } })
+    W.give(1, TABLE, 1)
+    local rawTake, cut = T.takeInto, true
+    T.takeInto = function(side, name, n, slot)
+        if cut then cut = false; return rawTake(side, name, n - 1, slot) end
+        return rawTake(side, name, n, slot)
+    end
+    local ok, why, info = T.craftBatch({ { "minecraft:stone_brick_stairs", 8 } })
+    T.takeInto = rawTake
+    check("a short round says which ingredient came up short, by how many, and what the chest still has",
+        ok == false and info.failed[1] and info.failed[1].why == "short of stone_bricks: a round of 2 crafts needs 2 a cell, the chest gave 1 (19 still in it) (made 4 of 8)",
+        tostring(why))
+    -- and a batch counts the room every product takes: with two, one stack each, and one spare, 3 free slots aren't
+    -- enough (the inventory's 1, the products' 2, a spare): refused before anything moves, not short as it fills
+    fresh()
+    full = { [1] = { "minecraft:cobblestone", 64 }, [2] = { "minecraft:stone_bricks", 30 } }
+    for slot = 3, 24 do full[slot] = { "minecraft:dirt", 64 } end
+    fill(0, 0, 1, full)
+    W.give(1, TABLE, 1)
+    local before = chestLine()
+    ok, why = T.craftBatch({ { "minecraft:stone_brick_stairs", 8 }, { "minecraft:stone_brick_slab", 12 } })
+    check("T.craftBatch's room: every product counted (two, a stack each), refused before anything moves", ok == nil
+        and why:find("it needs 4 free slots", 1, true) and chestLine() == before, tostring(why))
+end
+
 -- T.craftPlan: the recipe tree against what there is, and T.craftBatch crafting it
 --------------------------------------------------------------------------
 -- A plan's steps as words: "oak_planks 4 (1), stick 4 (1), torch 16 (4)".

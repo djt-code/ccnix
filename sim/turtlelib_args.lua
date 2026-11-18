@@ -45,6 +45,15 @@ local x, y, z = T.keyPos(T.posKey({ x = -12, y = 3, z = 2950 }))
 check("keyPos reads what posKey writes", x == -12 and y == 3 and z == 2950)
 check("keyPos: not three whole numbers, nil", T.keyPos("1,2") == nil and T.keyPos("1,2,3,4") == nil
     and select(3, T.keyPos("1,2,x")) == nil)
+-- ADR-0015: a list where a cell is wanted says so, and what to write (it was "attempt to perform arithmetic on a nil")
+local okKey, keyErr = pcall(T.posKey, { 1, 2, 3 })
+local okDist, distErr = pcall(T.dist, { x = 0, y = 0, z = 0 }, { 4, 5, 6 })
+local okAt, atErr = pcall(T.at, nil)
+check("T.posKey, T.dist and T.at given a list (or nothing): an error that says a cell is wanted, and how to write it",
+    not okKey and tostring(keyErr):find("T.posKey wants a cell { x =, y =, z = }, not a list { 1, 2, 3 }: write { x = 1, y = 2, z = 3 }", 1, true)
+        and not okDist and tostring(distErr):find("T.dist wants a cell", 1, true) and tostring(distErr):find("{ x = 4, y = 5, z = 6 }", 1, true)
+        and not okAt and tostring(atErr):find("T.at wants a cell { x =, y =, z = }, not nil", 1, true),
+    tostring(keyErr) .. " / " .. tostring(distErr) .. " / " .. tostring(atErr))
 local cx, cz = T.keyXZ(T.ckey(-7, 0))
 check("keyXZ reads what ckey writes", cx == -7 and cz == 0)
 check("keyXZ: not two whole numbers, nil", T.keyXZ("1,2,3") == nil and T.keyXZ("") == nil and T.keyXZ("1.5,2") == nil)

@@ -1257,6 +1257,9 @@ HTTP.queue = {
     reply({ toolUse("lua", { code = "local function helper() return 1 end\nlocal two = function() return 2 end\nlocal helper = function() end\n  local function inner() end\nlocal a, b = 1, 2\nlocal text = require('text')\nreturn 1" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "local x = function() return 5 end\nreturn x()" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "local function y() end\nerror('no', 0)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "W = 1\nlocal function W() return 7 end\nlocal function x() return 8 end\nreturn W(), x()" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "for i = 1, 20 do print('no route: walled in by stone') end\nprint('the end')\nreturn 1" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "print(string.rep('a', 6100))" }) }, "tool_use"),
     reply({ text("Done.") }, "end_turn"),
 }
 run("keep things")
@@ -1284,6 +1287,14 @@ check("an unindented local function at the top of a call is noted as gone, each 
     l6 and l6.content == "-> 1\nnote: helper, two were local to this call and are gone; make them global, or keep() them", l6 and l6.content)
 check("...one name in the singular", l7 and l7.content == "-> 5\nnote: x was local to this call and is gone; make it global, or keep() it", l7 and l7.content)
 check("...and nothing is noted when the call failed", l8 and l8.is_error and l8.content == "error: no", l8 and l8.content)
+-- ADR-0015: no note for a name that is a global after all; repeated lines once, with a count; no clip of a few characters
+local l9, l10, l11 = resultsIn(10).toolu_9, resultsIn(11).toolu_10, resultsIn(12).toolu_11
+check("...nor for a name that is a global too, nor one noted before (once a session is enough)", l9 and l9.content == "-> 7\n-> 8",
+    l9 and l9.content)
+check("a line printed 20 times comes back once, with how many times, the rest after it",
+    l10 and l10.content == "no route: walled in by stone (x20)\nthe end\n-> 1", l10 and l10.content)
+check("output a little over the limit is sent whole: no \"(3 characters left out)\"",
+    l11 and #l11.content == 6100 and not l11.content:find("left out", 1, true), l11 and #l11.content)
 fresh({ "" })
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("what do I keep")

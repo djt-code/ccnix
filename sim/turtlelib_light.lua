@@ -245,7 +245,8 @@ do
         not (spawns(3, 4) or spawns(4, 4) or spawns(5, 4) or spawns(6, 4) or spawns(7, 4)), show(cells))
     check("...a carpet or a rail over stone leaves no room; a sign does", not spawns(0, 6) and not spawns(1, 6) and spawns(2, 6), show(cells))
     check("...a slab whose half the map lacks is unsure, not listed, and the line says to inspect it",
-        not spawns(8, 4) and info.unsure == 1 and info.summary:find("1 over a slab or stair whose half the map lacks", 1, true) ~= nil,
+        not spawns(8, 4) and #info.unsure == 1 and info.unsure[1].x == 8 and info.unsure[1].z == 4
+            and info.summary:find("1 over a slab or stair whose half the map lacks (info.unsure", 1, true) ~= nil,
         info.summary)
     check("...glowstone lights the cell over it to 14", T.light(ROOM)(6, 1, 4) == 14)
 
@@ -284,6 +285,8 @@ do
     cells, info = T.darkCells(BOX, { dimension = "nether", limit = 5 })
     check("opts.limit cuts the list (darkest first), the rest counted in info.more",
         #cells == 5 and info.more == 13 and info.dark == 18 and cells[1].light == 0 and #info.anyLight == 2, show(cells))
+    check("...and the line says so: listed the darkest 5 of 18", info.summary:find("listed the darkest 5 of 18 (opts.limit; info.more 13)", 1, true) ~= nil,
+        info.summary)
     local none, why = T.darkCells(BOX, { dimension = "aether" })
     check("a dimension it doesn't know is refused", none == nil and why == "no such dimension: aether (overworld, nether or end)", tostring(why))
 end

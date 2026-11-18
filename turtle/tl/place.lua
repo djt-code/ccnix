@@ -40,6 +40,7 @@ local T = require("turtlelib")
 local text = require("text")
 local convert = require("convert")
 local fileio = require("fileio")
+local tables = require("tables")
 
 local LEARN_FILE = ".placements"             -- what came out, where the table was wrong, in the data folder
 local TRIES = 6                              -- approaches tried before giving up (opts.tries)
@@ -73,12 +74,15 @@ local FAMILY_EXACT = {
     polished_basalt = "log", deepslate = "log",
     piston = "piston", sticky_piston = "piston", dispenser = "piston", dropper = "piston", observer = "observer",
     repeater = "diode", comparator = "diode",
+    chain = "chain", lantern = "lantern", soul_lantern = "lantern",
+    sea_lantern = "block", jack_o_lantern = "block",        -- (whole blocks, whatever their names end in)
 }
 local FAMILY_SUFFIX = {
     { "_stairs", "stairs" }, { "_slab", "slab" }, { "_trapdoor", "trapdoor" }, { "_door", "door" },
     { "_fence_gate", "fence_gate" }, { "_button", "button" }, { "_log", "log" }, { "_wood", "log" },
     { "_hyphae", "log" }, { "_pillar", "log" }, { "_stem", "log" }, { "_fence", "fence" }, { "_pane", "pane" },
-    { "_wall", "wall" }, { "_hanging_sign", "block" }, { "_sign", "sign" },
+    { "_wall", "wall" }, { "_hanging_sign", "block" }, { "_sign", "sign" }, { "_chain", "chain" },
+    { "copper_lantern", "lantern" },
 }
 -- (a hanging sign is not a sign of the table's: it hangs under a block, and goes in as it comes)
 
@@ -150,8 +154,8 @@ local function shortName(name)
     return rest or name
 end
 
--- The family a block or item is in: stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate,
--- chest, piston, observer, diode, fence, pane, wall, or block (anything else).
+-- The family a block or item is in: stairs, slab, log, chain, torch, lantern, sign, ladder, button, door, trapdoor,
+-- fence_gate, chest, piston, observer, diode, fence, pane, wall, or block (anything else).
 local function familyOf(name)
     local s = shortName(name)
     if FAMILY_EXACT[s] then return FAMILY_EXACT[s] end
@@ -167,6 +171,7 @@ end
 
 -- Rows from "when key=rule key=rule" strings.  `when` is what the game finds, in the order it looks: "beyond" (a
 -- block to click beyond the target), "floor" (sideways only: a block under the target to click on its top),
+-- "ceiling" (sideways only: a block above the target, for what hangs under one: a lantern),
 -- "ahead" (from above or below only: a block beside the target the way the turtle faces, the first side a ladder
 -- looks for to hang on) or "always" (the turtle's own block is clicked).  The rule for a key is a word, or heading, back, right, left,
 -- along and across (see above), or for `block`: wall (the torch hangs on a wall) or item.
@@ -218,6 +223,21 @@ local FAMILIES = {
         front = rows("beyond axis=along", "floor axis=y", "always axis=along"),
         down = rows("always axis=y"),
         up = rows("always axis=y"),
+    },
+    -- a chain lies along the axis of the face clicked, as a log does; it holds up and holds under a lantern or a torch
+    chain = {
+        sturdy = false, post = true,
+        front = rows("beyond axis=along", "floor axis=y", "always axis=along"),
+        down = rows("always axis=y"),
+        up = rows("always axis=y"),
+    },
+    -- a lantern stands on the block below it if that holds it, else hangs under the block above (Minecraft looks
+    -- down before up whatever is clicked; placed up it looks up first, and the turtle below holds nothing up)
+    lantern = {
+        hang = true, onPost = true, sturdy = false,
+        front = rows("floor hanging=false", "ceiling hanging=true"),
+        down = rows("beyond hanging=false"),
+        up = rows("beyond hanging=true"),
     },
     -- a torch hangs on the block beyond (a wall torch, facing the turtle), or stands on the floor or the block below
     torch = {
@@ -310,7 +330,10 @@ local function keysOf(fam)
 end
 
 -- Keys a caller may name in opts, and the state key each one is for
-local WANTED = { "facing", "half", "axis", "face", "type", "rotation" }
+local WANTED = { "facing", "half", "axis", "face", "type", "rotation", "hanging" }
+-- Every option T.placeAt takes (one it doesn't is named, not ignored)
+local PLACE_OPTS = { facing = true, half = true, axis = true, face = true, type = true, rotation = true, hanging = true,
+                     toward = true, move = true, inside = true, tries = true, text = true, temp = true, digBelow = true }
 
 --------------------------------------------------------------------------
 -- What the game found out, kept
@@ -549,7 +572,11 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
                 local sx, sy, sz = standFor(kind, h, tx, ty, tz)
                 local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
                 local facts = { beyond = fact(nameAt(bx, by, bz), TOP_FACT[kind] == "beyond") }
-                if kind == "front" then facts.floor = fact(nameAt(tx, ty - 1, tz), true) else facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz))) end
+                if kind == "front" then
+                    facts.floor, facts.ceiling = fact(nameAt(tx, ty - 1, tz), true), fact(nameAt(tx, ty + 1, tz), true)
+                else
+                    facts.ahead = fact(nameAt(aheadOf(h, tx, ty, tz)))
+                end
                 local stand = nameAt(sx, sy, sz)
                 if not (stand and clickable(stand) and not dig) then
                     for _, c in ipairs(rowsFor(fam, kind, facts)) do
@@ -580,7 +607,7 @@ end
 -- Words for an approach and for where the block it needs is, in a message
 local KIND_WORDS = { front = "sideways", down = "from above", up = "from below" }
 local FACT_WORDS = {
-    front = { beyond = "beyond the target", floor = "under the target" },
+    front = { beyond = "beyond the target", floor = "under the target", ceiling = "above the target" },
     down = { beyond = "under the target", ahead = "beside the target the way the turtle faces" },
     up = { beyond = "above the target", ahead = "beside the target the way the turtle faces" },
 }
@@ -621,10 +648,15 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     if stand and clickable(stand) and not dig then return "the map has " .. stand .. " there", true end
     local bx, by, bz = beyondFor(kind, h, tx, ty, tz)
     local ax, ay, az = aheadOf(h, tx, ty, tz)
-    local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz }, ahead = { ax, ay, az } }
-    local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz), ahead = nameAt(ax, ay, az) }
+    local cells = { beyond = { bx, by, bz }, floor = { tx, ty - 1, tz }, ceiling = { tx, ty + 1, tz }, ahead = { ax, ay, az } }
+    local names = { beyond = nameAt(bx, by, bz), floor = nameAt(tx, ty - 1, tz), ceiling = nameAt(tx, ty + 1, tz),
+                    ahead = nameAt(ax, ay, az) }
     local facts = { beyond = fact(names.beyond, TOP_FACT[kind] == "beyond") }
-    if kind == "front" then facts.floor = fact(names.floor, true) else facts.ahead = fact(names.ahead) end
+    if kind == "front" then
+        facts.floor, facts.ceiling = fact(names.floor, true), fact(names.ceiling, true)
+    else
+        facts.ahead = fact(names.ahead)
+    end
     local needed
     for _, row in ipairs(fam[kind]) do
         local f = row.when == "always" or facts[row.when]
@@ -1260,12 +1292,12 @@ end
 
 -- What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
 --
--- family is stairs, slab, log, torch, sign, ladder, button, door, trapdoor, fence_gate, chest, piston (and dispenser and
--- dropper), observer, diode (a repeater or comparator), fence, pane, wall or block; keys is
--- the set of state names placeAt can be asked for with it (facing, half, type, axis, face: a slab takes half and
--- type, which are the same); hang is true for a family that hangs or stands on a solid block (a torch or a standing
--- sign stands on the post of a fence, a wall or a pane too, though nothing hangs on their sides); door is true for a
--- family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
+-- family is stairs, slab, log, chain, torch, lantern, sign, ladder, button, door, trapdoor, fence_gate, chest, piston
+-- (and dispenser and dropper), observer, diode (a repeater or comparator), fence, pane, wall or block; keys is
+-- the set of state names placeAt can be asked for with it (facing, half, type, axis, face, rotation, hanging: a slab
+-- takes half and type, which are the same); hang is true for a family that hangs or stands on a solid block (a torch,
+-- lantern or standing sign stands on the post of a fence, a wall, a pane or a chain too, though nothing hangs on their
+-- sides; a lantern hangs under one, opts.hanging); door is true for a family of two blocks.  Used by tl.blueprint to order the work and to ask for only the states that can be asked for.
 function T.placeInfo(item)
     if type(item) ~= "string" or item == "" then return nil end
     local famName = familyOf(item)
@@ -1289,7 +1321,8 @@ end
 -- dispenser, dropper or observer, which need none; a repeater or comparator stands on a block); opts.half is bottom or top for a
 -- stair, slab or trapdoor; opts.axis is x, y or z for a log; opts.face is wall, floor or ceiling for a button or lever;
 -- opts.rotation is a standing sign's, 0 (its face south), 4 (west), 8 (north) or 12 (east): the only four a turtle
--- gives.  opts.toward = { x, y, z }, the cell a reader stands in, turns a sign to them: a wall sign when the map shows a
+-- gives; opts.hanging is a lantern's: true hangs it under the block above (placed from below, or sideways with nothing
+-- under the cell to stand on), false stands it on the block below; opts.axis is a chain's too.  opts.toward = { x, y, z }, the cell a reader stands in, turns a sign to them: a wall sign when the map shows a
 -- sturdy block behind the cell (on the far side from the reader), else a standing sign at the nearest of the four
 -- rotations (how.toward says which, and how many degrees off the reader's way it is).  Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
 -- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
@@ -1309,8 +1342,14 @@ end
 -- toward, with opts.toward: { form = "wall", facing, behind } or { form = "standing", rotation, wanted, off, note }).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
 -- the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
+-- An option it doesn't take is refused, named.
 function T.placeAt(x, y, z, item, opts)
     opts = opts or {}
+    for _, key in ipairs(tables.sortedKeys(opts)) do
+        if not PLACE_OPTS[key] then
+            return nil, "placeAt has no option " .. tostring(key) .. " (it takes " .. table.concat(tables.sortedKeys(PLACE_OPTS), ", ") .. ")"
+        end
+    end
     for _, n in ipairs({ x, y, z }) do
         if type(n) ~= "number" or n ~= math.floor(n) then return nil, "placeAt wants a cell of whole numbers: x, y, z" end
     end

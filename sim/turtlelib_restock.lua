@@ -32,3 +32,29 @@ F.inv = { { name = "minecraft:diamond_pickaxe", count = 1 }, { name = "minecraft
 show("before")
 T.restockFrom("bottom", "minecraft:water_bucket", 2, { room = 3, label = "Water buckets" })
 show("after ")
+
+-- ADR-0015: the chest full, the buckets not first: the first stack is set
+-- aside in an empty slot of the turtle while the buckets come to the front,
+-- then goes back; nothing else stays aboard, nothing is lost
+local check = require("mock").check
+F.chest = {}
+F.chest[1] = { name = "minecraft:dirt", count = 64 }
+F.chest[2] = { name = "minecraft:water_bucket", count = 1 }
+F.chest[3] = { name = "minecraft:water_bucket", count = 1 }
+for q = 4, F.CHEST_SIZE do F.chest[q] = { name = "minecraft:cobblestone", count = 64 } end
+F.inv = { { name = "minecraft:diamond_pickaxe", count = 1 }, { name = "minecraft:wheat_seeds", count = 63 } }
+show("full  ")
+T.restockFrom("bottom", "minecraft:water_bucket", 2, { room = 3, label = "Water buckets" })
+show("after ")
+local aboard, dirt = 0, 0
+for q = 1, 16 do
+    local c = F.inv[q]
+    if c and c.name == "minecraft:water_bucket" then aboard = aboard + c.count end
+end
+for q = 1, F.CHEST_SIZE do
+    local c = F.chest[q]
+    if c and c.name == "minecraft:dirt" then dirt = dirt + c.count end
+end
+check("a full chest: both buckets aboard, the stack set aside back in the chest",
+    aboard == 2 and dirt == 64 and F.inv[1].name == "minecraft:diamond_pickaxe" and F.inv[2].count == 63
+        and F.inv[16] == nil)
