@@ -40,6 +40,21 @@ local flow, settleWater, isWater, isOreBlock = Mine.flow, Mine.settleWater, Mine
 --------------------------------------------------------------------------
 -- Scenarios
 --------------------------------------------------------------------------
+-- Run fn with these settings (the rest at their defaults).
+local function withSettings(chosen, fn)
+    local defaults = {}
+    settings = { define = function(name, o) defaults[name] = o.default end,
+                 get = function(name) if chosen[name] ~= nil then return chosen[name] end return defaults[name] end,
+                 set = function() end, save = function() end }
+    fn()
+    settings = nil
+end
+-- mine as before it waited for supplies (mine.wait off): it stops when out of chests or fuel
+local function runNoWait(...)
+    local a = table.pack(...)
+    withSettings({ ["mine.wait"] = false }, function() run(table.unpack(a, 1, a.n)) end)
+end
+
 -- 1. a 12x3x3 tunnel, no homes (12 is under the spacing)
 setup(stock(4, 64)); features(); remember()
 startAt(); Mine.inv, Mine.files = {}, {}
@@ -102,6 +117,7 @@ check("a size given is kept in the settings", SAVED["mine.width"] == 2 and SAVED
     and SAVED["mine.length"] == 5 and SAVED.saved)
 setup(stock(4, 64)); remember()
 startAt(); Mine.inv, Mine.files = {}, {}
+SAVED["mine.wait"] = false                       -- (out of chests, it stops rather than waits)
 run("2", "2")
 check("and no length given is kept as 0, no end", SAVED["mine.length"] == 0)
 settings = nil
@@ -227,7 +243,7 @@ check("mine.protect off: nothing is protected", #offNames > 0 and offNames[1] ==
 setup(stock(5, 64))
 startAt(); Mine.inv, Mine.files = {}, {}
 FUEL, LOWEST, DRY, SPILLED = 100, 100, 0, 0
-run("2", "2", "--spacing", "8")
+runNoWait("2", "2", "--spacing", "8")
 check("stopped: out of chests", logHas("Out of chests"))
 check("tunnel dug to z=24", leftIn(0, 1, 0, 1, 1, 24) == 0 and get(0, 0, 25) ~= nil, leftIn(0, 1, 0, 1, 1, 24) .. " blocks left")
 checkHomes(8, 2)
@@ -239,7 +255,7 @@ check("job can be resumed (stopped by itself)", jobState() == "stopped", tostrin
 --    to home 2 and carries on, two more homes
 for _, it in ipairs(stock(4, 0)) do table.insert(chestAt(0, 1, 0), it) end
 startAt()
-run("--resume")
+runNoWait("--resume")
 check("resumed from home 2", logHas("Back at home 2"))
 check("stopped: out of chests again", logHas("Out of chests"))
 check("tunnel dug to z=40", leftIn(0, 1, 0, 1, 1, 40) == 0, leftIn(0, 1, 0, 1, 1, 40) .. " blocks left")
@@ -257,7 +273,7 @@ for i = 1, 6 do table.insert(h1, { name = "minecraft:raw_iron", count = 64 }) en
 for i = 1, 2 do table.insert(h1, { name = "minecraft:diamond", count = 64 }) end
 for _, it in ipairs(stock(2, 0)) do table.insert(chestAt(0, 1, 0), it) end
 startAt()
-run("--resume")
+runNoWait("--resume")
 local _, got = contents(chestAt(0, 1, 0))
 check("brought back every diamond and all the iron", (got["minecraft:diamond"] or 0) == 128 and (got["minecraft:raw_iron"] or 0) == 384,
     (got["minecraft:diamond"] or 0) .. " diamond, " .. (got["minecraft:raw_iron"] or 0) .. " raw iron, "
@@ -316,7 +332,7 @@ Mine.files[".turtlepos"] = "1 1 36 0 flat"
 run("reset")
 check("reset to home 5 (z=40), facing its wall", P.x == 0 and P.y == 0 and P.z == 40 and P.d == 3)
 for _, it in ipairs(stock(2, 0)) do table.insert(chestAt(-1, 0, 40), it) end   -- two more chests, out there
-run("--resume")
+runNoWait("--resume")
 check("resumed from home 5, not the start", not logHas("Back at home") and logHas("Built home 6"))
 check("tunnel dug to z=48", leftIn(0, 1, 0, 1, 1, 48) == 0, leftIn(0, 1, 0, 1, 1, 48) .. " blocks left")
 check("back at the start", atStart())
@@ -344,14 +360,19 @@ check("back at the start", atStart())
 --     player how the run ended, with where it is and its fuel: done, and
 --     stopped (here by the bedrock); off, or with no player, it tells no one
 local told = {}
+-- a chat box attached (chatAttached), or one on board: as T.report sees it
+local chatAttached = true
+local function holdingChatBox()
+    for slot = 1, 16 do
+        local it = turtle.getItemDetail(slot)
+        if it and it.name == "advancedperipherals:chat_box" then return true end
+    end
+    return false
+end
 package.loaded.mc = { new = function()
-    return { has = { chat = "chat box" }, flush = function() return true end,
+    return { has = { chat = (chatAttached or holdingChatBox()) and "chat box" or nil }, flush = function() return true end,
              tell = function(who, message)
-                 local held = false
-                 for slot = 1, 16 do
-                     local it = turtle.getItemDetail(slot)
-                     if it and it.name == "advancedperipherals:chat_box" then held = true end
-                 end
+                 local held = holdingChatBox()
                  told[#told + 1] = who .. ": " .. message .. (held and " {chat box aboard}" or "")
                  return true
              end,
@@ -360,14 +381,6 @@ package.loaded.mc = { new = function()
                  return true
              end }
 end }
-local function withSettings(chosen, fn)
-    local defaults = {}
-    settings = { define = function(name, o) defaults[name] = o.default end,
-                 get = function(name) if chosen[name] ~= nil then return chosen[name] end return defaults[name] end,
-                 set = function() end, save = function() end }
-    fn()
-    settings = nil
-end
 local function bedrockWorld()
     setup(stock(10, 64))
     for x = 0, 1 do for y = 0, 1 do set(x, y, 13, { name = "minecraft:bedrock" }) end end
@@ -384,7 +397,9 @@ local boxStock = stock(4, 64)
 boxStock[#boxStock + 1] = { name = "advancedperipherals:chat_box", count = 1 }
 setup(boxStock); startAt(); Mine.inv, Mine.files = {}, {}
 FUEL, LOWEST, DRY = 1000, 1000, 0
+chatAttached = false                       -- (only the one in the chest)
 withSettings({ ["mine.report"] = true, ["turtle.player"] = "Tester" }, function() run("2", "2", "6", "--new") end)
+chatAttached = true
 check("...and when it is done", #told == 1 and told[1]:find("^Tester: mine Done: ") and not told[1]:find("Stopped because", 1, true), table.concat(told, " | "))
 local _, topNow = contents(chestAt(0, 1, 0))
 check("...a chat box in the start's top chest is taken out for the telling, and put back",
@@ -435,7 +450,7 @@ check("no facing and no scanner: it says why it isn't setting the origin, and mi
 setup(stock(10, 6))
 startAt(); Mine.inv, Mine.files = {}, {}
 FUEL, LOWEST, DRY = 0, math.huge, 0                -- empty: all it has is 6 coal
-run("3", "3", "--spacing", "16")
+runNoWait("3", "3", "--spacing", "16")
 check("stopped: not enough fuel", logHas("Not enough fuel"))
 check("back at the start", atStart())
 check("never moved on an empty tank", DRY == 0, "tried " .. DRY)
@@ -1100,7 +1115,7 @@ WATERY = false
 check("water from the next segment: the tunnel dry after the walk out", poolWet > 20 and wetIn() == 0,
     poolWet .. " wet before, " .. wetIn() .. " after")
 check("... without going over the segment before again and again (a dry walk out and back: 64 moves)",
-    Mine.moves < 200, Mine.moves .. " moves")
+    Mine.workMoves() < 200, Mine.workMoves() .. " moves")
 check("finished", logHas("^Done"))
 
 -- 13o. the walk out, its torch at z=29 gone, with water getting in through
@@ -1163,7 +1178,7 @@ local function bridged(water)
 end
 bridged(false)
 check("a dry patch under the floor lane: left be, no going across (a dry walk out and back: 64 moves)",
-    Mine.moves <= 70, Mine.moves .. " moves")
+    Mine.workMoves() <= 70, Mine.workMoves() .. " moves")
 bridged(true)
 checkFloor(0, 2, -1, 1, 32)
 check("... with water beside it: the floor beside it filled, from bulk blocks taken at home 1 on the way",
@@ -1198,8 +1213,8 @@ local farAfter = 0
 for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farAfter = farAfter + 1 end end end end
 check("water through the far wall of a 64-block segment: dried", farWet > 50 and farAfter == 0,
     farWet .. " wet before, " .. farAfter .. " after")
-check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.moves < 1300,
-    Mine.moves .. " moves")
+check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.workMoves() < 1300,
+    Mine.workMoves() .. " moves")
 
 -- 13g. dug already, with waterlogged glow lichen in the right wall at
 --      floor level near z=24, its water spread along the floor: `mine
@@ -1428,8 +1443,11 @@ for name, n in pairs(BURNT) do
 end
 check("burnt nothing but coal", #burnt == 0, table.concat(burnt, ", "))
 local _, last = contents(chestAt(-1, 0, 48))
-check("the crafting table and the spare wood are in the last home",
-    last["minecraft:crafting_table"] == 1 and ((last["minecraft:oak_log"] or 0) + (last["minecraft:oak_planks"] or 0)) > 0)
+local _, startTop = contents(chestAt(0, 1, 0))
+check("the tunnel finished: the crafting table and the spare wood come back to the start, none left in the last home",
+    startTop["minecraft:crafting_table"] == 1 and ((startTop["minecraft:oak_log"] or 0) + (startTop["minecraft:oak_planks"] or 0)) > 0
+        and not last["minecraft:crafting_table"] and not last["minecraft:chest"],
+    tostring(startTop["minecraft:crafting_table"]) .. " table at the start; last home: " .. (contents(chestAt(-1, 0, 48))))
 check("pickaxe back on, chunk controller still on",
     EQ.left == "advancedperipherals:chunk_controller" and EQ.right == "minecraft:diamond_pickaxe")
 check("back at the start", atStart())
