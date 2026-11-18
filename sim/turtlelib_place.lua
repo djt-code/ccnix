@@ -409,6 +409,10 @@ do
     scene("a sign with a floor and no wall: it stands", {
         item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Keep\nout" }, expect = { { 0, 0, 3, "oak_sign" } } })
     check("...the lines as given, each its own", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
+    scene("a sign's UTF-8 text (an arrow, a dash) as the game shows it, spelled out", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Gate \226\134\146\nRoad \226\128\148 Ember" },
+        expect = { { 0, 0, 3, "oak_sign" } } })
+    check("...no mojibake on the sign", signLines(0, 0, 3) == "|Gate ->|Road - Ember|", signLines(0, 0, 3))
     scene("a sign facing north goes round its wall to the north side", {
         item = SIGN, blocks = { stone(0, 0, 2) }, opts = { facing = "north", text = "north" },
         expect = { { 0, 0, 3, "oak_wall_sign", { facing = "north" } } }, from = { 0, 0, 4 } })

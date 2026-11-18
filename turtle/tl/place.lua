@@ -38,6 +38,7 @@
 
 local T = require("turtlelib")
 local text = require("text")
+local convert = require("convert")
 local fileio = require("fileio")
 
 local LEARN_FILE = ".placements"             -- what came out, where the table was wrong, in the data folder
@@ -729,7 +730,7 @@ end
 local function signLines(item, famName, said)
     if famName ~= "sign" then return nil, "only a sign takes text, and " .. item .. " is not one" end
     if type(said) ~= "string" then return nil, "a sign's text is a string" end
-    local lines = text.wrap(said, SIGN_WIDTH)
+    local lines = text.wrap(convert.fromUTF8(said), SIGN_WIDTH)   -- (as the game shows it: CC passes a byte a character)
     if #lines > SIGN_LINES then
         return nil, "a sign holds " .. SIGN_LINES .. " lines of " .. SIGN_WIDTH .. " characters, and this text wraps to " .. #lines
             .. " (\"" .. table.concat(lines, "|") .. "\")"

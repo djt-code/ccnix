@@ -641,9 +641,15 @@ end
 function M.sse(msg)
     local out = {}
     local function ev(t) out[#out + 1] = "event: " .. t.type .. "\ndata: " .. json.encode(t, UTF8) .. "\n\n" end
+    -- (cut between characters, as the API does: never inside a UTF-8 one)
     local function pieces(s, n)
-        local t = {}
-        for i = 1, #s, n do t[#t + 1] = s:sub(i, i + n - 1) end
+        local t, i = {}, 1
+        while i <= #s do
+            local j = math.min(#s, i + n - 1)
+            while j < #s and s:byte(j + 1) >= 0x80 and s:byte(j + 1) <= 0xBF do j = j + 1 end
+            t[#t + 1] = s:sub(i, j)
+            i = j + 1
+        end
         return t
     end
     local start = {}

@@ -1383,6 +1383,17 @@ check("...and the tool is offered: lua status run_program ask_user chat, then th
     HTTP.requests[1].body.tools[5].name == "chat" and HTTP.requests[1].body.tools[5].input_schema.required[1] == "text"
         and HTTP.requests[1].body.tools[5].description:find("stops short of the cache's 5 minutes", 1, true))
 
+-- the model writes UTF-8 (an arrow, a dash): the chat box gets it as the
+-- game shows text, spelled out ("->", "--"), not as mojibake
+chatFresh()
+HTTP.queue = {
+    reply({ toolUse("chat", { text = "Keep done: ladder \226\134\146 terrace \226\128\148 F4." }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("say it with an arrow")
+check("chat: UTF-8 the model wrote spelled out for the game (no mojibake)",
+    CHATSENT[1] and CHATSENT[1].message == "Keep done: ladder -> terrace - F4.", CHATSENT[1] and CHATSENT[1].message)
+
 -- the player's other messages during the wait come with the next results
 -- (ADR-0013 D2: T.report.ask passes them on), the answer once
 chatFresh()
