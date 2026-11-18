@@ -1605,3 +1605,21 @@ for _, z in ipairs({ 0, 16, 32 }) do
 end
 check("...none of what the patches give in a valuables chest or at the start", #stray == 0, table.concat(stray, ", "))
 check("...done, back at the start", jobState() == "done" and atStart(), tostring(jobState()))
+
+-- 20. the computer goes down (a chunk unloading) right after a move,
+--     before the move is saved, in the middle of the second segment: the
+--     saved position is a block behind.  `mine reset` gets it back to
+--     its last home all the same (it checks the heading and the home's
+--     chests there), and `mine --resume` finishes the tunnel
+setup(stock(10, 64))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 3000, 3000, 0
+REBOOT_AFTER = 260
+run("3", "3", "32", "--spacing", "16")
+local wentDown = REBOOT_AFTER == nil and not atStart()
+run("reset")
+check("down a move after its last save: `mine reset` back at its last home", wentDown and logHas("^At home 1 %(z=16%)"),
+    tostring(wentDown) .. "; at " .. Mine.P.x .. "," .. Mine.P.y .. "," .. Mine.P.z)
+run("--resume")
+check("...and `mine --resume` finishes the tunnel", leftIn(0, 2, 0, 2, 1, 32) == 0 and jobState() == "done" and atStart(),
+    leftIn(0, 2, 0, 2, 1, 32) .. " blocks left, " .. tostring(jobState()))
