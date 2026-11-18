@@ -1653,7 +1653,7 @@ run("what have I got")
 Mine.files["claude/helpers.lua"] = nil
 local ch, hp = resultsIn(2).toolu_1, resultsIn(3).toolu_2
 check("check(code): nil and the error for code that doesn't compile, true for code that does, and nothing run",
-    ch and ch.content:find("^%-> nil\n%-> check:1:") and ch.content:find("\n%-> true\n%-> false\n", 1) ~= nil, ch and ch.content)
+    ch and ch.content:find("^%-> nil\n%-> check:1:") and ch.content:find("\n%-> true\n%-> false$") ~= nil, ch and ch.content)
 check("helpers(): each helper file's globals, and the names T has too", hp
     and hp.content == "-> /claude/helpers.lua: digCell, myThing; T has digCell too", hp and hp.content)
 check("...and the lua tool says what's absent and how to check code", (HTTP.requests[1].body.tools[1].description or "")
