@@ -521,6 +521,17 @@ end
 Mine.TABLE = "minecraft:crafting_table"
 
 local function moved(ox, oy, oz)
+    -- REBOOT_AFTER: the computer goes down right after this many moves, the
+    -- move made but not yet saved (a chunk unload can't be held back as a
+    -- Ctrl+T is, see T.run): the saved position is a block behind
+    if REBOOT_AFTER then
+        REBOOT_AFTER = REBOOT_AFTER - 1
+        if REBOOT_AFTER <= 0 then
+            REBOOT_AFTER = nil
+            STOPPED_HERE = true
+            error("Terminated", 0)
+        end
+    end
     if WATERY then
         local b = get(P.x, P.y, P.z)
         if isWater(b) and b.level ~= 0 then set(P.x, P.y, P.z, nil) end   -- pushed out
