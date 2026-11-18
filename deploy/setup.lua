@@ -31,11 +31,14 @@
 --                                      ChanServ, #minecraft (`help ircd`)
 --   screen                             windows that stay when you detach
 --                                      (or telnet drops): screen -r; with init
+--   gpsd                               a GPS host as a service, with init
+--                                      (--at x,y,z: its position; `help gpsd`)
 -- git and deploy/ always come; so do the help files of what you pick.
 --
 -- Options: --autostart <app> (a turtle runs it at every boot: resumes its
 -- job, or starts one from the settings; see turtle/autostart.lua; on a
--- computer: router, its status screen at every boot), --example (httpd,
+-- computer: router, its status screen at every boot), --at x,y,z (gpsd's
+-- position: gpsd.x, gpsd.y, gpsd.z), --example (httpd,
 -- and a guestbook in its script root: /cgi/guestbook), --ccsh, --net,
 -- --router, --init (what ccsh, net, router and init set, without
 -- naming them), --no-reboot, --all (everything, sim/ too), --skip <dir>
@@ -147,6 +150,7 @@ local APPS = {
             "help/irc-scripts.txt", NET },
     ircd = { "bin/ircd.lua", IRC, "lib/ircd.lua", "lib/ircserv.lua", "lib/mc.lua", NET, INIT },
     screen = { "bin/screen.lua", "lib/screen.lua", "lib/readline.lua", INIT },
+    gpsd = { "bin/gpsd.lua", "lib/gpsd.lua", INIT },
 }
 -- (the text libraries, which nearly everything uses: see lib/scan's header)
 local TEXT = { "lib/scan.lua", "lib/text.lua", "lib/convert.lua", "lib/getopt.lua", "lib/glob.lua", "lib/path.lua",
@@ -155,10 +159,10 @@ local ALWAYS = { "bin/git.lua", "lib/pager.lua", TEXT, "deploy/", "help/ccnix.tx
 local AUTOSTART = turtle and { mine = true, farm = true, mow = true, autocompost = true } or { router = true }
 
 local cloneArgs, apps = {}, {}
-local autostart, example, noReboot, login, netBoot, router, initBoot
+local autostart, example, noReboot, login, netBoot, router, initBoot, gpsAt
 
 local function usage()
-    print("Usage: setup [app...] [--autostart app] [--example] [--ccsh] [--net] [--router] [--init] [--no-reboot] [--all] [--skip dir]...")
+    print("Usage: setup [app...] [--autostart app] [--example] [--at x,y,z] [--ccsh] [--net] [--router] [--init] [--no-reboot] [--all] [--skip dir]...")
     print("Apps: " .. table.concat(tables.sortedKeys(APPS), " "))
     print("--autostart: " .. (turtle and "mine, farm, mow or autocompost" or "router"))
 end
@@ -166,7 +170,7 @@ end
 -- The options (anywhere among the apps), and what each does; false back
 -- from one: it was given a word it can't take
 local OPTIONS = { ccsh = true, net = true, router = true, init = true, ["no-reboot"] = true, all = true,
-                  skip = "=", example = true, autostart = "=" }
+                  skip = "=", example = true, autostart = "=", at = "=" }
 local OPTION = {
     ccsh = function() login = true end,
     net = function() netBoot = true end,
@@ -179,6 +183,15 @@ local OPTION = {
         cloneArgs[#cloneArgs + 1] = dir
     end,
     example = function() example = true end,
+    at = function(xyz)                           -- (x,y,z: a comma each, as negative numbers read as options)
+        local p = text.split(xyz, ",")
+        if #p ~= 3 then return false end
+        for i = 1, 3 do
+            p[i] = tonumber(text.trim(p[i]))
+            if not p[i] then return false end
+        end
+        gpsAt = p
+    end,
     autostart = function(app)
         if not AUTOSTART[app] then return false end
         autostart = app
@@ -196,6 +209,11 @@ do
         apps[#apps + 1] = a
     end
 end
+if gpsAt then                      -- (the position is gpsd's)
+    local named = false
+    for _, a in ipairs(apps) do named = named or a == "gpsd" end
+    if not named then apps[#apps + 1] = "gpsd" end
+end
 if example then                    -- (the guestbook is httpd's)
     local named = false
     for _, a in ipairs(apps) do named = named or a == "httpd" end
@@ -211,7 +229,7 @@ for _, a in ipairs(apps) do
     if a == "ccsh" then login = true end
     if a == "net" or a == "telnet" or a == "telnetd" or a == "httpd" or a == "irc" or a == "ircd" then netBoot = true end
     if a == "router" then netBoot, router = true, true end
-    if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" or a == "screen" then initBoot = true end
+    if a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" or a == "screen" or a == "gpsd" then initBoot = true end
 end
 
 -- The paths the named apps need, with their help files (and extra's), as
@@ -254,7 +272,7 @@ elseif savedChoice() then
     for _, o in ipairs(paths(savedChoice())) do cloneArgs[#cloneArgs + 1] = o end
 end
 
--- syslogd, telnetd, httpd, ircd: services init starts at every boot (syslogd
+-- syslogd, telnetd, httpd, ircd, gpsd: services init starts at every boot (syslogd
 -- with init, unless it's set up already; httpd's root made, with a first
 -- page, if it isn't there; --example: the guestbook in its script root).
 -- from(path): a repo file's path on this computer.
@@ -262,19 +280,34 @@ local function services(from)
     local list = { table.unpack(apps) }
     if initBoot then list[#list + 1] = "init" end      -- (--init, the app unnamed: syslogd too)
     for _, a in ipairs(list) do
-        if (a == "init" or a == "telnetd" or a == "httpd" or a == "ircd") and not settings.get("service.syslogd.cmd") then
+        if (a == "init" or a == "telnetd" or a == "httpd" or a == "ircd" or a == "gpsd") and not settings.get("service.syslogd.cmd") then
             settings.set("service.syslogd.cmd", "syslogd")
             settings.set("service.syslogd.enabled", true)
             settings.save()
             print("syslogd keeps the system log (/var/log): `help syslog`")
         end
-        if a == "telnetd" or a == "httpd" or a == "ircd" then
+        if a == "telnetd" or a == "httpd" or a == "ircd" or a == "gpsd" then
             settings.set("service." .. a .. ".cmd", a)
             settings.set("service." .. a .. ".enabled", true)
             settings.save()
         end
         if a == "ircd" then
             print("ircd serves IRC on port " .. (settings.get("ircd.port") or 6667) .. " at every boot: `help ircd` (sysctl ircd.* to configure)")
+        end
+        if a == "gpsd" then
+            if gpsAt then
+                settings.set("gpsd.x", gpsAt[1])
+                settings.set("gpsd.y", gpsAt[2])
+                settings.set("gpsd.z", gpsAt[3])
+                settings.save()
+            end
+            if settings.get("gpsd.x") ~= nil then
+                print("gpsd answers GPS at " .. tostring(settings.get("gpsd.x")) .. ", " .. tostring(settings.get("gpsd.y")) .. ", "
+                    .. tostring(settings.get("gpsd.z")) .. " at every boot, once the other hosts agree: `help gpsd`")
+            else
+                print("gpsd answers GPS at every boot, where the other hosts say it is (setup gpsd --at x,y,z,"
+                    .. " or sysctl gpsd.x=..., sets it): `help gpsd`")
+            end
         end
         if a == "telnetd" and not settings.get("telnetd.password") then
             print("telnetd needs a password: sysctl telnetd.password=<password> (then reboot, or service start telnetd)")
