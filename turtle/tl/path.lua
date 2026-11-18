@@ -611,6 +611,56 @@ local function walk(route, moveOpts, warn)
     return true
 end
 
+-- (ADR-0015 D4) A far target the search gives up on is gone to in legs of about HOP blocks, a scan at each (radius 8:
+-- no fuel), at most HOPS_MOST legs.
+local HOP, HOPS_MOST = 16, 64
+local SOLID_TRIES = 4
+
+-- Go to goal by legs: from each stop a cell about HOP blocks on toward it (up a little if the map has it solid), a
+-- scan first, T.travel to it without hops.  True and a note saying it hopped; false and why.
+local function hopTo(goal, opts)
+    local legs, fuel0 = 0, turtle.getFuelLevel()
+    local legOpts = {}
+    for k, v in pairs(opts) do legOpts[k] = v end
+    legOpts.hops, legOpts.limit = false, nil         -- (a leg is short: the search's own limit does for it)
+    local function spent()
+        local f = turtle.getFuelLevel()
+        if type(f) ~= "number" or type(fuel0) ~= "number" then return 0 end
+        return fuel0 - f
+    end
+    while true do
+        local here = T.here()
+        local d = T.dist(here, goal)
+        if d == 0 then return true, "hopped: " .. legs .. " legs of about " .. HOP .. " (a search to it gave up), " .. spent() .. " fuel" end
+        if legs >= HOPS_MOST then
+            return false, "hopped " .. legs .. " legs and isn't there (at " .. T.posString() .. ")"
+        end
+        if opts.maxFuel and spent() >= opts.maxFuel then
+            return false, "hopped " .. legs .. " legs, " .. spent() .. " fuel (opts.maxFuel " .. opts.maxFuel .. "), stopped at " .. T.posString()
+        end
+        local ok, err = pcall(T.scan, 8)                 -- (what's ahead into the map; a scan that fails isn't a stop)
+        if not ok and tostring(err) == "Terminated" then error(err, 0) end
+        local target = goal
+        if d > HOP then
+            local f = HOP / d
+            local function toward(a, b) return a + math.floor((b - a) * f + 0.5) end
+            target = { x = toward(here.x, goal.x), y = toward(here.y, goal.y), z = toward(here.z, goal.z) }
+            local map = rawget(T, "map")
+            for _ = 1, SOLID_TRIES do
+                local name = map and select(2, pcall(map.get, target.x, target.y, target.z))
+                if type(name) ~= "string" or name == "minecraft:air" or name == "minecraft:cave_air" then break end
+                target.y = target.y + 1
+            end
+        end
+        local went, why = T.travel(target.x, target.y, target.z, legOpts)
+        if not went then
+            return false, "hopped " .. legs .. " legs toward " .. T.posKey(goal) .. " (a search to it gave up), stopped at "
+                .. T.posString() .. ": " .. tostring(why)
+        end
+        legs = legs + 1
+    end
+end
+
 -- The box of the turtle's frame a route between two cells looks through, for a scan before the layer is looked for.
 local function routeBox(from, to, span)
     return { math.min(from.x, to.x), math.min(from.y, to.y), math.min(from.z, to.z),
@@ -626,6 +676,9 @@ end
 -- times (default 6); a dig it refuses for the liquid beside it (T.moveTo's opts.liquid) is planned round so too.  opts are
 -- T.path's (dig, digOnly, avoid, inside, liquid, avoidCells, limit, margin), plus span (how far above the
 -- higher end a layer may be, default 8), scan, replans, and scanning's opts.move.  On failure the turtle stays where it got to.
+-- A target too far for the search (it gives up at its limit) is gone to in legs of about 16 blocks, a scan (radius 8,
+-- no fuel) at each, the second result saying it hopped; opts.maxFuel caps what the legs spend, opts.hops = false
+-- doesn't hop.
 function T.travel(x, y, z, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -668,7 +721,10 @@ function T.travel(x, y, z, opts)
     local why
     if not route then
         route, why = plan(T.here(), goal, ruleOpts)
-        if not route then return false, why end
+        if not route then
+            if opts.hops ~= false and tostring(why):find("gave up after searching", 1, true) then return hopTo(goal, opts) end
+            return false, why
+        end
     end
     local replans = opts.replans or REPLANS
     local last

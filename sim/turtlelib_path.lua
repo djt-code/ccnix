@@ -681,6 +681,21 @@ local asked
 ok = T.moveTo(0, 0, 6, { path = function(x, y, z, o) asked = { x, y, z }; return false, "nope" end })
 check("...and a function in its place", ok == false and asked and asked[3] == 6)
 
+-- ADR-0015 D4: a target farther than the search goes (the model's hop loop): legs of about 16, a scan at each
+T = fresh()
+local scansBefore = scanCalls
+ok, why = T.travel(100, 0, 0, { scan = false, limit = 40, hops = false })
+check("a far target the search gives up on, with hops off: nil and the search limit, as before", ok == false
+    and why:find("gave up after searching 40 cells", 1, true) ~= nil and at(T) == "(0,0,0)", tostring(why))
+ok, why = T.travel(100, 0, 0, { scan = false, limit = 40 })
+check("...by default it goes in legs: there, saying it hopped, a scan at each leg", ok == true and at(T) == "(100,0,0)"
+    and tostring(why):find("hopped: 7 legs of about 16", 1, true) ~= nil and scanCalls - scansBefore >= 6, tostring(why) .. " " .. at(T))
+T = fresh()
+FUEL = 1000
+ok, why = T.travel(100, 0, 0, { scan = false, limit = 40, maxFuel = 20 })
+check("...opts.maxFuel stops the legs, saying where", ok == false and why:find("(opts.maxFuel 20), stopped at", 1, true) ~= nil, tostring(why))
+FUEL = nil
+
 -- no way: the goal is sealed
 T = fresh()
 learn(T, -4, -2, -2, 4, 2, 6)
