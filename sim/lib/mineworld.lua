@@ -80,7 +80,8 @@ function Mine.setup(stock)
     Mine.dirs = {}
     turtle._ccnixWorld = nil
     if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
-    Mine.ENTITIES, Mine.GROUND, BURNT, CRAFTED = {}, {}, {}, {}
+    Mine.ENTITIES, Mine.GROUND, Mine.MOBS, BURNT, CRAFTED = {}, {}, {}, {}, {}
+    OBSTRUCTED, HITS = 0, 0
     THROWN, CHEST_SPILLED, SLEPT, ONSLEEP = 0, 0, 0, nil
     -- as in the field: a chunk controller on the left, the pickaxe on the
     -- right (a scenario sets EQ after this for anything else)
@@ -426,6 +427,16 @@ end
 -- was in it falls on the ground.
 local function attack(x, y, z)
     local key = k(x, y, z)
+    local mob = Mine.MOBS and Mine.MOBS[key]
+    if mob then                                    -- a mob or player hit: one that can be, goes in so many
+        HITS = (HITS or 0) + 1
+        mob.hit = (mob.hit or 0) + 1
+        if mob.hits then
+            mob.hits = mob.hits - 1
+            if mob.hits <= 0 then Mine.MOBS[key] = nil end
+        end
+        return true
+    end
     local e = Mine.ENTITIES[key]
     if not e then return false end
     Mine.ENTITIES[key] = nil
@@ -537,6 +548,24 @@ SCANS = 0
 turtle = M.merge(
     M.movementApi(Mine, passable, {
         onMove = function(...) if ONMOVE then ONMOVE(...) end end,
+        -- a minecart (Mine.ENTITIES) or a mob or player (Mine.MOBS[key] =
+        -- { stay = seconds a player stays in the way, from the first
+        -- bump; hits = hits a mob takes; hit: hits it got }) in the way
+        blocked = function(x, y, z)
+            local key = k(x, y, z)
+            if Mine.ENTITIES[key] then OBSTRUCTED = (OBSTRUCTED or 0) + 1; return true end
+            local mob = Mine.MOBS and Mine.MOBS[key]
+            if not mob then return false end
+            if mob.stay then
+                mob.from = mob.from or (SLEPT or 0)
+                if (SLEPT or 0) - mob.from >= mob.stay then         -- (it has stepped aside)
+                    Mine.MOBS[key] = nil
+                    return false
+                end
+            end
+            OBSTRUCTED = (OBSTRUCTED or 0) + 1
+            return true
+        end,
         moved = moved,
         turned = function() if WATERY then waterStep() end end,
     }),

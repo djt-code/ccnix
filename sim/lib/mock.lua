@@ -253,6 +253,8 @@ function M.movementApi(S, passable, hooks)
         if FUEL ~= nil and FUEL <= 0 then DRY = (DRY or 0) + 1; return false end
         local nx, ny, nz = S.P.x + dx, S.P.y + dy, S.P.z + dz
         if not passable(S.get(nx, ny, nz)) then return false end
+        -- an entity standing there (hooks.blocked says): as in game
+        if hooks.blocked and hooks.blocked(nx, ny, nz) then return false, "Movement obstructed" end
         if hooks.onMove then hooks.onMove(S.P.x, S.P.y, S.P.z, nx, ny, nz) end
         local ox, oy, oz = S.P.x, S.P.y, S.P.z
         S.P.x, S.P.y, S.P.z = nx, ny, nz
