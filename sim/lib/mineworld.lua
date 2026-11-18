@@ -78,7 +78,8 @@ local DROP = {
 -- lapis 4-9 and redstone 4-5 taken at their middle (the sim has no luck)
 local DROP_COUNT = { ["minecraft:clay"] = 4, ["minecraft:copper_ore"] = 3, ["minecraft:lapis_ore"] = 6,
                      ["minecraft:redstone_ore"] = 4 }
-local FALLS = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true }
+local FALLS = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true, ["minecraft:red_sand"] = true,
+                ["minecraft:suspicious_sand"] = true, ["minecraft:suspicious_gravel"] = true }
 -- A torch block: standing (minecraft:torch) or, hung on a wall, as the
 -- game names it then, minecraft:wall_torch.
 local TORCH_BLOCK = { ["minecraft:torch"] = true, ["minecraft:wall_torch"] = true }
@@ -99,7 +100,7 @@ function Mine.setup(stock)
     if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
     Mine.ENTITIES, Mine.GROUND, Mine.MOBS, BURNT, CRAFTED = {}, {}, {}, {}, {}
     OBSTRUCTED, HITS = 0, 0
-    THROWN, CHEST_SPILLED, SLEPT, ONSLEEP = 0, 0, 0, nil
+    THROWN, CHEST_SPILLED, SLEPT, ONSLEEP, LAST_SCAN_AT, COOLED = 0, 0, 0, nil, nil, 0
     -- as in the field: a chunk controller on the left, the pickaxe on the
     -- right (a scenario sets EQ after this for anything else)
     EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
@@ -375,6 +376,9 @@ local function dig(x, y, z)
 end
 
 local function solid(b) return b and not passable(b) and not isTorch(b) end
+-- What a torch can stand on or hang on: solid, and not a chest (its top
+-- and sides aren't full faces).
+local function holdsTorch(b) return solid(b) and not b.inv end
 -- A torch needs something under it or, in front, the block beyond to
 -- hang on.  Ore drops, fuel and gems aren't blocks.
 local function place(x, y, z, dir)
@@ -392,11 +396,12 @@ local function place(x, y, z, dir)
     if not passable(get(x, y, z)) then return false end
     local on, hangsOn                      -- what a torch hangs on or stands on; hung on a wall
     if it.name == "minecraft:torch" then
+        if isWater(get(x, y, z)) then return false end           -- (a torch won't go in water)
         local bx, bz = x + M.DX[P.d], z + M.DZ[P.d]
-        local hangs = dir == "front" and solid(get(bx, y, bz))
+        local hangs = dir == "front" and holdsTorch(get(bx, y, bz))
         hangsOn = hangs
         if hangs then on = k(bx, y, bz)
-        elseif solid(get(x, y - 1, z)) then on = k(x, y - 1, z)
+        elseif holdsTorch(get(x, y - 1, z)) then on = k(x, y - 1, z)
         else return false end
     end
     if it.name:find("raw_") or M.FUEL_VALUE[it.name] or it.name == "minecraft:diamond"
@@ -621,6 +626,13 @@ turtle = M.merge(
 local function geoScanner()
     return {
         scanBlocks = function(r)                -- `scan` in AP's docs; this on the user's server
+            -- SCAN_COOLDOWN: seconds before it scans again (time passes in
+            -- the sim only by sleeping); sooner, it says so and scans nothing
+            if SCAN_COOLDOWN and LAST_SCAN_AT and (SLEPT or 0) - LAST_SCAN_AT < SCAN_COOLDOWN then
+                COOLED = (COOLED or 0) + 1
+                return nil, "scanBlocks is on cooldown"
+            end
+            LAST_SCAN_AT = SLEPT or 0
             SCANS = SCANS + 1
             local out = {}
             for tx = -r, r do for ty = -r, r do for tz = -r, r do

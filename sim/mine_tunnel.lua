@@ -1623,3 +1623,13 @@ check("down a move after its last save: `mine reset` back at its last home", wen
 run("--resume")
 check("...and `mine --resume` finishes the tunnel", leftIn(0, 2, 0, 2, 1, 32) == 0 and jobState() == "done" and atStart(),
     leftIn(0, 2, 0, 2, 1, 32) .. " blocks left, " .. tostring(jobState()))
+
+-- 21. the Geo Scanner's cooldown (SCAN_COOLDOWN, 2 s here: AP's own isn't
+--     known yet): a scan too soon after the last one says so, and mine
+--     waits a second and scans again, as many times as it takes; what
+--     the scans show is fetched as before
+SCAN_COOLDOWN = 2
+scanWorld(true)
+SCAN_COOLDOWN = nil
+check("the scanner on cooldown: it waited and scanned again", (COOLED or 0) > 0 and logHas("lined up")
+    and oreGone(-5, 1, 12) and oreGone(7, 0, 20), (COOLED or 0) .. " too soon, " .. SCANS .. " scans")
