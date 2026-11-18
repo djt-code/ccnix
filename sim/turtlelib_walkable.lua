@@ -208,6 +208,24 @@ do
     warnings = lintScene(blocks, { 0, 3, 0, 2, 3, 4 })
     check("...a drop of 3 is not", #ofRule(warnings, "drop") == 0, texts(warnings))
 
+    -- ADR-0015: one rule with many warnings doesn't take the whole limit (a walkway open on one side: a drop at each
+    -- walk cell; a lantern at head height over one), and opts.rules picks the rules
+    local open = walkway()
+    for i = #open, 1, -1 do
+        local b = open[i]
+        if b[1] == 2 and b[2] == 5 then table.remove(open, i) end
+    end
+    add(open, { { 1, 6, 2, "minecraft:lantern", { hanging = "true" } } })
+    lintScene(open, { 0, 4, 0, 2, 6, 4 })
+    local cut, cutInfo = T.lint({ 0, 4, 0, 2, 6, 4 }, { limit = 3 })
+    check("a shared limit: a rule with many warnings (drops) leaves room for the others (the lantern)", cut and #cut == 3
+        and #ofRule(cut, "lantern") == 1 and #ofRule(cut, "drop") == 2 and cutInfo.more == cutInfo.rules.drop - 2, texts(cut or {}))
+    local only, onlyInfo = T.lint({ 0, 4, 0, 2, 6, 4 }, { rules = { "lantern" } })
+    check("...opts.rules checks only the rules named", only and #only == 1 and only[1].rule == "lantern" and onlyInfo.rules.drop == nil,
+        texts(only or {}))
+    local bad, badWhy = T.lint({ 0, 4, 0, 2, 6, 4 }, { rules = { "lanterns" } })
+    check("...a rule it doesn't have: nil and why, naming the rules", bad == nil and badWhy:find("no lint rule lanterns (the rules: headroom", 1, true) ~= nil,
+        tostring(badWhy))
     warnings = lintScene(add(cube(-2, 0, -2, 4, 0, 4, STONE), { { 1, 2, 1, "minecraft:lantern", { hanging = "true" } } }), { 0, 0, 0, 2, 2, 2 })
     local lantern = ofRule(warnings, "lantern")
     check("lantern: a lantern at head height over a walk cell is warned of", #lantern == 1 and at(lantern, 1, 1, 1) ~= nil

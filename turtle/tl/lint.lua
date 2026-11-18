@@ -411,7 +411,9 @@ local function roundIt(w) return w.where == "around" end
 -- cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved.  Warnings, not
 -- refusals: a design may break a rule on purpose.  Nil and why if it can't start.  Info is { cells, unchecked (stairs
 -- with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50),
--- rules (a count by rule), summary (a line a rule: its first warning, and how many more) }.
+-- rules (a count by rule), summary (a line a rule: its first warning, and how many more) }.  opts.rules (a list of
+-- rule names) checks only those.  The limit is shared: the list takes each rule's first, then each one's second, and
+-- so on, so one rule with many can't crowd out the others.
 -- For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is
 -- one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and
 -- around (the counts) and planSummary (the summary of the plan's own).  T.build prints only those, and a count of the rest.
@@ -424,6 +426,17 @@ function T.lint(what, opts)
     local origin = T.origin()
     local base = origin and COMPASS_AT[origin.facing]
     local limit = opts.limit or LIMIT
+    local only
+    if opts.rules ~= nil then
+        if type(opts.rules) ~= "table" then return nil, "opts.rules is a list of rules: " .. table.concat(RULES, ", ") end
+        only = {}
+        for _, name in ipairs(opts.rules) do
+            local known = false
+            for _, rule in ipairs(RULES) do known = known or rule == name end
+            if not known then return nil, "no lint rule " .. tostring(name) .. " (the rules: " .. table.concat(RULES, ", ") .. ")" end
+            only[name] = true
+        end
+    end
     local found, info = {}, { cells = cells, unchecked = 0, more = 0, rules = {}, summary = {} }
     for _, rule in ipairs(RULES) do found[rule] = {} end
     local bp = plan and T.blueprint      -- (a box's lint never loads tl.blueprint)
@@ -436,6 +449,7 @@ function T.lint(what, opts)
         return "around"
     end
     local function warn(rule, x, y, z, words, named)
+        if only and not only[rule] then return end
         local list = found[rule]
         list[#list + 1] = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words,
                             where = plan and where(x, y, z, named or {}) or nil }
@@ -470,12 +484,25 @@ function T.lint(what, opts)
         info.inPlan, info.around = 0, 0
     end
     for _, keep in ipairs(passes) do
+        -- (each rule's warnings in turn, a round at a time: the limit is shared)
+        local lists, longest = {}, 0
         for _, rule in ipairs(RULES) do
+            local list = {}
             for _, w in ipairs(found[rule]) do
                 if keep(w) then
+                    list[#list + 1] = w
                     if plan then
                         if w.where == "plan" then info.inPlan = info.inPlan + 1 else info.around = info.around + 1 end
                     end
+                end
+            end
+            lists[#lists + 1] = list
+            longest = math.max(longest, #list)
+        end
+        for i = 1, longest do
+            for _, list in ipairs(lists) do
+                local w = list[i]
+                if w then
                     if #warnings < limit then warnings[#warnings + 1] = w else info.more = info.more + 1 end
                 end
             end
