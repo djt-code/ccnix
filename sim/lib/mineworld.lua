@@ -37,10 +37,20 @@ local W = {}
 local k = M.key
 local ROCK = { "minecraft:stone", "minecraft:stone", "minecraft:deepslate", "minecraft:andesite",
                "minecraft:diorite", "minecraft:granite", "minecraft:tuff" }
+-- MIXED_ROCK: patches of other ground, as the field has it (a cavern of
+-- dripstone ran the turtle out of filler): every few blocks along the
+-- tunnel a patch of one of these, a few blocks across.
+local OTHER = { "minecraft:dripstone_block", "minecraft:calcite", "minecraft:clay", "minecraft:moss_block",
+                "minecraft:mud", "minecraft:dirt", "minecraft:gravel" }
 local function get(x, y, z)
     local b = W[k(x, y, z)]
     if b ~= nil then return b or nil end
     if z < 1 then return nil end                    -- open space behind the tunnel face
+    if MIXED_ROCK then
+        local px, py, pz = math.floor(x / 3), math.floor(y / 3), math.floor(z / 4)
+        local h = (px * 73 + py * 37 + pz * 19) % 11
+        if h < #OTHER then return { name = OTHER[h + 1] } end
+    end
     return { name = ROCK[(x * 31 + y * 17 + z * 13) % #ROCK + 1] }
 end
 local function set(x, y, z, b) W[k(x, y, z)] = b or false end
@@ -60,7 +70,14 @@ local DROP = {
     ["minecraft:short_grass"] = "minecraft:wheat_seeds", ["minecraft:tall_grass"] = "minecraft:wheat_seeds",
     ["minecraft:fern"] = "minecraft:wheat_seeds", ["minecraft:large_fern"] = "minecraft:wheat_seeds",
     ["minecraft:dead_bush"] = "minecraft:stick",
+    -- as the game drops them with a plain pickaxe (counts below)
+    ["minecraft:clay"] = "minecraft:clay_ball", ["minecraft:copper_ore"] = "minecraft:raw_copper",
+    ["minecraft:lapis_ore"] = "minecraft:lapis_lazuli", ["minecraft:redstone_ore"] = "minecraft:redstone",
 }
+-- How many a block drops, where it's more than one: clay 4; copper 2-5,
+-- lapis 4-9 and redstone 4-5 taken at their middle (the sim has no luck)
+local DROP_COUNT = { ["minecraft:clay"] = 4, ["minecraft:copper_ore"] = 3, ["minecraft:lapis_ore"] = 6,
+                     ["minecraft:redstone_ore"] = 4 }
 local FALLS = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true }
 -- A torch block: standing (minecraft:torch) or, hung on a wall, as the
 -- game names it then, minecraft:wall_torch.
@@ -349,7 +366,9 @@ local function dig(x, y, z)
     LAST_DUG = k(x, y, z)
     if TRAVELLING then TRAVEL_DIGS = (TRAVEL_DIGS or 0) + 1 end
     DIGS = (DIGS or 0) + 1
-    if b.name ~= "minecraft:glow_lichen" then M.addItem(Mine, DROP[b.name] or b.name, 1) end   -- (lichen needs shears)
+    if b.name ~= "minecraft:glow_lichen" then                    -- (lichen needs shears)
+        M.addItem(Mine, DROP[b.name] or b.name, DROP_COUNT[b.name] or 1)
+    end
     gravity(x, y, z)
     if WATERY then flow(x, y, z); waterStep() end
     return true
