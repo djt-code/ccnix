@@ -689,7 +689,7 @@ T.verify(plan, opts)
 T.replace(box, pattern, item, opts)
     Swap every block in a box whose name matches a glob for another block: how many, and what could not be. Returns true, info; false, why, info when some were trapped or failed; nil, why when it couldn't begin.
 
-    The box is six numbers in a table, or { x1 =, ... }; the glob matches block names (the namespace may be left out); `item` is the block to put in, with a state in brackets if it has one. The cells are those the map holds (opts.scan scans the box first, which the map needs to know it). Each is taken from the nearest free side the map shows, nearest next: the turtle looks at the block (one that has changed since is left), digs it and places the new one. A block with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to. It refuses if there is less of `item` on board than cells to swap, unless opts.partial. Info is { replaced, same, trapped, failed, gone, more }, trapped and failed being lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo), inside (a protected area the job owns, to swap blocks in it), partial.
+    The box is six numbers in a table, or { x1 =, ... }; the glob matches block names (the namespace may be left out); `item` is the block to put in, with a state in brackets if it has one. The cells are those the map holds (opts.scan scans the box first, which the map needs to know it). Each is taken from the nearest free side the map shows, nearest next: the turtle looks at the block (one that has changed since is left), digs it and places the new one. A block with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to, unless opts.digBelow: then (for a plain block) a neighbour with air over it is dug, stood in, the block swapped from there, and the neighbour put back from above with the same block (one that digging gives back, T.dropsItself, or one carried). It refuses if there is less of `item` on board than cells to swap, unless opts.partial. Info is { replaced, same, trapped, failed, gone, more, via (swapped by way of a neighbour) }, trapped and failed being lists of { x, y, z, name, why }. opts: scan, limit (cells at most, default 1000), move (for T.moveTo), inside (a protected area the job owns, to swap blocks in it), partial, digBelow.
 
 tl.craft: crafting and smelting: recipes as data, T.craft, T.craftBatch, T.canCraft, T.smelt, what burns and smelts
 
@@ -1010,6 +1010,11 @@ T.forgetPlacements(family)
     Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
 
     A wrong row learnt (say from a block the map had wrong) is laid over the table from then on; this puts the table's rows back.
+
+== Support ==
+
+T.dropsItself(name)
+    Does digging the block give the block back (planks, bricks, a log: yes; stone, grass, glowstone: no)? The list placeAt's opts.digBelow and T.replace's go by to put a dug floor back; a block it doesn't know is a no.
 
 == Placing a block with the state wanted ==
 

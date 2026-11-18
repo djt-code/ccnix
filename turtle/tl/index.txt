@@ -219,6 +219,8 @@ Walking a route:
 T.travel(x, y, z, opts) - Go to the cell x, y, z by the map: along a clear layer if there is one, else by a search; true (and T.moveTo's warning, if it dug under sand or gravel), or false and why.
 Looking at what came out, and taking it back:
 T.forgetPlacements(family) - Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as T.placeInfo names them) or for all. True, or false and why.
+Support:
+T.dropsItself(name) - Does digging the block give the block back (planks, bricks, a log: yes; stone, grass, glowstone: no)? The list placeAt's opts.digBelow and T.replace's go by to put a dug floor back; a block it doesn't know is a no.
 Placing a block with the state wanted:
 T.itemOfBlock(name) - The item that places the block `name`: "minecraft:redstone" for "minecraft:redstone_wire", "minecraft:torch" for a wall_torch, a crop's seeds; any other block's name as it is.
 T.blockOfItem(item, form) - The block the item `item` places ("minecraft:redstone_wire" for "minecraft:redstone", else the item's own name), or with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.

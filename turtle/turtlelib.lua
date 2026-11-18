@@ -3246,7 +3246,7 @@ T.registry = {
     path = "tl.path", travel = "tl.path",
     -- tl.place: blocks placed with the state wanted, and fire
     placeAt = "tl.place", ignite = "tl.place", placeInfo = "tl.place", forgetPlacements = "tl.place", signFor = "tl.place",
-    itemOfBlock = "tl.place", blockOfItem = "tl.place",
+    itemOfBlock = "tl.place", blockOfItem = "tl.place", dropsItself = "tl.place",
     -- tl.blueprint: building from a plan, checking it, swapping blocks
     blueprint = "tl.blueprint", build = "tl.blueprint", verify = "tl.blueprint", replace = "tl.blueprint",
     -- tl.lint: a build as a two-tall player meets it

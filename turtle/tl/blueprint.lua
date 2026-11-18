@@ -1317,10 +1317,13 @@ end
 -- out); `item` is the block to put in, with a state in brackets if it has one.  The cells are those the map holds (opts.scan
 -- scans the box first, which the map needs to know it).  Each is taken from the nearest free side the map shows, nearest
 -- next: the turtle looks at the block (one that has changed since is left), digs it and places the new one.  A block
--- with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to.  It refuses if there
--- is less of `item` on board than cells to swap, unless opts.partial.  Info is { replaced, same, trapped, failed,
--- gone, more }, trapped and failed being lists of { x, y, z, name, why }.  opts: scan, limit (cells at most,
--- default 1000), move (for T.moveTo), inside (a protected area the job owns, to swap blocks in it), partial.
+-- with no free side (every neighbour solid in the map) is listed in `trapped` and never dug to, unless opts.digBelow:
+-- then (for a plain block) a neighbour with air over it is dug, stood in, the block swapped from there, and the
+-- neighbour put back from above with the same block (one that digging gives back, T.dropsItself, or one carried).  It
+-- refuses if there is less of `item` on board than cells to swap, unless opts.partial.  Info is { replaced, same,
+-- trapped, failed, gone, more, via (swapped by way of a neighbour) }, trapped and failed being lists of { x, y, z,
+-- name, why }.  opts: scan, limit (cells at most, default 1000), move (for T.moveTo), inside (a protected area the
+-- job owns, to swap blocks in it), partial, digBelow.
 function T.replace(box, pattern, item, opts)
     opts = opts or {}
     local name, state = parseItem(item)
@@ -1338,7 +1341,7 @@ function T.replace(box, pattern, item, opts)
     local found, cut = T.map.find(pattern, box, opts.limit or 1000)
     if not found then return nil, cut end
     local test = T.nameTest(pattern)     -- (as T.map.find: a glob with no namespace also matches the short name)
-    local todo, info = {}, { replaced = 0, same = 0, trapped = {}, failed = {}, gone = 0, more = cut == true }
+    local todo, info = {}, { replaced = 0, same = 0, trapped = {}, failed = {}, gone = 0, more = cut == true, via = 0 }
     for _, c in ipairs(found) do
         local _, now = T.map.get(c.x, c.y, c.z)
         if c.name == name and (not state or stateHolds(state, now)) then info.same = info.same + 1 else todo[#todo + 1] = c end
@@ -1352,10 +1355,78 @@ function T.replace(box, pattern, item, opts)
         return nil, "a compass facing or axis needs the world origin: T.setOrigin(x, y, z, facing)"
     end
     local move = opts.move or { path = true, scan = false }
+    -- (ADR-0015 D8.5) A trapped cell by way of a neighbour n with air over it: dig n from above, stand in it, swap the
+    -- cell, step out and put n back.  True; or false and why (n put back if it was dug).
+    local function viaNeighbour(c)
+        local why = "no neighbour with air over it that can be dug and put back"
+        for _, d in ipairs({ "up", 0, 1, 2, 3 }) do
+            local v = T.DELTA[d]
+            local n = { x = c.x + v[1], y = c.y + v[2], z = c.z + v[3] }
+            local nName, nState = T.map.get(n.x, n.y, n.z)
+            local over = T.map.get(n.x, n.y + 1, n.z)
+            if nName and nName ~= AIR and (over == AIR or over == "minecraft:cave_air") and not T.guarded(n.x, n.y, n.z)
+                and (T.dropsItself(nName) or T.countItem(nName) > 0) then
+                local ok, moveWhy = T.moveTo(n.x, n.y + 1, n.z, move)
+                if not ok then
+                    why = "couldn't get over " .. T.posKey(n) .. ": " .. tostring(moveWhy)
+                else
+                    local seen, data = T.look("down")
+                    local now = seen and type(data) == "table" and data.name or nil
+                    if now ~= nName then
+                        why = T.posKey(n) .. " is " .. tostring(now) .. " now, not " .. nName
+                    else
+                        local dug, digWhy = T.digDir("down")
+                        if not dug then
+                            why = "couldn't dig " .. T.posKey(n) .. ": " .. tostring(digWhy)
+                        else
+                            local result
+                            if T.moveDir("down") then
+                                local dc = T.dirTo(c)
+                                local cSeen, cData = T.look(dc)
+                                local here = cSeen and type(cData) == "table" and cData.name or nil
+                                if not (here and test(here)) then
+                                    result = "it is " .. tostring(here) .. " now"
+                                else
+                                    local cDug, cWhy = T.digDir(dc)
+                                    if not cDug then result = "couldn't dig it from " .. T.posKey(n) .. ": " .. tostring(cWhy)
+                                    else
+                                        T.selectItem(name)
+                                        local placed, placeWhy = T.placeDir(dc)
+                                        if not placed then result = "dug it but couldn't place " .. name .. ": " .. tostring(placeWhy) end
+                                    end
+                                end
+                                T.moveDir("up")
+                            else
+                                result = "couldn't step into " .. T.posKey(n)
+                            end
+                            -- the neighbour back as it was
+                            local back = T.selectItem(nName) and T.placeDir("down")
+                            if not back then
+                                return false, (result and (result .. "; ") or "") .. T.posKey(n) .. " not put back: no " .. nName .. " to place"
+                            end
+                            if result then return false, result end
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        return false, why
+    end
     local function swapOne(c)
         local stands = standsFor(c)
         if #stands == 0 then
-            info.trapped[#info.trapped + 1] = { x = c.x, y = c.y, z = c.z, name = c.name, why = "no free side: every neighbour is solid in the map" }
+            if opts.digBelow and plain and T.countItem(name) > 0 then
+                local ok, why = viaNeighbour(c)
+                if ok then
+                    info.replaced, info.via = info.replaced + 1, info.via + 1
+                    return
+                end
+                info.trapped[#info.trapped + 1] = { x = c.x, y = c.y, z = c.z, name = c.name, why = "no free side, and by way of a neighbour: " .. why }
+                return
+            end
+            info.trapped[#info.trapped + 1] = { x = c.x, y = c.y, z = c.z, name = c.name,
+                why = "no free side: every neighbour is solid in the map" .. (plain and " (opts.digBelow goes in by way of one)" or "") }
             return
         end
         local why

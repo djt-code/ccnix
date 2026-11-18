@@ -895,6 +895,12 @@ local SELF_DROPS = { "soul_soil", "soul_sand", "basalt", "polished_basalt", "smo
                      "*_stem", "*_hyphae", "quartz_block", "purpur_block", "obsidian", "crying_obsidian" }
 for _, g in ipairs(TEMP_BLOCKS) do SELF_DROPS[#SELF_DROPS + 1] = g end
 local dropsItself = T.nameTest(SELF_DROPS)
+
+-- Does digging the block give the block back (planks, bricks, a log: yes; stone, grass, glowstone: no)?  The list
+-- placeAt's opts.digBelow and T.replace's go by to put a dug floor back; a block it doesn't know is a no.
+function T.dropsItself(name)
+    return type(name) == "string" and dropsItself(name)
+end
 local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
