@@ -1572,3 +1572,36 @@ check("in the way: a player, a zombie and a minecart: the tunnel dug through", l
 check("...the player waited for, never hit", (player.hit or 0) == 0, tostring(player.hit or 0) .. " hits")
 check("...the zombie hit until gone", Mine.MOBS["0,0,6"] == nil, tostring(HITS) .. " hits in all")
 check("back at the start", atStart())
+
+-- 19. ground as the field has it (MIXED_ROCK: patches of dripstone,
+--     calcite, clay, moss, mud, dirt and gravel among the stone), with
+--     copper, lapis and redstone ore that drop several items each: a
+--     3x3 tunnel 48 long, homes every 16.  Everything the patches give
+--     is bulk (clay gives clay balls, four a block), so it stays in the
+--     homes' bulk chests and none of it in a valuables chest or at the
+--     start; the ores' drops come back to the start
+setup(stock(10, 64))
+MIXED_ROCK = true
+set(1, 1, 20, ore("minecraft:copper_ore")); set(1, 1, 30, ore("minecraft:lapis_ore"))
+set(1, 1, 40, ore("minecraft:redstone_ore"))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 3000, 3000, 0
+run("3", "3", "48", "--spacing", "16")
+MIXED_ROCK = nil
+local clayDug = false
+for z = 1, 48 do for x = 0, 2 do for y = 0, 2 do if get(x, y, z) == nil then clayDug = true end end end end
+local _, top19 = contents(chestAt(0, 1, 0))
+check("mixed ground: the ores' drops at the start (3 raw copper, 6 lapis, 4 redstone)", (top19["minecraft:raw_copper"] or 0) == 3
+    and (top19["minecraft:lapis_lazuli"] or 0) == 6 and (top19["minecraft:redstone"] or 0) == 4,
+    (contents(chestAt(0, 1, 0))))
+local stray = {}
+for _, z in ipairs({ 0, 16, 32 }) do
+    local c = z == 0 and chestAt(0, 1, 0) or chestAt(-1, 0, z)
+    local _, n = contents(c)
+    for _, name in ipairs({ "minecraft:clay_ball", "minecraft:mud", "minecraft:moss_block", "minecraft:calcite",
+                            "minecraft:dripstone_block", "minecraft:dirt", "minecraft:gravel" }) do
+        if n[name] then stray[#stray + 1] = n[name] .. " " .. name .. " at z=" .. z end
+    end
+end
+check("...none of what the patches give in a valuables chest or at the start", #stray == 0, table.concat(stray, ", "))
+check("...done, back at the start", jobState() == "done" and atStart(), tostring(jobState()))

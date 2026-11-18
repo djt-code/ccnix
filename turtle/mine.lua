@@ -380,7 +380,7 @@ for _, n in ipairs({ "cobblestone", "cobbled_deepslate", "stone", "deepslate", "
         "red_sandstone", "andesite", "diorite", "granite", "tuff", "calcite",
         "dripstone_block", "pointed_dripstone", "netherrack", "blackstone", "basalt",
         "smooth_basalt", "soul_sand", "soul_soil", "end_stone", "flint", "mud",
-        "clay", "moss_block", "terracotta", "magma_block" }) do
+        "clay", "clay_ball", "moss_block", "terracotta", "magma_block" }) do      -- (clay dug gives clay balls)
     BULK["minecraft:" .. n] = true
 end
 BULK_TAGS = {
