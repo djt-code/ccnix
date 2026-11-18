@@ -1551,3 +1551,24 @@ check("their spare reach past the walls: ore 5 out of each fetched, and under th
     oreGone(-5, 1, 8) and oreGone(28, 1, 8) and oreGone(11, -4, 8))
 checkFloor(0, 23, -1, 1, 16)
 check("back at the start", atStart())
+
+-- 18. entities in the way, as in game (a move into one fails, "Movement
+--     obstructed"): a player standing in the tunnel's start column for 2
+--     seconds, a zombie in a lane (gone after 3 hits) and a minecart in
+--     the tunnel: it waits for the player (who isn't hit), hits the
+--     zombie and the minecart once they don't move, and digs the tunnel
+--     out
+setup(stock(4, 64))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 1000, 1000, 0
+local player = { stay = 2 }
+Mine.MOBS["0,0,3"] = player
+Mine.MOBS["0,0,6"] = { hits = 3 }
+Mine.ENTITIES["2,0,9"] = { item = "minecraft:minecart" }
+set(2, 0, 9, nil)                                   -- (an open cell, as in a mineshaft)
+run("3", "3", "12")
+check("in the way: a player, a zombie and a minecart: the tunnel dug through", leftIn(0, 2, 0, 2, 1, 12) == 0
+    and jobState() == "done", leftIn(0, 2, 0, 2, 1, 12) .. " blocks left, " .. tostring(jobState()))
+check("...the player waited for, never hit", (player.hit or 0) == 0, tostring(player.hit or 0) .. " hits")
+check("...the zombie hit until gone", Mine.MOBS["0,0,6"] == nil, tostring(HITS) .. " hits in all")
+check("back at the start", atStart())

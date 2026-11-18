@@ -117,6 +117,7 @@ T.cfg = {
     margin     = 1,     -- columns outside the grid usable for detours
     maxReplans = 10,    -- BFS re-plans per target before giving up
     lowFuel    = 50,    -- top up from inventory below this
+    waitBeforeHit = 3,  -- seconds a move waits for what stands in its way (a player steps aside) before hitting it
     topupFuel  = 1000,  -- ...to about this level
     fuelMargin = 30,    -- spare fuel kept beyond the trip home (detours)
     maxClimb   = 3,     -- terrain stepping: max climb per column
@@ -1332,18 +1333,33 @@ local function stuck(move, digWhy, why)
     return "can't move " .. MOVE_WORD[move] .. ": " .. (why or "something is in the way")
 end
 
--- One move with fuel first: look, dig what T.diggable lists, move, attacking what's in the way.
+-- Something in the way of a move into an open cell ("Movement obstructed": a mob, a player, a minecart): for the
+-- first T.cfg.waitBeforeHit seconds it is waited for (a player steps aside), then hit.  `state.waited` keeps the time
+-- across tries.  True when it hit.
+local function inTheWay(why, hit, state)
+    if why and tostring(why):find("obstructed", 1, true) and state.waited < (T.cfg.waitBeforeHit or 0) then
+        sleep(0.5)
+        state.waited = state.waited + 0.5
+        return false
+    end
+    hit()
+    sleep(0.3)
+    return true
+end
+
+-- One move with fuel first: look, dig what T.diggable lists, move, waiting for and then attacking what's in the way.
 local function step(move, attack)
     T.ensureFuel()
     local digWhy, why
-    for _ = 1, 5 do
+    local hits, state = 0, { waited = 0 }
+    while hits < 5 do
         local clear, said = clearWay(move)
         if not clear then return false, said end
         digWhy = said
         local moved_, rawWhy = raw[move]()
         if moved_ then moved(move); return true end
         why = rawWhy
-        attack(); sleep(0.3)
+        if inTheWay(rawWhy, attack, state) then hits = hits + 1 end
     end
     return false, stuck(move, digWhy, why)
 end
@@ -1670,7 +1686,8 @@ local function stepInto(d, rules)
     local at = T.posKey(cell)
     local move = (d == "up" or d == "down") and d or "forward"
     local name
-    for _ = 1, 6 do
+    local hits, state = 0, { waited = 0 }
+    while hits < 6 do
         local ok, data = T.look(d)
         name = ok and type(data) == "table" and data.name or nil
         if name and rules.avoid(name) then return false, "avoiding " .. name .. " at " .. at, name, cell end
@@ -1694,9 +1711,9 @@ local function stepInto(d, rules)
             T.refuelTo(T.cfg.topupFuel)
             if turtle.getFuelLevel() < 1 then return false, "out of fuel at " .. T.posString(), nil, T.here() end
         end
-        if raw[move]() then moved(move); return true end
-        T.attackDir(d)
-        sleep(0.3)
+        local moved_, why = raw[move]()
+        if moved_ then moved(move); return true end
+        if inTheWay(why, function() T.attackDir(d) end, state) then hits = hits + 1 end
     end
     return false, "can't move into " .. at .. (name and (" (" .. name .. ")") or ": something is in the way"), name, cell
 end
