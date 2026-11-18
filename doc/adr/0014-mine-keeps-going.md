@@ -201,7 +201,10 @@ Not a fit:
 - **T.attachedTo:** it needs a map on disk. mine's own torch list
   (`torchBy`) already covers the torches it knocks off.
 
-It also found these bugs, fixed with this work (no decision):
+It also found these bugs, fixed with this work (no decision). One more
+claim, that `mine.map=false` doesn't keep mine out of the map, isn't a
+bug: the setting (and the header) only ever covered the scans, and digs
+and moves add to a map other programs started, as they should.
 - **A crafting return that strands the scanner and bucket:**
   `craftSupplies` returns early when it can't empty out, leaving the Geo
   Scanner and bucket in the chest. The library path removes that branch.
@@ -214,9 +217,6 @@ It also found these bugs, fixed with this work (no decision):
     chest, which is bulk in a valuables chest.
 
   It now moves only what it took.
-- **`mine.map=false`:** since 0.53, T.look, digs and moves write to a map
-  already on disk, so the setting only skips scans. With it false, mine
-  now keeps the map shut while it runs.
 - **Wide tunnels:** the header says torches go on both walls "wider than
   8"; the code does it from 10. From about 27 wide, the middle of the
   floor stays dark whatever the spacing. The header gets the right
