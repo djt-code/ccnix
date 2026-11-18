@@ -395,4 +395,15 @@ do
     check("without opts.attached the dig is as before: no look at what it holds (tl.attach not loaded), the torches drop",
         ok == true and was == STONE and warning == nil and extra == nil and package.loaded["tl.attach"] == nil and W.get(2, 1, 3) == nil,
         tostring(warning))
+    -- ADR-0015 D6: a dig that destroys the block (glowstone gives dust, glass nothing) is refused, saying what it gives
+    fresh(add(cube(-3, -1, -3, 6, -1, 8, STONE), { { 2, 0, 3, "minecraft:glowstone" }, { 2, 0, 5, "minecraft:white_stained_glass" } }))
+    know(-3, -1, -3, 6, 3, 8)
+    ok, why = T.digCell(2, 0, 3)
+    check("T.digCell of glowstone: refused before it moves, saying what it gives and the option", ok == false
+        and why == "digging minecraft:glowstone at 2,0,3 destroys it: it gives 2 to 4 glowstone dust (no silk touch); opts.lossy = true digs it anyway"
+        and W.get(2, 0, 3) and T.pos.x == 0 and T.pos.z == 0, tostring(why))
+    ok, why = T.digCell(2, 0, 5)
+    check("...stained glass too: it gives nothing", ok == false and why:find("gives nothing", 1, true) ~= nil and W.get(2, 0, 5), tostring(why))
+    ok, was = T.digCell(2, 0, 3, { lossy = true })
+    check("...opts.lossy = true digs it", ok == true and was == "minecraft:glowstone" and W.get(2, 0, 3) == nil, tostring(was))
 end

@@ -1821,6 +1821,19 @@ function T.moveTo(x, y, z, opts)
     return run()
 end
 
+-- Blocks a dig destroys (a turtle's pickaxe has no silk touch): what each gives instead.  T.digCell refuses them
+-- unless opts.lossy.
+local LOSSY = { glowstone = "2 to 4 glowstone dust", sea_lantern = "2 or 3 prismarine crystals",
+                ice = "nothing (water, where it stood on a block)", packed_ice = "nothing", blue_ice = "nothing",
+                glass = "nothing", glass_pane = "nothing" }
+local function lossyDrop(name)
+    local short = name and (text.stripPrefix(name, "minecraft:") or name)
+    if not short then return nil end
+    if LOSSY[short] then return LOSSY[short] end
+    if text.endsWith(short, "_stained_glass") or text.endsWith(short, "_stained_glass_pane") then return "nothing" end
+    return nil
+end
+
 -- Names a turtle may stand in to dig a cell beside it
 local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["minecraft:void_air"] = true,
                     ["minecraft:water"] = true, ["minecraft:flowing_water"] = true }
@@ -1836,7 +1849,8 @@ local STANDABLE = { ["minecraft:air"] = true, ["minecraft:cave_air"] = true, ["m
 -- stays beside the cell.  opts.attached looks first at what the block holds, from the map (T.attachedTo: a torch on it,
 -- a ladder or a sign on its side, a lantern under it): "refuse" refuses a dig that would drop any (a maybe too), naming
 -- them; "warn" digs, and returns them as a fourth value, { attached = the list }, named in the warning (those surely held
--- go from the map as air).
+-- go from the map as air).  A block the dig would destroy (glowstone gives dust; glass, its panes and ice give nothing)
+-- is refused, saying what it gives, unless opts.lossy = true.
 function T.digCell(x, y, z, opts)
     opts = opts or {}
     for _, n in ipairs({ x, y, z }) do
@@ -1851,6 +1865,10 @@ function T.digCell(x, y, z, opts)
     local function refusal(name)
         local area = T.guarded(x, y, z)
         if area then return "protected: " .. area .. " (" .. (name or "the block") .. " at " .. at .. ")" end
+        local gives = not opts.lossy and lossyDrop(name)
+        if gives then
+            return "digging " .. name .. " at " .. at .. " destroys it: it gives " .. gives .. " (no silk touch); opts.lossy = true digs it anyway"
+        end
         if not opts.liquid then return liquidRefusal(name or "the block", cell) end
     end
     local function run()
