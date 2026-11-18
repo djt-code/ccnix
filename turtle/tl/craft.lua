@@ -875,8 +875,8 @@ local function countsText(counts)
     return table.concat(parts, ", ")
 end
 
--- Work out crafting { [name] = n } down the recipe tree (torches, sticks, planks, logs) against the inventory and the
--- chests: the plan { steps, base, short, ok }, and why when short; nil, why.  T.craftBatch(plan) crafts it.
+-- Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok },
+-- and why when short; nil, why.  T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 --
 -- `targets` is { [name] = n } or { { name, n }, ... }.  The tree is followed down (torches need sticks and coal, sticks
 -- planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the
@@ -1231,8 +1231,8 @@ local function batchAt(side, list, entries, opts)
     return true, info
 end
 
--- Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take:
--- aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
+-- Craft a list { { name, n }, ... } (only what it names) or a T.craftPlan plan (sticks for torches too) with one stash,
+-- the products left in the chest (opts.take: aboard): true, info; false, why, info if some failed; nil, why.
 --
 -- The list is in the order to make them, each as T.craft takes it (n rounded up to whole crafts); a plan is its steps
 -- (one that is short is refused unless opts.partial).  It works from a chest as T.craft does (the same opts.chest, and the junk

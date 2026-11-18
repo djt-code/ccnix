@@ -401,8 +401,9 @@ local function always() return true end
 local function ofPlan(w) return w.where == "plan" end
 local function roundIt(w) return w.where == "around" end
 
--- What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and
--- exit, railings meeting on a diagonal, drops over 3, lights in the way.  A list of { rule, x, y, z, text }, and info.
+-- What stops a two-tall player in a build (a box or a plan), read-only: headroom, a flight's approach and exit,
+-- diagonal railings, drops over 3, lights in the way.  A list of { rule, x, y, z, text }, and info (info.rules;
+-- opts.rules).
 --
 -- `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own
 -- cells and states, the map for the cells it leaves alone and round it).  The cells looked at are the box's and,

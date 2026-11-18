@@ -15,7 +15,7 @@ T.protect(name, x1, y1, z1, x2, y2, z2) - Protect the box between two corners (x
 T.unprotect(name) - Remove the area called `name`. True, or false and why (none by that name).
 T.areaSet(names) - The names in `names` (one area's name, a list or a set of them) as a set { [name] = true }; an empty set for nil.
 T.protected(x, y, z, skip) - The name of the first protected area that holds the cell, or nil. `skip`, a name or a list of names, leaves those areas out (see T.guarded).
-T.protections() - The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 } (copies: changing one changes nothing).
+T.protections() - The protected areas, as a list of tables with named fields: { name =, x1 =, y1 =, z1 =, x2 =, y2 =, z2 = } (p.name, p.x1, ...; copies: changing one changes nothing).
 T.guarded(x, y, z) - The name of the protected area that stops the current job from digging the cell: T.protected, but not counting the areas the job is working inside (T.cfg.inside, set by T.inside). nil if none.
 T.inside(names, fn, ...) - Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
 T.withUnprotected(names, fn, ...) - Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
@@ -164,10 +164,10 @@ T.addRecipe(spec) - Add a recipe (modded items, say): out (the item made), count
 T.recipe(name) - The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
 T.canCraft(name, n, opts) - Can the item be crafted: true, or false, why and the short list. Counts the inventory and the chest.
 Planning:
-T.craftPlan(targets, opts) - Work out crafting { [name] = n } down the recipe tree (torches, sticks, planks, logs) against the inventory and the chests: the plan { steps, base, short, ok }, and why when short; nil, why. T.craftBatch(plan) crafts it.
+T.craftPlan(targets, opts) - Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 Crafting from a chest:
 T.craft(name, n, opts) - Craft n of an item from a chest (stash the inventory, fill the grid, craft, put it all back): true and how many, or false/nil and why.
-T.craftBatch(list, opts) - Craft a list { { name, n }, ... } or a T.craftPlan plan with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info when some failed; nil, why (nothing was touched).
+T.craftBatch(list, opts) - Craft a list { { name, n }, ... } (only what it names) or a T.craftPlan plan (sticks for torches too) with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info if some failed; nil, why.
 Fuel and smelting:
 T.fuelTicks(name) - How many ticks a furnace burns the item for (20 a second; it smelts an item in 200), or nil if it is not a fuel.
 T.smeltsTo(name) - What the item smelts into in a furnace, or nil if it does not smelt.
@@ -199,11 +199,11 @@ T.undoClear() - Empty the undo journal. True.
 T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n entries (default 1), or those after opts.since (T.undoMark). Returns true, info; false, why, info when some could not be; nil, why if there is nothing to undo.
 tl.light: block light over the map, and the cells where a mob could spawn in the dark:
 T.light(box, opts) - The block light in a box from the map: a function level(x, y, z) giving a cell's light (0 to 15; nil for a cell outside the box), and info; nil and why.
-T.darkCells(box, opts) - Where a mob could spawn in a box (the map's blocks and T.light): a list of { x, y, z, light } (the feet cell, its light) at or under the dimension's limit, darkest first, and info; nil and why.
+T.darkCells(box, opts) - Where a mob could spawn in a box: a list of { x, y, z, light } (the feet cell) at or under the dimension's limit, darkest first, opts.limit at most (50; info.more the rest), and info (info.unsure: cells to inspect); nil and why.
 tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths:
 T.blockKind(name) - What a block is to a player, by its name: the kind's name (open, railing, stairs, slab, solid, ...) and a copy of its facts ({ pass, floor, height, ... }).
 The lint:
-T.lint(what, opts) - What stops a two-tall player in a build (a box or a plan), read-only: headroom over stairs, a flight's approach and exit, railings meeting on a diagonal, drops over 3, lights in the way. A list of { rule, x, y, z, text }, and info.
+T.lint(what, opts) - What stops a two-tall player in a build (a box or a plan), read-only: headroom, a flight's approach and exit, diagonal railings, drops over 3, lights in the way. A list of { rule, x, y, z, text }, and info (info.rules; opts.rules).
 Walking:
 T.walkable(from, to, opts) - A way a two-tall player walks from one feet cell to another over the map (steps up 1, ladders, falls over 3 only if there's no other way): the path (feet cells after `from`, the last `to`) and { falls }; nil and why if none.
 The search:
@@ -216,7 +216,7 @@ Placing a block with the state wanted:
 T.itemOfBlock(name) - The item that places the block `name`: "minecraft:redstone" for "minecraft:redstone_wire", "minecraft:torch" for a wall_torch, a crop's seeds; any other block's name as it is.
 T.blockOfItem(item, form) - The block the item `item` places ("minecraft:redstone_wire" for "minecraft:redstone", else the item's own name), or with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.
 T.placeInfo(item) - What placeAt can place this item by: { family, keys, hang, door }, or nil if the item is not a block it knows.
-T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the block, its state and how; nil and why if it can't.
+T.placeAt(x, y, z, item, opts) - Place item at the cell x, y, z with the state wanted (opts.facing, half, axis, hanging; a sign's opts.text; opts.digBelow lets it dig a floor to stand in and put it back): the block, its state and how; nil and why if it can't.
 A sign in front of a reader:
 T.signFor(reader, said, opts) - Put a sign in front of a reader standing at reader = { x, y, z }, its face toward them, with text on it: the sign's name, its state and how ({ at, look, toward, ... } as T.placeAt's); nil and why if it can't.
 Lighting a fire:
@@ -228,7 +228,7 @@ T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, se
 Going to a chest:
 T.recount(side) - Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests. The chest as T.chests gives it, or nil and why.
 Cataloguing:
-T.catalogue(spots, opts) - Go round the chests and write down what each holds. Returns true, info; false, why, info when some could not be read; nil, why when there is nothing to do.
+T.catalogue(spots, opts) - Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the chest's side), else every chest known. True, info; false, why, info if some couldn't be read; nil, why.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
 T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
@@ -268,7 +268,7 @@ T.map.cube(cx, cy, cz) - The cube at cx, cy, cz (map frame) as its 4096 bytes an
 Scans:
 T.scan(r, opts) - Geo-scan around the turtle (radius r, default 8; over 8 needs opts.force) into the map: { ["x,y,z"] = name } in the turtle's frame, and an info table.
 T.mergeScan(entries, r, opts) - Put a scan somebody else took, here, in the map: true and the number of blocks in it, or nil and why.
-T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next: { tiles, scanned, failed, partial }.
+T.scanBox(box, opts) - Scan a whole box ({x1, y1, z1, x2, y2, z2}, turtle frame) with radius-8 scans side by side, nearest next, going to each with opts.move ({ path = true, dig = true } digs): { tiles, scanned, failed, partial }.
 Inspecting:
 T.inspectAt(x, y, z, opts) - Go next to the cell x, y, z, inspect it and note its block and state in the map: name, state table (nil if none), or nil and why.
 T.inspectAll(list, opts) - T.inspectAt for each cell of a list ({x, y, z} tables or "x,y,z" keys), nearest next: { ["x,y,z"] = {name, state} } and a list of {x, y, z, why} that failed: the way to get block states over an area (T.scan gives names only).

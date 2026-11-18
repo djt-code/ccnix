@@ -347,8 +347,8 @@ local function spawnable(f, x, y, z, fireproof)
     return "ok"
 end
 
--- Where a mob could spawn in a box (the map's blocks and T.light): a list of { x, y, z, light } (the feet cell, its
--- light) at or under the dimension's limit, darkest first, and info; nil and why.
+-- Where a mob could spawn in a box: a list of { x, y, z, light } (the feet cell) at or under the dimension's limit,
+-- darkest first, opts.limit at most (50; info.more the rest), and info (info.unsure: cells to inspect); nil and why.
 --
 -- A cell is spawnable with room for a mob (it and the cell over it: air, a torch, a sign; not a rail, carpet, button,
 -- pressure plate or redstone) over a full, sturdy floor (a solid block, a top slab, an upside-down stair; not a bottom

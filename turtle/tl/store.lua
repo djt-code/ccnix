@@ -523,8 +523,8 @@ local function standFor(p)
     return best
 end
 
--- Go round the chests and write down what each holds.  Returns true, info; false, why, info when some could not be
--- read; nil, why when there is nothing to do.
+-- Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the
+-- chest's side), else every chest known.  True, info; false, why, info if some couldn't be read; nil, why.
 --
 -- `spots` is a list of chests as { x, y, z, side } (and bulk = true for the bulk chest, holds as T.addChest takes), which are remembered
 -- (T.addChest) and read, and only they; nil goes round every chest already known.  The two halves of a double chest

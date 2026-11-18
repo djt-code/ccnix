@@ -1311,8 +1311,8 @@ function T.placeInfo(item)
 end
 
 
--- Place item at the cell x, y, z with the state wanted (opts.facing, opts.half, opts.axis; a sign's opts.text): the
--- block, its state and how; nil and why if it can't.
+-- Place item at the cell x, y, z with the state wanted (opts.facing, half, axis, hanging; a sign's opts.text;
+-- opts.digBelow lets it dig a floor to stand in and put it back): the block, its state and how; nil and why if it can't.
 --
 -- It works out from the table which approaches (placing sideways, from above or from below, from each side) give the
 -- state wanted and the map says are possible, goes to the nearest with T.moveTo, places, inspects, and if the state is

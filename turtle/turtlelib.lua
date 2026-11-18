@@ -712,8 +712,8 @@ function T.protected(x, y, z, skip)
     end
 end
 
--- The protected areas, as a list of { name, x1, y1, z1, x2, y2, z2 }
--- (copies: changing one changes nothing).
+-- The protected areas, as a list of tables with named fields: { name =, x1 =, y1 =, z1 =, x2 =, y2 =, z2 = } (p.name,
+-- p.x1, ...; copies: changing one changes nothing).
 function T.protections()
     local out = {}
     for i, a in ipairs(areas()) do
