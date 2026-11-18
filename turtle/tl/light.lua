@@ -30,6 +30,7 @@
 
 local T = require("turtlelib")
 local text = require("text")
+local tables = require("tables")
 
 local REACH = 14                  -- the farthest a light outside the box reaches into it (15 falls to 1 in 14 steps)
 local MAX_CELLS = 65536           -- the biggest box looked at
@@ -446,6 +447,121 @@ function T.darkCells(box, opts)
     if info.cut then parts[#parts + 1] = "over " .. MAX_LIGHTS .. " lights: some left out" end
     info.summary = table.concat(parts, "; ")
     return out, info
+end
+
+-- (ADR-0015 D8.1) The light planLights lights cells to by default: a level over the nether's limit (11), and in the
+-- overworld and the end what a player calls lit (8: crops grow, and the spawning limit, 0, is far under it)
+local PLAN_MIN = { overworld = 8, ["end"] = 8, nether = 12 }
+
+-- The fewest lights, of the places given, that bring every cell to opts.min (8; 12 in the nether): a list of
+-- { x, y, z, name } to place, nearest first, and info; nil and why.
+--
+-- `cells` are the cells to light ({ x, y, z }: a walkway's feet cells, T.darkCells' list); `candidates` the cells a
+-- light may go in ({ x, y, z } or { x, y, z, name }: in the wall beside a path, the floor under it).  It reads the map
+-- and T.light's model (what passes light and what stops it, the lights already there): a cell already at opts.min is
+-- done; then, again and again, the candidate that brings the most cells still dark to opts.min is taken (a greedy
+-- cover: few lights, not always the fewest), until all are lit or no candidate helps.  The light is opts.item
+-- (default minecraft:lantern, 15; a torch 14, glowstone 15, a soul lantern 10), or a candidate's own name.  opts:
+-- min, item, dimension (the default min: T.cfg.dimension, else the overworld).  Info is { lit (already at min), covered
+-- (by the lights chosen), left (a list of the cells no candidate reaches), lights, summary }.  Nothing is placed:
+-- T.placeAt them (a lantern's opts.hanging, a torch on a wall) and T.darkCells to check.
+function T.planLights(cells, candidates, opts)
+    opts = opts or {}
+    if type(cells) ~= "table" or #cells == 0 then return nil, "planLights wants a list of cells { x, y, z } to light" end
+    if type(candidates) ~= "table" or #candidates == 0 then return nil, "planLights wants a list of candidate cells { x, y, z } for lights" end
+    local dimName = dimensionOf(opts.dimension or T.cfg.dimension or "overworld")
+    if not dimName then return nil, "opts.dimension is overworld, nether or end" end
+    local min = opts.min or PLAN_MIN[dimName]
+    if not (whole(min) and min >= 1 and min <= 15) then return nil, "opts.min is a light level, 1 to 15" end
+    local item = fullName(opts.item or "lantern")
+    local function xyz(c) return c.x or c[1], c.y or c[2], c.z or c[3] end
+    -- the box round them all, for the model
+    local bx1, by1, bz1, bx2, by2, bz2
+    for _, list in ipairs({ cells, candidates }) do
+        for i, c in ipairs(list) do
+            local x, y, z = xyz(c)
+            if not (whole(x) and whole(y) and whole(z)) then return nil, "cell " .. i .. " isn't { x, y, z }: whole numbers" end
+            bx1, by1, bz1 = math.min(bx1 or x, x), math.min(by1 or y, y), math.min(bz1 or z, z)
+            bx2, by2, bz2 = math.max(bx2 or x, x), math.max(by2 or y, y), math.max(bz2 or z, z)
+        end
+    end
+    for _, c in ipairs(candidates) do
+        local name = fullName(c.name or c[4] or item)
+        if (emission(name)) < 1 then return nil, name .. " gives no light" end
+    end
+    local f, why = flood({ bx1, by1, bz1, bx2, by2, bz2 }, { with = opts.with })
+    if not f then return nil, why end
+    local need, needN, info = {}, 0, { lit = 0, covered = 0, left = {}, lights = 0 }
+    for _, c in ipairs(cells) do
+        local x, y, z = xyz(c)
+        local k = key(x, y, z)
+        if not need[k] then
+            if (f.level(x, y, z) or 0) >= min then info.lit = info.lit + 1
+            else need[k] = { x = x, y = y, z = z }; needN = needN + 1 end
+        end
+    end
+    -- what each candidate alone lights to min: the same spread as the model's, from the candidate's cell
+    local function reach(cx, cy, cz, name)
+        local level = emission(name)
+        local got, L, queue, head = {}, { [key(cx, cy, cz)] = level }, { { cx, cy, cz, level, classOf(name) } }, 1
+        while queue[head] do
+            local q = queue[head]
+            head = head + 1
+            local x, y, z, l, c = q[1], q[2], q[3], q[4], q[5]
+            if l >= min and need[key(x, y, z)] then got[#got + 1] = key(x, y, z) end
+            if l - 1 >= min then
+                for _, d in ipairs(SIX) do
+                    local nx, ny, nz = x + d[1], y + d[2], z + d[3]
+                    local nk = key(nx, ny, nz)
+                    if (L[nk] or 0) < l - 1 and nx >= bx1 - 15 and nx <= bx2 + 15 and ny >= by1 - 15 and ny <= by2 + 15
+                        and nz >= bz1 - 15 and nz <= bz2 + 15 then
+                        local nc = f.at(nx, ny, nz)
+                        if not nc.opaque and not (d[2] == 1 and (c.up or nc.down)) and not (d[2] == -1 and (c.down or nc.up)) then
+                            L[nk] = l - 1
+                            queue[#queue + 1] = { nx, ny, nz, l - 1, nc }
+                        end
+                    end
+                end
+            end
+            if head % BREATHE_EVERY == 0 then breathe() end
+        end
+        return got
+    end
+    local covers = {}
+    for i, c in ipairs(candidates) do
+        local x, y, z = xyz(c)
+        covers[i] = reach(x, y, z, fullName(c.name or c[4] or item))
+    end
+    local picks, used = {}, {}
+    while needN > 0 do
+        local best, bestN = nil, 0
+        for i, list in ipairs(covers) do
+            if not used[i] then
+                local n = 0
+                for _, k in ipairs(list) do if need[k] then n = n + 1 end end
+                if n > bestN then best, bestN = i, n end
+            end
+        end
+        if not best then break end
+        used[best] = true
+        local c = candidates[best]
+        local x, y, z = xyz(c)
+        picks[#picks + 1] = { x = x, y = y, z = z, name = fullName(c.name or c[4] or item) }
+        for _, k in ipairs(covers[best]) do
+            if need[k] then need[k], needN = nil, needN - 1; info.covered = info.covered + 1 end
+        end
+    end
+    for _, k in ipairs(tables.sortedKeys(need)) do info.left[#info.left + 1] = need[k] end
+    info.lights = #picks
+    local here = T.pos
+    table.sort(picks, function(a, b)
+        local da, db = T.dist(here, a), T.dist(here, b)
+        if da ~= db then return da < db end
+        return key(a.x, a.y, a.z) < key(b.x, b.y, b.z)
+    end)
+    info.summary = #picks .. " lights bring " .. info.covered .. " cells to light " .. min .. " (" .. info.lit .. " were already)"
+        .. (#info.left > 0 and ("; " .. #info.left .. " no candidate reaches (info.left)") or "")
+    return picks, info
 end
 
 return T

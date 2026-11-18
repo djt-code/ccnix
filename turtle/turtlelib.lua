@@ -3217,7 +3217,7 @@ T.registry = {
     -- tl.lint: a build as a two-tall player meets it
     lint = "tl.lint", walkable = "tl.lint", blockKind = "tl.lint",
     -- tl.light: block light over the map, and where mobs could spawn
-    light = "tl.light", darkCells = "tl.light",
+    light = "tl.light", darkCells = "tl.light", planLights = "tl.light",
     -- tl.craft: recipes, crafting from a chest, and smelting
     craft = "tl.craft", canCraft = "tl.craft", recipe = "tl.craft", addRecipe = "tl.craft",
     smelt = "tl.craft", fuelTicks = "tl.craft", smeltsTo = "tl.craft",

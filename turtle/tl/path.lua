@@ -615,6 +615,7 @@ end
 -- no fuel), at most HOPS_MOST legs.
 local HOP, HOPS_MOST = 16, 64
 local SOLID_TRIES = 4
+local LEG_HEIGHTS = { 0, 3, -3, 6 }
 
 -- Go to goal by legs: from each stop a cell about HOP blocks on toward it (up a little if the map has it solid), a
 -- scan first, T.travel to it without hops.  True and a note saying it hopped; false and why.
@@ -652,7 +653,11 @@ local function hopTo(goal, opts)
                 target.y = target.y + 1
             end
         end
-        local went, why = T.travel(target.x, target.y, target.z, legOpts)
+        local went, why
+        for _, up in ipairs(LEG_HEIGHTS) do              -- (a leg that can't be gone may go a little higher or lower)
+            went, why = T.travel(target.x, target.y + up, target.z, legOpts)
+            if went or d <= HOP then break end
+        end
         if not went then
             return false, "hopped " .. legs .. " legs toward " .. T.posKey(goal) .. " (a search to it gave up), stopped at "
                 .. T.posString() .. ": " .. tostring(why)
