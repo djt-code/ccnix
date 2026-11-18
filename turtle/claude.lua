@@ -771,10 +771,31 @@ local function log(line)
     if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
 end
 
+-- A tool's output cut to MAX_OUTPUT: its start and its end, and how much went between.  (A little over is sent as it
+-- is: the note would cost about what it saves.)
 local function clip(s)
-    if #s <= MAX_OUTPUT then return s end
+    if #s <= MAX_OUTPUT + 200 then return s end
     local half = math.floor(MAX_OUTPUT / 2)
     return s:sub(1, half) .. "\n... (" .. (#s - MAX_OUTPUT) .. " characters left out) ...\n" .. s:sub(-half)
+end
+
+-- Lines printed more than once (a loop printing the same why), each kept where it first came, with how many times:
+-- "no route: walled in (x12)".  A line said once is left as it is.  So repeats don't take the room the rest needs
+-- before the output is clipped.
+local function foldRepeats(s)
+    local lines = text.split(s, "\n", true)
+    local count = {}
+    for _, line in ipairs(lines) do count[line] = (count[line] or 0) + 1 end
+    local out, said = {}, {}
+    for _, line in ipairs(lines) do
+        if count[line] == 1 or line == "" then
+            out[#out + 1] = line
+        elseif not said[line] then
+            said[line] = true
+            out[#out + 1] = line .. " (x" .. count[line] .. ")"
+        end
+    end
+    return table.concat(out, "\n")
 end
 
 local function show(v)
@@ -1114,14 +1135,25 @@ local function topLocals(code)
     return names
 end
 
--- The note for those names, or nil
-local function localsNote(code)
-    local names = topLocals(code)
+-- The note for those names, or nil.  A name the code's world has as a global too isn't gone, and isn't named; nor
+-- is one noted before this session (a throwaway helper written again and again: once is enough).
+local localsNote
+do
+local noted = {}
+function localsNote(code)
+    local names = {}
+    for _, name in ipairs(topLocals(code)) do
+        if rawget(env, name) == nil and not noted[name] then
+            noted[name] = true
+            names[#names + 1] = name
+        end
+    end
     if #names == 0 then return nil end
     if #names == 1 then
         return "note: " .. names[1] .. " was local to this call and is gone; make it global, or keep() it"
     end
     return "note: " .. table.concat(names, ", ") .. " were local to this call and are gone; make them global, or keep() them"
+end
 end
 
 local function runLua(code)
@@ -1140,6 +1172,8 @@ local function runLua(code)
     end
     flushPartial()
     print, printed = realPrint, nil
+    -- (what was printed, its repeats folded; the results are each their own)
+    if #out > 0 then out = { foldRepeats(table.concat(out, "\n")) } end
     if ok then
         for i = 2, results.n do out[#out + 1] = "-> " .. show(results[i]) end
     else
