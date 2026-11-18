@@ -174,6 +174,10 @@ function M.new(opts)
 
     local function enqueue(item)
         if not self.has.chat then return nil, "no chat box or command computer" end
+        -- as the game shows it: CC passes a byte a character, so UTF-8 (an
+        -- arrow a model wrote) would come out as mojibake (convert.fromUTF8)
+        item.text = convert.fromUTF8(item.text)
+        if item.from then item.from = convert.fromUTF8(item.from) end
         if #queue >= 50 then table.remove(queue, 1) end   -- (a flood: the oldest goes)
         queue[#queue + 1] = item
         self.flush()
