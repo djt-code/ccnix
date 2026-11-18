@@ -337,7 +337,12 @@ by one. That way a correction can't hide a regression.
    where it says what stops a tunnel.
 
 ### Phase 2: the sim corrections (D9)
-1. [ ] Each correction its own commit, with its changed checks explained.
+1. [x] Each correction its own commit, with its changed checks explained.
+   Three bugs found and fixed: turtlelib hit a player in the way (now it
+   waits, `T.cfg.waitBeforeHit`), clay balls were valuables (now bulk),
+   and `mine reset` after a reboot mid-move stopped a block from home
+   (now it looks a block off). The in-game endless going-over passes
+   didn't reproduce with the corrected water: still open.
 
 ### Phase 3: release (on the user's ok)
 1. [ ] Version bump (minor), UNTESTED.md section with its issue, release.

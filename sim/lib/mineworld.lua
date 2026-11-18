@@ -37,10 +37,20 @@ local W = {}
 local k = M.key
 local ROCK = { "minecraft:stone", "minecraft:stone", "minecraft:deepslate", "minecraft:andesite",
                "minecraft:diorite", "minecraft:granite", "minecraft:tuff" }
+-- MIXED_ROCK: patches of other ground, as the field has it (a cavern of
+-- dripstone ran the turtle out of filler): every few blocks along the
+-- tunnel a patch of one of these, a few blocks across.
+local OTHER = { "minecraft:dripstone_block", "minecraft:calcite", "minecraft:clay", "minecraft:moss_block",
+                "minecraft:mud", "minecraft:dirt", "minecraft:gravel" }
 local function get(x, y, z)
     local b = W[k(x, y, z)]
     if b ~= nil then return b or nil end
     if z < 1 then return nil end                    -- open space behind the tunnel face
+    if MIXED_ROCK then
+        local px, py, pz = math.floor(x / 3), math.floor(y / 3), math.floor(z / 4)
+        local h = (px * 73 + py * 37 + pz * 19) % 11
+        if h < #OTHER then return { name = OTHER[h + 1] } end
+    end
     return { name = ROCK[(x * 31 + y * 17 + z * 13) % #ROCK + 1] }
 end
 local function set(x, y, z, b) W[k(x, y, z)] = b or false end
@@ -60,8 +70,16 @@ local DROP = {
     ["minecraft:short_grass"] = "minecraft:wheat_seeds", ["minecraft:tall_grass"] = "minecraft:wheat_seeds",
     ["minecraft:fern"] = "minecraft:wheat_seeds", ["minecraft:large_fern"] = "minecraft:wheat_seeds",
     ["minecraft:dead_bush"] = "minecraft:stick",
+    -- as the game drops them with a plain pickaxe (counts below)
+    ["minecraft:clay"] = "minecraft:clay_ball", ["minecraft:copper_ore"] = "minecraft:raw_copper",
+    ["minecraft:lapis_ore"] = "minecraft:lapis_lazuli", ["minecraft:redstone_ore"] = "minecraft:redstone",
 }
-local FALLS = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true }
+-- How many a block drops, where it's more than one: clay 4; copper 2-5,
+-- lapis 4-9 and redstone 4-5 taken at their middle (the sim has no luck)
+local DROP_COUNT = { ["minecraft:clay"] = 4, ["minecraft:copper_ore"] = 3, ["minecraft:lapis_ore"] = 6,
+                     ["minecraft:redstone_ore"] = 4 }
+local FALLS = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true, ["minecraft:red_sand"] = true,
+                ["minecraft:suspicious_sand"] = true, ["minecraft:suspicious_gravel"] = true }
 -- A torch block: standing (minecraft:torch) or, hung on a wall, as the
 -- game names it then, minecraft:wall_torch.
 local TORCH_BLOCK = { ["minecraft:torch"] = true, ["minecraft:wall_torch"] = true }
@@ -80,8 +98,12 @@ function Mine.setup(stock)
     Mine.dirs = {}
     turtle._ccnixWorld = nil
     if turtle._ccnixWrap then turtle._ccnixWrap.listeners = {} end
-    Mine.ENTITIES, Mine.GROUND, BURNT, CRAFTED = {}, {}, {}, {}
-    THROWN, CHEST_SPILLED, SLEPT, ONSLEEP = 0, 0, 0, nil
+    Mine.ENTITIES, Mine.GROUND, Mine.MOBS, BURNT, CRAFTED = {}, {}, {}, {}, {}
+    OBSTRUCTED, HITS = 0, 0
+    THROWN, CHEST_SPILLED, SLEPT, ONSLEEP, LAST_SCAN_AT, COOLED = 0, 0, 0, nil, nil, 0
+    -- as in the field: a chunk controller on the left, the pickaxe on the
+    -- right (a scenario sets EQ after this for anything else)
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     set(0, 1, 0, Mine.chest(stock))                 -- valuables and supplies
     set(0, -1, 0, Mine.chest())                     -- bulk
 end
@@ -143,10 +165,11 @@ local function gravity(x, y, z)
 end
 
 --------------------------------------------------------------------------
--- Water, roughly as Minecraft runs it: an open block (not the turtle's)
--- beside or under water fills: a source if two sources sit beside it on
--- something solid or a source, falling water under water, flowing water
--- beside water that isn't spent; flowing water nothing feeds drains away.
+-- Water, as Minecraft runs it: it spreads down first, and sideways only
+-- toward the nearest drop within 4 blocks (see spread); a block it
+-- spreads to becomes a source if two sources sit beside it on something
+-- solid or a source, falling water under water, flowing water beside
+-- water that isn't spent; flowing water nothing feeds drains away.
 -- It takes time: water reacts to a change next to it 5 ticks on, and each
 -- turtle move, turn, dig or place takes 8.  A turtle moving into flowing
 -- water pushes it out; one moving into a source is waterlogged and leaves
@@ -192,9 +215,11 @@ local function due(a, b, c, t)
 end
 -- Something changed at (x,y,z) now: the water there and next to it ticks
 -- 5 ticks on.
+local lavaWake                  -- (set below, with the lava)
 local function flow(x, y, z)
     due(x, y, z, clock + 5)
     for _, d in ipairs(M.SIDES6) do due(x + d[1], y + d[2], z + d[3], clock + 5) end
+    if LAVA_FLOWS and lavaWake then lavaWake(x, y, z) end
 end
 Mine.flow = flow
 -- The open block (not the turtle's) at (a,b,c) gets the water due it.
@@ -214,11 +239,154 @@ local function fillAt(a, b, c, t)
     set(a, b, c, new)
     due(a, b, c, t + 5)
 end
+-- Where water goes from a block of it, as Minecraft's FlowingFluid.spread
+-- has it: down, if the block under it is open (and then nowhere else);
+-- otherwise, if it's a source or isn't over falling water, sideways, but
+-- only the way (or ways) to the nearest drop within 4 blocks (the slope
+-- search), or every way if there's none.  Never up.
+local function wateryOpen(x, y, z)              -- water may pass through: open, or flowing water
+    if z < 1 or (x == P.x and y == P.y and z == P.z) then return false end
+    local b = get(x, y, z)
+    return b == nil or isTorch(b) or (isWater(b) and b.level ~= 0)
+end
+local function opposite(i)
+    local d = M.SIDES4[i]
+    for j, e in ipairs(M.SIDES4) do if e[1] == -d[1] and e[2] == -d[2] then return j end end
+end
+-- How far from (x,y,z) the nearest drop is, going through cells open(),
+-- up to `reach` blocks (1000: none), not back the way it came.
+local function slopeFrom(open, reach, x, y, z, depth, back)
+    local best = 1000
+    for i, d in ipairs(M.SIDES4) do
+        if i ~= back then
+            local nx, nz = x + d[1], z + d[2]
+            if open(nx, y, nz) then
+                if open(nx, y - 1, nz) then return depth end
+                if depth < reach then best = math.min(best, slopeFrom(open, reach, nx, y, nz, depth + 1, opposite(i))) end
+            end
+        end
+    end
+    return best
+end
+-- The sides a fluid at (a,b,c) spreads to: those toward the nearest drop.
+local function sidesToward(open, reach, a, b, c)
+    local dist, best = {}, 1000
+    for i, d in ipairs(M.SIDES4) do
+        local nx, nz = a + d[1], c + d[2]
+        if open(nx, b, nz) then
+            dist[i] = open(nx, b - 1, nz) and 0 or slopeFrom(open, reach, nx, b, nz, 1, opposite(i))
+            best = math.min(best, dist[i])
+        end
+    end
+    local out = {}
+    for i, d in ipairs(M.SIDES4) do
+        if dist[i] and dist[i] == best then out[#out + 1] = d end
+    end
+    return out
+end
+local function spread(a, b, c, t)
+    if wateryOpen(a, b - 1, c) then fillAt(a, b - 1, c, t); return end
+    for _, d in ipairs(sidesToward(wateryOpen, 4, a, b, c)) do fillAt(a + d[1], b, c + d[2], t) end
+end
+
+--------------------------------------------------------------------------
+-- Lava, as the overworld has it (LAVA_FLOWS; it ticks with the water):
+-- every 30 ticks it falls if it can, else spreads sideways toward the
+-- nearest drop within 2 blocks, 2 levels a block (3 blocks from a source),
+-- and makes no new sources.  Touching water it hardens, a source into
+-- obsidian and flowing lava into cobblestone; falling onto water it makes
+-- stone.  A torch it reaches burns.
+--------------------------------------------------------------------------
+local LAVA_NAME = "minecraft:lava"
+local function llevel(b) if b and b.name == LAVA_NAME then return b.level or 0 end end
+local lavaPending = {}
+local function lavaDue(a, b, c, t)
+    if not llevel(get(a, b, c)) then return end
+    local key = k(a, b, c)
+    local q = lavaPending[key]
+    if not q or q[1] > t then lavaPending[key] = { t, a, b, c } end
+end
+local function lavaOpen(x, y, z)
+    if z < 1 or (x == P.x and y == P.y and z == P.z) then return false end
+    local b = get(x, y, z)
+    return b == nil or isTorch(b) or (llevel(b) ~= nil and b.level ~= 0)
+end
+local function lavaFor(x, y, z)
+    if llevel(get(x, y + 1, z)) then return { name = LAVA_NAME, level = 8 } end
+    local feed
+    for _, d in ipairs(M.SIDES4) do
+        local lv = llevel(get(x + d[1], y, z + d[2]))
+        if lv then
+            local l = lv >= 8 and 0 or lv
+            if l + 2 <= 6 then feed = math.min(feed or 99, l + 2) end
+        end
+    end
+    return feed and { name = LAVA_NAME, level = feed } or nil
+end
+local function hardens(a, b, c)
+    local lv = llevel(get(a, b, c))
+    if not lv then return false end
+    for _, d in ipairs(M.SIDES6) do
+        if d[2] ~= -1 and isWater(get(a + d[1], b + d[2], c + d[3])) then
+            set(a, b, c, { name = lv == 0 and "minecraft:obsidian" or "minecraft:cobblestone" })
+            return true
+        end
+    end
+    return false
+end
+local function lavaFill(a, b, c, t)
+    local cur = get(a, b, c)
+    if c < 1 or (a == P.x and b == P.y and c == P.z) or not (cur == nil or isTorch(cur)) then return end
+    local new = lavaFor(a, b, c)
+    if not new then return end
+    if isTorch(cur) then BURNT_TORCHES = (BURNT_TORCHES or 0) + 1 end
+    if BOX and a >= BOX[1] and a <= BOX[2] and b >= BOX[3] and b <= BOX[4] and k(a, b, c) ~= LAST_DUG then
+        LAVA_IN = (LAVA_IN or 0) + 1
+    end
+    set(a, b, c, new)
+    lavaDue(a, b, c, t + 30)
+end
+local function lavaSpread(a, b, c, t)
+    if isWater(get(a, b - 1, c)) then set(a, b - 1, c, { name = "minecraft:stone" }); return end
+    if lavaOpen(a, b - 1, c) then lavaFill(a, b - 1, c, t); return end
+    for _, d in ipairs(sidesToward(lavaOpen, 2, a, b, c)) do lavaFill(a + d[1], b, c + d[2], t) end
+end
+local function lavaTicks()
+    for _ = 1, 100000 do
+        local first
+        for key, q in pairs(lavaPending) do
+            if q[1] <= clock and (not first or q[1] < first[1] or (q[1] == first[1] and key < first[5])) then
+                first = q
+                q[5] = key
+            end
+        end
+        if not first then return end
+        local t, a, b, c = first[1], first[2], first[3], first[4]
+        lavaPending[k(a, b, c)] = nil
+        local cur = get(a, b, c)
+        if llevel(cur) and not (a == P.x and b == P.y and c == P.z) and not hardens(a, b, c) then
+            if cur.level ~= 0 then
+                local new = lavaFor(a, b, c)
+                if (new and new.level) ~= cur.level then
+                    set(a, b, c, new)
+                    for _, d in ipairs(M.SIDES6) do lavaDue(a + d[1], b + d[2], c + d[3], t + 30) end
+                end
+            end
+            if llevel(get(a, b, c)) then lavaSpread(a, b, c, t) end
+        end
+    end
+end
+
 -- Let `ticks` pass (a turtle action's 8 by default).  A water block that
 -- ticks drains if nothing feeds it (or changes level), and spreads into
 -- the open blocks next to it, which tick 5 ticks later.
+lavaWake = function(x, y, z)
+    lavaDue(x, y, z, clock + 30)
+    for _, d in ipairs(M.SIDES6) do lavaDue(x + d[1], y + d[2], z + d[3], clock + 30) end
+end
 local function waterStep(ticks)
     clock = clock + (ticks or 8)
+    if LAVA_FLOWS then lavaTicks() end
     for _ = 1, 100000 do
         local first
         for key, q in pairs(pending) do      -- the earliest; ties by place, so runs repeat
@@ -239,16 +407,14 @@ local function waterStep(ticks)
                     for _, d in ipairs(M.SIDES6) do due(a + d[1], b + d[2], c + d[3], t + 5) end
                 end
             end
-            if wlevel(get(a, b, c)) then
-                for _, d in ipairs(M.SIDES6) do fillAt(a + d[1], b + d[2], c + d[3], t) end
-            end
+            if wlevel(get(a, b, c)) then spread(a, b, c, t) end
         end
     end
 end
 -- Let the water settle (at the end of a run).
 function Mine.settleWater()
-    for _ = 1, 400 do
-        if next(pending) == nil then return end
+    for _ = 1, 2000 do
+        if next(pending) == nil and (not LAVA_FLOWS or next(lavaPending) == nil) then return end
         waterStep(5)
     end
 end
@@ -345,13 +511,18 @@ local function dig(x, y, z)
     LAST_DUG = k(x, y, z)
     if TRAVELLING then TRAVEL_DIGS = (TRAVEL_DIGS or 0) + 1 end
     DIGS = (DIGS or 0) + 1
-    if b.name ~= "minecraft:glow_lichen" then M.addItem(Mine, DROP[b.name] or b.name, 1) end   -- (lichen needs shears)
+    if b.name ~= "minecraft:glow_lichen" then                    -- (lichen needs shears)
+        M.addItem(Mine, DROP[b.name] or b.name, DROP_COUNT[b.name] or 1)
+    end
     gravity(x, y, z)
-    if WATERY then flow(x, y, z); waterStep() end
+    if WATERY or LAVA_FLOWS then flow(x, y, z); waterStep() end
     return true
 end
 
 local function solid(b) return b and not passable(b) and not isTorch(b) end
+-- What a torch can stand on or hang on: solid, and not a chest (its top
+-- and sides aren't full faces).
+local function holdsTorch(b) return solid(b) and not b.inv end
 -- A torch needs something under it or, in front, the block beyond to
 -- hang on.  Ore drops, fuel and gems aren't blocks.
 local function place(x, y, z, dir)
@@ -369,11 +540,12 @@ local function place(x, y, z, dir)
     if not passable(get(x, y, z)) then return false end
     local on, hangsOn                      -- what a torch hangs on or stands on; hung on a wall
     if it.name == "minecraft:torch" then
+        if isWater(get(x, y, z)) then return false end           -- (a torch won't go in water)
         local bx, bz = x + M.DX[P.d], z + M.DZ[P.d]
-        local hangs = dir == "front" and solid(get(bx, y, bz))
+        local hangs = dir == "front" and holdsTorch(get(bx, y, bz))
         hangsOn = hangs
         if hangs then on = k(bx, y, bz)
-        elseif solid(get(x, y - 1, z)) then on = k(x, y - 1, z)
+        elseif holdsTorch(get(x, y - 1, z)) then on = k(x, y - 1, z)
         else return false end
     end
     if it.name:find("raw_") or M.FUEL_VALUE[it.name] or it.name == "minecraft:diamond"
@@ -383,7 +555,7 @@ local function place(x, y, z, dir)
     else set(x, y, z, { name = it.name, on = on }) end
     M.useSel(Mine)
     PLACED = (PLACED or 0) + 1
-    if WATERY then flow(x, y, z); waterStep() end
+    if WATERY or LAVA_FLOWS then flow(x, y, z); waterStep() end
     return true
 end
 
@@ -423,6 +595,16 @@ end
 -- was in it falls on the ground.
 local function attack(x, y, z)
     local key = k(x, y, z)
+    local mob = Mine.MOBS and Mine.MOBS[key]
+    if mob then                                    -- a mob or player hit: one that can be, goes in so many
+        HITS = (HITS or 0) + 1
+        mob.hit = (mob.hit or 0) + 1
+        if mob.hits then
+            mob.hits = mob.hits - 1
+            if mob.hits <= 0 then Mine.MOBS[key] = nil end
+        end
+        return true
+    end
     local e = Mine.ENTITIES[key]
     if not e then return false end
     Mine.ENTITIES[key] = nil
@@ -488,7 +670,18 @@ end
 Mine.TABLE = "minecraft:crafting_table"
 
 local function moved(ox, oy, oz)
-    if WATERY then
+    -- REBOOT_AFTER: the computer goes down right after this many moves, the
+    -- move made but not yet saved (a chunk unload can't be held back as a
+    -- Ctrl+T is, see T.run): the saved position is a block behind
+    if REBOOT_AFTER then
+        REBOOT_AFTER = REBOOT_AFTER - 1
+        if REBOOT_AFTER <= 0 then
+            REBOOT_AFTER = nil
+            STOPPED_HERE = true
+            error("Terminated", 0)
+        end
+    end
+    if WATERY or LAVA_FLOWS then
         local b = get(P.x, P.y, P.z)
         if isWater(b) and b.level ~= 0 then set(P.x, P.y, P.z, nil) end   -- pushed out
         flow(ox, oy, oz)
@@ -534,8 +727,26 @@ SCANS = 0
 turtle = M.merge(
     M.movementApi(Mine, passable, {
         onMove = function(...) if ONMOVE then ONMOVE(...) end end,
+        -- a minecart (Mine.ENTITIES) or a mob or player (Mine.MOBS[key] =
+        -- { stay = seconds a player stays in the way, from the first
+        -- bump; hits = hits a mob takes; hit: hits it got }) in the way
+        blocked = function(x, y, z)
+            local key = k(x, y, z)
+            if Mine.ENTITIES[key] then OBSTRUCTED = (OBSTRUCTED or 0) + 1; return true end
+            local mob = Mine.MOBS and Mine.MOBS[key]
+            if not mob then return false end
+            if mob.stay then
+                mob.from = mob.from or (SLEPT or 0)
+                if (SLEPT or 0) - mob.from >= mob.stay then         -- (it has stepped aside)
+                    Mine.MOBS[key] = nil
+                    return false
+                end
+            end
+            OBSTRUCTED = (OBSTRUCTED or 0) + 1
+            return true
+        end,
         moved = moved,
-        turned = function() if WATERY then waterStep() end end,
+        turned = function() if WATERY or LAVA_FLOWS then waterStep() end end,
     }),
     M.lookingApi(Mine, inspectAt, function(b) return not passable(b) end),
     M.actingApi(Mine, "dig", dig),
@@ -559,6 +770,13 @@ turtle = M.merge(
 local function geoScanner()
     return {
         scanBlocks = function(r)                -- `scan` in AP's docs; this on the user's server
+            -- SCAN_COOLDOWN: seconds before it scans again (time passes in
+            -- the sim only by sleeping); sooner, it says so and scans nothing
+            if SCAN_COOLDOWN and LAST_SCAN_AT and (SLEPT or 0) - LAST_SCAN_AT < SCAN_COOLDOWN then
+                COOLED = (COOLED or 0) + 1
+                return nil, "scanBlocks is on cooldown"
+            end
+            LAST_SCAN_AT = SLEPT or 0
             SCANS = SCANS + 1
             local out = {}
             for tx = -r, r do for ty = -r, r do for tz = -r, r do
@@ -575,8 +793,8 @@ local function geoScanner()
                         out[#out + 1] = { x = tz + 1000, y = ty + 1000, z = tx + 1000, name = b.name, tags = tags }
                     else
                         local f, rt = (P.d + SCAN_TURN) % 4, (P.d + SCAN_TURN + 1) % 4
+                        -- (no block state: AP's scan gives none, ADR-0012)
                         out[#out + 1] = { x = tz + 0.0, y = ty + 0.0, z = tx + 0.0, name = b.name, tags = tags,
-                            state = { waterlogged = b.waterlogged, level = b.level },
                             -- SCAN_TURN: a scanner whose idea of forward is turned
                             f = tx * M.DX[f] + tz * M.DZ[f] + 0.0, u = ty + 0.0,
                             r = tx * M.DX[rt] + tz * M.DZ[rt] + 0.0 }
@@ -682,7 +900,7 @@ function Mine.runner(proj)
     return M.runner(Mine, proj .. "/turtle/mine.lua", {
         before = function() SPLIT, DIGS, SUPPLIES_FROM = 0, 0, nil end,
         after = function()
-            if WATERY then Mine.settleWater() end
+            if WATERY or LAVA_FLOWS then Mine.settleWater() end
             stoppedHere, STOPPED_HERE = STOPPED_HERE, nil
         end,
         stats = function()

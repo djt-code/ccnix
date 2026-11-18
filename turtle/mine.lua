@@ -380,7 +380,7 @@ for _, n in ipairs({ "cobblestone", "cobbled_deepslate", "stone", "deepslate", "
         "red_sandstone", "andesite", "diorite", "granite", "tuff", "calcite",
         "dripstone_block", "pointed_dripstone", "netherrack", "blackstone", "basalt",
         "smooth_basalt", "soul_sand", "soul_soil", "end_stone", "flint", "mud",
-        "clay", "moss_block", "terracotta", "magma_block" }) do
+        "clay", "clay_ball", "moss_block", "terracotta", "magma_block" }) do      -- (clay dug gives clay balls)
     BULK["minecraft:" .. n] = true
 end
 BULK_TAGS = {
@@ -3348,6 +3348,35 @@ function where()
     print("Fuel: " .. tostring(turtle.getFuelLevel()) .. ".")
 end
 
+-- Home h's chests where the turtle is (it faces the home's way first).
+function chestsAt(h)
+    T.face(h.face)
+    if h.k == 0 then return containerOn("top") and containerOn("bottom") end
+    return containerOn("front") and containerOn(h.bulk)
+end
+
+-- Not at home h's chests where it thinks it is: a block off each way
+-- (through open cells only, nothing dug), looking for them.  Found, the
+-- position is put right (and saved): true.  Not found, it's back where it
+-- began: false.
+function homeNearby(h)
+    for _, d in ipairs({ 2, 0, 1, 3, "up", "down" }) do
+        local ok = look(d)
+        if not ok and T.moveDir(d) then
+            if chestsAt(h) then
+                print(string.format("The chests are a block off from where it thought: its position is put right"
+                    .. " (it went down before saving a move)."))
+                T.pos.x, T.pos.y, T.pos.z = h.x, h.y, h.z
+                T.savePos()
+                return true
+            end
+            T.moveDir(OPP[d])
+            T.face(h.face)
+        end
+    end
+    return false
+end
+
 function main()
 if doWhere then where(); return end
 if doReset and forceHere then T.setHomeHere(); return end
@@ -3413,10 +3442,12 @@ if doReset then
     end)
     digLimit = nil
     -- there means its chests are there
-    local there = ok and T.pos.x == 0 and T.pos.y == 0 and T.pos.z == target.z
-    if there then
-        if target.k == 0 then there = containerOn("top") and containerOn("bottom")
-        else there = containerOn("front") and containerOn(target.bulk) end
+    local there = ok and T.pos.x == 0 and T.pos.y == 0 and T.pos.z == target.z and chestsAt(target)
+    -- the computer going down right after a move, before it was saved (a
+    -- chunk unloading), leaves the saved position a block behind: the
+    -- chests are then a block off, the way of that move
+    if ok and not there and T.pos.x == 0 and T.pos.y == 0 and T.pos.z == target.z then
+        there = homeNearby(target)
     end
     if not ok or not there then
         if not ok and (type(err) ~= "table" or not err.lost) then error(err, 0) end

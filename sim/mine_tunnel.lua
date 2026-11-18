@@ -624,7 +624,7 @@ setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, 
 local FIELD = { { -4, 1, 6 }, { -5, 1, 8 }, { -4, 0, 10 }, { -6, 2, 11 }, { -5, 1, 13 }, { -3, 2, 14 }, { -6, 0, 15 } }
 for _, o in ipairs(FIELD) do set(o[1], o[2], o[3], ore("minecraft:iron_ore")) end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { right = "minecraft:diamond_pickaxe" }   -- (no chunk controller here: the scanner swaps onto the free side)
 FUEL, DRY, SCANS = 2000, 0, 0
 local entries = 0
 ONMOVE = function(x, y, z, nx, ny, nz)
@@ -656,7 +656,7 @@ local function mapHas(lib, x, y, z, name)
 end
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 run("3", "3", "12")
 local tlib = require("turtlelib")
@@ -692,7 +692,7 @@ check("a second run adds to the map: the far part is in it, the first part still
 
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 local defaults, chosen = {}, { ["mine.map"] = false }
 settings = { define = function(name, o) defaults[name] = o.default end,
@@ -721,7 +721,7 @@ for _, case in ipairs({ { "a fetch through a lit niche", true, THROUGH, "TORCHES
     if case[2] then table.insert(chestAt(0, 1, 0), { name = SCANNER, count = 1 }) end
     for _, o in ipairs(case[3]) do set(o[1], o[2], o[3], ore(o[4])) end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, SCANS, TORCHES_DUG, TORCHES_DROPPED = 2000, 0, 0, 0, 0
     run("3", "3", "60")
     local gone = 0
@@ -751,7 +751,7 @@ for _, it in ipairs({ { name = "minecraft:cobblestone", count = 64 }, { name = "
     table.insert(chestAt(0, -1, 0), it)                 -- bulk to seal with
 end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, PLACED, SCANS = 300, 0, 0, 0
 WATERY = true
 run("3", "3", "30")
@@ -780,7 +780,7 @@ check("back at the start", atStart())
 --      heading were off): it says so and stops trusting scans
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 64 } })
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, DRY, SCANS = 2000, 0, 0
 SCAN_TURN = 1
 run("3", "3", "30")
@@ -800,7 +800,7 @@ local function wetWalls(withScanner)
     for x = 3, 6 do for y = -1, 3 do for z = 6, 30 do set(x, y, z, { name = "minecraft:water", level = 0 }) end end end
     for x = -1, 7 do for z = 5, 31 do set(x, 4, z, { name = "minecraft:stone" }); set(x, -2, z, { name = "minecraft:stone" }) end end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, PLACED, SCANS, WASHED, INGRESS = 3000, 0, 0, 0, 0, 0
     WATERY, BOX = true, { 0, 2, 0, 2 }
     run("3", "3", "36")
@@ -835,7 +835,7 @@ local function lichenWorld(withScanner)
     set(1, 4, 22, { name = "minecraft:water", level = 0 }); set(1, 5, 22, { name = "minecraft:water", level = 0 })
     set(3, 0, 26, { name = "minecraft:glow_lichen" })                          -- dry, in the right wall
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, WASHED, INGRESS, SCANS = 3000, 0, 0, 0, 0
     WATERY, BOX = true, { 0, 2, 0, 2 }
     run("3", "3", "30")
@@ -862,7 +862,7 @@ lichenWorld(true)
 setup({ { name = SCANNER, count = 1 }, { name = "minecraft:chest", count = 4 } })
 for x = -5, -6, -1 do for y = 0, 1 do set(x, y, 10, ore("minecraft:coal_ore")) end end
 startAt(); Mine.inv, Mine.files = {}, {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 FUEL, LOWEST, DRY = 250, math.huge, 0
 run("3", "3", "40")
 check("went for the coal when low", logHas("going for the coal"))
@@ -880,7 +880,7 @@ local function dugTunnel()
     for _, z in ipairs({ 16, 32 }) do set(-1, 0, z, chest()); set(0, -1, z, chest()) end
     Mine.files = { ["mine.job"] = "3 3 0 16 2 active" }    -- homes at 16 and 32: dug to 32
     Mine.inv = {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY = 500, 0
 end
 dugTunnel()
@@ -1166,8 +1166,11 @@ local function bridged(water)
     end
     WATERY = water
     if water then
-        set(3, 1, 22, { name = "minecraft:water", level = 0 })
-        flow(3, 1, 22)
+        -- (in the near wall: water from the far one drains into the pit under
+        -- columns 1-2 and never crosses the floor lane, so it isn't seen,
+        -- as the dry pit isn't)
+        set(-1, 1, 22, { name = "minecraft:water", level = 0 })
+        flow(-1, 1, 22)
         settleWater()
     end
     startAt()
@@ -1193,7 +1196,7 @@ for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do set(x, y, z, nil) end end end
 for _, z in ipairs({ 64, 128 }) do set(-1, 0, z, chest()); set(0, -1, z, chest()) end
 Mine.files = { ["mine.job"] = "3 3 128 64 2 active" }
 Mine.inv = {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 for _, it in ipairs(stock(2, 64, 16)) do table.insert(chestAt(0, 1, 0), it) end
 table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
 table.insert(chestAt(0, -1, 64), { name = "minecraft:cobblestone", count = 64 })
@@ -1211,7 +1214,7 @@ run("--resume")
 WATERY = false
 local farAfter = 0
 for x = 0, 2 do for y = 0, 2 do for z = 1, 128 do if isWater(get(x, y, z)) then farAfter = farAfter + 1 end end end end
-check("water through the far wall of a 64-block segment: dried", farWet > 50 and farAfter == 0,
+check("water through the far wall of a 64-block segment: dried", farWet > 20 and farAfter == 0,
     farWet .. " wet before, " .. farAfter .. " after")
 check("... going back over just where it was (the whole segment again each time: 1338 moves)", Mine.workMoves() < 1300,
     Mine.workMoves() .. " moves")
@@ -1280,7 +1283,7 @@ local function holeWorld()
     setup(stock(4, 64, 64))
     for _ = 1, 3 do table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 }) end
     startAt(); Mine.inv, Mine.files = {}, {}
-    EQ = { right = "minecraft:diamond_pickaxe" }
+    EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY = 3000, 0
 end
 holeWorld()
@@ -1377,7 +1380,7 @@ for k = 1, 6 do
 end
 Mine.files = { ["mine.job"] = "3 3 384 64 6 active" }
 Mine.inv = {}
-EQ = { right = "minecraft:diamond_pickaxe" }
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
 startAt()
 Mine.files[".turtlepos"] = "0 0 0 0 flat"
 FUEL, DRY = 500, 0
@@ -1551,3 +1554,112 @@ check("their spare reach past the walls: ore 5 out of each fetched, and under th
     oreGone(-5, 1, 8) and oreGone(28, 1, 8) and oreGone(11, -4, 8))
 checkFloor(0, 23, -1, 1, 16)
 check("back at the start", atStart())
+
+-- 18. entities in the way, as in game (a move into one fails, "Movement
+--     obstructed"): a player standing in the tunnel's start column for 2
+--     seconds, a zombie in a lane (gone after 3 hits) and a minecart in
+--     the tunnel: it waits for the player (who isn't hit), hits the
+--     zombie and the minecart once they don't move, and digs the tunnel
+--     out
+setup(stock(4, 64))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 1000, 1000, 0
+local player = { stay = 2 }
+Mine.MOBS["0,0,3"] = player
+Mine.MOBS["0,0,6"] = { hits = 3 }
+Mine.ENTITIES["2,0,9"] = { item = "minecraft:minecart" }
+set(2, 0, 9, nil)                                   -- (an open cell, as in a mineshaft)
+run("3", "3", "12")
+check("in the way: a player, a zombie and a minecart: the tunnel dug through", leftIn(0, 2, 0, 2, 1, 12) == 0
+    and jobState() == "done", leftIn(0, 2, 0, 2, 1, 12) .. " blocks left, " .. tostring(jobState()))
+check("...the player waited for, never hit", (player.hit or 0) == 0, tostring(player.hit or 0) .. " hits")
+check("...the zombie hit until gone", Mine.MOBS["0,0,6"] == nil, tostring(HITS) .. " hits in all")
+check("back at the start", atStart())
+
+-- 19. ground as the field has it (MIXED_ROCK: patches of dripstone,
+--     calcite, clay, moss, mud, dirt and gravel among the stone), with
+--     copper, lapis and redstone ore that drop several items each: a
+--     3x3 tunnel 48 long, homes every 16.  Everything the patches give
+--     is bulk (clay gives clay balls, four a block), so it stays in the
+--     homes' bulk chests and none of it in a valuables chest or at the
+--     start; the ores' drops come back to the start
+setup(stock(10, 64))
+MIXED_ROCK = true
+set(1, 1, 20, ore("minecraft:copper_ore")); set(1, 1, 30, ore("minecraft:lapis_ore"))
+set(1, 1, 40, ore("minecraft:redstone_ore"))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 3000, 3000, 0
+run("3", "3", "48", "--spacing", "16")
+MIXED_ROCK = nil
+local clayDug = false
+for z = 1, 48 do for x = 0, 2 do for y = 0, 2 do if get(x, y, z) == nil then clayDug = true end end end end
+local _, top19 = contents(chestAt(0, 1, 0))
+check("mixed ground: the ores' drops at the start (3 raw copper, 6 lapis, 4 redstone)", (top19["minecraft:raw_copper"] or 0) == 3
+    and (top19["minecraft:lapis_lazuli"] or 0) == 6 and (top19["minecraft:redstone"] or 0) == 4,
+    (contents(chestAt(0, 1, 0))))
+local stray = {}
+for _, z in ipairs({ 0, 16, 32 }) do
+    local c = z == 0 and chestAt(0, 1, 0) or chestAt(-1, 0, z)
+    local _, n = contents(c)
+    for _, name in ipairs({ "minecraft:clay_ball", "minecraft:mud", "minecraft:moss_block", "minecraft:calcite",
+                            "minecraft:dripstone_block", "minecraft:dirt", "minecraft:gravel" }) do
+        if n[name] then stray[#stray + 1] = n[name] .. " " .. name .. " at z=" .. z end
+    end
+end
+check("...none of what the patches give in a valuables chest or at the start", #stray == 0, table.concat(stray, ", "))
+check("...done, back at the start", jobState() == "done" and atStart(), tostring(jobState()))
+
+-- 20. the computer goes down (a chunk unloading) right after a move,
+--     before the move is saved, in the middle of the second segment: the
+--     saved position is a block behind.  `mine reset` gets it back to
+--     its last home all the same (it checks the heading and the home's
+--     chests there), and `mine --resume` finishes the tunnel
+setup(stock(10, 64))
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 3000, 3000, 0
+REBOOT_AFTER = 260
+run("3", "3", "32", "--spacing", "16")
+local wentDown = REBOOT_AFTER == nil and not atStart()
+run("reset")
+check("down a move after its last save: `mine reset` back at its last home", wentDown and logHas("^At home 1 %(z=16%)"),
+    tostring(wentDown) .. "; at " .. Mine.P.x .. "," .. Mine.P.y .. "," .. Mine.P.z)
+run("--resume")
+check("...and `mine --resume` finishes the tunnel", leftIn(0, 2, 0, 2, 1, 32) == 0 and jobState() == "done" and atStart(),
+    leftIn(0, 2, 0, 2, 1, 32) .. " blocks left, " .. tostring(jobState()))
+
+-- 21. the Geo Scanner's cooldown (SCAN_COOLDOWN, 2 s here: AP's own isn't
+--     known yet): a scan too soon after the last one says so, and mine
+--     waits a second and scans again, as many times as it takes; what
+--     the scans show is fetched as before
+SCAN_COOLDOWN = 2
+scanWorld(true)
+SCAN_COOLDOWN = nil
+check("the scanner on cooldown: it waited and scanned again", (COOLED or 0) > 0 and logHas("lined up")
+    and oreGone(-5, 1, 12) and oreGone(7, 0, 20), (COOLED or 0) .. " too soon, " .. SCANS .. " scans")
+
+-- 22. lava that flows (LAVA_FLOWS, as in game: the field saw it pour in
+--     from above): a shaft over the tunnel's ceiling with a lava source at
+--     its top, the lava fallen down it onto the ceiling.  Digging the
+--     top row under it lets it pour in: mine seals it, and leaves no lava
+--     touching the tunnel; and a pocket of lava in a wall that runs out
+--     when the wall's dug is sealed too
+setup(stock(4, 64))
+for y = 3, 7 do set(1, y, 10, nil) end
+set(1, 8, 10, { name = "minecraft:lava", level = 0 })
+set(4, 1, 14, { name = "minecraft:lava", level = 0 }); set(3, 1, 14, nil)     -- (behind the wall, an open cell before it)
+LAVA_FLOWS = true
+flow(1, 8, 10); flow(4, 1, 14)
+settleWater()
+local fallen = get(1, 3, 10)
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 2000, 2000, 0
+BOX, LAVA_IN = { 0, 2, 0, 2 }, 0
+run("3", "3", "16")
+LAVA_FLOWS, BOX = nil, nil
+check("lava from a shaft above: it had fallen onto the ceiling", fallen and fallen.name == "minecraft:lava",
+    tostring(fallen and fallen.name))
+checkLava(16)
+check("...the tunnel dug and no lava in it", leftIn(0, 2, 0, 2, 1, 16) == 0, leftIn(0, 2, 0, 2, 1, 16) .. " blocks left, "
+    .. (LAVA_IN or 0) .. " lava flowed in")
+check("...done, back at the start", jobState() == "done" and atStart(), tostring(jobState()))
+check("never moved on an empty tank", DRY == 0, "tried " .. DRY)
