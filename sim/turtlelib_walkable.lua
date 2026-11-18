@@ -253,6 +253,28 @@ do
         and #ofRule(warnings, "light") == 0, texts(warnings))
 end
 
+-- ADR-0015 D8.6: T.walkable{ with = ... }: what-if cells in place of the map's
+do
+    local blocks = cube(-2, 0, -2, 6, 0, 6, STONE)
+    add(blocks, cube(-2, 1, 3, 6, 2, 3, STONE))               -- a wall across z = 3
+    add(blocks, { { 2, 1, 3, "minecraft:air" }, { 2, 2, 3, "minecraft:air" } })
+    for i = #blocks, 1, -1 do
+        local b = blocks[i]
+        if b[1] == 2 and b[3] == 3 and (b[2] == 1 or b[2] == 2) and b[4] == STONE then table.remove(blocks, i) end
+    end
+    fresh(blocks)
+    know(-3, -1, -3, 7, 4, 7)
+    local path = T.walkable({ 2, 1, 1 }, { 2, 1, 5 })
+    check("(control) a doorway in a wall: a walk through it", path ~= nil)
+    local none, why = T.walkable({ 2, 1, 1 }, { 2, 1, 5 }, { with = { { 2, 1, 3, "stone" }, { 2, 2, 3, "stone" } } })
+    local shown = {}
+    for _, c in ipairs(type(none) == "table" and none or {}) do shown[#shown + 1] = c.x .. "," .. c.y .. "," .. c.z end
+    check("T.walkable{ with }: the doorway filled, as a what-if: no walk, the map unchanged", none == nil and why:find("no walk", 1, true) ~= nil
+        and T.map.get(2, 1, 3) == "minecraft:air", none and table.concat(shown, " ") or tostring(why))
+    path = T.walkable({ 2, 1, 1 }, { 2, 1, 5 }, { with = { { 2, 2, 3, "lantern", { hanging = true } } } })
+    check("...a lantern hanging in it at head height: no walk either (2 tall)", path == nil)
+end
+
 --------------------------------------------------------------------------
 -- A plan: its cells and states, the map round it
 --------------------------------------------------------------------------

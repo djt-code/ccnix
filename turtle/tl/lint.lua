@@ -677,12 +677,31 @@ end
 -- listed; opts.maxFall refuses those over it.  The why of no walk names what shuts the ways nearest the goal (a block
 -- in the way, a step too high, headroom, a fall, cells the map hasn't seen).  Info is { nodes (places searched), falls
 -- = list of { x, y, z, height } (where each fall over 3 lands) }.  opts: maxFall, limit (places to search, default
--- 20000), margin (how far outside the box of the two cells, default 16).
+-- 20000), margin (how far outside the box of the two cells, default 16), with (a list of { x, y, z, name, state }
+-- read in place of the map's cells, as T.light takes it: would a player still get through with a lantern here, or
+-- once this wall is gone?).
 function T.walkable(from, to, opts)
     opts = opts or {}
     local a, b = cellOf(from), cellOf(to)
     if not (a and b) then return nil, "walkable wants two cells of whole numbers: { x, y, z }" end
-    local view = newView(mapRead)
+    local read = mapRead
+    if opts.with ~= nil then
+        local with = {}
+        if type(opts.with) ~= "table" then return nil, "opts.with is a list of { x, y, z, name, state }" end
+        for _, w in ipairs(opts.with) do
+            local x, y, z, name = w.x or w[1], w.y or w[2], w.z or w[3], w.name or w[4]
+            if not (whole(x) and whole(y) and whole(z) and type(name) == "string") then
+                return nil, "opts.with is a list of { x, y, z, name, state }"
+            end
+            with[key(x, y, z)] = { name = name:find(":", 1, true) and name or ("minecraft:" .. name), state = w.state or w[5] }
+        end
+        read = function(x, y, z)
+            local w = with[key(x, y, z)]
+            if w then return w.name, w.state end
+            return mapRead(x, y, z)
+        end
+    end
+    local view = newView(read)
     local H, why = standIn(view, a.x, a.y, a.z)
     if not H then return nil, "a player can't stand at " .. key(a.x, a.y, a.z) .. ": " .. why end
     local goalOk, goalWhy = standIn(view, b.x, b.y, b.z)
