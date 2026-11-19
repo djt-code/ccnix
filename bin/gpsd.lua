@@ -28,7 +28,10 @@
 -- A constellation: four hosts at least, not all at one height (four in one
 -- plane leave two answers), as far apart as the modems reach, high up (a
 -- wireless modem reaches farther the higher it is; an ender modem reaches
--- the whole dimension, but not another).  Around where the turtles work,
+-- the whole dimension).  One per dimension: a wireless modem doesn't hear
+-- another dimension, and an ender modem's message from one comes with no
+-- distance, so gps.locate can't use it (the Nether needs its own four, at
+-- Nether coordinates).  Around where the turtles work,
 -- not off to one side: outside the hosts a small error grows (a host one
 -- block out moves a fix 1000 blocks away by tens of blocks).  A client
 -- needs four in range.  Pocket computers and turtles can't host: they move.

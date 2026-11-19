@@ -17,7 +17,6 @@ In game, after `/ccnix rom update`: four computers with wireless (or ender) mode
 - **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block.
 - **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
 - **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
-- **Refused**: `gpsd` on a turtle says why.
 - **Modems**: a second wireless modem attached while it runs is answered on ("answering on ... too"); both removed, it warns.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
@@ -905,6 +904,11 @@ numbers, the text tools and the network tools. Still to try:
   - The count: "served N requests (N in the last 10 minutes)" from each host.
   - Locating: `gps locate` on a pocket computer gave the player's own position, exactly: x and z as the
     player stood (367.3, 451.4), y the feet plus the eyes' 1.62 (101.62); the four distances matched it.
+  - Refused: `gpsd` on a turtle, in red: "a turtle moves, and a GPS host must stay put: run gpsd on a
+    computer".
+  - Across dimensions: a turtle in the Nether can't locate from the four in the overworld ("Could not
+    determine position"), as CC does: a wireless modem doesn't hear another dimension, and an ender
+    modem's message from one has no distance. The help says so now (ADR-0017 D6 is the design for it).
   - Refused: `gpsd` on a pocket computer, in red: "a pocket computer moves, and a GPS host must stay put:
     run gpsd on a computer".
   - Seen: "(1 other host agree)": fixed to "agrees".
