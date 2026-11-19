@@ -408,7 +408,15 @@ function T.startAtHome(force)
         saved, note, far, unset = T.checkedPos()
         if note then print(note) end
     end
-    if saved and not force and (far or saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
+    -- In terrain mode home is the home column's ground (goHome settles onto it and calls that y = 0): GPS finding the
+    -- turtle there at another height means that ground isn't where it was, and it is home, re-zeroed at it.
+    local ground = saved and note and not far and saved.mode == "terrain" and saved.x == 0 and saved.z == 0
+        and saved.dir == 0 and saved.y ~= 0
+    if ground then
+        print(string.format("Home's ground is %d block%s %s than when the frame was set: home is here.", math.abs(saved.y),
+            math.abs(saved.y) == 1 and "" or "s", saved.y > 0 and "higher" or "lower"))
+    end
+    if saved and not force and not ground and (far or saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
         return saved
     end
     rezero(saved or cleared)

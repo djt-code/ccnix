@@ -15,7 +15,7 @@ tried, and close it when the section is empty.
 In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
 
 - **The origin**: a turtle with no world origin (`T.origin()` nil) starts a job (`farm`, `mow`, `mine`): "World origin from GPS: the turtle is at x,y,z, facing f (from a scan)" (or "from a step": with no scanner it steps one block forward or back, digging nothing, and comes back); `T.origin()` then matches F3.
-- **A block off**: with the job stopped, pick the turtle up and put it down a block or two away, facing the same way; `farm reset` (or `home`): "The saved position was N blocks off: corrected from GPS ...", and it goes home.
+- **A block off**: with the job stopped, pick the turtle up and put it down a block or two away, facing the same way; `farm reset` (or `home`): "The saved position was N blocks off: corrected from GPS ...", and it goes home. With mow (terrain mode), the next `mow` starts with no "may not be at home": where home's ground isn't the height it was, "Home's ground is N blocks higher ...: home is here" once.
 - **Carried far**: carried 20 or more blocks (or into the Nether, with hosts there): the start and `reset` say "carried off, or in another dimension. Not corrected" and don't move; `farm --here` starts there.
 - **Lost**: delete the saved position (`rm /ccnix/turtle/.turtlepos`, or the program's folder) with the turtle away from home: `home` finds it from GPS ("The saved position was lost: ...") and goes home; the map stays aligned (`T.map.stats().aligned`).
 - **A player's origin**: `mine --origin x,y,z,facing` with a typo in x: the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
@@ -896,6 +896,13 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-19 — ADR-0018 (main before 0.54.0), a mowing turtle with a wireless modem among four gpsd hosts:
+  - The origin from GPS at its first start (facing from a scan), saved as from GPS.
+  - Moved by hand: "The saved position was 1 block off: corrected from GPS to 0,1,0 ..., facing west (from a scan)".
+  - Seen: `mow reset` settled on the home column and called it y 0, GPS said 1, and the start refused again, round
+    and round; fixed (terrain mode takes the home column at another height as home, re-zeroed there).
+  - Seen: `mow 3 3 0` mowed forever (0 read as a repeat of 0 minutes): fixed, 0 is once.
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
