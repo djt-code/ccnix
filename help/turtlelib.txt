@@ -1196,6 +1196,11 @@ T.gpsCheck(saved)
 
     Returns the position to use (saved, corrected and saved again, or found when it was lost), a line saying what happened (nil when nothing did), true third when GPS puts the turtle beyond T.GPS_REACH (nothing corrected: the caller stops), and true fourth when there's no origin and no saved position to set one from.
 
+T.gpsHere()
+    Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
+
+    For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the map and the world origin follow, so later checks agree. The facing comes from a scan, else a step.
+
 == The map ==
 
 T.map.get(x, y, z)

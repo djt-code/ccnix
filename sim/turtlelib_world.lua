@@ -1001,7 +1001,15 @@ check("gps: carried 100 blocks: nothing corrected, and why", far == true and cou
 check("gps: ...a start stops", T.requireHome(false, "x") == false and T.loadPos().x == 0)
 ok = T.goHome()
 check("gps: ...goHome won't head off from there", ok == false and at(100, 0, 0))
-carry(-100, 0, 0)
+T = reboot()
+ok = T.requireHome(true, "x")             -- (a start with --here)
+local h = T.toWorld(0, 0, 0)
+local tx, ty, tz = worldOf(100, 0, 0)
+check("gps: ...a start with --here makes the spot home, by GPS: the origin follows it", ok == true and counted(0, 0, 0, 0)
+    and h and h.x == tx and h.y == ty and h.z == tz, h and dump(h) or "nil")
+T = reboot()
+pos, why = T.checkedPos()
+check("gps: ...and the next start agrees", why == nil, tostring(why))
 
 -- the saved position lost, with an origin: found from GPS, the map kept aligned
 T = fresh(1)
