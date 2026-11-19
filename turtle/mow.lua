@@ -14,7 +14,8 @@
 -- Both are counted OUT from the turtle: its own row and column are not
 -- part of the lawn, so the box is x = 1..width, z = 1..length.
 --
--- With a wireless modem on the turtle and GPS hosts in range, its saved
+-- With a wireless modem on the turtle (or in its inventory: it's swapped
+-- in for the check) and GPS hosts in range, its saved
 -- position is checked against GPS when it starts and at `reset`: put
 -- right if it's up to 16 blocks off, found if it was lost; farther off
 -- (carried away, or another dimension) it stops and says where GPS

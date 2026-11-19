@@ -16,6 +16,7 @@ In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem eq
 
 - **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
 - **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
+- **The modem swapped in**: a mine turtle with the pickaxe and the chunk controller on and the modem in the inventory, moved a block by hand: `mine reset` swaps the modem in (for the pickaxe), corrects the count, swaps back, and goes; after a run the modem and the chunk controller are still aboard (#121).
 - **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
 

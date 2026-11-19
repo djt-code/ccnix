@@ -1,6 +1,7 @@
 # ADR-0018: the turtle programs take their position from GPS
 
-**Status:** Accepted (2026-11-19): every recommendation (the user: "all recommendations accepted")
+**Status:** Accepted (2026-11-19): every recommendation (the user: "all recommendations accepted");
+D7 amended the same day (below)
 **Date:** 2026-11-19
 **Deciders:** Dan Theisen
 
@@ -164,6 +165,16 @@ usually the tool and the scanner, and swapping one costs a slot's
 juggling at every start. That could come later, as `T.withPeripheral`
 does for the scanner.
 
+**Amended (2026-11-19, the user: "yes change D7 so it swaps the modem in
+for position checks"):** in game, a mine turtle carries the pickaxe and
+the chunk controller, so its modem rides in the inventory. Not
+swapping it in meant no GPS for mine at all, and a `mine reset` after
+a lost count went to the wrong place. A check now swaps a wireless
+modem (the ender modem first) in from the inventory with
+`T.withPeripheral`, as a scan does the geo scanner, in place of the
+tool; the chunk controller never comes off. It swaps back after the
+check. With no side free to swap onto, there's no check.
+
 ### D8. What each program shows
 
 - **mine, farm and mow:** carry on after a correction, with one line about
@@ -181,7 +192,7 @@ does for the scanner.
 - **The risk:** a wrong constellation moving a right frame. D5's warning
   and D3's limit bound it. `turtle.gps=false` turns it off.
 - **Left out:** the step in D4 is the only motion added, and only when the
-  facing is unknown. Mid-job checks (D1 b) and a swapped-in modem (D7)
+  facing is unknown. Mid-job checks (D1 b) and a swapped-in modem (D7, since amended)
   are left for a later report to ask for.
 
 ## Consequences
