@@ -391,6 +391,8 @@ local function rezero(old)
     frameMoved(old)
 end
 
+local withGps                                   -- (below, with the position from GPS)
+
 -- Call at the start of a job: the turtle is at home, facing forward.
 -- If a saved position says otherwise, returns it instead of resetting so
 -- the program can warn the user.
@@ -421,13 +423,15 @@ function T.startAtHome(force)
     end
     local old = saved or cleared
     if far and force then                       -- (--here, far from where it was saved: where GPS puts it is what moves)
-        local here, how = T.need("gpsHere")()
+        local whereNow = T.need("gpsHere")
+        local here, how = nil, "no GPS"
+        if whereNow then here, how = withGps(whereNow) end
         if here then
             old = here
             print(string.format("Home moved here (%d,%d,%d in the old frame, facing from %s): the map and the origin follow.",
                 here.x, here.y, here.z, how))
         else
-            print("Home is here, but where it is wasn't found (" .. tostring(how) .. "): the map is kept as it was.")
+            print("Home is here, but where it is wasn't found (" .. tostring(how or "no GPS") .. "): the map is kept as it was.")
         end
     end
     rezero(old)
@@ -445,15 +449,21 @@ end
 -- answer, its saved position is checked against a fix when a job starts,
 -- at `reset` and `home`, and when claude starts a goal: corrected within
 -- T.GPS_REACH blocks, found when it was lost, and the world origin set
--- from GPS when there's none.  The work is tl.world's (T.gpsCheck);
--- without a modem nothing is loaded and nothing changes.  `sysctl
--- turtle.gps=false` turns it off.
+-- from GPS when there's none.  The work is tl.world's (T.gpsCheck).  A
+-- modem in the inventory is swapped in for the check, as the geo scanner
+-- is for a scan (the chunk controller never comes off), and back after
+-- (ADR-0018 D7, as amended).  Without a modem nothing is loaded and
+-- nothing changes.  `sysctl turtle.gps=false` turns it off.
 --------------------------------------------------------------------------
 
 -- This run's check, once made: { far = true when GPS put the turtle beyond reach }
 local gpsDone
 
--- Is there GPS to ask: the API, the setting, a wireless modem on the turtle?
+-- The wireless modems a check can swap in from the inventory: the ender modem first.
+local MODEM_ITEMS = { "computercraft:wireless_modem_advanced", "computercraft:wireless_modem_normal" }
+
+-- Is there GPS to ask: the API, the setting, and a wireless modem: true when one is on the turtle, the item's name
+-- when one is in the inventory (to swap in), false when there's none.
 local function gpsAble()
     if not (gps and gps.locate and peripheral and peripheral.getNames) then return false end
     if T.setting("turtle.gps", true, "Check the turtle's saved position against GPS when a job starts (and correct it)")
@@ -463,7 +473,25 @@ local function gpsAble()
     for _, side in ipairs(peripheral.getNames()) do
         if peripheral.getType(side) == "modem" and peripheral.call(side, "isWireless") then return true end
     end
+    for _, name in ipairs(MODEM_ITEMS) do
+        for slot = 1, 16 do
+            local it = turtle.getItemDetail(slot)
+            if it and it.name == name then return name end
+        end
+    end
     return false
+end
+
+-- Run fn(...) with GPS to ask: as it is with a modem on, with one from the inventory swapped in and back, or not at all.
+-- fn's results; nil when there's no GPS (no modem, turned off, no side to swap one onto).
+function withGps(fn, ...)
+    local how = gpsAble()
+    if not how then return nil end
+    if how == true then return fn(...) end
+    local args = table.pack(...)
+    local res = table.pack(T.withPeripheral(how, function() return fn(table.unpack(args, 1, args.n)) end))
+    if not res[1] then return nil end
+    return table.unpack(res, 2, res.n)
 end
 
 -- The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
@@ -477,7 +505,9 @@ function T.checkedPos(again)
     if not gpsAble() then return saved end
     local check = T.need("gpsCheck")
     if not check then return saved end
-    local pos, note, far, unset = check(saved)
+    local res = table.pack(withGps(check, saved))
+    if res.n == 1 and res[1] == nil then return saved end     -- (a modem aboard, but no side to swap it onto)
+    local pos, note, far, unset = res[1], res[2], res[3], res[4]
     gpsDone.far, gpsDone.unset = far or false, unset
     return pos, note, far, unset
 end

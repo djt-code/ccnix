@@ -29,7 +29,8 @@
 -- T.toLocal), for claude and the other programs.  GPS overrides it, with a
 -- warning, where they disagree.
 --
--- With a wireless modem on the turtle and GPS hosts in range, its saved
+-- With a wireless modem on the turtle (or in its inventory: it's swapped
+-- in for the check) and GPS hosts in range, its saved
 -- position is checked against GPS when it starts and at `reset`: put
 -- right if it's up to 16 blocks off, found if it was lost; farther off
 -- (carried away, or another dimension) it stops and says where GPS
