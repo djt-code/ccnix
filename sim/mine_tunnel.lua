@@ -912,6 +912,13 @@ P.x, P.y, P.z, P.d = 0, 1, 20, 1
 Mine.files[".turtlepos"] = "0 1 20 0 flat"
 run("reset", "--to-start")
 check("--to-start went to the start", atStart())
+-- 13b2. a finished tunnel: plain `mine reset` goes to the start (nothing to resume from the last home)
+dugTunnel()
+Mine.files["mine.job"] = "3 3 40 16 2 done"
+P.x, P.y, P.z, P.d = 0, 1, 20, 1
+Mine.files[".turtlepos"] = "0 1 20 1 flat"
+run("reset")
+check("a finished tunnel: reset went to the start, not the last home", atStart() and logHas("Heading back to the start"))
 -- 13c. the last home (2, z=32) flooded: `mine reset --home 1` takes it
 --      back a home, and `mine --resume` carries on from there, out to home
 --      2 in one go (there already: not built again), going over the
