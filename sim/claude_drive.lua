@@ -2559,3 +2559,36 @@ check("with ccnix's layers, each one's skills listed, the update's winning over 
         and layers:find("- new-one: Only in the update. (/ccnix/turtle/skills/new-one/skill.md)\n", 1, true)
         and layers:find("- storage: The update's storage. (/ccnix/turtle/skills/storage/skill.md)]", 1, true), layers)
 end
+
+-- ADR-0018: the position checked against GPS at each goal's start; what changed goes to the model with the goal.
+--     (A wireless modem on the back, GPS answering, a world origin from GPS on disk.)
+do
+local rawNames, rawType, rawCall = peripheral.getNames, peripheral.getType, peripheral.call
+peripheral.getNames = function() local n = rawNames(); n[#n + 1] = "back"; return n end
+peripheral.getType = function(side) if side == "back" then return "modem" end return rawType(side) end
+peripheral.call = function(side, m, ...) if side == "back" and m == "isWireless" then return true end return rawCall(side, m, ...) end
+local fixAt
+gps = { locate = function() return fixAt[1], fixAt[2], fixAt[3] end }
+fresh({ "" })
+local dataDir = fs.getDir(package.loaded.turtlelib and package.loaded.turtlelib.dataPath(".turtlepos") or ".turtlepos")
+local function data(name) return dataDir == "" and name or (dataDir .. "/" .. name) end
+Mine.files[data(".map/frame")] = "frame 0 0 0 0 1\nworld 2 100 64 -50\nsource gps\n"   -- (+z south; (0,0,0) at 100,64,-50)
+Mine.files[data(".turtlepos")] = "0 0 0 0 flat"
+fixAt = { 100, 64, -50 }                               -- (where it is: nothing to say)
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("say hello")
+local m1 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("gps: a goal with GPS agreeing: no note", m1 == "say hello" or not m1:find("GPS", 1, true), m1)
+fresh({ "" })
+Mine.files[data(".map/frame")] = "frame 0 0 0 0 1\nworld 2 100 64 -50\nsource gps\n"
+Mine.files[data(".turtlepos")] = "0 0 0 0 flat"
+fixAt = { 100, 64, 50 }                                -- (100 blocks south: carried off)
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run("say hello")
+local m2 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("gps: GPS far from the count: the goal says so, and T.pos is left as counted",
+    m2:find("[Position check: GPS puts the turtle at 100,64,50 (0,0,100 in its frame), 100 blocks from where it was saved (0,0,0)", 1, true)
+        and m2:find("ask the player before moving far.]", 1, true) and Mine.files[data(".turtlepos")]:find("^0 0 0 0"), m2)
+gps = nil
+peripheral.getNames, peripheral.getType, peripheral.call = rawNames, rawType, rawCall
+end

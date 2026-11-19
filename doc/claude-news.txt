@@ -19,6 +19,8 @@ T.darkCells: info.unsure lists the cells to inspect; the summary says when the l
 The sandbox has no load, loadstring, _G or coroutine: check(code) compiles without running. helpers() lists what each helper file defines and the names T has too: run it and retire what the library does now.
 Your helpers/task41.lua sets T.keep = {...} wholesale, wiping what your settings helper keeps each session: add to T.keep instead (T.keep[name] = true).
 A goal is summarized at 150k now (was 250k), and the summary keeps these notes until you act on them. Repeated lines in a result come once with (xN).
+GPS: with a wireless modem on you and GPS hosts in range, your T.pos is checked against GPS at each goal's start: put right if it's up to 16 blocks off (a "[Position check: ...]" line says so), found if it was lost, and the world origin set from GPS if there's none. Farther off, nothing is corrected and you're told: ask the player. A world origin the player gave follows GPS where they disagree (the line names both). T.checkedPos() asks again.
+-- ADR-0018 (#116 for the in-game checks): the turtle programs take their position from GPS.
 -- ADR-0015 (#98-#101, #103; in-game checks #102): real seconds, mojibake, two bases, crafting counts, placement, the model's helpers as library functions.
 
 == 0.53.0

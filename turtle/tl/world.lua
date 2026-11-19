@@ -14,7 +14,9 @@
 -- new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one
 -- more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS
 -- and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder
--- (.map/frame).
+-- (.map/frame).  With GPS (ADR-0018), T.checkedPos checks the saved position against a fix when a job
+-- starts: the first fix sets the origin (or anchors a player's to GPS), later ones correct the count
+-- within T.GPS_REACH blocks, and a lost position is found again, so the map stays aligned.
 --
 -- The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it
 -- was seen, the names of the blocks the cube holds, and the block states that were inspected) and
@@ -169,6 +171,7 @@ local function saveFrame()
     S.onDisk = true
     local lines = { string.format("frame %d %d %d %d %d", f.t, f.dx, f.dy, f.dz, f.aligned and 1 or 0) }
     if w then lines[2] = string.format("world %d %d %d %d", w.s, w.ox, w.oy, w.oz) end
+    if w and w.src == "gps" then lines[3] = "source gps" end   -- (from GPS, or anchored to it: ADR-0018 D5)
     return fileio.write(fs.combine(S.dir, FRAME_FILE), table.concat(lines, "\n") .. "\n")
 end
 
@@ -188,6 +191,8 @@ local function loadFrame()
             S.frame = { t = nums[1] % 4, dx = nums[2], dy = nums[3], dz = nums[4], aligned = nums[5] == 1 }
         elseif nums and w[1] == "world" and #nums == 4 then
             S.world = { s = nums[1] % 4, ox = nums[2], oy = nums[3], oz = nums[4] }
+        elseif w[1] == "source" and w[2] == "gps" and S.world then
+            S.world.src = "gps"
         end
     end
     return true
@@ -757,12 +762,24 @@ function T.origin()
     return { x = x, y = y, z = z, facing = COMPASS_NAME[(S.world.s + S.frame.t) % 4], aligned = true }
 end
 
--- The turtle's cell by GPS: x, y, z; nil and why if there is no fix.
-local function gpsFix()
+-- How far from a whole number a GPS fix may be and still count (ADR-0018 D2): a turtle's fix is its block, exactly
+-- (its modem is at the block's corner), so one that isn't is wrong somehow.
+local GPS_TOLERANCE = 0.1
+
+-- The turtle's cell by GPS: x, y, z; nil and why if there is no fix, and true third when there was one but it
+-- wasn't a block's (so it's worth saying).
+local function gpsCell()
     if not (gps and gps.locate) then return nil, "no GPS API on this computer" end
     local ok, x, y, z = pcall(gps.locate, 2)
-    if not (ok and x) then return nil, "no GPS fix (it needs a wireless modem and GPS hosts in range)" end
-    return math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
+    if not ok and x == "Terminated" then error(x, 0) end
+    if not (ok and type(x) == "number" and type(y) == "number" and type(z) == "number") then
+        return nil, "no GPS fix (it needs a wireless modem and GPS hosts in range)"
+    end
+    local rx, ry, rz = math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)
+    if math.abs(x - rx) > GPS_TOLERANCE or math.abs(y - ry) > GPS_TOLERANCE or math.abs(z - rz) > GPS_TOLERANCE then
+        return nil, string.format("a GPS fix of %.2f, %.2f, %.2f isn't a block (a turtle's is, exactly): set aside", x, y, z), true
+    end
+    return rx, ry, rz
 end
 
 -- Ask the geo scanner for a scan of radius `radius`, putting it on for the time it takes and
@@ -832,6 +849,8 @@ local function compassFromScan()
     return nil, why
 end
 
+local setOriginFrom   -- (below: T.setOrigin, and ADR-0018 with where the origin came from)
+
 -- Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns
 -- true and T.origin()'s table, or nil and why.
 --
@@ -840,11 +859,15 @@ end
 -- turtle's frame are on disk (mine.job, an unfinished T.build's .build): they are in the frame as it was when they were
 -- made, so if that has moved since (a re-zero, --here) their cells are wrong.
 function T.setOrigin(x, y, z, facing)
+    return setOriginFrom(x == nil and y == nil and z == nil and "gps" or nil, x, y, z, facing)
+end
+-- (src: "gps" when the cell is GPS's, nil when the player gave it: ADR-0018 D5)
+function setOriginFrom(src, x, y, z, facing)
     ensure()
     if not S.frame.aligned then return nil, UNALIGNED end
     if x == nil and y == nil and z == nil then
         local why
-        x, y, z = gpsFix()
+        x, y, z = gpsCell()
         if not x then why = y; return nil, tostring(why) .. "; give x, y, z" end
     end
     if not (whole(x) and whole(y) and whole(z)) then return nil, "setOrigin wants whole numbers: x, y, z" end
@@ -859,7 +882,7 @@ function T.setOrigin(x, y, z, facing)
     end
     local mx, my, mz = toMap(T.pos.x, T.pos.y, T.pos.z)
     local heading = (T.dir + S.frame.t) % 4                -- the way it faces, in the map's frame
-    S.world = { s = (c - heading) % 4, ox = 0, oy = 0, oz = 0 }
+    S.world = { s = (c - heading) % 4, ox = 0, oy = 0, oz = 0, src = src }
     local ax, ay, az = toWorldPoint(mx, my, mz)
     S.world.ox, S.world.oy, S.world.oz = x - ax, y - ay, z - az
     local ok, why = saveFrame()
@@ -895,6 +918,138 @@ function T.toLocal(a, b, c)
     if type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then return nil, "toLocal wants a point: x, y, z" end
     local lx, ly, lz = fromMap(fromWorldPoint(x, y, z))
     return { x = lx, y = ly, z = lz }
+end
+
+--------------------------------------------------------------------------
+-- The position from GPS (ADR-0018)
+--
+-- turtlelib's T.checkedPos asks this at a job's start, `reset` and `home`,
+-- and claude's goals, when the turtle has a wireless modem: the dead-reckoned
+-- position against a GPS fix.  GPS gives the cell but no facing; the facing,
+-- when it's needed, comes from a scan, else a step.
+--------------------------------------------------------------------------
+
+-- How far (blocks) a correction may move the saved position (D3): farther, the turtle was carried off or is in
+-- another dimension (GPS is per dimension, and it can't tell), and nothing is corrected.
+T.GPS_REACH = 16
+
+local function cellText(x, y, z)
+    if type(x) == "table" then x, y, z = x.x, x.y, x.z end
+    return string.format("%d,%d,%d", x, y, z)
+end
+
+-- The compass way the turtle faces, from a step: forward (or back) into a free cell, a fix, and back.  Digs nothing.
+-- c and the cell it ends in by GPS (a step back that's blocked leaves it a cell over); nil and why.
+local function compassFromStep(x0, y0, z0)
+    local fuel = turtle.getFuelLevel()
+    if fuel ~= "unlimited" and fuel < 2 then return nil, "no fuel for a step" end
+    local sign = 1
+    if not turtle.forward() then
+        if not turtle.back() then return nil, "nothing free ahead or behind to step into" end
+        sign = -1
+    end
+    local x1, y1, z1 = gpsCell()
+    local back
+    if sign == 1 then back = turtle.back() else back = turtle.forward() end
+    if not x1 then return nil, "no GPS fix after the step" end
+    local row = COMPASS_AT[(x1 - x0) * sign]
+    local c = row and row[(z1 - z0) * sign]
+    if not c or y1 ~= y0 then return nil, "the step didn't come out one block across" end
+    if back then return c, x0, y0, z0 end
+    return c, x1, y1, z1
+end
+
+-- The compass way the turtle faces now: from a scan, else a step.  c, how, and the cell it ends in; nil and why.
+local function compassNow(x, y, z)
+    local c, why = compassFromScan()
+    if c then return c, "a scan", x, y, z end
+    local c2, x2, y2, z2 = compassFromStep(x, y, z)
+    if c2 then return c2, "a step", x2, y2, z2 end
+    return nil, "no scan (" .. tostring(why) .. "), no step (" .. tostring(x2) .. ")"
+end
+
+-- The turtle's heading in its frame, given the compass way it faces.
+local function headingOf(c) return (c - S.world.s - S.frame.t) % 4 end
+-- ...and the compass way of heading d.
+local function compassOf(d) return (S.world.s + d + S.frame.t) % 4 end
+
+-- Check a saved position (T.loadPos's, or nil) against a GPS fix: T.checkedPos's work (ADR-0018).
+--
+-- Returns the position to use (saved, corrected and saved again, or found when it was lost), a line saying what
+-- happened (nil when nothing did), true third when GPS puts the turtle beyond T.GPS_REACH (nothing corrected: the
+-- caller stops), and true fourth when there's no origin and no saved position to set one from.
+function T.gpsCheck(saved)
+    ensure()
+    local x, y, z = gpsCell()
+    if not x then return saved, z and y or nil end
+    if not S.frame.aligned then return saved, "GPS: " .. UNALIGNED end
+    local here = saved and { x = saved.x, y = saved.y, z = saved.z, dir = saved.dir, mode = saved.mode }
+    -- no origin: the first fix sets it (D5), where the turtle is by its count
+    if not S.world then
+        if not here then return saved, nil, false, true end    -- (startAtHome asks again once it's re-zeroed)
+        T.pos.x, T.pos.y, T.pos.z, T.dir = here.x, here.y, here.z, here.dir
+        local c, how, fx, fy, fz = compassNow(x, y, z)
+        if not c then
+            return saved, "GPS puts the turtle at " .. cellText(x, y, z) .. ", but which way it faces isn't known (" .. how
+                .. "): no world origin set"
+        end
+        local ok, why = setOriginFrom("gps", fx, fy, fz, COMPASS_NAME[c])
+        if not ok then return saved, "GPS: the origin wasn't set (" .. tostring(why) .. ")" end
+        return saved, string.format("World origin from GPS: the turtle is at %s, facing %s (from %s).", cellText(fx, fy, fz),
+            COMPASS_NAME[c], how)
+    end
+    -- lost: the position from GPS, the facing from a scan or a step (D6)
+    if not here then
+        local loc = T.toLocal(x, y, z)
+        T.pos.x, T.pos.y, T.pos.z = loc.x, loc.y, loc.z
+        local c, how, fx, fy, fz = compassNow(x, y, z)
+        if not c then
+            return nil, "The saved position was lost; GPS puts the turtle at " .. cellText(x, y, z) .. ", but which way it faces"
+                .. " isn't known (" .. how .. ")"
+        end
+        loc = T.toLocal(fx, fy, fz)
+        T.pos.x, T.pos.y, T.pos.z, T.dir = loc.x, loc.y, loc.z, headingOf(c)
+        T.savePos()
+        return { x = loc.x, y = loc.y, z = loc.z, dir = T.dir, mode = T.mode },
+            string.format("The saved position was lost: GPS puts the turtle at %s (%s in its frame), facing %s (from %s).",
+                cellText(fx, fy, fz), cellText(loc), COMPASS_NAME[c], how)
+    end
+    -- a player's origin: the first fix anchors it to GPS, the position kept (the turtle hasn't moved since it was told)
+    if S.world.src ~= "gps" then
+        local w = T.toWorld(here)
+        if w.x == x and w.y == y and w.z == z then
+            S.world.src = "gps"
+            saveFrame()
+            return saved
+        end
+        T.pos.x, T.pos.y, T.pos.z, T.dir = here.x, here.y, here.z, here.dir
+        local ok, why = setOriginFrom("gps", x, y, z, COMPASS_NAME[compassOf(here.dir)])
+        if not ok then return saved, "GPS: the origin wasn't moved (" .. tostring(why) .. ")" end
+        return saved, string.format("The world origin given put the turtle at %s, but GPS puts it at %s: the origin follows GPS"
+            .. " now (if the GPS hosts' positions are wrong, T.setOrigin(x, y, z, facing) sets it again).", cellText(w),
+            cellText(x, y, z))
+    end
+    -- an origin from GPS: the count is checked, and corrected within reach (D3)
+    local loc = T.toLocal(x, y, z)
+    if loc.x == here.x and loc.y == here.y and loc.z == here.z then return saved end
+    local d = math.sqrt((loc.x - here.x) ^ 2 + (loc.y - here.y) ^ 2 + (loc.z - here.z) ^ 2)
+    local blocks = d == math.floor(d) and string.format("%d", d) or string.format("%.1f", d)
+    if d > T.GPS_REACH then
+        return saved, string.format("GPS puts the turtle at %s (%s in its frame), %s blocks from where it was saved (%s):"
+            .. " carried off, or in another dimension. Not corrected: put it back, or start it with --here.", cellText(x, y, z),
+            cellText(loc), blocks, cellText(here)), true
+    end
+    T.pos.x, T.pos.y, T.pos.z, T.dir = loc.x, loc.y, loc.z, here.dir
+    local c, how, fx, fy, fz = compassNow(x, y, z)
+    if c then
+        loc = T.toLocal(fx, fy, fz)
+        T.pos.x, T.pos.y, T.pos.z, T.dir = loc.x, loc.y, loc.z, headingOf(c)
+    end
+    T.savePos()
+    return { x = T.pos.x, y = T.pos.y, z = T.pos.z, dir = T.dir, mode = here.mode },
+        string.format("The saved position was %s block%s off: corrected from GPS to %s (%s in the world), %s.", blocks,
+            d == 1 and "" or "s", cellText(T.pos), cellText(x, y, z),
+            c and ("facing " .. COMPASS_NAME[c] .. " (from " .. how .. ")") or ("the heading kept (" .. how .. ")"))
 end
 
 --------------------------------------------------------------------------

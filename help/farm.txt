@@ -24,6 +24,8 @@ width  = tiles to the RIGHT of the turtle (negative = to the LEFT)
 length = tiles AHEAD of the turtle (negative = BEHIND)
 Both are counted OUT from the turtle: its own row and column are not part of the farm, so the box is x = 1..width, z = 1..length. repeatMinutes defaults to 20; 0 = single pass.
 
+With a wireless modem on the turtle and GPS hosts in range, its saved position is checked against GPS when it starts and at `reset`: put right if it's up to 16 blocks off, found if it was lost; farther off (carried away, or another dimension) it stops and says where GPS puts it.  The first check sets the world origin, if there's none (`help turtlelib`; sysctl turtle.gps=false turns it off).
+
 Settings (`sysctl farm.repeat=30`): farm.width and farm.length are the box to learn when none is given (a size given is saved there, so a turtle that boots with no map can learn the same farm again), farm.repeat the minutes between passes.
 
 Placement: put the turtle diagonally outside one corner of the farm, hovering TWO blocks above the farmland (one block above the crop tops). Put the output chest/barrel directly below the start position (up to 3 blocks down, air between; it's found afresh on every visit, so it can be moved up or down later without telling the turtle).  Keep in the chest: what each crop is planted with (wheat or beetroot seeds, carrots, potatoes, sugar cane), dirt, and a bucket or two (water buckets for clone); the turtle restocks from it.
