@@ -419,7 +419,18 @@ function T.startAtHome(force)
     if saved and not force and not ground and (far or saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
         return saved
     end
-    rezero(saved or cleared)
+    local old = saved or cleared
+    if far and force then                       -- (--here, far from where it was saved: where GPS puts it is what moves)
+        local here, how = T.need("gpsHere")()
+        if here then
+            old = here
+            print(string.format("Home moved here (%d,%d,%d in the old frame, facing from %s): the map and the origin follow.",
+                here.x, here.y, here.z, how))
+        else
+            print("Home is here, but where it is wasn't found (" .. tostring(how) .. "): the map is kept as it was.")
+        end
+    end
+    rezero(old)
     if unset then                               -- (no origin, no saved position: the origin from here, now it's home)
         local _, note2 = T.checkedPos(true)
         if note2 then print(note2) end
@@ -3308,7 +3319,7 @@ T.registry = {
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
     alignMap = "tl.world", frameChanged = "tl.world", mergeScan = "tl.world",
-    gpsCheck = "tl.world",
+    gpsCheck = "tl.world", gpsHere = "tl.world",
     -- tl.attach: what a block holds, which a dig would drop
     attachedTo = "tl.attach",
     -- tl.path: routes

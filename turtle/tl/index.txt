@@ -261,6 +261,7 @@ T.toWorld(a, b, c) - Convert a point of the turtle's frame (a table with x, y, z
 T.toLocal(a, b, c) - Convert a world point (a table with x, y, z, or three numbers) to the turtle's frame: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
 The position from GPS (ADR-0018):
 T.gpsCheck(saved) - Check a saved position (T.loadPos's, or nil) against a GPS fix: T.checkedPos's work (ADR-0018).
+T.gpsHere() - Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
 The map:
 T.map.get(x, y, z) - What the map holds at x, y, z (turtle frame): the block's name, its state table if inspected, and when it was last seen (seconds); nil and why if never seen.
 T.map.set(x, y, z, name, state) - Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)

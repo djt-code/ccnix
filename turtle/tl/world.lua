@@ -1052,6 +1052,23 @@ function T.gpsCheck(saved)
             c and ("facing " .. COMPASS_NAME[c] .. " (from " .. how .. ")") or ("the heading kept (" .. how .. ")"))
 end
 
+-- Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
+--
+-- For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes
+-- home, and the map and the world origin follow, so later checks agree.  The facing comes from a scan, else a step.
+function T.gpsHere()
+    ensure()
+    if not (S.world and S.frame.aligned) then return nil, "no world origin to place it by" end
+    local x, y, z = gpsCell()
+    if not x then return nil, y end
+    local loc = T.toLocal(x, y, z)
+    T.pos.x, T.pos.y, T.pos.z = loc.x, loc.y, loc.z
+    local c, how, fx, fy, fz = compassNow(x, y, z)
+    if not c then return nil, how end
+    loc = T.toLocal(fx, fy, fz)
+    return { x = loc.x, y = loc.y, z = loc.z, dir = headingOf(c) }, how
+end
+
 --------------------------------------------------------------------------
 -- The map: the queries
 --------------------------------------------------------------------------

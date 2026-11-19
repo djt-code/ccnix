@@ -14,12 +14,10 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
 
-- **The origin**: a turtle with no world origin (`T.origin()` nil) starts a job (`farm`, `mow`, `mine`): "World origin from GPS: the turtle is at x,y,z, facing f (from a scan)" (or "from a step": with no scanner it steps one block forward or back, digging nothing, and comes back); `T.origin()` then matches F3.
-- **Carried far**: carried 20 or more blocks (or into the Nether, with hosts there): the start and `reset` say "carried off, or in another dimension. Not corrected" and don't move; `farm --here` starts there.
-- **Lost**: delete the saved position (`rm /ccnix/turtle/.turtlepos`, or the program's folder) with the turtle away from home: `home` finds it from GPS ("The saved position was lost: ...") and goes home; the map stays aligned (`T.map.stats().aligned`).
-- **A player's origin**: `mine --origin x,y,z,facing` with a typo in x: the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
+- **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
+- **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
+- **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
-- **Off**: `sysctl turtle.gps=false`: no check; no modem: no check, no delay.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
@@ -905,6 +903,14 @@ numbers, the text tools and the network tools. Still to try:
   - After the fixes (#118): carried 5 blocks, `mow` said "The saved position was 5 blocks off: corrected from GPS to
     5,-1,0 ..., facing west (from a scan)" and stopped; `mow reset` went home; the next `mow` said "Home's ground is 1
     block lower than when the frame was set: home is here" once and mowed.
+  - Carried 29 blocks: `mow` and `mow reset` said "GPS puts the turtle at ... 29.2 blocks from where it was saved (0,0,0):
+    carried off, or in another dimension. Not corrected" and didn't move ("Not heading home from there").
+  - Seen: `mow --here` then didn't move home: the start took the old saved position as where the spot was, so every
+    later check said carried off again; fixed (a start with --here takes where GPS puts it).
+  - Lost: `rm /ccnix/turtle/.turtlepos`, `home`: "The saved position was lost: GPS puts the turtle at ... (14,-3,27 in
+    its frame), facing east (from a scan)", and it went home. (`home` alone doesn't know the job's mode, so it
+    travelled flat.)
+  - Off: `sysctl turtle.gps=false`: `mow 6 6 0` said nothing about GPS and mowed one pass.
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
