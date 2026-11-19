@@ -25,6 +25,13 @@
 -- of the farm, so the box is x = 1..width, z = 1..length.
 -- repeatMinutes defaults to 20; 0 = single pass.
 --
+-- With a wireless modem on the turtle and GPS hosts in range, its saved
+-- position is checked against GPS when it starts and at `reset`: put
+-- right if it's up to 16 blocks off, found if it was lost; farther off
+-- (carried away, or another dimension) it stops and says where GPS
+-- puts it.  The first check sets the world origin, if there's none
+-- (`help turtlelib`; sysctl turtle.gps=false turns it off).
+--
 -- Settings (`sysctl farm.repeat=30`): farm.width and farm.length are the box
 -- to learn when none is given (a size given is saved there, so a turtle
 -- that boots with no map can learn the same farm again), farm.repeat the

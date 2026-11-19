@@ -1,6 +1,6 @@
 # ADR-0018: the turtle programs take their position from GPS
 
-**Status:** Proposed (2026-11-19)
+**Status:** Accepted (2026-11-19): every recommendation (the user: "all recommendations accepted")
 **Date:** 2026-11-19
 **Deciders:** Dan Theisen
 
@@ -199,10 +199,10 @@ does for the scanner.
 
 ### Phase 0
 
-1. [ ] The sims' turtle world answers `gps.locate` from the turtle's true
+1. [x] The sims' turtle world answers `gps.locate` from the turtle's true
    cell (`sim/turtlelib_world.lua` has a stub). A sim switch moves the
    turtle without telling turtlelib, and turns GPS off.
-2. [ ] Scenarios that fail today:
+2. [x] Scenarios that fail today:
    - a desync of one block;
    - a turtle carried 3 blocks before a start;
    - one carried 100 blocks;
@@ -214,14 +214,14 @@ does for the scanner.
 
 ### Phase 1: build (on the user's answers)
 
-3. [ ] turtlelib: `T.gpsCheck()`, which checks, corrects and explains.
+3. [x] turtlelib: `T.gpsCheck()`, which checks, corrects and explains.
    Called from `T.startAtHome` and `T.goHome`. The origin's source saved
    with it.
-4. [ ] claude: at session start and per goal; the context line; the
+4. [x] claude: at session start and per goal; the context line; the
    prompt.
-5. [ ] autostart: its look at the saved position goes through the check.
-6. [ ] The help, `turtle/tl/index.txt`, and UNTESTED.md with a
-   `needs-in-game-test` issue.
+5. [x] autostart: its look at the saved position goes through the check.
+6. [x] The help, `turtle/tl/index.txt`, and UNTESTED.md with a
+   `needs-in-game-test` issue (#116).
 
 ### Phase 2: release
 

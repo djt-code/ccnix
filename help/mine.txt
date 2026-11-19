@@ -21,7 +21,9 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
         mine where
             where it is along the tunnel: at which home, or between which two; the tunnel's homes (it reads the saved job and position, so it works while mine runs, as a service say)
 
---origin gives the world cell of the start (what F3 shows for the block the turtle stands in) and the compass way it faces, north, east, south or west (left out, it is worked out from a Geo Scanner scan), for a run from the start.  The map then knows where it is in the world (T.toWorld, T.toLocal), for claude and the other programs.
+--origin gives the world cell of the start (what F3 shows for the block the turtle stands in) and the compass way it faces, north, east, south or west (left out, it is worked out from a Geo Scanner scan), for a run from the start.  The map then knows where it is in the world (T.toWorld, T.toLocal), for claude and the other programs.  GPS overrides it, with a warning, where they disagree.
+
+With a wireless modem on the turtle and GPS hosts in range, its saved position is checked against GPS when it starts and at `reset`: put right if it's up to 16 blocks off, found if it was lost; farther off (carried away, or another dimension) it stops and says where GPS puts it.  The first check sets the world origin, if there's none (`help turtlelib`; sysctl turtle.gps=false turns it off).
 
 A tunnel saved before a re-zero that moved the start (another program started away from home, T.clearPos) is in the old frame: --resume, haul and reset refuse it, say why and mark it stale; a fresh tunnel replaces it.
 

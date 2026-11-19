@@ -10,6 +10,18 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
+## ADR-0018: the position from GPS (ccnix 0.54.0) (#116)
+
+In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
+
+- **The origin**: a turtle with no world origin (`T.origin()` nil) starts a job (`farm`, `mow`, `mine`): "World origin from GPS: the turtle is at x,y,z, facing f (from a scan)" (or "from a step": with no scanner it steps one block forward or back, digging nothing, and comes back); `T.origin()` then matches F3.
+- **A block off**: with the job stopped, pick the turtle up and put it down a block or two away, facing the same way; `farm reset` (or `home`): "The saved position was N blocks off: corrected from GPS ...", and it goes home.
+- **Carried far**: carried 20 or more blocks (or into the Nether, with hosts there): the start and `reset` say "carried off, or in another dimension. Not corrected" and don't move; `farm --here` starts there.
+- **Lost**: delete the saved position (`rm /ccnix/turtle/.turtlepos`, or the program's folder) with the turtle away from home: `home` finds it from GPS ("The saved position was lost: ...") and goes home; the map stays aligned (`T.map.stats().aligned`).
+- **A player's origin**: `mine --origin x,y,z,facing` with a typo in x: the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
+- **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
+- **Off**: `sysctl turtle.gps=false`: no check; no modem: no check, no delay.
+
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
 In-game order: `/ccnix rom update`; on a computer `ccnix` (it says the server's tick rate while it isn't 20); then
