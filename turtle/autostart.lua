@@ -50,14 +50,31 @@ if not CHOICES[prog] then
     return
 end
 
+-- Where the turtle last saved itself, checked against GPS where there is GPS (ADR-0018): the position (false if
+-- there's none) and whether GPS put it beyond reach.  Asked once.
+local checked, beyond
+local function position()
+    if checked == nil then
+        local note
+        checked, note, beyond = T.checkedPos()
+        checked = checked or false
+        if note then print("autostart: " .. note) end
+    end
+    return checked or nil, beyond
+end
+
 -- Where the turtle last saved itself, if not at the start
 local function away()
-    local p = T.loadPos()
+    local p = position()
     return p and (p.x ~= 0 or p.y ~= 0 or p.z ~= 0 or p.dir ~= 0) and p or nil
 end
 
 -- The steps for each program: lists of command lines, or nil and why not
 local function plan()
+    if prog == "mine" or prog == "farm" or prog == "mow" then
+        local _, far = position()
+        if far then return nil, "GPS puts the turtle far from where it was saved (above): put it back, or start it with --here" end
+    end
     if prog == "mine" then
         if not T.hasMineJob() then return { { "mine" } } end
         -- the job as mine saved it (one it can't read: carry on, and mine says why)

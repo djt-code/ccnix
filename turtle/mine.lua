@@ -26,7 +26,15 @@
 -- the turtle stands in) and the compass way it faces, north, east, south or
 -- west (left out, it is worked out from a Geo Scanner scan), for a run from
 -- the start.  The map then knows where it is in the world (T.toWorld,
--- T.toLocal), for claude and the other programs.
+-- T.toLocal), for claude and the other programs.  GPS overrides it, with a
+-- warning, where they disagree.
+--
+-- With a wireless modem on the turtle and GPS hosts in range, its saved
+-- position is checked against GPS when it starts and at `reset`: put
+-- right if it's up to 16 blocks off, found if it was lost; farther off
+-- (carried away, or another dimension) it stops and says where GPS
+-- puts it.  The first check sets the world origin, if there's none
+-- (`help turtlelib`; sysctl turtle.gps=false turns it off).
 --
 -- A tunnel saved before a re-zero that moved the start (another program
 -- started away from home, T.clearPos) is in the old frame: --resume, haul
@@ -3401,7 +3409,9 @@ if doReset then
     useJob(job)
     home = homeAt(0)
     segEnd = LENGTH
-    local saved = T.loadPos()
+    local saved, note, far = T.checkedPos()        -- (checked against GPS where there is GPS: ADR-0018)
+    if note then print(note) end
+    if far then print("Not heading back from there."); return end
     if not saved then print("No saved position; the turtle hasn't moved since its last job."); return end
     T.pos.x, T.pos.y, T.pos.z, T.dir = saved.x, saved.y, saved.z, saved.dir
     -- where to: the last home it built, the one asked for (--home N), or
@@ -3474,7 +3484,9 @@ end
 -- `mine reset` left it at (the last, or one asked for with --home).  nil
 -- (having said why) if neither.
 function startingHome(fromLast)
-    local saved = T.loadPos()
+    local saved, note, far = T.checkedPos()        -- (checked against GPS where there is GPS: ADR-0018)
+    if note then print(note) end
+    if far then return nil end
     local last
     if fromLast and saved and saved.x == 0 and saved.y == 0 and saved.z > 0 and saved.z % SPACING == 0
             and saved.z / SPACING <= lastHome then
