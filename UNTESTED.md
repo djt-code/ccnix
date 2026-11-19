@@ -14,9 +14,6 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
 
-- **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
-- **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
-- **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
@@ -918,6 +915,11 @@ numbers, the text tools and the network tools. Still to try:
     hand: `mine reset` said "The saved position was 3.6 blocks off: corrected from GPS to 2,0,3 ..., facing north (from
     a step)" and went back along the tunnel from there to its home.
   - `mine reset` on the finished tunnel (#125), the turtle at its last home: "Heading back to the start. At the start."
+  - The origin by a step: a turtle with no world origin and no geo scanner stepped a block and back for its facing,
+    and set the origin from GPS.
+  - Carried far, then `--here`: "Home moved here ...: the map and the origin follow".
+  - A player's origin with a typo: the next start said the origin given put it elsewhere and "the origin follows GPS
+    now".
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
