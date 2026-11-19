@@ -399,13 +399,68 @@ end
 -- map (T.map, if one is kept) is told where that spot was in the old one, so it stays
 -- right.  With no saved position (the file was deleted) and no T.clearPos before it,
 -- nobody knows where that was, and the map is marked unaligned (T.alignMap).
+--
+-- With GPS (T.checkedPos), the saved position is checked first: corrected, found when it was lost, or (beyond
+-- T.GPS_REACH) returned as it is, the turtle being somewhere else.
 function T.startAtHome(force)
-    local saved = T.loadPos()
-    if saved and not force and (saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
+    local saved, note, far, unset
+    if T.loadPos() or not cleared then          -- (T.clearPos just now: where it was is known)
+        saved, note, far, unset = T.checkedPos()
+        if note then print(note) end
+    end
+    if saved and not force and (far or saved.x ~= 0 or saved.y ~= 0 or saved.z ~= 0 or saved.dir ~= 0) then
         return saved
     end
     rezero(saved or cleared)
+    if unset then                               -- (no origin, no saved position: the origin from here, now it's home)
+        local _, note2 = T.checkedPos(true)
+        if note2 then print(note2) end
+    end
     return nil
+end
+
+--------------------------------------------------------------------------
+-- The position from GPS (ADR-0018)
+--
+-- Where the turtle has a wireless modem (or an ender modem) and GPS hosts
+-- answer, its saved position is checked against a fix when a job starts,
+-- at `reset` and `home`, and when claude starts a goal: corrected within
+-- T.GPS_REACH blocks, found when it was lost, and the world origin set
+-- from GPS when there's none.  The work is tl.world's (T.gpsCheck);
+-- without a modem nothing is loaded and nothing changes.  `sysctl
+-- turtle.gps=false` turns it off.
+--------------------------------------------------------------------------
+
+-- This run's check, once made: { far = true when GPS put the turtle beyond reach }
+local gpsDone
+
+-- Is there GPS to ask: the API, the setting, a wireless modem on the turtle?
+local function gpsAble()
+    if not (gps and gps.locate and peripheral and peripheral.getNames) then return false end
+    if T.setting("turtle.gps", true, "Check the turtle's saved position against GPS when a job starts (and correct it)")
+            == false then
+        return false
+    end
+    for _, side in ipairs(peripheral.getNames()) do
+        if peripheral.getType(side) == "modem" and peripheral.call(side, "isWireless") then return true end
+    end
+    return false
+end
+
+-- The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
+--
+-- Third: true if GPS puts the turtle beyond T.GPS_REACH (nothing corrected: stop, and say the line).  Fourth: true if
+-- there's no world origin and no saved position to set one from.  Asked once a run; `again` asks again.
+function T.checkedPos(again)
+    if gpsDone and not again then return T.loadPos(), nil, gpsDone.far, gpsDone.unset end
+    gpsDone = { far = false }
+    local saved = T.loadPos()
+    if not gpsAble() then return saved end
+    local check = T.need("gpsCheck")
+    if not check then return saved end
+    local pos, note, far, unset = check(saved)
+    gpsDone.far, gpsDone.unset = far or false, unset
+    return pos, note, far, unset
 end
 
 --------------------------------------------------------------------------
@@ -2235,7 +2290,12 @@ end
 -- given, runs once at travel height before setting off (it may correct T.dir); false from it stops the trip.
 function T.goHome(opts)
     opts = opts or {}
-    local saved = T.loadPos()
+    local saved, note, far = T.checkedPos()        -- (GPS corrects it, or finds it when it was lost)
+    if note then print(note) end
+    if far then
+        print("Not heading home from there.")
+        return false
+    end
     if not saved then
         print("No saved position; the turtle has not moved since its last job, or is already home.")
         return true
@@ -3240,6 +3300,7 @@ T.registry = {
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
     alignMap = "tl.world", frameChanged = "tl.world", mergeScan = "tl.world",
+    gpsCheck = "tl.world",
     -- tl.attach: what a block holds, which a dig would drop
     attachedTo = "tl.attach",
     -- tl.path: routes

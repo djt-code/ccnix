@@ -7,6 +7,8 @@ T.frameId() - The number of the frame the turtle counts in: one more at each re-
 T.frameStale(stamp) - Why a job saved in frame `stamp` can't be carried on now (a re-zero since), or nil if it can.
 T.clearPos() - Delete the saved position file: the next job starts from home as (0,0,0).
 T.startAtHome(force) - Call at the start of a job: the turtle is at home, facing forward. If a saved position says otherwise, returns it instead of resetting so the program can warn the user.
+The position from GPS (ADR-0018):
+T.checkedPos(again) - The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
 The turtle API, wrapped once:
 T.claim() - Make this module the one the wrapped turtle functions keep up to date. Loading turtlelib does it already; call it when another program's module may have loaded since (claude, after run_program).
 T.owns() - Is this copy of turtlelib the one the wrapped turtle functions keep up to date (the last loaded, or the last to T.claim)? A module's listener that acts for its program (the undo journal, autoDump) acts only while its copy owns the turtle.
@@ -257,6 +259,8 @@ T.origin() - The turtle's frame in the world: { x, y, z, facing, aligned }, the 
 T.setOrigin(x, y, z, facing) - Say where the turtle stands in the world: world cell (x, y, z), facing "north", "east", "south" or "west". Returns true and T.origin()'s table, or nil and why.
 T.toWorld(a, b, c) - Convert a point of the turtle's frame (a table with x, y, z, or three numbers) to the world's: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
 T.toLocal(a, b, c) - Convert a world point (a table with x, y, z, or three numbers) to the turtle's frame: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+The position from GPS (ADR-0018):
+T.gpsCheck(saved) - Check a saved position (T.loadPos's, or nil) against a GPS fix: T.checkedPos's work (ADR-0018).
 The map:
 T.map.get(x, y, z) - What the map holds at x, y, z (turtle frame): the block's name, its state table if inspected, and when it was last seen (seconds); nil and why if never seen.
 T.map.set(x, y, z, name, state) - Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)

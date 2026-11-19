@@ -70,6 +70,15 @@ T.startAtHome(force)
 
     Where it does reset, the spot the turtle stands on becomes (0,0,0) in a new frame; the map (T.map, if one is kept) is told where that spot was in the old one, so it stays right. With no saved position (the file was deleted) and no T.clearPos before it, nobody knows where that was, and the map is marked unaligned (T.alignMap).
 
+    With GPS (T.checkedPos), the saved position is checked first: corrected, found when it was lost, or (beyond T.GPS_REACH) returned as it is, the turtle being somewhere else.
+
+== The position from GPS (ADR-0018) ==
+
+T.checkedPos(again)
+    The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
+
+    Third: true if GPS puts the turtle beyond T.GPS_REACH (nothing corrected: stop, and say the line). Fourth: true if there's no world origin and no saved position to set one from. Asked once a run; `again` asks again.
+
 == The turtle API, wrapped once ==
 
 T.claim()
@@ -1146,7 +1155,7 @@ tl.world: the map and the frames: what the turtle has seen, dug and placed, and 
 
 Loaded by turtlelib the first time one of these is used (T.scan, T.map, T.setOrigin, ...), and from the start on a turtle that already has a map on disk, so that digs and moves made by any program keep it right.  Coordinates in the calls are the turtle's own (the frame it counts in: (0,0,0) where its job started, facing +z, +x to its right).
 
-Frames.  The turtle's frame isn't fixed: `--here`, T.setHomeHere, T.clearPos and a run with no saved position make wherever it stands (0,0,0) again.  So the map keeps a frame of its own, the one it was started in, and the transform (a shift and quarter turns) from the turtle's current frame to it.  Whenever turtlelib re-zeroes it tells this module where that spot was, and the transform is updated, so what the map holds stays where it is.  If the frame was lost without that (the saved position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder (.map/frame).
+Frames.  The turtle's frame isn't fixed: `--here`, T.setHomeHere, T.clearPos and a run with no saved position make wherever it stands (0,0,0) again.  So the map keeps a frame of its own, the one it was started in, and the transform (a shift and quarter turns) from the turtle's current frame to it.  Whenever turtlelib re-zeroes it tells this module where that spot was, and the transform is updated, so what the map holds stays where it is.  If the frame was lost without that (the saved position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder (.map/frame).  With GPS (ADR-0018), T.checkedPos checks the saved position against a fix when a job starts: the first fix sets the origin (or anchors a player's to GPS), later ones correct the count within T.GPS_REACH blocks, and a lost position is found again, so the map stays aligned.
 
 The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it was seen, the names of the blocks the cube holds, and the block states that were inspected) and then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air, 2 and up for a name of the palette.  A cube is loaded when it's used and written when it changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first, except those the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in .map/pins in the map's frame) overlaps, and those holding home or the map's own origin; when only those are left the map says it is over its cap (T.map.stats().over, printed once) rather than growing without a word.  What the turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells it covered, air where it lists no block.
 
@@ -1179,6 +1188,13 @@ T.toWorld(a, b, c)
 
 T.toLocal(a, b, c)
     Convert a world point (a table with x, y, z, or three numbers) to the turtle's frame: a table { x, y, z }; nil and why if there's no origin or the map is unaligned.
+
+== The position from GPS (ADR-0018) ==
+
+T.gpsCheck(saved)
+    Check a saved position (T.loadPos's, or nil) against a GPS fix: T.checkedPos's work (ADR-0018).
+
+    Returns the position to use (saved, corrected and saved again, or found when it was lost), a line saying what happened (nil when nothing did), true third when GPS puts the turtle beyond T.GPS_REACH (nothing corrected: the caller stops), and true fourth when there's no origin and no saved position to set one from.
 
 == The map ==
 

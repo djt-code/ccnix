@@ -906,4 +906,175 @@ T.frameChanged(nil, nil)
 merged, why = T.mergeScan(scanBlocks(5), 5)
 check("an unaligned map takes nothing, and says so", merged == nil and why:find("unaligned", 1, true), tostring(why))
 
+--------------------------------------------------------------------------
+-- The position from GPS (ADR-0018): T.checkedPos, and the starts, homes and resets that use it
+--------------------------------------------------------------------------
+-- GPS answers from the mock's true cell, in the world; a wireless modem on the back (or none).  A "carry" moves the
+-- mock without turtlelib knowing.
+local MODEM = true
+local FIX                                   -- (a fix to give instead of the true one)
+local function gpsOn()
+    gps = { locate = function()
+        if FIX then return FIX[1], FIX[2], FIX[3] end
+        return worldOf(S.P.x, S.P.y, S.P.z)
+    end }
+    peripheral.getNames = function()
+        local names = {}
+        if EQ.left then names[#names + 1] = "left" end
+        if EQ.right then names[#names + 1] = "right" end
+        if MODEM then names[#names + 1] = "back" end
+        return names
+    end
+    local scannerType = peripheral.getType
+    peripheral.getType = function(side) if side == "back" and MODEM then return "modem" end return scannerType(side) end
+    peripheral.call = function(side, method) if side == "back" and method == "isWireless" then return true end end
+end
+local function gpsOff()
+    gps, peripheral.getNames, peripheral.call = nil, nil, nil
+end
+local function carry(dx, dy, dz) S.P.x, S.P.y, S.P.z = S.P.x + dx, S.P.y + dy, S.P.z + dz end
+local function at(x, y, z) return S.P.x == x and S.P.y == y and S.P.z == z end
+local function counted(x, y, z, d) return T.pos.x == x and T.pos.y == y and T.pos.z == z and (d == nil or T.dir == d) end
+-- a world with blocks near home for a scan to line up with
+local function landmarks() put(3, 0, 2, STONE); put(0, 0, 2, DIRT); put(-1, 1, -1, GLASS) end
+local scannerType0 = peripheral.getType
+gpsOn()
+
+-- no origin yet: the first start sets it from GPS, the facing from a scan
+T = fresh(1)
+landmarks()
+ok = T.requireHome(false, "x")
+local o = T.origin()
+local ox, oy, oz = worldOf(0, 0, 0)
+check("gps: no origin, a first start: the origin from GPS, the facing from a scan",
+    ok and o and o.x == ox and o.y == oy and o.z == oz and o.facing == COMPASS[1], o and dump(o) or "nil")
+check("gps: ...saved as from GPS", S.files[".map/frame"]:find("source gps", 1, true), S.files[".map/frame"])
+-- ...from a step, with no scanner
+T = fresh(3)
+EQ.left = nil
+local digs0 = DIGS
+local _, note = T.checkedPos()        -- (nothing yet: no origin, no saved position)
+T.startAtHome(false)                  -- (re-zeroed, it sets the origin)
+o = T.origin()
+ox, oy, oz = worldOf(0, 0, 0)
+check("gps: no scanner: the facing from a step forward and back, nothing dug, the turtle home again",
+    o and o.facing == COMPASS[3] and o.x == ox and o.z == oz and at(0, 0, 0) and counted(0, 0, 0, 0) and DIGS == digs0,
+    o and dump(o) or "nil")
+-- ...blocked ahead: the step goes back instead
+T = fresh(0)
+EQ.left = nil
+put(0, 0, 1, STONE)
+T.startAtHome(false)
+o = T.origin()
+check("gps: blocked ahead: the step goes back", o and o.facing == COMPASS[0] and at(0, 0, 0), o and dump(o) or "nil")
+-- ...boxed in, no scanner: no origin, and why
+T = fresh(2)
+EQ.left = nil
+put(0, 0, 1, STONE); put(0, 0, -1, STONE)
+tp(T, 0, 0, 0, 0)
+local pos, why = T.checkedPos(true)
+check("gps: boxed in with no scanner: no origin set, and why",
+    T.origin() == nil and why and why:find("isn't known", 1, true) and why:find("nothing free", 1, true), tostring(why))
+
+-- a start with the count a block off (a move lost): corrected, the facing checked
+T = fresh(2)
+landmarks()
+T.startAtHome(false)                    -- (the origin from GPS)
+tp(T, 0, 0, 0, 0)
+carry(1, 0, 0)
+pos, why = T.checkedPos(true)
+check("gps: a block off: corrected to where GPS says, and saved", pos and pos.x == 1 and pos.z == 0 and counted(1, 0, 0, 0)
+    and T.loadPos().x == 1 and why:find("1 block off", 1, true) and why:find("facing south (from a scan)", 1, true), tostring(why))
+check("gps: ...requireHome then says it may not be at home", T.requireHome(false, "x") == false)
+-- carried 3 blocks between jobs (the file says home): corrected, and `reset` brings it home
+tp(T, 0, 0, 0, 0)
+carry(0, 0, 3)
+T = reboot()                            -- (`reset`: a program of its own)
+ok = T.goHome()
+check("gps: carried 3 blocks: goHome heads home from where GPS says, and gets there", ok and at(0, 0, 0) and counted(0, 0, 0))
+-- carried 100: nothing corrected; the start stops, goHome won't go
+tp(T, 0, 0, 0, 0)
+carry(100, 0, 0)
+pos, why, far = T.checkedPos(true)
+check("gps: carried 100 blocks: nothing corrected, and why", far == true and counted(0, 0, 0) and pos.x == 0
+    and why:find("carried off, or in another dimension", 1, true), tostring(why))
+check("gps: ...a start stops", T.requireHome(false, "x") == false and T.loadPos().x == 0)
+ok = T.goHome()
+check("gps: ...goHome won't head off from there", ok == false and at(100, 0, 0))
+carry(-100, 0, 0)
+
+-- the saved position lost, with an origin: found from GPS, the map kept aligned
+T = fresh(1)
+landmarks()
+T.startAtHome(false)
+T.map.set(5, 0, 5, STONE)
+T.map.flush()
+tp(T, 2, 0, 1, 1)
+S.files[".turtlepos"] = nil
+T = reboot()
+pos, why = T.checkedPos()
+check("gps: the saved position lost: found from GPS, with the facing", pos and pos.x == 2 and pos.z == 1 and pos.dir == 1
+    and why:find("was lost", 1, true), tostring(why))
+check("gps: ...the map still aligned, its cells where they were", T.map.stats().aligned and T.map.get(5, 0, 5) == STONE)
+-- ...lost at home: the start re-zeroes there with the map aligned (it was marked unaligned before GPS)
+tp(T, 0, 0, 0, 0)
+S.files[".turtlepos"] = nil
+T = reboot()
+T.startAtHome(false)
+check("gps: lost at home: the start keeps the map aligned", T.map.stats().aligned and T.map.get(5, 0, 5) == STONE)
+
+-- a player's origin: the first fix agreeing marks it as GPS's; one disagreeing moves it, the count kept
+T = fresh(2)
+landmarks()
+gpsOff()
+T.startAtHome(false)
+ox, oy, oz = worldOf(0, 0, 0)
+T.setOrigin(ox, oy, oz, "south")
+gpsOn()
+pos, why = T.checkedPos(true)
+check("gps: a player's origin GPS agrees with: kept, quietly, marked from GPS", why == nil
+    and S.files[".map/frame"]:find("source gps", 1, true))
+T = fresh(2)
+landmarks()
+gpsOff()
+T.startAtHome(false)
+T.setOrigin(ox + 5, oy, oz, "south")    -- (a typo)
+gpsOn()
+pos, why = T.checkedPos(true)
+o = T.origin()
+check("gps: a player's origin GPS disagrees with: it follows GPS, the count kept, and both are named",
+    o and o.x == ox and o.z == oz and counted(0, 0, 0, 0) and why:find("follows GPS", 1, true)
+    and why:find(string.format("%d,%d,%d", ox + 5, oy, oz), 1, true), tostring(why))
+
+-- what doesn't ask: no modem, turtle.gps=false; a fix that isn't a block is set aside
+T = fresh(2)
+landmarks()
+T.startAtHome(false)
+tp(T, 0, 0, 0, 0)
+carry(2, 0, 0)
+MODEM = false
+pos, why = T.checkedPos(true)
+check("gps: no wireless modem: not asked", why == nil and counted(0, 0, 0))
+MODEM = true
+SETTINGS["turtle.gps"] = false
+pos, why = T.checkedPos(true)
+check("gps: turtle.gps=false: not asked", why == nil and counted(0, 0, 0))
+SETTINGS["turtle.gps"] = nil
+local wx, wy, wz = worldOf(S.P.x, S.P.y, S.P.z)
+FIX = { wx + 0.4, wy, wz }
+pos, why = T.checkedPos(true)
+check("gps: a fix that isn't a block: set aside, and said", counted(0, 0, 0) and why and why:find("isn't a block", 1, true), tostring(why))
+FIX = nil
+pos, why = T.checkedPos(true)
+check("gps: ...a good one corrects it", counted(2, 0, 0))
+carry(-2, 0, 0)
+-- once a run unless asked again
+tp(T, 0, 0, 0, 0)
+carry(1, 0, 0)
+pos, why = T.checkedPos()
+check("gps: asked once a run: the second call doesn't ask again", why == nil and counted(0, 0, 0))
+carry(-1, 0, 0)
+gpsOff()
+peripheral.getType = scannerType0
+
 print = realPrint
