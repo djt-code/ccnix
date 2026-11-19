@@ -912,6 +912,8 @@ numbers, the text tools and the network tools. Still to try:
     its frame), facing east (from a scan)", and it went home. (`home` alone doesn't know the job's mode, so it
     travelled flat.)
   - Off: `sysctl turtle.gps=false`: `mow 6 6 0` said nothing about GPS and mowed one pass.
+  - mine with GPS (after #121): a 4x4 tunnel 70 long, one home, finished and back at the start (0,0,0 facing 0); its
+    world origin set from GPS at the first start (.map/frame "source gps").
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
