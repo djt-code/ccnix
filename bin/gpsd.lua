@@ -11,8 +11,10 @@
 -- too), and on modems attached later.
 --
 -- Where it is: gpsd.x, gpsd.y and gpsd.z, the computer's own block (F3's
--- "Targeted Block" while you look at it): CC measures distances from the
--- block the modem is on, exactly, so a block off is wrong.  Without them, a command computer knows its own; another
+-- "Targeted Block" while you look at it, in that order: y is the height):
+-- CC measures distances from the block the modem is on, exactly, so a
+-- block off is wrong.  A check can't see y and z swapped on every host
+-- (the distances are the same), only that the clients' fixes come out so.  Without them, a command computer knows its own; another
 -- locates itself from the other hosts (tried every 10 s until there's a
 -- fix; not saved: a computer moved locates again at boot).  A position
 -- from the settings is checked when it starts: it pings, and weighs each
