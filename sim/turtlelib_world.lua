@@ -1074,6 +1074,33 @@ carry(1, 0, 0)
 pos, why = T.checkedPos()
 check("gps: asked once a run: the second call doesn't ask again", why == nil and counted(0, 0, 0))
 carry(-1, 0, 0)
+-- terrain mode (mow): GPS finding the turtle on the home column a block higher (home's ground moved) is home, and
+-- the start re-zeroes there, the origin following; flat mode isn't, it's off
+for _, mode in ipairs({ "terrain", "flat" }) do
+    T = fresh(2)
+    landmarks()
+    T.startAtHome(false)
+    local hx, hy, hz = worldOf(0, 0, 0)
+    T.mode = mode
+    tp(T, 0, 0, 0, 0)
+    carry(0, 1, 0)
+    T = reboot()
+    local prints = {}
+    print = function(...) prints[#prints + 1] = table.concat({ ... }, " ") end
+    ok = T.requireHome(false, "x")
+    print = function() end
+    local w = T.toWorld(0, 0, 0)
+    if mode == "terrain" then
+        check("gps: terrain mode, a block up on the home column: home, re-zeroed there, the origin following",
+            ok == true and counted(0, 0, 0, 0) and w and w.x == hx and w.y == hy + 1 and w.z == hz
+                and table.concat(prints, "|"):find("Home's ground is 1 block higher", 1, true), table.concat(prints, "|"))
+        T = reboot()
+        local _, again = T.checkedPos()
+        check("gps: ...and the next start agrees, nothing to say", again == nil, tostring(again))
+    else
+        check("gps: flat mode, a block up on the home column: not home", ok == false, table.concat(prints, "|"))
+    end
+end
 gpsOff()
 peripheral.getType = scannerType0
 

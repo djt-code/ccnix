@@ -171,6 +171,11 @@ check("mow 5 4 7: the size and the repeat kept", SAVED["mow.width"] == 5 and SAV
     and SAVED["mow.repeat"] == 7 and SAVED.saved == true)
 check("and it waited for the next pass", logHas("^Sleeping 7 min") and Mine.files[".turtlepos"] == "0 0 0 0 terrain")
 SAVED = {}
+lawn(5, 4)
+run("5", "4", "0", "notorch")
+check("mow 5 4 0: one pass, no wait (0 is once)", not logHas("^Sleeping") and SAVED["mow.repeat"] == 0
+    and Mine.files[".turtlepos"] == "0 0 0 0 terrain")
+SAVED = {}
 lawn(6, 3)
 run("6", "3", "notorch")
 check("mow 6 3: the size kept, no repeat", SAVED["mow.width"] == 6 and SAVED["mow.length"] == 3
