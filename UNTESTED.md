@@ -14,7 +14,7 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
 
-- **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block; a pocket computer's too.
+- **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block.
 - **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
 - **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
 - **Refused**: `gpsd` on a turtle says why.
@@ -903,6 +903,8 @@ numbers, the text tools and the network tools. Still to try:
   - A typo: x one block off and `service restart gpsd`: the red crit ("3 of 3 hosts disagree (the one at
     ... is 21.2 blocks away, not 21.9)"), not serving; set right, serving again 21 s later with 3 agreeing.
   - The count: "served N requests (N in the last 10 minutes)" from each host.
+  - Locating: `gps locate` on a pocket computer gave the player's own position, exactly: x and z as the
+    player stood (367.3, 451.4), y the feet plus the eyes' 1.62 (101.62); the four distances matched it.
   - Refused: `gpsd` on a pocket computer, in red: "a pocket computer moves, and a GPS host must stay put:
     run gpsd on a computer".
   - Seen: "(1 other host agree)": fixed to "agrees".
