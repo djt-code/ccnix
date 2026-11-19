@@ -16,7 +16,6 @@ In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem eq
 
 - **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
 - **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
-- **mine reset, a finished tunnel**: with the tunnel done and the turtle out in it, `mine reset` goes to the start, not the last home (#125).
 - **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
 
@@ -917,6 +916,7 @@ numbers, the text tools and the network tools. Still to try:
   - The modem swapped in (#122): the mine turtle, pickaxe and chunk controller on, the modem in the inventory, moved by
     hand: `mine reset` said "The saved position was 3.6 blocks off: corrected from GPS to 2,0,3 ..., facing north (from
     a step)" and went back along the tunnel from there to its home.
+  - `mine reset` on the finished tunnel (#125), the turtle at its last home: "Heading back to the start. At the start."
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
