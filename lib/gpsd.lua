@@ -64,6 +64,11 @@ function G.position(msg)
     return { x, y, z }
 end
 
+-- "1 other host agrees", "3 other hosts agree"
+local function agreeing(n)
+    return n .. (n == 1 and " other host agrees" or " other hosts agree")
+end
+
 -- The position the settings give: {x, y, z}; nil when none is set; nil and
 -- why when only some are, or one isn't a number.
 function G.configured(settingsT)
@@ -215,7 +220,7 @@ function D:checked()
             .. " blocks, but its position is " .. num(d.expected, 1) .. " from ours: its position (or ours) is wrong")
     end
     if self.state == "serving" then             -- (a check while serving: said only if a host answered)
-        if #v.agree > 0 then self:log("info", "checked: " .. #v.agree .. " other host" .. (#v.agree == 1 and "" or "s") .. " agree") end
+        if #v.agree > 0 then self:log("info", "checked: " .. agreeing(#v.agree)) end
     else
         self:serve(v)
     end
@@ -226,8 +231,7 @@ end
 function D:serve(v)
     local wasRefusing = self.state == "refusing" or self.verdict
     self.state, self.verdict = "serving", nil
-    local agreed = v and #v.agree > 0 and (" (" .. #v.agree .. " other host" .. (#v.agree == 1 and "" or "s")
-        .. " agree)") or ""
+    local agreed = v and #v.agree > 0 and (" (" .. agreeing(#v.agree) .. ")") or ""
     local on = next(self.modems) and (" on " .. table.concat(self:modemList(), ", ")) or ", once there's a wireless modem"
     self:log(wasRefusing and "notice" or "info", "serving " .. fmt(self.pos) .. ", from " .. self.from .. agreed .. on)
     if not self.countTimer then self.countTimer = self:timer("count", G.COUNT, true) end

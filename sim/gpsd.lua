@@ -181,6 +181,11 @@ do
     check("...the one out named in a warning",
         w.logged("^warning: the host at 0, 90, %-100 answers from [%d.]+ blocks, but its position is [%d.]+ from ours"), w.logs[#w.logs])
 end
+do
+    local state, w = verdict({ A1 })
+    check("one host that agrees: serving, \"1 other host agrees\"", state == "serving"
+        and w.logged("^info: serving 100, 64, %-200, from gpsd.x, gpsd.y and gpsd.z %(1 other host agrees%) on top"), w.logs[#w.logs])
+end
 check("one host out, none agreeing: serving (one can't say which is wrong)", verdict({ B1 }) == "serving")
 check("two out, one agreeing: not serving", verdict({ A1, B1, B2 }) == "refusing")
 check("two out, two agreeing: serving", verdict({ A1, A2, B1, B2 }) == "serving")

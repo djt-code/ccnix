@@ -14,13 +14,11 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
 
-- **Serving**: `service status gpsd` on each says "serving x, y, z, from gpsd.x, gpsd.y and gpsd.z (3 other hosts agree) on top" (the modem's side); a turtle's `gps locate` (and `T.setOrigin()`) gives its block; a pocket computer's too.
-- **A typo**: one host with a coordinate one block off (`sysctl gpsd.z=...`, `service restart gpsd`): it says in red on the console that its position is wrong and doesn't serve; set right, it serves within a minute.
+- **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block; a pocket computer's too.
 - **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
 - **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
 - **Refused**: `gpsd` on a turtle and on a pocket computer says why.
 - **Modems**: a second wireless modem attached while it runs is answered on ("answering on ... too"); both removed, it warns.
-- **The count**: after 10 minutes of turtles locating, "served N requests" in /var/log/messages.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
@@ -896,6 +894,16 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
+  (three at one height, one 15 blocks above), `.settings` per host, rebooted:
+  - Serving: each logged "serving x, y, z, from gpsd.x, gpsd.y and gpsd.z (N other hosts agree) on top"
+    (or right), N growing as the others booted; the first one up, alone, served unchecked and logged
+    "checked: 2 other hosts agree" at its recheck once two more were up.
+  - A typo: x one block off and `service restart gpsd`: the red crit ("3 of 3 hosts disagree (the one at
+    ... is 21.2 blocks away, not 21.9)"), not serving; set right, serving again 21 s later with 3 agreeing.
+  - The count: "served N requests (N in the last 10 minutes)" from each host.
+  - Seen: "(1 other host agree)": fixed to "agrees".
 
 - 2026-11-17 — ADR-0012 (ccnix 0.52.0), from the castle turtle's v3 run (16 goals over about ten hours,
   report_harness_v3.md and its four logs):
