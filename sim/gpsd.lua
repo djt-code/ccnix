@@ -132,6 +132,9 @@ do
     for _, side in ipairs({ "top", "back", "right" }) do d:handle("peripheral_detach", side) end
     check("every wireless modem removed: a warning", w.logs[#w.logs]:find("^warning: no wireless modem"))
     check("...and no answer from a modem gone", pinged(w, d, "top", 65534, 8) == nil)
+    d:handle("peripheral", "right")
+    check("a modem attached again after none: \"answering on right\", not \"too\"", w.logs[#w.logs] == "info: answering on right",
+        w.logs[#w.logs])
 end
 
 -- 3. a wrong position: most of the hosts disagree, and it doesn't serve
@@ -243,6 +246,16 @@ do
     d = G.new(w.env)
     d:start()
     check("numbers set as text (sysctl's): taken", d.pos[2] == 64 and d.pos[3] == -3)
+end
+do  -- gps.y for gpsd.y: warned, and not used
+    local w = world({ settings = { ["gps.y"] = "-5", ["gps.z"] = "-5" } })
+    G.new(w.env):start()
+    check("gps.y and gps.z set, no gpsd.*: a warning naming them, and it locates itself",
+        w.logged("^warning: gps.y, gps.z are set, but gpsd reads gpsd.x, gpsd.y and gpsd.z: a typo%? %(not used: it locates itself"),
+        w.logs[1])
+    w = world({ settings = { ["gpsd.x"] = 1, ["gpsd.y"] = 2, ["gpsd.z"] = 3, ["gps.x"] = 9 } })
+    G.new(w.env):start()
+    check("...with gpsd.* set too: the warning says those are used", w.logged("^warning: gps.x is set, .*using gpsd.x, gpsd.y and gpsd.z"))
 end
 
 -- 5. no position set: a command computer's block, or GPS

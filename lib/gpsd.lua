@@ -149,6 +149,15 @@ function D:start()
     end
     local pos, why = G.configured(self.env.settings)
     if why then self:log("err", why); self.state = "stopped"; return nil, why end
+    local typos = {}
+    for _, k in ipairs({ "gps.x", "gps.y", "gps.z" }) do
+        if self.env.settings.get(k) ~= nil then typos[#typos + 1] = k end
+    end
+    if #typos > 0 then
+        self:log("warning", table.concat(typos, ", ") .. (#typos == 1 and " is" or " are") .. " set, but gpsd reads gpsd.x, "
+            .. "gpsd.y and gpsd.z: a typo? (" .. (pos and "using gpsd.x, gpsd.y and gpsd.z" or "not used: it locates itself")
+            .. "; `sysctl " .. typos[1] .. "=` clears it)")
+    end
     if pos then
         self.pos, self.from = pos, "gpsd.x, gpsd.y and gpsd.z"
         if self.env.settings.get("gpsd.check") == false then return self:serve() end
@@ -279,7 +288,7 @@ function D:handle(ev, a, b, c, msg, distance)
         end
     elseif ev == "peripheral" then
         if self:addModem(a) then
-            self:log("info", "answering on " .. a .. " too")
+            self:log("info", "answering on " .. a .. (#self:modemList() > 1 and " too" or ""))
             if self.state == "locating" and not self.pos then return self:locate() end
         end
     elseif ev == "peripheral_detach" then

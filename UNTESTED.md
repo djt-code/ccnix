@@ -14,10 +14,10 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
 
-- **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block.
-- **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
-- **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
-- **Modems**: a second wireless modem attached while it runs is answered on ("answering on ... too"); both removed, it warns.
+- **Locating**: a turtle's `T.setOrigin()` (in `lua`: `T = require("turtlelib")` first) gives its block and facing.
+- **A neighbour's typo**: a fifth host set wrong with `gpsd.check=false` (so it serves anyway; one that refuses
+  answers no one); a right one restarted warns naming it, and serves.
+- **A typo in the setting's name**: `sysctl gps.y=...` (not gpsd.y): a warning names it, at start.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
@@ -912,6 +912,17 @@ numbers, the text tools and the network tools. Still to try:
   - Refused: `gpsd` on a pocket computer, in red: "a pocket computer moves, and a GPS host must stay put:
     run gpsd on a computer".
   - Seen: "(1 other host agree)": fixed to "agrees".
+  - In the Nether, four hosts more, and two with no position:
+    - Serving: one with its position typed in: "(3 other hosts agree)".
+    - No position: two located themselves from the others and served ("from GPS (the other hosts)").
+    - A host at 0, 0, 0 among them: "5 of 5 hosts disagree", not serving.
+    - Modems: the modem removed, "no wireless modem: waiting for one (right was removed)"; put back, "answering on
+      right too" ("too" with no other modem: fixed).
+    - Locating: a turtle's and a pocket computer's `gps locate` gave fixes, but with y and z swapped: the four
+      were typed in as x, z, y (y -1 in the Nether, below its floor). The check can't see that (every distance
+      is the same), the help now says y is the height.
+    - A "wrong position" typed as `gps.y`/`gps.z`, not gpsd.*: unseen by gpsd, which located itself. gpsd now
+      warns about gps.x, gps.y and gps.z.
 
 - 2026-11-17 — ADR-0012 (ccnix 0.52.0), from the castle turtle's v3 run (16 goals over about ten hours,
   report_harness_v3.md and its four logs):
