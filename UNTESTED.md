@@ -61,8 +61,6 @@ to try `--new` over it and the supplies coming home.
   every minute, and carries on after you put them in; `service stop mine` or Ctrl+T ends the wait.
 - **`--new` over the same tunnel**: `mine --new` (or `--resume`) of a finished tunnel carries it on as a plain
   `mine` with a longer `mine.length` did (tested).
-- **Supplies home**: a finished tunnel brings its last home's chests, fuel, torches and table back to the start;
-  `mine haul --supplies` after a stop.
 - **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
   on and off with the chunk controller staying put, the scanner and bucket still aboard after.
 - **Too wide to light**: a tunnel over 24 wide says so at the start.
@@ -891,6 +889,8 @@ numbers, the text tools and the network tools. Still to try:
     carrying it on from home N").
   - `mine.haulEvery=8`: it hauls the valuables to the start every 8 homes.
   - Chests join: full home chests grew into double chests; after a haul their second halves were picked up again.
+  - Supplies home (tried earlier): a finished tunnel brought its last home's supplies back to the start, and
+    `mine haul --supplies` after a stop did the same.
 
 - 2026-11-19 — ADR-0018 (main before 0.54.0), a mowing turtle with a wireless modem among four gpsd hosts:
   - The origin from GPS at its first start (facing from a scan), saved as from GPS.
