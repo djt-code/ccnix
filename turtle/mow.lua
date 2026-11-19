@@ -86,7 +86,9 @@ local SET_L = T.setting("mow.length", 16, "Lawn length for mow: tiles + ahead / 
 local SET_R = T.setting("mow.repeat", 0, "Minutes between mow passes; 0 = a single pass")
 local WIDTH  = tonumber(args[1]) or SET_W
 local LENGTH = tonumber(args[2]) or SET_L
-local REPEAT = tonumber(args[3]) or (SET_R > 0 and SET_R or nil)   -- minutes between passes; nil = once
+local REPEAT = tonumber(args[3])                -- minutes between passes; nil = once
+if REPEAT == nil and SET_R > 0 then REPEAT = SET_R end
+if REPEAT and REPEAT <= 0 then REPEAT = nil end -- (0 is once: in Lua it's true, so it would repeat at once, forever)
 local MIN_FUEL = math.abs(WIDTH * LENGTH) + math.abs(WIDTH) + math.abs(LENGTH) + 150
 
 local TORCH = "minecraft:torch"
