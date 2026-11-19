@@ -14,9 +14,6 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
 
-- **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
-- **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
-- **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
@@ -56,22 +53,14 @@ In-game order: `/ccnix rom update`, then the 10x10 endless tunnel that stopped w
 `mine --resume` (its spacing stays 16), with `sysctl mine.report=true` to hear the waits. Then a fresh short tunnel
 to try `--new` over it and the supplies coming home.
 
-- **Chests join**: a full home chest grows: the second chest (valuables in the wall at z-1, or z+1 past a torch
-  niche; bulk under the floor at z-1) joins it into a double chest ("... is a double chest now"); one that doesn't
-  join is taken back and said. Open both halves as a player (the block above the new valuables half is cleared).
 - **Hauling when full**: a full valuables chest with no chest to spare: "is full: back to the start with the
   valuables", the trips, "Back out to home N", and on. Only the start's chest being full stops it.
-- **Picking chests up**: after a haul empties a grown valuables chest, its second half is dug (the home's fuel
-  stock lifted out first and put back), the wall filled, the chest back at the start; nothing on the ground.
-- **`mine.haulEvery=N`**: a haul after every Nth home.
 - **Bulk overflow**: a full bulk chest with nothing to grow it throws the rest behind the home (it despawns);
   "Threw away N bulk blocks"; no stop.
 - **Waiting**: out of chests (or fuel) it goes home, says what it needs (and in chat with mine.report), looks
   every minute, and carries on after you put them in; `service stop mine` or Ctrl+T ends the wait.
-- **`--new` over the same tunnel**: "is the same one: carrying it on from home N", the finished part gone
-  over, not dug again; `--resume` of a finished tunnel with a longer `mine.length`.
-- **Supplies home**: a finished tunnel brings its last home's chests, fuel, torches and table back to the start;
-  `mine haul --supplies` after a stop.
+- **`--new` over the same tunnel**: `mine --new` (or `--resume`) of a finished tunnel carries it on as a plain
+  `mine` with a longer `mine.length` did (tested).
 - **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
   on and off with the chunk controller staying put, the scanner and bucket still aboard after.
 - **Too wide to light**: a tunnel over 24 wide says so at the start.
@@ -894,6 +883,15 @@ numbers, the text tools and the network tools. Still to try:
 
 ## Tested
 
+- 2026-11-19 — ADR-0014 (main before 0.54.0), a 10x10 endless tunnel in the overworld (`mine.length=0`,
+  `mine.haulEvery=8`), still running:
+  - Carried on: `mine` at the start of the finished tunnel carried it on from its last home ("is the same one:
+    carrying it on from home N").
+  - `mine.haulEvery=8`: it hauls the valuables to the start every 8 homes.
+  - Chests join: full home chests grew into double chests; after a haul their second halves were picked up again.
+  - Supplies home (tried earlier): a finished tunnel brought its last home's supplies back to the start, and
+    `mine haul --supplies` after a stop did the same.
+
 - 2026-11-19 — ADR-0018 (main before 0.54.0), a mowing turtle with a wireless modem among four gpsd hosts:
   - The origin from GPS at its first start (facing from a scan), saved as from GPS.
   - Moved by hand: "The saved position was 1 block off: corrected from GPS to 0,1,0 ..., facing west (from a scan)".
@@ -917,6 +915,11 @@ numbers, the text tools and the network tools. Still to try:
     hand: `mine reset` said "The saved position was 3.6 blocks off: corrected from GPS to 2,0,3 ..., facing north (from
     a step)" and went back along the tunnel from there to its home.
   - `mine reset` on the finished tunnel (#125), the turtle at its last home: "Heading back to the start. At the start."
+  - The origin by a step: a turtle with no world origin and no geo scanner stepped a block and back for its facing,
+    and set the origin from GPS.
+  - Carried far, then `--here`: "Home moved here ...: the map and the origin follow".
+  - A player's origin with a typo: the next start said the origin given put it elsewhere and "the origin follows GPS
+    now".
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
