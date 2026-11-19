@@ -16,7 +16,6 @@ In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem eq
 
 - **The origin by a step**: a turtle with no world origin and no geo scanner starts a job: "World origin from GPS: ... (from a step)": it steps one block forward or back, digging nothing, and comes back; `T.origin()` then matches F3.
 - **Carried far, then --here**: a start with `--here` where GPS put it far off: "Home moved here (... in the old frame, facing from a scan): the map and the origin follow"; the next start says nothing.
-- **The modem swapped in**: a mine turtle with the pickaxe and the chunk controller on and the modem in the inventory, moved a block by hand: `mine reset` swaps the modem in (for the pickaxe), corrects the count, swaps back, and goes; after a run the modem and the chunk controller are still aboard (#121).
 - **A player's origin**: `mine --origin x,y,z,facing` with a typo in x (or, on any turtle, edit its .map/frame: add 1 to the `world` line's second number, the x, and delete the `source gps` line): the next start says the origin given put it elsewhere and "the origin follows GPS now"; `T.origin()` matches F3.
 - **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
 
@@ -914,6 +913,9 @@ numbers, the text tools and the network tools. Still to try:
   - Off: `sysctl turtle.gps=false`: `mow 6 6 0` said nothing about GPS and mowed one pass.
   - mine with GPS (after #121): a 4x4 tunnel 70 long, one home, finished and back at the start (0,0,0 facing 0); its
     world origin set from GPS at the first start (.map/frame "source gps").
+  - The modem swapped in (#122): the mine turtle, pickaxe and chunk controller on, the modem in the inventory, moved by
+    hand: `mine reset` said "The saved position was 3.6 blocks off: corrected from GPS to 2,0,3 ..., facing north (from
+    a step)" and went back along the tunnel from there to its home.
 
 - 2026-11-18 — ADR-0016 gpsd (main before 0.54.0, by `/ccnix rom update`), four hosts on the dev server
   (three at one height, one 15 blocks above), `.settings` per host, rebooted:
