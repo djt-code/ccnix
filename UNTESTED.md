@@ -14,7 +14,6 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
 
-- **Locating**: a turtle's `T.setOrigin()` (in `lua`: `T = require("turtlelib")` first) gives its block and facing.
 - **A neighbour's typo**: a fifth host set wrong with `gpsd.check=false` (so it serves anyway; one that refuses
   answers no one); a right one restarted warns naming it, and serves.
 - **A typo in the setting's name**: `sysctl gps.y=...` (not gpsd.y): a warning names it, at start.
@@ -921,6 +920,9 @@ numbers, the text tools and the network tools. Still to try:
     - Locating: a turtle's and a pocket computer's `gps locate` gave fixes, but with y and z swapped: the four
       were typed in as x, z, y (y -1 in the Nether, below its floor). The check can't see that (every distance
       is the same), the help now says y is the height.
+    - Fixed (y and z swapped back on each): a pocket computer's fix the player's eyes again (y the feet + 1.62).
+    - `T.setOrigin()` on a turtle, in `lua` (`package.path = ccnix.lib .. package.path` and `T = require("turtlelib")`
+      first: the prompt hasn't ccnix's folders): origin 32, 51, -2 facing east, aligned; `T.toWorld(T.pos)` agreed.
     - A "wrong position" typed as `gps.y`/`gps.z`, not gpsd.*: unseen by gpsd, which located itself. gpsd now
       warns about gps.x, gps.y and gps.z.
 
