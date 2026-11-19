@@ -469,6 +469,11 @@ function isPlanks(name) return text.endsWith(name, "_planks") end
 function isWood(name) return isLog(name) or isPlanks(name) or name == STICK end
 -- The Advanced Peripherals Geo Scanner: kept on board, never unloaded.
 function isScanner(name) return text.contains(name, "geo_scanner") end
+-- A turtle upgrade or computer part (a wireless modem, a chunk controller, a chat box): the turtle's own, which an
+-- unload keeps aboard (T.isEssential's peripherals).  Not the geo scanner: that is the start chest's kit, and goes back.
+function isUpgrade(name)
+    return not isScanner(name) and (text.startsWith(name, "computercraft:") or text.startsWith(name, "advancedperipherals:"))
+end
 -- A bucket: kept on board (one), for taking up lava to burn (see scoop).
 BUCKET, LAVA_BUCKET = "minecraft:bucket", "minecraft:lava_bucket"
 function isSupply(name)
@@ -1334,6 +1339,8 @@ function unload(only)
                 fuel = fuel + keep
             elseif isScanner(it.name) and only ~= "everything" then
                 keep = it.count
+            elseif isUpgrade(it.name) then
+                keep = it.count                  -- (a modem, a chunk controller: the turtle's own, never left in a chest)
             elseif it.name == BUCKET and buckets < 1 and only ~= "everything" then
                 keep, buckets = 1, 1
             end

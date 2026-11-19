@@ -68,6 +68,21 @@ check("never moved on an empty tank", DRY == 0, "tried " .. DRY)
 check("nothing spilled", (SPILLED or 0) == 0, tostring(SPILLED or 0))
 check("job done", jobState() == "done", tostring(jobState()))
 
+-- 1u. a wireless modem and a chunk controller in the inventory (taken off, or never put on): they stay aboard
+--     through every unload, not left in the start's chests
+setup(stock(4, 64)); features(); remember()
+startAt(); Mine.inv, Mine.files = {}, {}
+Mine.inv[1] = { name = "computercraft:wireless_modem_advanced", count = 1 }
+Mine.inv[2] = { name = "advancedperipherals:chunk_controller", count = 1 }
+FUEL, LOWEST, DRY, SPILLED = 1000, 1000, 0, 0
+run("3", "3", "12")
+local function aboard(name)
+    for _, it in pairs(Mine.inv) do if it and it.name == name then return true end end
+    return false
+end
+check("the modem and the chunk controller stayed aboard", jobState() == "done"
+    and aboard("computercraft:wireless_modem_advanced") and aboard("advancedperipherals:chunk_controller"))
+
 -- 1l. the same with a bucket in the start chest: the lava sources, one in
 --     the right wall and one in the tunnel, are taken up and burned (the
 --     wall's hole filled as ever); the bucket comes back to the start
