@@ -14,7 +14,8 @@
 --                                the start, as many trips as it takes
 --         mine haul --supplies   ...and the supplies in the last home too
 --         mine reset             back to the last home it built, after a
---                                Ctrl+T or restart
+--                                Ctrl+T or restart (to the start, when the
+--                                tunnel is finished)
 --         mine reset --to-start  back to the start instead
 --         mine reset --here      turtle was put back at the start by hand
 --         mine where             where it is along the tunnel: at which home,
@@ -3423,7 +3424,8 @@ if doReset then
     if not saved then print("No saved position; the turtle hasn't moved since its last job."); return end
     T.pos.x, T.pos.y, T.pos.z, T.dir = saved.x, saved.y, saved.z, saved.dir
     -- where to: the last home it built, the one asked for (--home N), or
-    -- the start (asked for, no homes yet, or it's at the start already)
+    -- the start (asked for, no homes yet, it's at the start already, or the
+    -- tunnel is finished: there's nothing to resume from a home)
     local target = homeAt(job.homes)
     if homeArg then
         if homeArg ~= math.floor(homeArg) or homeArg < 0 or homeArg > job.homes then
@@ -3431,7 +3433,7 @@ if doReset then
             return
         end
         target = homeAt(homeArg)
-    elseif toStart or saved.z <= 0 then target = homeAt(0) end
+    elseif toStart or saved.z <= 0 or job.state == "done" then target = homeAt(0) end
     if T.at(target) then
         T.face(target.face)
         print(target.k == 0 and "At the start already." or ("At home " .. target.k .. " already."))

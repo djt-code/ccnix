@@ -13,7 +13,7 @@ Usage:  mine [<width> <height> [length]] [--spacing N] [--no-lights] [--here]
         mine haul --supplies
             ...and the supplies in the last home too
         mine reset
-            back to the last home it built, after a Ctrl+T or restart
+            back to the last home it built, after a Ctrl+T or restart (to the start, when the tunnel is finished)
         mine reset --to-start
             back to the start instead
         mine reset --here
