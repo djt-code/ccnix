@@ -913,8 +913,11 @@ check("an unaligned map takes nothing, and says so", merged == nil and why:find(
 -- mock without turtlelib knowing.
 local MODEM = true
 local FIX                                   -- (a fix to give instead of the true one)
+local MODEM_ITEM = "computercraft:wireless_modem_normal"
+local function modemOn(side) return EQ[side] == MODEM_ITEM end
 local function gpsOn()
     gps = { locate = function()
+        if not (MODEM or modemOn("left") or modemOn("right")) then return nil end    -- (CC's: no modem, no fix)
         if FIX then return FIX[1], FIX[2], FIX[3] end
         return worldOf(S.P.x, S.P.y, S.P.z)
     end }
@@ -925,12 +928,22 @@ local function gpsOn()
         if MODEM then names[#names + 1] = "back" end
         return names
     end
-    local scannerType = peripheral.getType
-    peripheral.getType = function(side) if side == "back" and MODEM then return "modem" end return scannerType(side) end
-    peripheral.call = function(side, method) if side == "back" and method == "isWireless" then return true end end
+    local scannerType, scannerMethods, scannerWrap = peripheral.getType, peripheral.getMethods, peripheral.wrap
+    local modem = { isWireless = function() return true end }
+    peripheral.getType = function(side)
+        if (side == "back" and MODEM) or modemOn(side) then return "modem" end
+        return scannerType(side)
+    end
+    peripheral.getMethods = function(side) if modemOn(side) then return { "isWireless" } end return scannerMethods(side) end
+    peripheral.wrap = function(side) if modemOn(side) then return modem end return scannerWrap(side) end
+    peripheral.call = function(side, method)
+        if (side == "back" or modemOn(side)) and method == "isWireless" then return true end
+    end
 end
+local methods0, wrap0 = peripheral.getMethods, peripheral.wrap
 local function gpsOff()
     gps, peripheral.getNames, peripheral.call = nil, nil, nil
+    peripheral.getMethods, peripheral.wrap = methods0, wrap0
 end
 local function carry(dx, dy, dz) S.P.x, S.P.y, S.P.z = S.P.x + dx, S.P.y + dy, S.P.z + dz end
 local function at(x, y, z) return S.P.x == x and S.P.y == y and S.P.z == z end
@@ -1076,6 +1089,26 @@ FIX = nil
 pos, why = T.checkedPos(true)
 check("gps: ...a good one corrects it", counted(2, 0, 0))
 carry(-2, 0, 0)
+-- the modem in the inventory (a pickaxe and a chunk controller on): swapped in for the check, in place of the pickaxe,
+-- and back after (D7, as amended)
+MODEM = false
+EQ.left = PICK
+S.inv[16] = { name = MODEM_ITEM, count = 1 }
+tp(T, 0, 0, 0, 0)
+carry(1, 0, 0)
+pos, why = T.checkedPos(true)
+check("gps: a modem in the inventory: swapped in for the check, the count corrected", counted(1, 0, 0)
+    and why and why:find("1 block off", 1, true), tostring(why))
+check("gps: ...and swapped back: the pickaxe and the chunk controller on, the modem aboard", EQ.left == PICK
+    and EQ.right == CONTROLLER and M.carried(S, MODEM_ITEM) == 1, tostring(EQ.left) .. " " .. tostring(EQ.right))
+S.inv[16] = nil
+for slot, it in pairs(S.inv) do if it and it.name == MODEM_ITEM then S.inv[slot] = nil end end
+pos, why = T.checkedPos(true)
+check("gps: no modem on or aboard: not asked", why == nil)
+MODEM = true
+EQ.left = SCANNER
+carry(-1, 0, 0)
+tp(T, 0, 0, 0, 0)
 -- once a run unless asked again
 tp(T, 0, 0, 0, 0)
 carry(1, 0, 0)
