@@ -10,14 +10,6 @@ the heading), on the "Needs in-game test" view of the ccnix board. A new
 section gets its issue when it ships; tick the issue's checks as they are
 tried, and close it when the section is empty.
 
-## ADR-0016: gpsd (ccnix 0.54.0) (#106)
-
-In game, after `/ccnix rom update`: four computers with wireless (or ender) modems, not all at one height, each `setup gpsd --at x,y,z` with its own F3 block coordinates, rebooted.
-
-- **A neighbour's typo**: a fifth host set wrong with `gpsd.check=false` (so it serves anyway; one that refuses
-  answers no one); a right one restarted warns naming it, and serves.
-- **A typo in the setting's name**: `sysctl gps.y=...` (not gpsd.y): a warning names it, at start.
-
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
 In-game order: `/ccnix rom update`; on a computer `ccnix` (it says the server's tick rate while it isn't 20); then
@@ -923,6 +915,10 @@ numbers, the text tools and the network tools. Still to try:
     - Fixed (y and z swapped back on each): a pocket computer's fix the player's eyes again (y the feet + 1.62).
     - `T.setOrigin()` on a turtle, in `lua` (`package.path = ccnix.lib .. package.path` and `T = require("turtlelib")`
       first: the prompt hasn't ccnix's folders): origin 32, 51, -2 facing east, aligned; `T.toWorld(T.pos)` agreed.
+    - A neighbour's typo: the host at 0, 0, 0 with `gpsd.check=false` served; a right one restarted warned "the host at
+      0, 0, 0 answers from 38.3 blocks, but its position is 94.2 from ours", and served with 4 agreeing.
+    - A typo in the setting's name: `gps.y` set: "gps.y is set, but gpsd reads gpsd.x, gpsd.y and gpsd.z: a typo?
+      (using gpsd.x, gpsd.y and gpsd.z; `sysctl gps.y=` clears it)".
     - A "wrong position" typed as `gps.y`/`gps.z`, not gpsd.*: unseen by gpsd, which located itself. gpsd now
       warns about gps.x, gps.y and gps.z.
 
