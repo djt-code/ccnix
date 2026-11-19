@@ -17,7 +17,7 @@ In game, after `/ccnix rom update`: four computers with wireless (or ender) mode
 - **Locating**: a turtle's `gps locate` and `T.setOrigin()` give its block; a pocket computer's too.
 - **A neighbour's typo**: with a fifth host set wrong, the four right ones each warn naming it, and serve.
 - **No position**: a fifth computer with `setup gpsd` alone locates itself from the four and serves ("from GPS (the other hosts)").
-- **Refused**: `gpsd` on a turtle and on a pocket computer says why.
+- **Refused**: `gpsd` on a turtle says why.
 - **Modems**: a second wireless modem attached while it runs is answered on ("answering on ... too"); both removed, it warns.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
@@ -903,6 +903,8 @@ numbers, the text tools and the network tools. Still to try:
   - A typo: x one block off and `service restart gpsd`: the red crit ("3 of 3 hosts disagree (the one at
     ... is 21.2 blocks away, not 21.9)"), not serving; set right, serving again 21 s later with 3 agreeing.
   - The count: "served N requests (N in the last 10 minutes)" from each host.
+  - Refused: `gpsd` on a pocket computer, in red: "a pocket computer moves, and a GPS host must stay put:
+    run gpsd on a computer".
   - Seen: "(1 other host agree)": fixed to "agrees".
 
 - 2026-11-17 — ADR-0012 (ccnix 0.52.0), from the castle turtle's v3 run (16 goals over about ten hours,
