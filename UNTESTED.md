@@ -56,20 +56,14 @@ In-game order: `/ccnix rom update`, then the 10x10 endless tunnel that stopped w
 `mine --resume` (its spacing stays 16), with `sysctl mine.report=true` to hear the waits. Then a fresh short tunnel
 to try `--new` over it and the supplies coming home.
 
-- **Chests join**: a full home chest grows: the second chest (valuables in the wall at z-1, or z+1 past a torch
-  niche; bulk under the floor at z-1) joins it into a double chest ("... is a double chest now"); one that doesn't
-  join is taken back and said. Open both halves as a player (the block above the new valuables half is cleared).
 - **Hauling when full**: a full valuables chest with no chest to spare: "is full: back to the start with the
   valuables", the trips, "Back out to home N", and on. Only the start's chest being full stops it.
-- **Picking chests up**: after a haul empties a grown valuables chest, its second half is dug (the home's fuel
-  stock lifted out first and put back), the wall filled, the chest back at the start; nothing on the ground.
-- **`mine.haulEvery=N`**: a haul after every Nth home.
 - **Bulk overflow**: a full bulk chest with nothing to grow it throws the rest behind the home (it despawns);
   "Threw away N bulk blocks"; no stop.
 - **Waiting**: out of chests (or fuel) it goes home, says what it needs (and in chat with mine.report), looks
   every minute, and carries on after you put them in; `service stop mine` or Ctrl+T ends the wait.
-- **`--new` over the same tunnel**: "is the same one: carrying it on from home N", the finished part gone
-  over, not dug again; `--resume` of a finished tunnel with a longer `mine.length`.
+- **`--new` over the same tunnel**: `mine --new` (or `--resume`) of a finished tunnel carries it on as a plain
+  `mine` with a longer `mine.length` did (tested).
 - **Supplies home**: a finished tunnel brings its last home's chests, fuel, torches and table back to the start;
   `mine haul --supplies` after a stop.
 - **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
@@ -893,6 +887,13 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-19 — ADR-0014 (main before 0.54.0), a 10x10 endless tunnel in the overworld (`mine.length=0`,
+  `mine.haulEvery=8`), still running:
+  - Carried on: `mine` at the start of the finished tunnel carried it on from its last home ("is the same one:
+    carrying it on from home N").
+  - `mine.haulEvery=8`: it hauls the valuables to the start every 8 homes.
+  - Chests join: full home chests grew into double chests; after a haul their second halves were picked up again.
 
 - 2026-11-19 — ADR-0018 (main before 0.54.0), a mowing turtle with a wireless modem among four gpsd hosts:
   - The origin from GPS at its first start (facing from a scan), saved as from GPS.
