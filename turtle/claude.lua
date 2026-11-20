@@ -28,6 +28,13 @@
 --                conversation, with the options it was given (what
 --                autostart runs after a reboot; nothing there: it asks)
 --
+-- Each session keeps its --model, --effort, --steps and --cache in the
+-- setting claude.options, and a claude started without one takes it
+-- from there: autostart's plain `claude` after a reboot starts as the
+-- last session did, not on the defaults.  One given on the command line
+-- wins, and is kept in turn; `sysctl claude.options=` goes back to the
+-- defaults.  (--confirm isn't kept: it's for whoever is at the turtle.)
+--
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
 -- helpers are loaded again), /tidy to have it tidy its notes (below),
@@ -93,7 +100,8 @@
 -- restart, its chunk unloaded) starts `claude --resume` at boot: the
 -- model is told it was interrupted and to read its memory and carry on.
 -- That spends API money with nobody at the turtle, so it's off unless
--- set; with no goal to resume, autostart starts claude waiting for one.
+-- set; with no goal to resume, autostart starts claude waiting for one
+-- (with the last session's options, as above).
 --
 -- Keeping the player told: when claude.remindChat minutes (default 15, 0
 -- for never) pass with no chat message to the player (T.report, the chat
@@ -380,7 +388,8 @@ local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|h
 -- then the goal and what the model added.  (The options' table is here too:
 -- that line is read with it.)
 local resume = { file = "claude/resume.txt", prefix = "options:",
-                 options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true } }
+                 options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true },
+                 kept = { "model", "effort", "steps", "cache" } }      -- (the ones claude.options keeps)
 local opts, args = T.options({ ... }, resume.options)
 if not opts then
     print("claude: " .. args)
@@ -401,6 +410,20 @@ if opts.resume then
             rest = saved            -- (the model rewrote it without the line)
         end
         resume.goal = text.trim(rest or "")
+    end
+end
+-- The last session's options (ADR-0019 D4: autostart's plain `claude` after a reboot keeps them), under any given
+-- here or kept with the goal.  Not --confirm: that one is for whoever is at the turtle now.
+resume.saved = T.setting("claude.options", "",
+    "claude: the options the last session started with (--model, --effort, --steps, --cache); a claude started without one takes it from here")
+resume.taken = {}
+do
+    local saved = T.options(text.words(resume.saved or ""), resume.options) or {}
+    for _, k in ipairs(resume.kept) do
+        if opts[k] == nil and saved[k] ~= nil then
+            opts[k] = saved[k]
+            resume.taken[#resume.taken + 1] = "--" .. k .. " " .. saved[k]
+        end
     end
 end
 if opts.cache and not CACHE_TTLS[opts.cache] then
@@ -2831,8 +2854,14 @@ local function main()
         MODEL, EFFORT, T.posString(), T.dir, tostring(turtle.getFuelLevel())))
     -- the options as given, and what they came to
     local given = {}
-    for _, k in ipairs({ "model", "effort", "steps", "cache" }) do
+    for _, k in ipairs(resume.kept) do
         if opts[k] then given[#given + 1] = "--" .. k .. " " .. opts[k] end
+    end
+    -- (kept for the next session that starts without them: ADR-0019 D4)
+    local kept = table.concat(given, " ")
+    if kept ~= (resume.saved or "") then T.saveSettings({ ["claude.options"] = kept }) end
+    if #resume.taken > 0 then
+        say("yellow", "Options from the last session (claude.options): " .. table.concat(resume.taken, " ") .. ".")
     end
     if CONFIRM then given[#given + 1] = "--confirm" end
     resume.given = table.concat(given, " ")

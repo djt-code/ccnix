@@ -2671,3 +2671,34 @@ check("D1: the prompt says sleep is real seconds and os.clock game time, and nam
         and not sys:find("sleep, os.clock and os.startTimer count game ticks", 1, true)
         and tool:find("sleep (real seconds), gps, fs and io in scope", 1, true))
 end
+
+-- ADR-0019 D4: each session keeps its options in the setting claude.options, and a claude started without them (as
+--     autostart's plain `claude` after a reboot) takes them; a flag given wins, and is kept in turn; --confirm isn't
+--     kept.  (The settings: a table, saved when told.)
+do
+local SETD, saves = {}, 0
+settings = { define = function() end, get = function(n) return SETD[n] end, set = function(n, v) SETD[n] = v end,
+             save = function() saves = saves + 1 end }
+local function startLine() return ((Mine.files["claude.log"] or ""):match("start: claude[^\n]*")) or "" end
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig the tunnel", "--steps", "400", "--cache", "1h", "--confirm")
+check("D4: a session keeps its options in claude.options (not --confirm), saved",
+    SETD["claude.options"] == "--steps 400 --cache 1h" and saves == 1, tostring(SETD["claude.options"]))
+fresh({ "say hello", "" })
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run()
+local r1 = HTTP.requests[1] and HTTP.requests[1].body
+check("D4: a plain claude (as autostart starts it after a reboot) starts with them, and says so",
+    r1 and r1.cache_control.ttl == "1h" and startLine():find("steps 400, cache 1h", 1, true)
+        and not startLine():find("confirming", 1, true)
+        and Mine.logHas("^Options from the last session %(claude%.options%): %-%-steps 400 %-%-cache 1h%.$") and saves == 1,
+    startLine())
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig more", "--steps", "9")
+check("D4: a flag given wins over the kept one, and is kept in turn",
+    startLine():find("steps 9, cache 1h", 1, true) and SETD["claude.options"] == "--steps 9 --cache 1h" and saves == 2,
+    startLine() .. " / " .. tostring(SETD["claude.options"]))
+settings = nil
+end
