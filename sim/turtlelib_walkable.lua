@@ -16,7 +16,8 @@
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
 --     info.warnings, and without it doesn't;
 --   * (ADR-0013) a plan's warnings tagged in the plan or round it (counted in info, the plan's first); T.build prints
---     the plan's and one line counting those round it; a box's lint has no tags.
+--     the plan's and one line counting those round it; a box's lint has no tags; (ADR-0019 D5) the drops round a
+--     wall's top cells are one line, "N drops on the plan's top", their cells in info.topDrops.
 --   * T.walkable: a path for a 1x2 player up the good staircase; none past a ceiling over the first stair; a step up
 --     in a 2-high corridor refused for headroom (3 air needed where the step starts), allowed once the ceiling is
 --     raised; a fall of 5 taken only when there is no other way, and listed (refused with opts.maxFall = 3); up a
@@ -383,6 +384,23 @@ do
     said = table.concat(PRINTED, " | ")
     check("T.build prints the light rule's line for a plan's wall torch over a walk cell",
         ok == true and at(ofRule(info.warnings, "light"), 1, 1, 1) ~= nil and said:find("player: light at 1,1,1", 1, true) ~= nil, said)
+
+    -- (ADR-0019 D5) a wall 5 long and 5 high: a drop round each of its top cells, one line for them all
+    fresh(cube(-3, -1, -3, 7, -1, 5, STONE))
+    know(-3, -1, -3, 7, 6, 5)
+    W.give(1, STONE, 25)
+    for i = #PRINTED, 1, -1 do PRINTED[i] = nil end
+    plan = T.blueprint.fill(0, 0, 2, 4, 4, 2, STONE)
+    warnings, lint = T.lint(plan)
+    check("a wall's top cells: their drops are one line of the plan's summary, the cells in info.topDrops, every warning kept",
+        lint and #lint.planSummary == 1 and lint.planSummary[1] == "5 drops on the plan's top (y 5): wall tops, unless players walk there "
+            .. "(their cells: info.topDrops)" and #lint.topDrops == 5 and #ofRule(warnings, "drop") == 5,
+        lint and table.concat(lint.planSummary, " | "))
+    ok, info = T.build(plan, { name = "wall" })
+    said = table.concat(PRINTED, " | ")
+    check("...T.build prints that one line, and info.topDrops has the cells",
+        ok == true and #PRINTED == 1 and said:find("player: 5 drops on the plan's top", 1, true) == 1 and #info.topDrops == 5
+            and at(ofRule(info.warnings, "drop"), 2, 5, 2) ~= nil, said)
 end
 
 --------------------------------------------------------------------------

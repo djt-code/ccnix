@@ -61,7 +61,15 @@ peripheral = {
     end,
     getName = function(p) return p._name end,
 }
+-- a dig in front: only with a pickaxe on (CC's why without one)
+local DIGS_WITH = { ["minecraft:diamond_pickaxe"] = true, ["minecraft:iron_pickaxe"] = true }
+DUG = 0
 turtle = M.merge(M.inventoryApi(S), M.equipmentApi(S), M.fuelApi(S),
+    M.actingApi(S, "dig", function()
+        if not (DIGS_WITH[EQ.left] or DIGS_WITH[EQ.right]) then return false, "No tool to dig with" end
+        DUG = DUG + 1
+        return true
+    end),
     M.actingApi(S, "suck", function(_, _, _, _, n) return M.suckFrom(S, chest, CHEST_SIZE, n) end),
     M.actingApi(S, "drop", function(_, _, _, _, n) return M.dropInto(S, chest, CHEST_SIZE, n) end))
 
@@ -255,6 +263,52 @@ check("T.withPeripheral: fn's modem stays on, fn's result comes back, and why th
     ok == true and result == "said" and EQ.right == MODEM and #printed == 1
         and printed[1] == "T.withPeripheral: the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the "
         .. PICK .. " not put back", printed[1])
+
+--------------------------------------------------------------------------
+-- ADR-0019 D3: a dig with the tool aboard but not on (T.cfg.equipToDig)
+--------------------------------------------------------------------------
+local function quietly(fn)
+    local said, was = {}, print
+    print = function(s2) said[#said + 1] = s2 end
+    local res = table.pack(pcall(fn))
+    print = was
+    if not res[1] then error(res[2], 0) end
+    return said, table.unpack(res, 2, res.n)
+end
+local said, dug, digWhy
+reset(CONTROLLER, MODEM)
+put(3, PICK)
+said, dug, digWhy = quietly(function() return turtle.dig() end)
+check("equipToDig off (programs): the dig fails as CC says, nothing equipped",
+    dug == false and digWhy == "No tool to dig with" and EQ.right == MODEM and carrying(PICK) == 1 and #said == 0, tostring(digWhy))
+T.cfg.equipToDig = true
+said, dug, digWhy = quietly(function() return turtle.dig() end)
+check("equipToDig on: the pickaxe goes on the side without the controller, the modem into its slot, the dig goes through",
+    dug == true and DUG == 1 and EQ.left == CONTROLLER and EQ.right == PICK and S.inv[3] and S.inv[3].name == MODEM
+        and S.sel == 1, tostring(digWhy))
+check("...and says so", #said == 1 and said[1] == "A dig put the " .. PICK .. " on the right (T.cfg.equipToDig); the " .. MODEM
+    .. " it took off is in slot 3.", said[1])
+S.sel = 3; turtle.equipRight(); S.sel = 1        -- (the modem put back on by hand)
+said, dug = quietly(function() return T.digDir(0) end)
+check("...once: the next one equips again without a word", dug == true and EQ.right == PICK and #said == 0, said[1])
+reset(MODEM, CONTROLLER)
+S.inv[1] = { name = PICK, count = 1, damaged = true }
+put(5, "minecraft:iron_pickaxe")
+said, dug = quietly(function() return turtle.dig() end)
+check("a damaged pickaxe ahead of a good one: the good one goes on (the left, the controller's on the right)",
+    dug == true and EQ.left == "minecraft:iron_pickaxe" and EQ.right == CONTROLLER and S.inv[1].damaged and S.inv[5].name == MODEM)
+reset(CONTROLLER, MODEM)
+S.inv[1] = { name = PICK, count = 1, damaged = true }
+said, dug, digWhy = quietly(function() return turtle.dig() end)
+check("...only a damaged one: the dig fails as before, the modem stays on",
+    dug == false and digWhy == "No tool to dig with" and EQ.right == MODEM and S.inv[1].damaged, tostring(digWhy))
+reset(CONTROLLER, MODEM)
+put(2, PICK)
+T.cfg.tools = { "*_shovel" }
+said, dug, digWhy = quietly(function() return turtle.dig() end)
+check("T.cfg.tools names the job's tools: a pickaxe it doesn't name stays in the inventory",
+    dug == false and digWhy == "No tool to dig with" and EQ.right == MODEM and carrying(PICK) == 1, tostring(digWhy))
+T.cfg.tools, T.cfg.equipToDig = nil, nil
 
 --------------------------------------------------------------------------
 -- pull
