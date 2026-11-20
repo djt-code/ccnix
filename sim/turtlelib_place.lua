@@ -7,7 +7,7 @@
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
 --     reached by a route round the support) and standing (on top of a fence, a wall or a pane too, though none of
---     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
+--     them holds one on a side); a sign and its text (standing on a wall or a fence too; the text as a list of lines); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * signs toward a reader (opts.toward, ADR-0013 D6.3): a wall sign when a block stands behind the cell, else
 --     standing at the nearest of the four rotations a turtle gives (how far off said; in a world turned too; reached
@@ -215,6 +215,16 @@ do
     check("opts.exit: a block that would close the last way to it is refused, saying why", name == nil
         and why:find("won't place stone at 0,0,3: no way from 0,0,2 to opts.exit 0,0,6 after it", 1, true) ~= nil and W.get(0, 0, 3) == nil,
         tostring(why))
+    -- (ADR-0019) the exit the cell being placed: it "reached" the exit through the block it placed, sealing the turtle in
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0, 3 } })
+    check("opts.exit the target cell itself: refused, saying it's the cell being placed, nothing placed", name == nil
+        and why:find("opts.exit 0,0,3 is the cell being placed", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { x = 0, y = 0, z = 3 } })
+    check("...given as { x =, y =, z = } too", name == nil and why:find("is the cell being placed", 1, true) ~= nil and W.get(0, 0, 3) == nil,
+        tostring(why))
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0 } })
+    check("...and an opts.exit that isn't a cell is refused", name == nil and why == "opts.exit is a cell { x, y, z }, whole numbers"
+        and W.get(0, 0, 3) == nil, tostring(why))
     local placed, _, how = T.placeAt(0, 0, 3, STONE)
     check("...without it, placed with a warning that the turtle is closed in", placed == STONE and how and how.warning
         and how.warning:find("warning: placed stone at 0,0,3, but the turtle at 0,0,2 is closed in after it", 1, true) ~= nil,
@@ -233,6 +243,16 @@ scene("a chain hanging down (axis y) with a floor to click", {
 scene("a chain lying along x onto a block beyond to the east", {
     item = CHAIN, blocks = { stone(1, 0, 3) }, opts = { axis = "x" },
     expect = { { 0, 0, 3, "chain", { axis = "x" } } }, approach = "front", from = { -1, 0, 3 } })
+-- (ADR-0019 D7 B) a chain along x over a floor, nothing beyond: the why says opts.temp props only from below
+do
+    fresh(nil, { stone(-1, -1, 3), stone(0, -1, 3), stone(1, -1, 3) })
+    knowAll()
+    W.give(1, CHAIN, 4)
+    local name, why = T.placeAt(0, 0, 3, CHAIN, { axis = "x" })
+    check("a chain along x over a floor with nothing beyond: refused, the why saying opts.temp props only from below, so put a block beyond first",
+        name == nil and why:find("opts.temp props only from below", 1, true) ~= nil and why:find("put a block beyond", 1, true) ~= nil,
+        tostring(why) .. " / " .. W.show(0, 0, 3))
+end
 scene("a lantern hanging under a block (opts.hanging = true), nothing under the cell", {
     item = LANTERN, blocks = { stone(0, 1, 3) }, opts = { hanging = true },
     expect = { { 0, 0, 3, "lantern", { hanging = true } } } })
@@ -466,6 +486,10 @@ do
     scene("a sign with a floor and no wall: it stands", {
         item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Keep\nout" }, expect = { { 0, 0, 3, "oak_sign" } } })
     check("...the lines as given, each its own", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
+    -- (ADR-0019) the text as a list of lines
+    scene("a sign's text as a list of lines", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = { "Keep", "out" } }, expect = { { 0, 0, 3, "oak_sign" } } })
+    check("...each its own line, as with newlines", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
     scene("a sign's UTF-8 text (an arrow, a dash) as the game shows it, spelled out", {
         item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Gate \226\134\146\nRoad \226\128\148 Ember" },
         expect = { { 0, 0, 3, "oak_sign" } } })
@@ -479,6 +503,12 @@ do
     local name, why = T.placeAt(0, 0, 3, SIGN, { text = "one two three four five six seven eight nine ten eleven twelve" })
     check("text that will not fit 4 lines of 15 is refused with why, nothing placed, no move", name == nil
         and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    name, why = T.placeAt(0, 0, 3, SIGN, { text = { "one", "two", "three", "four, too long for one" } })
+    check("...a list of lines too, a line longer than 15 wrapping past the 4th", name == nil
+        and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, SIGN, { text = { "one", 2 } })
+    check("...a list with something not a string in it: refused, saying which", name == nil
+        and why:find("line 2 of a sign's text is a number", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
     W.give(2, STONE, 4)
     name, why = T.placeAt(0, 0, 3, STONE, { text = "hello" })
     check("text on a block that is not a sign is refused", name == nil and why:find("only a sign", 1, true) ~= nil and W.get(0, 0, 3) == nil,

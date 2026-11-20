@@ -642,7 +642,8 @@ end
 -- Why one approach can't give `want`, in words, or nil if the table says it can (or may: a fact the map doesn't know).
 -- The stand is taken; or the row that would give it needs a block the map says isn't there; or it lands on a row that
 -- gives something else.  An approach that only faces the wrong way is nil too: the one facing the right way says more.
--- A second result is true when the stand is what is wrong, whichever way the turtle would face.
+-- A second result is true when the stand is what is wrong, whichever way the turtle would face; a third, the fact the
+-- row needs ("beyond", "floor", ...) when a missing block is what is wrong.
 local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
     local sx, sy, sz = standFor(kind, h, tx, ty, tz)
     local stand = nameAt(sx, sy, sz)
@@ -674,13 +675,13 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     if not needed then return nil end
     local c = cells[needed]
     return "needs " .. (fam.hang and "a block to hang it on " or "a block ") .. FACT_WORDS[kind][needed] .. ", and the map has "
-        .. tostring(names[needed] or "nothing it knows") .. " at " .. c[1] .. "," .. c[2] .. "," .. c[3]
+        .. tostring(names[needed] or "nothing it knows") .. " at " .. c[1] .. "," .. c[2] .. "," .. c[3], false, needed
 end
 
 -- Why the approaches the table rules out can't give `want` at the target: a list of "<approach>: <why>", in the order
--- plan goes through them, each said once.
+-- plan goes through them, each said once; and true if a sideways one wants a block beyond the target that isn't there.
 local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
-    local out, said = {}, {}
+    local out, said, beyond = {}, {}, false
     local function fact(name, top)
         if famName == "slab" and name == item then return nil end
         return factAbout(fam, name, top)
@@ -689,7 +690,8 @@ local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
     for _, kind in ipairs({ "front", "down", "up" }) do
         for h = 0, 3 do
             if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
-                local why, standing = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+                local why, standing, needed = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+                beyond = beyond or (kind == "front" and needed == "beyond")
                 local line = why and approachWords(kind, h, tx, ty, tz, base, turning and not standing) .. ": " .. why
                 if line and not said[line] then
                     said[line] = true
@@ -698,7 +700,7 @@ local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
             end
         end
     end
-    return out
+    return out, beyond
 end
 
 -- A list in a message: the first SHOWN, joined with "; ", and how many more.
@@ -758,11 +760,17 @@ local function needsMet(fam, tx, ty, tz)
     return nil
 end
 
--- A sign's text as its lines: opts.text wrapped to SIGN_WIDTH, each newline starting a line; nil and why if it is not
--- a sign, or the text takes more than SIGN_LINES lines.
+-- A sign's text as its lines: opts.text (a string, or a list of strings taken as joined by newlines) wrapped to
+-- SIGN_WIDTH, each newline starting a line; nil and why if it is not a sign, or the text takes more than SIGN_LINES lines.
 local function signLines(item, famName, said)
     if famName ~= "sign" then return nil, "only a sign takes text, and " .. item .. " is not one" end
-    if type(said) ~= "string" then return nil, "a sign's text is a string" end
+    if type(said) == "table" then
+        for i, line in ipairs(said) do
+            if type(line) ~= "string" then return nil, "line " .. i .. " of a sign's text is a " .. type(line) .. ", not a string" end
+        end
+        said = table.concat(said, "\n")
+    end
+    if type(said) ~= "string" then return nil, "a sign's text is a string, or a list of lines" end
     local lines = text.wrap(convert.fromUTF8(said), SIGN_WIDTH)   -- (as the game shows it: CC passes a byte a character)
     if #lines > SIGN_LINES then
         return nil, "a sign holds " .. SIGN_LINES .. " lines of " .. SIGN_WIDTH .. " characters, and this text wraps to " .. #lines
@@ -905,6 +913,16 @@ local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
 
+-- A cell as { x, y, z } or { x =, y =, z = }: its x, y, z, or nil if it isn't one of whole numbers.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local xyz = { c.x or c[1], c.y or c[2], c.z or c[3] }
+    for i = 1, 3 do
+        if type(xyz[i]) ~= "number" or xyz[i] ~= math.floor(xyz[i]) then return nil end
+    end
+    return xyz[1], xyz[2], xyz[3]
+end
+
 -- (ADR-0015 D5) Would a block at x, y, z close the turtle in: no way out, through cells the map shows empty (air or
 -- water) or has never seen, to `exit` ({ x, y, z }), or with none to a cell OPEN_AT blocks from where it stands?
 -- Why, if so; nil if there is a way, or the search can't tell (it looks at SEAL_CELLS cells at most).  A way out that
@@ -914,8 +932,9 @@ local PASSES = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:water"
 local function closesIn(x, y, z, exit)
     local start = T.here()
     local key = function(a, b, c) return a .. "," .. b .. "," .. c end
-    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [key(x, y, z)] = true }, { start }, 1
-    local goal = exit and key(exit.x or exit[1], exit.y or exit[2], exit.z or exit[3])
+    local target = key(x, y, z)
+    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [target] = true }, { start }, 1
+    local goal = exit and key(cellOf(exit))
     while queue[head] do
         local c = queue[head]
         head = head + 1
@@ -924,7 +943,7 @@ local function closesIn(x, y, z, exit)
             local v = T.DELTA[d]
             local nx, ny, nz = c.x + v[1], c.y + v[2], c.z + v[3]
             local k = key(nx, ny, nz)
-            if k == goal then return nil end
+            if k == goal and k ~= target then return nil end          -- (the cell being placed is no way out)
             if not seen[k] then
                 seen[k] = true
                 local name = nameAt(nx, ny, nz)
@@ -1217,16 +1236,6 @@ end
 -- A sign turned toward a reader
 --------------------------------------------------------------------------
 
--- A cell as { x, y, z } or { x =, y =, z = }: its x, y, z, or nil if it isn't one of whole numbers.
-local function cellOf(c)
-    if type(c) ~= "table" then return nil end
-    local xyz = { c.x or c[1], c.y or c[2], c.z or c[3] }
-    for i = 1, 3 do
-        if type(xyz[i]) ~= "number" or xyz[i] ~= math.floor(xyz[i]) then return nil end
-    end
-    return xyz[1], xyz[2], xyz[3]
-end
-
 -- The headings nearest the way dx, dz (in the turtle's frame) points: one, or two when it is a diagonal.
 local function headingsToward(dx, dz)
     local hx, hz = dx > 0 and 1 or 3, dz > 0 and 0 or 2
@@ -1371,12 +1380,12 @@ end
 -- under the cell to stand on), false stands it on the block below; opts.axis is a chain's too.  opts.toward = { x, y, z }, the cell a reader stands in, turns a sign to them: a wall sign when the map shows a
 -- sturdy block behind the cell (on the far side from the reader), else a standing sign at the nearest of the four
 -- rotations (how.toward says which, and how many degrees off the reader's way it is).  Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
--- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
--- newline starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
+-- dig and walk in), tries (approaches to try, default 6), text (a sign's, a string or a list of lines: wrapped to 4
+-- lines of 15 characters, a newline or a new entry starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
 -- (below), exit ({ x, y, z }: below).  A cell that already holds the item as wanted comes back as it is; one holding
 -- anything else is not touched.  A placement that closes the turtle in (no way, through what the map shows empty or
 -- unknown, out of where it stands: a dozen blocks, or to opts.exit) is made with how.warning saying so; with
--- opts.exit it's refused.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
+-- opts.exit it's refused (and an opts.exit that is the target cell itself, which is no way out).  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
 -- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
@@ -1403,6 +1412,14 @@ function T.placeAt(x, y, z, item, opts)
     end
     if type(item) ~= "string" or item == "" then return nil, "placeAt wants the item's name, like minecraft:oak_stairs" end
     if not text.contains(item, ":") then item = "minecraft:" .. item end
+    if opts.exit ~= nil then
+        local ex, ey, ez = cellOf(opts.exit)
+        if not ex then return nil, "opts.exit is a cell { x, y, z }, whole numbers" end
+        if ex == x and ey == y and ez == z then
+            return nil, "opts.exit " .. x .. "," .. y .. "," .. z .. " is the cell being placed: the exit is a cell the turtle "
+                .. "can still get to after it (beside it, or beyond)"
+        end
+    end
     if opts.toward ~= nil then
         local aimed, aim = towardOpts(x, y, z, item, opts)
         if not aimed then return nil, aim end
@@ -1515,9 +1532,11 @@ function T.placeAt(x, y, z, item, opts)
         table.sort(asked)
         local what = shortName(item) .. (#asked > 0 and (" with " .. table.concat(asked, " ")) or "") ..
             " at " .. x .. "," .. y .. "," .. z
-        local others = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
+        local others, beyond = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
         local rest = #others > 0 and (" (the rest: " .. listed(others) .. ")") or ""
         local _, notes = supportPlans(famName, fam, item, learned, want, x, y, z, base, {}, opts)
+        -- (ADR-0019 D7) a sideways placement that wants a block beyond: opts.temp won't put one there
+        if beyond then notes[#notes + 1] = "opts.temp props only from below, so put a block beyond first to place it sideways" end
         local noted = #notes > 0 and (" (" .. table.concat(notes, "; ") .. ")") or ""
         if lastWhy then
             return nil, "couldn't place " .. what .. ": " .. lastWhy .. " (" .. #attempts .. (#attempts == 1 and " way" or " ways")
