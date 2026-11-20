@@ -4,7 +4,8 @@
 -- peripheral that lists them).
 --   * T.addChest / T.forgetChest / T.chests: the places kept in a data file other copies of the library read, whole
 --     numbers and a real side asked for, one bulk chest; a chest known already (the same place, another stand, the
---     other half of a double chest) adds nothing and says which;
+--     other half of a double chest) adds nothing and says which; holds that overlap another chest's said with the real
+--     names both take (never ones made up from the globs), by chest, three of each list at most;
 --   * T.catalogue: goes round the chests nearest first, writes down what each holds, comes back facing as before; a
 --     chest that is gone or unreachable is reported and the rest are read; chests given as places are remembered;
 --     opts.find adds the chests the map shows in a box;
@@ -34,6 +35,7 @@ local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local B = require("buildworld")
+local text = require("text")
 local realCheck = M.check
 -- (a check's detail is only shown when it fails)
 local function check(label, ok, detail) realCheck(label, ok, (not ok) and detail or nil) end
@@ -713,16 +715,48 @@ do
     local STAIRS = "minecraft:stone_brick_stairs"
     setUp()
     T.catalogue()
-    local _, note1 = T.addChest(D.x, D.y, D.z, D.side, { holds = "*_stairs" })
-    local _, note2 = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
-    check("T.addChest: holds that overlap another chest's are said, with an item both take and which wins",
-        not tostring(note1):find("warning", 1, true) and note2 and note2:find("warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_stairs\" (both take", 1, true)
-        and note2:find("the more specific glob wins, \"*_stairs\" (that chest's)", 1, true) ~= nil, tostring(note2))
     W.give(1, STAIRS, 8)
     W.give(2, "minecraft:bricks", 4)
+    local _, note1 = T.addChest(D.x, D.y, D.z, D.side, { holds = "*_stairs" })
+    local _, note2 = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
+    check("T.addChest: holds that overlap another chest's are said, with an item both take (one aboard) and which wins",
+        not tostring(note1):find("warning", 1, true) and note2 == "the chest at 3,0,1 is now for *brick*; warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_stairs\" " ..
+        "(both take stone_brick_stairs): the more specific glob wins, \"*_stairs\" (that chest's)", tostring(note2))
     local ok, why = T.stow()
     check("...stone brick stairs go to the chest for *_stairs, bricks to the one for *brick*", ok == true
         and chestHas(2, -1, -2, STAIRS) == 8 and chestHas(3, 0, 1, STAIRS) == 0 and chestHas(3, 0, 1, "minecraft:bricks") == 4, tostring(why))
+end
+
+do
+    -- ADR-0019: the overlap warning tests only real names (what the known chests hold, the inventory), never names made
+    -- by joining the globs' letters ("coalbrick"), groups by chest, and caps its lists at three
+    local function stairs(kind) return "minecraft:" .. kind .. "_stairs" end
+    setUp()
+    fill(-3, 0, 1, { [1] = { stairs("stone_brick"), 4 }, [2] = { stairs("brick"), 4 }, [3] = { stairs("mud_brick"), 4 },
+        [4] = { stairs("nether_brick"), 4 }, [5] = { "minecraft:stone_brick_slab", 4 } })
+    T.catalogue()
+    T.addChest(D.x, D.y, D.z, D.side, { holds = { "*coal*", "*_stairs", "*_slab" } })
+    local _, note = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
+    check("overlapping holds: only real names, one warning for the chest, its names capped at three", note ==
+        "the chest at 3,0,1 is now for *brick*; warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_slab\" (both take stone_brick_slab): the more specific glob wins, " ..
+        "\"*_slab\" (that chest's); \"*brick*\" overlaps its \"*_stairs\" (both take brick_stairs, mud_brick_stairs, nether_brick_stairs " ..
+        "and 1 more): the more specific glob wins, \"*_stairs\" (that chest's)", tostring(note))
+    check("...no name made up from the globs' letters (\"*coal*\" and \"*brick*\" take no real item both)",
+        not text.contains(tostring(note), "coal"), tostring(note))
+    -- four chests it overlaps: three said, and how many more
+    T.addChest(Bc.x, Bc.y, Bc.z, Bc.side, { holds = "*brick_*" })
+    T.addChest(C.x, C.y, C.z, C.side, { holds = "*_stairs" })
+    _, note = T.addChest(0, 0, 2, 0, { holds = "*brick*" })
+    check("...overlapping four chests: the first three said, then how many more", text.count(tostring(note), "warning: ") == 3
+        and text.endsWith(tostring(note), "; and 1 more chest overlaps it"), tostring(note))
+    -- six pairs of globs overlapping one chest: three said, and how many more
+    setUp()
+    fill(-3, 0, 1, { [1] = { stairs("stone_brick"), 4 }, [2] = { "minecraft:stone_brick_slab", 4 } })
+    T.catalogue()
+    T.addChest(D.x, D.y, D.z, D.side, { holds = { "*_stairs", "*_slab" } })
+    _, note = T.addChest(A.x, A.y, A.z, A.side, { holds = { "*brick*", "*stone*", "*_stairs", "*_slab" } })
+    check("...six pairs of globs with one chest: the first three said, then how many more", text.count(tostring(note), " overlaps ") == 3
+        and text.endsWith(tostring(note), "; and 3 more of its globs overlap"), tostring(note))
 end
 
 do
