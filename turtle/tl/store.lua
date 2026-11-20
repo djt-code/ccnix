@@ -288,33 +288,67 @@ local function belongs(list, c, name)
     return true
 end
 
--- An item name both globs take, made from their letters (and the names in the chests), or nil: how two chests' holds
--- are found to overlap, for T.addChest's warning.  (A guess: two globs may overlap on a name it doesn't think of.)
-local function overlapOf(g, h, list)
-    local tg, th = matcher(g), matcher(h)
-    local function parts(glob)
-        local out, cur = {}, ""
-        for i = 1, #glob do
-            local ch = glob:sub(i, i)
-            if ch == "*" or ch == "?" or ch == "[" or ch == "]" then
-                if cur ~= "" then out[#out + 1] = cur end
-                cur = ""
-            else
-                cur = cur .. ch
-            end
-        end
-        if cur ~= "" then out[#out + 1] = cur end
-        return table.concat(out)
-    end
-    local a, b = parts(g), parts(h)
-    local tries = { a .. b, b .. a, a .. "_" .. b, b .. "_" .. a }
+-- The item names an overlap of holds is tested on: real ones only, what the known chests hold (as last read) and what
+-- the turtle carries, sorted.  (ADR-0019: joining two globs' letters made up names no item has, "coalbrick".)
+local function realNames(list)
+    local names = {}
     for _, c in ipairs(list) do
-        for item in pairs(c.items) do tries[#tries + 1] = item end
+        for item in pairs(c.items) do names[item] = true end
     end
-    for _, name in ipairs(tries) do
-        if name ~= "" and tg(name) and th(name) then return name end
+    for s = 1, 16 do
+        local it = turtle.getItemDetail(s)
+        if it then names[it.name] = true end
     end
-    return nil
+    return tables.sortedKeys(names)
+end
+
+-- The first three of a list joined with sep, then more(n) for the n left out: "a, b, c and 2 more".
+local SHOWN = 3
+local function firstFew(list, sep, more)
+    local shown = {}
+    for i = 1, math.min(#list, SHOWN) do shown[i] = list[i] end
+    local out = table.concat(shown, sep)
+    if #list > SHOWN then out = out .. more(#list - SHOWN) end
+    return out
+end
+local function moreNames(n) return " and " .. n .. " more" end
+local function morePairs(n) return "; and " .. n .. " more of its globs overlap" end
+local function moreChests(n) return "; and " .. n .. (n == 1 and " more chest overlaps it" or " more chests overlap it") end
+
+-- The item name without minecraft: (a modded one keeps its namespace).
+local function shortName(name) return text.stripPrefix(name, NS) or name end
+
+-- T.addChest's warning for holds `globs` that overlap the other chests' (ADR-0015 D2), or nil: one part for each chest,
+-- each pair of globs with the real names both take and which glob wins (the more specific); three of each list at most.
+local function overlapWarning(c, globs, list)
+    local names = realNames(list)
+    local parts = {}
+    for _, q in ipairs(list) do
+        if q ~= c and q.holds then
+            local pairsSaid = {}
+            for _, g in ipairs(globs) do
+                for _, h in ipairs(q.holds) do
+                    local tg, th = matcher(g), matcher(h)
+                    local both = {}
+                    for _, name in ipairs(names) do
+                        if tg(name) and th(name) then both[#both + 1] = shortName(name) end
+                    end
+                    if #both > 0 then
+                        local gw, gl = specificity(g)
+                        local hw, hl = specificity(h)
+                        local wins = moreSpecific(gw, gl, hw, hl) and ("\"" .. g .. "\" (this chest's)")
+                            or moreSpecific(hw, hl, gw, gl) and ("\"" .. h .. "\" (that chest's)") or "neither: both chests take them"
+                        local whose = #pairsSaid == 0 and ("the chest at " .. T.posKey(cellOf(q)) .. "'s") or "its"
+                        pairsSaid[#pairsSaid + 1] = "\"" .. g .. "\" overlaps " .. whose .. " \"" .. h .. "\" (both take " ..
+                            firstFew(both, ", ", moreNames) .. "): the more specific glob wins, " .. wins
+                    end
+                end
+            end
+            if #pairsSaid > 0 then parts[#parts + 1] = "warning: " .. firstFew(pairsSaid, "; ", morePairs) end
+        end
+    end
+    if #parts == 0 then return nil end
+    return firstFew(parts, "; ", moreChests)
 end
 
 -- The chest in the list with this place, or nil.
@@ -338,7 +372,9 @@ end
 -- opts.holds says what the chest is for: a glob of item names, or a list or set of them (T.addChest(3, 0, 0, 0,
 -- { holds = { "*_log", "*_planks" } })); T.stow puts those there before anywhere else and T.sortChests moves them
 -- there.  Given again for a known chest it changes them, and the note says so; false makes it a chest for anything
--- again; left out, they stay as they were.  opts may come in bulk's place, with opts.bulk.
+-- again; left out, they stay as they were.  Holds that overlap another chest's are warned of in the note, chest by
+-- chest: the item names both take, from what the chests hold and the turtle carries (three, and how many more), and
+-- which glob wins, the more specific.  opts may come in bulk's place, with opts.bulk.
 function T.addChest(x, y, z, side, bulk, opts)
     if type(bulk) == "table" then bulk, opts = bulk.bulk, bulk end
     opts = opts or {}
@@ -372,26 +408,8 @@ function T.addChest(x, y, z, side, bulk, opts)
     end
     if newHolds ~= nil then c.holds = newHolds or nil end
     -- (ADR-0015 D2: holds that overlap another chest's are said, and which wins)
-    if newHolds then
-        for _, q in ipairs(list) do
-            if q ~= c and q.holds then
-                for _, g in ipairs(newHolds) do
-                    for _, h in ipairs(q.holds) do
-                        local both = overlapOf(g, h, list)
-                        if both then
-                            local gw, gl = specificity(g)
-                            local hw, hl = specificity(h)
-                            local wins = moreSpecific(gw, gl, hw, hl) and ("\"" .. g .. "\" (this chest's)")
-                                or moreSpecific(hw, hl, gw, gl) and ("\"" .. h .. "\" (that chest's)") or "neither: both chests take them"
-                            local warning = "warning: \"" .. g .. "\" overlaps the chest at " .. T.posKey(cellOf(q)) .. "'s \"" .. h ..
-                                "\" (both take " .. both .. "): the more specific glob wins, " .. wins
-                            known = known and (known .. "; " .. warning) or warning
-                        end
-                    end
-                end
-            end
-        end
-    end
+    local warning = newHolds and overlapWarning(c, newHolds, list)
+    if warning then known = known and (known .. "; " .. warning) or warning end
     if bulk then
         for _, q in ipairs(list) do q.bulk = false end
         c.bulk = true
@@ -729,12 +747,25 @@ function T.where(name)
     return nearest(found, T.here()), total
 end
 
--- Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at
--- the last chest).  Returns how many came aboard, and why if that is short of n.
+-- The names to pull at the chest on `side` for `name`: the name itself, or for a glob the items in the chest that match
+-- it, by name (T.pull takes one name, exactly).
+local function namesToPull(name, side)
+    if not text.containsAny(name, "*?[") then return { name } end
+    local test, out = matcher(name), {}
+    for item in pairs(T.containerCounts(side) or {}) do
+        if test(item) then out[#out + 1] = item end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before
+-- (opts.stay: stay at the last chest).  Returns how many came aboard, and why if that is short of n.
 --
--- `name` is an item's name (minecraft: assumed).  The chests come nearest first, each read again as it is visited
--- (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the
--- turtle has no room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+-- `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the
+-- items that match are taken, by name.  The chests come nearest first, each read again as it is visited (so a chest
+-- that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no
+-- room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
     n = n or 1
@@ -751,11 +782,16 @@ function T.fetch(name, n, opts)
             if got >= n then return end
             local side, reason = arrive(c, move)
             if side then
-                local took, pullWhy = T.pull(side, name, n - got)
-                got = got + took
+                local noRoomFor
+                for _, item in ipairs(namesToPull(name, side)) do
+                    if got >= n then break end
+                    local took, pullWhy = T.pull(side, item, n - got)
+                    got = got + took
+                    if pullWhy and text.contains(pullWhy, "no room") then noRoomFor = item; break end
+                end
                 note(list, c, side)
-                if pullWhy and text.contains(pullWhy, "no room") then
-                    why = "no room in the turtle for " .. name            -- (T.pull's own count is this chest's: the total is said below)
+                if noRoomFor then
+                    why = "no room in the turtle for " .. noRoomFor   -- (T.pull's own count is this chest's: the total is said below)
                     return
                 end
             else
@@ -863,6 +899,8 @@ local PLACES = {
     function(c, name) return (c.items[name] or 0) > 0 and accepts(c, name) end,
     function(c) return c.bulk == true end,
 }
+-- The places in words, for a note on the nearest of one (T.stow's far note)
+local PLACE_WORDS = { "the nearest chest for it", "the nearest chest holding it", "the bulk chest" }
 
 -- The chests to try for an item now: those of the first place in PLACES that has some not tried yet.  With `strict`
 -- (sorting) only chests it belongs in (a full chest for it doesn't send it to the bulk chest).
@@ -1024,8 +1062,8 @@ end
 -- specific holds win, T.addChest), one that holds some already and isn't for other things, and the bulk chest: of
 -- those, the nearest, and of those as near (8 blocks more at most), the first of that order.  Chests over
 -- opts.maxDistance (48) from where it began (or opts.near, { x, y, z }) aren't gone to unless opts.far: an item with
--- only those stays aboard, the why saying where the nearest is and how far (two bases: the other one's chests aren't
--- a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it.  A chest for other
+-- only those stays aboard, the why saying where the one it would go to is (the nearest chest for it, else holding it,
+-- else the bulk chest) and how far (two bases: the other one's chests aren't a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it.  A chest for other
 -- things never takes an item, and a full chest for it sends it on to the next place.  What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
 -- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
 -- and no bulk chest"), and the why returned says them all.  opts: move (T.moveTo's), keep (names, a list or set, globs
@@ -1076,23 +1114,24 @@ function T.stow(opts)
         end
         return out
     end
-    -- (an item whose chests are all out of reach: said where the nearest is)
+    -- (an item whose chests are all out of reach: said where the one it would go to is, ranked as targets() ranks
+    -- them, by place and then distance: the chest for it, then one holding it, then the bulk chest)
     if not opts.far then
         for name in pairs(names) do
             if #targets(list, name, {}) == 0 then
-                local far, farD
+                local far, farD, farPlace
                 for _, c in ipairs(scoped) do
-                    for _, place in ipairs(PLACES) do
+                    for i, place in ipairs(PLACES) do
                         if place(c, name, list) then
                             local d = T.dist(from, c)
-                            if not farD or d < farD then far, farD = c, d end
+                            if not far or i < farPlace or (i == farPlace and d < farD) then far, farD, farPlace = c, d, i end
                             break
                         end
                     end
                 end
                 if far then
-                    notes[name] = { "the nearest chest for it is at " .. T.posKey(cellOf(far)) .. ", " .. farD .. " blocks off (over opts.maxDistance "
-                        .. reach .. ": opts.far = true goes)" }
+                    notes[name] = { PLACE_WORDS[farPlace] .. " is at " .. T.posKey(cellOf(far)) .. ", " .. farD ..
+                        " blocks off (over opts.maxDistance " .. reach .. ": opts.far = true goes)" }
                 end
             end
         end
@@ -1116,8 +1155,9 @@ end
 
 -- The stacks T.sortChests moves at most, unless opts.limit says
 local SORT_LIMIT = 32
--- Why an item that is in the wrong chest stays there when there is nowhere else for it
-local NOWHERE = "nowhere for it: no chest is for it, no other chest holds it and there is no bulk chest"
+-- Why an item that is in the wrong chest stays there when there is nowhere else for it (sorting is by site: a chest for
+-- it at another base doesn't count)
+local NOWHERE = "nowhere for it at this site: no chest is for it, no other chest holds it and there is no bulk chest"
 
 -- The items in the chest c (as last read) that don't belong there, sorted by name.
 local function misplaced(list, c)

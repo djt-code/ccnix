@@ -11,8 +11,9 @@
 --     taken from the chest and put back; the table already on; a chest to walk to; a partial craft;
 --   * T.addRecipe (checked, newest first, crafted); T.canCraft (inventory plus chest);
 --   * T.craftBatch: planks, sticks and torches in one go with one stash (the tools in the chest, nothing outside the grid
---     at a craft, the table on and off once), the products left in the chest or taken aboard, a recipe that fails noted
---     and the rest made, refusals with nothing touched;
+--     at a craft, the table on and off once), the products left in the chest or taken aboard (an intermediate a later
+--     recipe used owed only as far as it's left, and what stays says pull's why), a recipe that fails noted and the rest
+--     made, refusals with nothing touched;
 --   * T.craftPlan: torches down to logs, in order, with the base materials and what is short (coal or charcoal), what
 --     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
 --     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
@@ -512,6 +513,29 @@ do
         info.failed[2] and info.failed[2].why)
     check("...opts.take brings what was made aboard (8 planks, 4 stairs) after the inventory is back", carrying("minecraft:oak_planks") == 8
         and carrying("minecraft:stone_brick_stairs") == 4 and W.S.inv[1].name == TABLE and info.taken["minecraft:stone_brick_stairs"] == 4, inventory())
+    -- ADR-0019: opts.take with an intermediate the later recipes use up (as the field's list: nuggets, then chains from
+    -- them).  18 nuggets made, 3 more aboard, 12 used: 9 left, 3 of them the inventory's back in its slot, and the 6 left
+    -- are all that's owed, not "12 stayed in the chest: no room"
+    local function nuggetBatch(filled)
+        fresh()
+        fill(0, 0, 1, { [1] = { "minecraft:iron_ingot", 8 }, [3] = { "minecraft:spruce_planks", 14 } })
+        W.give(1, TABLE, 1)
+        W.give(2, "minecraft:iron_nugget", 3)
+        for s = 3, filled do W.give(s, "minecraft:cobblestone", 64) end
+        return T.craftBatch({ { "minecraft:iron_nugget", 18 }, { "minecraft:chain", 6 }, { "minecraft:chest", 1 }, { "minecraft:spruce_door", 3 } },
+            { take = true })
+    end
+    ok, why, info = nuggetBatch(11)
+    check("opts.take with intermediates used by later recipes: only what's left of them is owed, and all of it comes aboard", ok == true
+        and type(why) == "table" and why.taken["minecraft:iron_nugget"] == 6 and why.used and why.used["minecraft:iron_nugget"] == 12
+        and next(why.left) == nil and carrying("minecraft:iron_nugget") == 9 and carrying("minecraft:chain") == 6 and carrying("minecraft:chest") == 1
+        and carrying("minecraft:spruce_door") == 3 and chestHas("minecraft:iron_nugget") == 0,
+        tostring(ok) .. " " .. tostring(why) .. " / " .. inventory() .. " / " .. chestLine())
+    -- and with no room for all of it, the why is pull's own
+    ok, why, info = nuggetBatch(14)
+    check("...with two free slots, what stays in the chest says why in pull's words", ok == false
+        and why == "3 spruce_door stayed in the chest: no room in the turtle for minecraft:spruce_door (got 0 of 3)" and info.left["minecraft:iron_nugget"] == nil,
+        tostring(why))
     -- refusals with nothing touched
     fresh()
     fill(0, 0, 1, { [1] = { "minecraft:oak_log", 2 } })
