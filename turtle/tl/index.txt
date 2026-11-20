@@ -242,7 +242,7 @@ Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the chest's side), else every chest known. True, info; false, why, info if some couldn't be read; nil, why.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 What there is, everywhere:
 T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:

@@ -11,7 +11,7 @@
 --     opts.find adds the chests the map shows in a box;
 --   * T.where: the chests with an item (a name, a glob, no namespace), nearest first, with the total;
 --   * T.fetch: goes to the chest that has it, takes the count (across chests when it must), keeps the list right, tries
---     the next chest when one is empty behind its back, stops for no room, comes back;
+--     the next chest when one is empty behind its back, stops for no room, comes back; a glob as T.where takes it;
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
@@ -406,6 +406,21 @@ do
     T.face(1)
     T.fetch(IRON, 7)
     check("facing as before, whatever way the last chest was faced", here(0, 0, 0, 1) and carrying(IRON) == 7)
+    -- ADR-0019: T.fetch takes the globs T.where takes: each chest's items that match, pulled by their own names
+    local SWORD = { stone = "minecraft:stone_sword", iron = "minecraft:iron_sword", diamond = "minecraft:diamond_sword" }
+    setUp()
+    fill(3, 0, 1, { [1] = { COBBLE, 64 }, [2] = { SWORD.stone, 1 }, [3] = { PLANKS, 40 }, [4] = { SWORD.iron, 1 } })
+    fill(2, -1, -2, { [1] = { IRON, 7 }, [2] = { SWORD.diamond, 1 } })
+    T.catalogue()
+    local _, total = T.where("*_sword")
+    got, why = T.fetch("*_sword", 2)
+    check("T.fetch with a glob: where finds 3, fetch takes 2 from the nearest chest, each by its own name", total == 3 and got == 2
+        and why == nil and carrying(SWORD.stone) == 1 and carrying(SWORD.iron) == 1 and chestHas(3, 0, 1, COBBLE) == 64 and here(),
+        tostring(total) .. " " .. tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch("*_sword", 5)
+    check("...then the rest from the next chest, short: what there is and why", got == 1 and carrying(SWORD.diamond) == 1
+        and why == "the chests hold no more minecraft:*_sword (got 1 of 5)" and line(T.chests(), 2, -2, "down").items[SWORD.diamond] == nil,
+        tostring(got) .. " " .. tostring(why))
 end
 
 --------------------------------------------------------------------------

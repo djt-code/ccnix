@@ -1112,9 +1112,9 @@ T.where(name)
     It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds) and age how long ago that was, so an old count can be read again first. Nil and why when no chest is known.
 
 T.fetch(name, n, opts)
-    Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+    Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 
-    `name` is an item's name (minecraft: assumed). The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 
 == What there is, everywhere ==
 

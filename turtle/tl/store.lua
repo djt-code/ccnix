@@ -747,12 +747,25 @@ function T.where(name)
     return nearest(found, T.here()), total
 end
 
--- Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at
--- the last chest).  Returns how many came aboard, and why if that is short of n.
+-- The names to pull at the chest on `side` for `name`: the name itself, or for a glob the items in the chest that match
+-- it, by name (T.pull takes one name, exactly).
+local function namesToPull(name, side)
+    if not text.containsAny(name, "*?[") then return { name } end
+    local test, out = matcher(name), {}
+    for item in pairs(T.containerCounts(side) or {}) do
+        if test(item) then out[#out + 1] = item end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before
+-- (opts.stay: stay at the last chest).  Returns how many came aboard, and why if that is short of n.
 --
--- `name` is an item's name (minecraft: assumed).  The chests come nearest first, each read again as it is visited
--- (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the
--- turtle has no room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+-- `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the
+-- items that match are taken, by name.  The chests come nearest first, each read again as it is visited (so a chest
+-- that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no
+-- room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
     n = n or 1
@@ -769,11 +782,16 @@ function T.fetch(name, n, opts)
             if got >= n then return end
             local side, reason = arrive(c, move)
             if side then
-                local took, pullWhy = T.pull(side, name, n - got)
-                got = got + took
+                local noRoomFor
+                for _, item in ipairs(namesToPull(name, side)) do
+                    if got >= n then break end
+                    local took, pullWhy = T.pull(side, item, n - got)
+                    got = got + took
+                    if pullWhy and text.contains(pullWhy, "no room") then noRoomFor = item; break end
+                end
                 note(list, c, side)
-                if pullWhy and text.contains(pullWhy, "no room") then
-                    why = "no room in the turtle for " .. name            -- (T.pull's own count is this chest's: the total is said below)
+                if noRoomFor then
+                    why = "no room in the turtle for " .. noRoomFor   -- (T.pull's own count is this chest's: the total is said below)
                     return
                 end
             else
