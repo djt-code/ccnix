@@ -159,6 +159,16 @@ end
 
 local function mapRead(x, y, z) return T.map.get(x, y, z) end
 
+-- The block a plan's cell stands for: a plan names the item (tl.blueprint), so a torch, sign, banner or head with a
+-- facing is its wall form (a wall_torch for a torch), and redstone its wire.
+local function planBlock(name, state)
+    if state ~= nil and state.facing ~= nil then
+        local wall = T.blockOfItem(name, "wall")
+        if wall then return wall end
+    end
+    return T.blockOfItem(name)
+end
+
 -- The view and the box for a box or a plan: view, x1, y1, z1, x2, y2, z2, and the plan (nil for a box); or nil and why.
 local function viewOf(what)
     if type(what) == "table" and (what.x1 ~= nil or type(what[1]) == "number") then
@@ -178,7 +188,7 @@ local function viewOf(what)
         local x1, y1, z1, x2, y2, z2 = bp.extent(plan)
         return newView(function(x, y, z)
             local name, state = bp.at(plan, x, y, z)
-            if name then return name, state end
+            if name then return planBlock(name, state), state end
             return mapRead(x, y, z)
         end), x1, y1, z1, x2, y2, z2, plan
     end

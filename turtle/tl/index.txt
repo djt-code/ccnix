@@ -184,7 +184,7 @@ T.smeltAt(cell, item, n, opts) - Smelt n at a furnace standing at cell {x, y, z}
 Harvesting:
 T.harvest(pattern, where, target, opts) - Dig the blocks in a place matching a glob, nearest first, top down, leaving protected areas, ones liquid would flow in by and ones under sand. True, info; false, why, info when short; nil, why if it couldn't begin.
 Fuel from lava:
-T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained; false, why, fuel gained; nil, why.
+T.refuelFromLava(target, opts) - Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and come back, facing as before. Returns true, fuel gained, info; false, why, fuel gained, info; nil, why.
 What a job costs in fuel:
 T.fuelFor(plan, opts) - What a job will cost in fuel, against the tank and the fuel on board: true, info if it will do; false, why, info if short; nil, why for a plan it can't read. Moves nothing.
 The job journal:
@@ -242,7 +242,7 @@ Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the chest's side), else every chest known. True, info; false, why, info if some couldn't be read; nil, why.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests that hold `name` and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 What there is, everywhere:
 T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:

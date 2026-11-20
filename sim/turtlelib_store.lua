@@ -4,13 +4,14 @@
 -- peripheral that lists them).
 --   * T.addChest / T.forgetChest / T.chests: the places kept in a data file other copies of the library read, whole
 --     numbers and a real side asked for, one bulk chest; a chest known already (the same place, another stand, the
---     other half of a double chest) adds nothing and says which;
+--     other half of a double chest) adds nothing and says which; holds that overlap another chest's said with the real
+--     names both take (never ones made up from the globs), by chest, three of each list at most;
 --   * T.catalogue: goes round the chests nearest first, writes down what each holds, comes back facing as before; a
 --     chest that is gone or unreachable is reported and the rest are read; chests given as places are remembered;
 --     opts.find adds the chests the map shows in a box;
 --   * T.where: the chests with an item (a name, a glob, no namespace), nearest first, with the total;
 --   * T.fetch: goes to the chest that has it, takes the count (across chests when it must), keeps the list right, tries
---     the next chest when one is empty behind its back, stops for no room, comes back;
+--     the next chest when one is empty behind its back, stops for no room, comes back; a glob as T.where takes it;
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
@@ -27,13 +28,16 @@
 --     through a re-zero), set, changed and cleared on a known chest; T.stow puts an item in a chest for it first, then
 --     one that holds it already (never a chest for other things), then the bulk chest, a full one falling through;
 --     T.sortChests moves what is in the wrong chest to where it belongs, says what moved and what couldn't (no room
---     where it belongs: put back), stops at opts.limit stacks, and goes nowhere when nothing is out of place;
+--     where it belongs: put back; nowhere at this site), stops at opts.limit stacks, and goes nowhere when nothing is
+--     out of place; at two bases, T.stow's note on an item whose chests are all far ranks them as it does (the chest
+--     for it before the other base's nearer bulk chest) and says which it is;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
 --     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
 local B = require("buildworld")
+local text = require("text")
 local realCheck = M.check
 -- (a check's detail is only shown when it fails)
 local function check(label, ok, detail) realCheck(label, ok, (not ok) and detail or nil) end
@@ -402,6 +406,21 @@ do
     T.face(1)
     T.fetch(IRON, 7)
     check("facing as before, whatever way the last chest was faced", here(0, 0, 0, 1) and carrying(IRON) == 7)
+    -- ADR-0019: T.fetch takes the globs T.where takes: each chest's items that match, pulled by their own names
+    local SWORD = { stone = "minecraft:stone_sword", iron = "minecraft:iron_sword", diamond = "minecraft:diamond_sword" }
+    setUp()
+    fill(3, 0, 1, { [1] = { COBBLE, 64 }, [2] = { SWORD.stone, 1 }, [3] = { PLANKS, 40 }, [4] = { SWORD.iron, 1 } })
+    fill(2, -1, -2, { [1] = { IRON, 7 }, [2] = { SWORD.diamond, 1 } })
+    T.catalogue()
+    local _, total = T.where("*_sword")
+    got, why = T.fetch("*_sword", 2)
+    check("T.fetch with a glob: where finds 3, fetch takes 2 from the nearest chest, each by its own name", total == 3 and got == 2
+        and why == nil and carrying(SWORD.stone) == 1 and carrying(SWORD.iron) == 1 and chestHas(3, 0, 1, COBBLE) == 64 and here(),
+        tostring(total) .. " " .. tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch("*_sword", 5)
+    check("...then the rest from the next chest, short: what there is and why", got == 1 and carrying(SWORD.diamond) == 1
+        and why == "the chests hold no more minecraft:*_sword (got 1 of 5)" and line(T.chests(), 2, -2, "down").items[SWORD.diamond] == nil,
+        tostring(got) .. " " .. tostring(why))
 end
 
 --------------------------------------------------------------------------
@@ -705,6 +724,23 @@ do
     ok, why = T.sortChests()
     check("T.sortChests sorts the site the turtle is at: the glowstone in the bulk chest here stays, nowhere far gone",
         ok == true and chestHas(0, 0, -3, GLOW) == 5 and chestHas(100, 0, 1, GLOW) == 6 and W.S.moves == moves, tostring(why))
+
+    -- ADR-0019: the far note ranks by place before distance, as stow does (the chest for it, then one holding it,
+    -- then the bulk chest), and says which: the far base's nearer bulk chest isn't "the chest for it"
+    setUp()
+    T.forgetChest(C.x, C.y, C.z, C.side)
+    W.set(100, 0, 1, "minecraft:chest")
+    W.set(106, 0, 1, "minecraft:chest")
+    T.addChest(100, 0, 0, 0, true)
+    T.addChest(106, 0, 0, 0, { holds = "*glowstone*" })
+    W.give(1, GLOW, 6)
+    ok, why = T.stow()
+    check("the far base's bulk chest nearer than its chest for the item: the note names the chest for it", ok == false
+        and why:find("the nearest chest for it is at 106,0,1, 106 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
+    T.forgetChest(106, 0, 0, 0)
+    ok, why = T.stow()
+    check("...with only the bulk chest there: it's called the bulk chest", ok == false
+        and why:find("the bulk chest is at 100,0,1, 100 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
 end
 
 do
@@ -713,16 +749,48 @@ do
     local STAIRS = "minecraft:stone_brick_stairs"
     setUp()
     T.catalogue()
-    local _, note1 = T.addChest(D.x, D.y, D.z, D.side, { holds = "*_stairs" })
-    local _, note2 = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
-    check("T.addChest: holds that overlap another chest's are said, with an item both take and which wins",
-        not tostring(note1):find("warning", 1, true) and note2 and note2:find("warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_stairs\" (both take", 1, true)
-        and note2:find("the more specific glob wins, \"*_stairs\" (that chest's)", 1, true) ~= nil, tostring(note2))
     W.give(1, STAIRS, 8)
     W.give(2, "minecraft:bricks", 4)
+    local _, note1 = T.addChest(D.x, D.y, D.z, D.side, { holds = "*_stairs" })
+    local _, note2 = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
+    check("T.addChest: holds that overlap another chest's are said, with an item both take (one aboard) and which wins",
+        not tostring(note1):find("warning", 1, true) and note2 == "the chest at 3,0,1 is now for *brick*; warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_stairs\" " ..
+        "(both take stone_brick_stairs): the more specific glob wins, \"*_stairs\" (that chest's)", tostring(note2))
     local ok, why = T.stow()
     check("...stone brick stairs go to the chest for *_stairs, bricks to the one for *brick*", ok == true
         and chestHas(2, -1, -2, STAIRS) == 8 and chestHas(3, 0, 1, STAIRS) == 0 and chestHas(3, 0, 1, "minecraft:bricks") == 4, tostring(why))
+end
+
+do
+    -- ADR-0019: the overlap warning tests only real names (what the known chests hold, the inventory), never names made
+    -- by joining the globs' letters ("coalbrick"), groups by chest, and caps its lists at three
+    local function stairs(kind) return "minecraft:" .. kind .. "_stairs" end
+    setUp()
+    fill(-3, 0, 1, { [1] = { stairs("stone_brick"), 4 }, [2] = { stairs("brick"), 4 }, [3] = { stairs("mud_brick"), 4 },
+        [4] = { stairs("nether_brick"), 4 }, [5] = { "minecraft:stone_brick_slab", 4 } })
+    T.catalogue()
+    T.addChest(D.x, D.y, D.z, D.side, { holds = { "*coal*", "*_stairs", "*_slab" } })
+    local _, note = T.addChest(A.x, A.y, A.z, A.side, { holds = "*brick*" })
+    check("overlapping holds: only real names, one warning for the chest, its names capped at three", note ==
+        "the chest at 3,0,1 is now for *brick*; warning: \"*brick*\" overlaps the chest at 2,-1,-2's \"*_slab\" (both take stone_brick_slab): the more specific glob wins, " ..
+        "\"*_slab\" (that chest's); \"*brick*\" overlaps its \"*_stairs\" (both take brick_stairs, mud_brick_stairs, nether_brick_stairs " ..
+        "and 1 more): the more specific glob wins, \"*_stairs\" (that chest's)", tostring(note))
+    check("...no name made up from the globs' letters (\"*coal*\" and \"*brick*\" take no real item both)",
+        not text.contains(tostring(note), "coal"), tostring(note))
+    -- four chests it overlaps: three said, and how many more
+    T.addChest(Bc.x, Bc.y, Bc.z, Bc.side, { holds = "*brick_*" })
+    T.addChest(C.x, C.y, C.z, C.side, { holds = "*_stairs" })
+    _, note = T.addChest(0, 0, 2, 0, { holds = "*brick*" })
+    check("...overlapping four chests: the first three said, then how many more", text.count(tostring(note), "warning: ") == 3
+        and text.endsWith(tostring(note), "; and 1 more chest overlaps it"), tostring(note))
+    -- six pairs of globs overlapping one chest: three said, and how many more
+    setUp()
+    fill(-3, 0, 1, { [1] = { stairs("stone_brick"), 4 }, [2] = { "minecraft:stone_brick_slab", 4 } })
+    T.catalogue()
+    T.addChest(D.x, D.y, D.z, D.side, { holds = { "*_stairs", "*_slab" } })
+    _, note = T.addChest(A.x, A.y, A.z, A.side, { holds = { "*brick*", "*stone*", "*_stairs", "*_slab" } })
+    check("...six pairs of globs with one chest: the first three said, then how many more", text.count(tostring(note), " overlaps ") == 3
+        and text.endsWith(tostring(note), "; and 3 more of its globs overlap"), tostring(note))
 end
 
 do
@@ -786,7 +854,7 @@ do
     ok, why, info = T.sortChests()
     check("iron in the chest for planks with no bulk chest: left there and said, the planks still moved", ok == false
         and chestHas(2, -1, -2, IRON) == 7 and carrying(IRON) == 0 and chestHas(2, -1, -2, PLANKS) == 45 and why:find("iron_ingot", 1, true)
-        and why:find("no bulk chest", 1, true), tostring(why))
+        and why:find("no bulk chest", 1, true) and why:find("nowhere for it at this site", 1, true), tostring(why))
 
     -- a chest that is gone
     setUp()

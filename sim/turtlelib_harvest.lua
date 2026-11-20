@@ -10,7 +10,8 @@
 --     T.cfg.autoDump keeps it going;
 --   * T.refuelFromLava: the nearest source the map knows, taken up with an empty bucket and burned, back where it began;
 --     flowing lava passed over (known and found out), an unreachable source passed over, no bucket, a lava bucket aboard
---     burned first, a tank with no room, no lava known, unlimited fuel; stops at the target;
+--     burned first, a tank with no room, no lava known, unlimited fuel; stops at the target; giving up says what each
+--     try found and where (info.tries, three of them in the why);
 --   * T.fuelFor: a route, a build, scans (free up to radius 8) and a box of scans added up against the tank and the fuel on
 --     board, with the margin and the detour; short, enough, unlimited fuel, a plan it cannot read;
 --   * T.harvest's limits (ADR-0011 D7.8): opts.maxFuel, opts.timeout, opts.exclude.
@@ -514,6 +515,29 @@ do
     know(-1, -2, -1, 5, 2, 6)
     local ok, gained = T.refuelFromLava(1000)
     check("a source nothing can get next to is passed over for the next", ok == true and has(3, -1, 3, LAVA) and not has(-6, -1, 5) and here(), tostring(ok) .. " " .. tostring(gained))
+end
+
+do
+    -- ADR-0019: giving up says what each try found and where: three flowing cells the map took for sources and one
+    -- source walled in, each the nearest to where the turtle is then; the why lists three and how many more, the info
+    -- all of them
+    lavaWorld()
+    W.fill(2, -1, 2, 4, 1, 4, "minecraft:bedrock")
+    W.set(3, -1, 3, LAVA, { level = 0 })
+    know(-1, -2, -1, 5, 2, 6)
+    for _, c in ipairs({ { 1, 1 }, { 2, 1 }, { -1, 2 } }) do         -- (flowing, and the map is not told)
+        W.set(c[1], -1, c[2], LAVA, { level = 3 })
+        T.map.set(c[1], -1, c[2], LAVA)
+    end
+    local ok, why, gained, info = T.refuelFromLava(1000, { tries = 4 })
+    local tries = info and info.tries or {}
+    local found = {}
+    for i, t in ipairs(tries) do found[i] = T.posKey(t) .. " " .. tostring(t.found) end
+    check("giving up after its tries: the why says what three of them found, where, and how many more", ok == false and gained <= 0
+        and why == "gave up after 4 tries: 1,-1,1 flowing, 2,-1,1 flowing, 3,-1,3 out of reach and 1 more (info.tries)", tostring(why) .. " " .. tostring(gained))
+    check("...info.tries has every try, in order, the walled-in source out of reach", table.concat(found, "; ") ==
+        "1,-1,1 flowing; 2,-1,1 flowing; 3,-1,3 out of reach; -1,-1,2 flowing", table.concat(found, "; "))
+    check("...and it came home, the far source left", here() and has(-6, -1, 5, LAVA))
 end
 
 do
