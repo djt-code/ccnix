@@ -28,7 +28,9 @@
 --     through a re-zero), set, changed and cleared on a known chest; T.stow puts an item in a chest for it first, then
 --     one that holds it already (never a chest for other things), then the bulk chest, a full one falling through;
 --     T.sortChests moves what is in the wrong chest to where it belongs, says what moved and what couldn't (no room
---     where it belongs: put back), stops at opts.limit stacks, and goes nowhere when nothing is out of place;
+--     where it belongs: put back; nowhere at this site), stops at opts.limit stacks, and goes nowhere when nothing is
+--     out of place; at two bases, T.stow's note on an item whose chests are all far ranks them as it does (the chest
+--     for it before the other base's nearer bulk chest) and says which it is;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
 --     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
 local PROJ = ...
@@ -707,6 +709,23 @@ do
     ok, why = T.sortChests()
     check("T.sortChests sorts the site the turtle is at: the glowstone in the bulk chest here stays, nowhere far gone",
         ok == true and chestHas(0, 0, -3, GLOW) == 5 and chestHas(100, 0, 1, GLOW) == 6 and W.S.moves == moves, tostring(why))
+
+    -- ADR-0019: the far note ranks by place before distance, as stow does (the chest for it, then one holding it,
+    -- then the bulk chest), and says which: the far base's nearer bulk chest isn't "the chest for it"
+    setUp()
+    T.forgetChest(C.x, C.y, C.z, C.side)
+    W.set(100, 0, 1, "minecraft:chest")
+    W.set(106, 0, 1, "minecraft:chest")
+    T.addChest(100, 0, 0, 0, true)
+    T.addChest(106, 0, 0, 0, { holds = "*glowstone*" })
+    W.give(1, GLOW, 6)
+    ok, why = T.stow()
+    check("the far base's bulk chest nearer than its chest for the item: the note names the chest for it", ok == false
+        and why:find("the nearest chest for it is at 106,0,1, 106 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
+    T.forgetChest(106, 0, 0, 0)
+    ok, why = T.stow()
+    check("...with only the bulk chest there: it's called the bulk chest", ok == false
+        and why:find("the bulk chest is at 100,0,1, 100 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
 end
 
 do
@@ -820,7 +839,7 @@ do
     ok, why, info = T.sortChests()
     check("iron in the chest for planks with no bulk chest: left there and said, the planks still moved", ok == false
         and chestHas(2, -1, -2, IRON) == 7 and carrying(IRON) == 0 and chestHas(2, -1, -2, PLANKS) == 45 and why:find("iron_ingot", 1, true)
-        and why:find("no bulk chest", 1, true), tostring(why))
+        and why:find("no bulk chest", 1, true) and why:find("nowhere for it at this site", 1, true), tostring(why))
 
     -- a chest that is gone
     setUp()

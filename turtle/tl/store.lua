@@ -881,6 +881,8 @@ local PLACES = {
     function(c, name) return (c.items[name] or 0) > 0 and accepts(c, name) end,
     function(c) return c.bulk == true end,
 }
+-- The places in words, for a note on the nearest of one (T.stow's far note)
+local PLACE_WORDS = { "the nearest chest for it", "the nearest chest holding it", "the bulk chest" }
 
 -- The chests to try for an item now: those of the first place in PLACES that has some not tried yet.  With `strict`
 -- (sorting) only chests it belongs in (a full chest for it doesn't send it to the bulk chest).
@@ -1042,8 +1044,8 @@ end
 -- specific holds win, T.addChest), one that holds some already and isn't for other things, and the bulk chest: of
 -- those, the nearest, and of those as near (8 blocks more at most), the first of that order.  Chests over
 -- opts.maxDistance (48) from where it began (or opts.near, { x, y, z }) aren't gone to unless opts.far: an item with
--- only those stays aboard, the why saying where the nearest is and how far (two bases: the other one's chests aren't
--- a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it.  A chest for other
+-- only those stays aboard, the why saying where the one it would go to is (the nearest chest for it, else holding it,
+-- else the bulk chest) and how far (two bases: the other one's chests aren't a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it.  A chest for other
 -- things never takes an item, and a full chest for it sends it on to the next place.  What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
 -- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
 -- and no bulk chest"), and the why returned says them all.  opts: move (T.moveTo's), keep (names, a list or set, globs
@@ -1094,23 +1096,24 @@ function T.stow(opts)
         end
         return out
     end
-    -- (an item whose chests are all out of reach: said where the nearest is)
+    -- (an item whose chests are all out of reach: said where the one it would go to is, ranked as targets() ranks
+    -- them, by place and then distance: the chest for it, then one holding it, then the bulk chest)
     if not opts.far then
         for name in pairs(names) do
             if #targets(list, name, {}) == 0 then
-                local far, farD
+                local far, farD, farPlace
                 for _, c in ipairs(scoped) do
-                    for _, place in ipairs(PLACES) do
+                    for i, place in ipairs(PLACES) do
                         if place(c, name, list) then
                             local d = T.dist(from, c)
-                            if not farD or d < farD then far, farD = c, d end
+                            if not far or i < farPlace or (i == farPlace and d < farD) then far, farD, farPlace = c, d, i end
                             break
                         end
                     end
                 end
                 if far then
-                    notes[name] = { "the nearest chest for it is at " .. T.posKey(cellOf(far)) .. ", " .. farD .. " blocks off (over opts.maxDistance "
-                        .. reach .. ": opts.far = true goes)" }
+                    notes[name] = { PLACE_WORDS[farPlace] .. " is at " .. T.posKey(cellOf(far)) .. ", " .. farD ..
+                        " blocks off (over opts.maxDistance " .. reach .. ": opts.far = true goes)" }
                 end
             end
         end
@@ -1134,8 +1137,9 @@ end
 
 -- The stacks T.sortChests moves at most, unless opts.limit says
 local SORT_LIMIT = 32
--- Why an item that is in the wrong chest stays there when there is nowhere else for it
-local NOWHERE = "nowhere for it: no chest is for it, no other chest holds it and there is no bulk chest"
+-- Why an item that is in the wrong chest stays there when there is nowhere else for it (sorting is by site: a chest for
+-- it at another base doesn't count)
+local NOWHERE = "nowhere for it at this site: no chest is for it, no other chest holds it and there is no bulk chest"
 
 -- The items in the chest c (as last read) that don't belong there, sorted by name.
 local function misplaced(list, c)
