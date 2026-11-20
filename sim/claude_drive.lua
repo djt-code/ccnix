@@ -1879,6 +1879,28 @@ shell.run, io = shellRunWas, ioWas36
 check("run_program: the pickaxe back on before the program runs, the controller where it was",
     progEQ == CONTROLLER .. " | " .. PICK and DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1], tostring(progEQ))
 
+-- ADR-0019: the model's code equips a modem by hand over the listening chat box; at the goal's end the put-back
+-- leaves the modem on, and the next goal is told the pickaxe couldn't go back
+listenFresh(CONTROLLER, PICK, true)
+Mine.inv[3] = { name = MODEM, count = 1 }
+SCRIPT = { { "sim_http" }, { "sim_http" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.select(3); turtle.equipRight(); return turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+answers[1] = "next"
+answers[2] = ""
+run("put the modem on")
+local g36m = HTTP.requests[3] and HTTP.requests[3].body.messages
+local next36m = g36m and g36m[#g36m].content
+local NOTBACK = "the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the " .. PICK .. " not put back"
+check("a modem equipped by hand over the listening chat box stays on at the goal's end; the pickaxe stays in the inventory",
+    EQ.left == CONTROLLER and EQ.right == MODEM and chatAboard() == 1 and Mine.inv[2] and Mine.inv[2].name == PICK, tostring(EQ.right))
+check("...the next goal is told the pickaxe couldn't go back, and the log says so",
+    type(next36m) == "string" and next36m:find("[After listening to the chat: " .. NOTBACK .. "]", 1, true) ~= nil
+        and (Mine.files["claude.log"] or ""):find("listener: " .. NOTBACK, 1, true) ~= nil, tostring(next36m))
+
 listenFresh(CONTROLLER, MODEM, true)
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),

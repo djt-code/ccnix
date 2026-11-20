@@ -1608,6 +1608,9 @@ end
 
 -- Put back what the chat box took the place of, if it's on (through
 -- T.equipPeripheral's restore, so turtlelib knows the pickaxe is back).
+-- When the side holds something else now (a modem the code equipped by
+-- hand) or the pickaxe is gone, the side is left as it is, and the next
+-- results and the log say why.
 function listen.putBack()
     local restore = listen.restore
     listen.chat, listen.restore = nil, nil

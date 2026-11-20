@@ -205,6 +205,57 @@ check("T.equipPeripheral gives the peripheral and a restore", q and q.scanBlocks
 check("restore puts back, and a second call does nothing", restore() == true and EQ.right == PICK and restore() == true
     and EQ.right == PICK and carrying(SCANNER) == 1)
 
+-- ADR-0019: restore puts back only over what it put on, checks the equip, and says why it didn't
+local MODEM = "computercraft:wireless_modem_advanced"
+local back, notBack
+reset(CONTROLLER, PICK)
+put(1, CHAT); put(2, MODEM)
+q, restore = T.equipPeripheral(CHAT)
+S.sel = 2; turtle.equipRight(); S.sel = 1        -- (a modem equipped by hand over the chat box)
+back, notBack = restore()
+check("a modem equipped by hand over the chat box stays on: false and why, the pickaxe left in the inventory",
+    back == false and notBack == "the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the "
+        .. PICK .. " not put back" and EQ.right == MODEM and carrying(PICK) == 1 and carrying(CHAT) == 1, tostring(notBack))
+reset(CONTROLLER, nil)
+put(1, CHAT); put(2, MODEM)
+q, restore = T.equipPeripheral(CHAT)
+S.sel = 2; turtle.equipRight(); S.sel = 1
+back, notBack = restore()
+check("...and over a side that was empty, the modem isn't taken off either",
+    back == false and notBack:find("left as it is, not emptied", 1, true) and EQ.right == MODEM and carrying(MODEM) == 0, tostring(notBack))
+reset(CONTROLLER, PICK)
+put(1, CHAT)
+q, restore = T.equipPeripheral(CHAT)
+S.inv[1] = nil                                  -- (the pickaxe put away in a chest)
+back, notBack = restore()
+check("the pickaxe gone from the inventory: the chat box stays on, false and why (no empty slot takes it off)",
+    back == false and notBack == "couldn't put the " .. PICK .. " back on the right: it isn't on board" and EQ.right == CHAT, tostring(notBack))
+reset(CONTROLLER, PICK)
+put(1, CHAT)
+q, restore = T.equipPeripheral(CHAT)
+S.inv[1] = { name = PICK, count = 1, damaged = true }
+put(5, PICK)
+back, notBack = restore()
+check("a damaged pickaxe ahead of a good one: the good one goes back on, the damaged one stays in its slot",
+    back == true and EQ.right == PICK and S.inv[1] and S.inv[1].damaged and S.inv[5] and S.inv[5].name == CHAT, tostring(notBack))
+reset(CONTROLLER, PICK)
+put(1, CHAT)
+q, restore = T.equipPeripheral(CHAT)
+S.inv[1] = { name = PICK, count = 1, damaged = true }
+back, notBack = restore()
+check("...only a damaged one: false and why, the chat box left on",
+    back == false and notBack == "couldn't put the " .. PICK .. " back on the right: Not a valid upgrade" and EQ.right == CHAT, tostring(notBack))
+reset(CONTROLLER, PICK)
+put(1, CHAT); put(2, MODEM)
+local printed, printWas = {}, print
+print = function(s) printed[#printed + 1] = s end
+ok, result = T.withPeripheral(CHAT, function() S.sel = 2; turtle.equipRight(); S.sel = 1; return "said" end)
+print = printWas
+check("T.withPeripheral: fn's modem stays on, fn's result comes back, and why the side wasn't put back is printed",
+    ok == true and result == "said" and EQ.right == MODEM and #printed == 1
+        and printed[1] == "T.withPeripheral: the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the "
+        .. PICK .. " not put back", printed[1])
+
 --------------------------------------------------------------------------
 -- pull
 --------------------------------------------------------------------------

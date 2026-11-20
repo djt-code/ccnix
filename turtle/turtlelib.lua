@@ -1385,8 +1385,10 @@ end
 --
 -- It prefers an empty side, then one with a tool, then another upgrade; opts.free = true takes only an
 -- empty side or a tool's, so no upgrade comes off (a modem, a scanner).  Call the returned function
--- when done (calling it again does nothing).  The reasons for nil: not on board, a tool rather than a
--- peripheral, both sides kept, no free slot for what comes off, or it never showed up.
+-- when done (calling it again does nothing): it returns true, or false and why it left the side as it
+-- is: something else was equipped there since (that stays on), or what was there is gone or won't go
+-- on (of several by that name, the first that equips goes back).  The reasons for nil: not on board,
+-- a tool rather than a peripheral, both sides kept, no free slot for what comes off, or it never showed up.
 function T.equipPeripheral(name, opts)
     opts = opts or {}
     if T.isTool(name) then return nil, name .. " is a tool, not a peripheral (T.withTool)" end
@@ -1426,26 +1428,45 @@ function T.equipPeripheral(name, opts)
     local tool = was and T.isTool(was) and was
     if tool then park(tool) end
     local done = false
-    -- puts back what was on the side (an empty slot selected takes the
-    -- peripheral off when there was nothing); true, or false and why
+    -- Puts back what was on the side, only while the side still holds the `name` put on (one equipped there since, by
+    -- hand or by code, stays on).  `was` goes back from the first slot holding one that equips (a damaged or enchanted
+    -- tool isn't an upgrade, so the next is tried); a side that was empty is emptied into an empty slot.  True, or
+    -- false and why, the side left as it is (a tool that didn't go back stays the turtle's own while it's aboard).
     local function restore()
         if done then return true end
         done = true
-        if tool then unpark(tool) end
-        local cur = turtle.getSelectedSlot()
-        local from = was and T.findSlot(was) or T.emptySlot()
-        if not from then
-            return false, "couldn't put the " .. (was or "empty side") .. " back on the " .. side .. ": it isn't on board"
+        local function settle(back, why)
+            if tool and (back or not T.findSlot(tool)) then unpark(tool) end
+            return back, why
         end
-        turtle.select(from)
-        equipSide(side)
+        local known, now = pcall(T.equipped, side)
+        if known and now ~= name then
+            return settle(false, string.format("the %s side holds %s now, not the %s put on: left as it is, %s", side,
+                now and ("the " .. now) or "nothing", name, was and ("and the " .. was .. " not put back") or "not emptied"))
+        end
+        local undo = was and ("put the " .. was .. " back on the " .. side) or ("take the " .. name .. " off the " .. side)
+        local from = {}
+        for slot = 1, 16 do
+            local it = turtle.getItemDetail(slot)
+            if was and it and it.name == was then from[#from + 1] = slot end
+        end
+        if not was then from[1] = T.emptySlot() end
+        if #from == 0 then return settle(false, "couldn't " .. undo .. (was and ": it isn't on board" or ": no empty slot")) end
+        local cur, ok, err = turtle.getSelectedSlot(), false, nil
+        for _, slot in ipairs(from) do
+            turtle.select(slot)
+            ok, err = equipSide(side)
+            if ok then break end
+        end
         turtle.select(cur)
-        return true
+        if ok then return settle(true) end
+        return settle(false, "couldn't " .. undo .. ": " .. (#from > 1 and ("none of the " .. #from .. " aboard would go on: ") or "")
+            .. tostring(err or "it wouldn't go on"))
     end
     local p = waitForPeripheral(side)
     if not p then
-        restore()
-        return nil, "the " .. name .. " didn't show up as a peripheral on the " .. side
+        local back, notBack = restore()
+        return nil, "the " .. name .. " didn't show up as a peripheral on the " .. side .. (back and "" or ("; " .. notBack))
     end
     return p, restore
 end
@@ -1454,12 +1475,15 @@ end
 -- what was on that side afterwards.  Returns true and what fn returned, or nil
 -- and why it couldn't equip (see T.equipPeripheral).
 --
--- The side is put back even if fn errors (the error is re-thrown).
+-- The side is put back even if fn errors (the error is re-thrown).  When it
+-- can't be (fn equipped something else there, or what was there is gone),
+-- the side is left as it is and why is printed.
 function T.withPeripheral(name, fn)
     local p, restore = T.equipPeripheral(name)
     if not p then return nil, restore end
     local res = table.pack(pcall(fn, p))
-    restore()
+    local back, notBack = restore()
+    if not back then print("T.withPeripheral: " .. tostring(notBack)) end
     if not res[1] then error(res[2], 0) end
     return true, table.unpack(res, 2, res.n)
 end

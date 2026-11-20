@@ -211,12 +211,12 @@ T.equipTool(name, side)
 T.equipPeripheral(name, opts)
     Equip the item `name` on the side that holds no chunk controller (or kept side), and wait for it to show up. Returns the peripheral and a function that puts back what was there, or nil and why.
 
-    It prefers an empty side, then one with a tool, then another upgrade; opts.free = true takes only an empty side or a tool's, so no upgrade comes off (a modem, a scanner). Call the returned function when done (calling it again does nothing). The reasons for nil: not on board, a tool rather than a peripheral, both sides kept, no free slot for what comes off, or it never showed up.
+    It prefers an empty side, then one with a tool, then another upgrade; opts.free = true takes only an empty side or a tool's, so no upgrade comes off (a modem, a scanner). Call the returned function when done (calling it again does nothing): it returns true, or false and why it left the side as it is: something else was equipped there since (that stays on), or what was there is gone or won't go on (of several by that name, the first that equips goes back). The reasons for nil: not on board, a tool rather than a peripheral, both sides kept, no free slot for what comes off, or it never showed up.
 
 T.withPeripheral(name, fn)
     Run fn(peripheral) with the item `name` equipped as a peripheral, and put back what was on that side afterwards. Returns true and what fn returned, or nil and why it couldn't equip (see T.equipPeripheral).
 
-    The side is put back even if fn errors (the error is re-thrown).
+    The side is put back even if fn errors (the error is re-thrown). When it can't be (fn equipped something else there, or what was there is gone), the side is left as it is and why is printed.
 
 == Low-level moves ==
 
