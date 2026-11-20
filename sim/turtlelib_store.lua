@@ -14,6 +14,8 @@
 --     the next chest when one is empty behind its back, stops for no room, comes back; a glob as T.where takes it;
 --     (ADR-0019 D2) only chests within opts.maxDistance (48) of where it began, the why saying what is farther and
 --     where, opts.far and a larger opts.maxDistance going there; T.prepare counting and fetching within it too;
+--     (ADR-0019 D6) of several pickaxes T.fetch and T.pull take the one that goes on as an upgrade (not worn, not
+--     enchanted) first, and opts.pick chooses by the chest's item detail;
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
@@ -423,6 +425,66 @@ do
     check("...then the rest from the next chest, short: what there is and why", got == 1 and carrying(SWORD.diamond) == 1
         and why == "the chests hold no more minecraft:*_sword (got 1 of 5)" and line(T.chests(), 2, -2, "down").items[SWORD.diamond] == nil,
         tostring(got) .. " " .. tostring(why))
+end
+
+do
+    -- ADR-0019 D6: which of several same-named items T.fetch and T.pull take.  Three diamond pickaxes in chest A: an
+    -- enchanted one in slot 1, a worn one in slot 2, a clean one in slot 3.  Only the clean one goes on as an upgrade
+    local function threePicks()
+        setUp()
+        fill(3, 0, 1, { [1] = { PICK, 1 }, [2] = { PICK, 1 }, [3] = { PICK, 1 } })
+        local inv = W.get(3, 0, 1).inv
+        inv[1].enchantments = { { name = "minecraft:efficiency", level = 3 } }
+        inv[2].damage = 120
+        T.catalogue()
+    end
+    -- the pickaxe aboard and what the chest has left: "clean", "enchanted", "worn"
+    local function kindOf(it)
+        if not it then return "none" end
+        return it.enchantments and "enchanted" or (it.damage or 0) > 0 and "worn" or "clean"
+    end
+    local function aboard()
+        for s = 1, 16 do
+            local it = W.S.inv[s]
+            if it and it.name == PICK then return kindOf(it), s end
+        end
+        return "none"
+    end
+    local function left()
+        local kinds = {}
+        for _, it in pairs(W.get(3, 0, 1).inv) do kinds[#kinds + 1] = kindOf(it) end
+        table.sort(kinds)
+        return table.concat(kinds, " ")
+    end
+    threePicks()
+    local got, why = T.fetch(PICK, 1)
+    local kind, slot = aboard()
+    turtle.select(slot or 1)
+    check("D6: of three pickaxes (enchanted, worn, clean) T.fetch takes the clean one, which goes on as an upgrade", got == 1
+        and kind == "clean" and left() == "enchanted worn" and turtle.equipRight() == true and EQ.right == PICK,
+        tostring(got) .. " " .. tostring(why) .. " " .. kind .. " / " .. left())
+    threePicks()
+    got, why = T.fetch(PICK, 1, { pick = function(d) return d.enchantments ~= nil end })
+    check("...opts.pick chooses by the chest's item detail: the enchanted one", got == 1 and aboard() == "enchanted"
+        and left() == "clean worn", tostring(got) .. " " .. tostring(why) .. " " .. aboard() .. " / " .. left())
+    threePicks()
+    got, why = T.fetch(PICK, 2, { pick = function(d) return d.enchantments == nil end })
+    check("...two it takes, the clean one first, then the worn one", got == 2 and left() == "enchanted", tostring(got) .. " " .. tostring(why))
+    threePicks()
+    got, why = T.fetch(PICK, 1, { pick = function() return false end })
+    check("...none it takes: nothing, and why", got == 0 and left() == "clean enchanted worn"
+        and why == "the chests hold no more minecraft:diamond_pickaxe that opts.pick takes (got 0 of 1)", tostring(why))
+    -- T.pull at the chest: the same
+    threePicks()
+    T.moveTo(3, 0, 0)
+    T.face(0)
+    got = T.pull("front", PICK, 1)
+    check("T.pull takes the clean pickaxe first too", got == 1 and aboard() == "clean" and left() == "enchanted worn", aboard() .. " / " .. left())
+    got, why = T.pull("front", PICK, 1, { pick = function(d) return (d.damage or 0) > 0 end })
+    check("...and its opts.pick: the worn one", got == 1 and left() == "enchanted", left())
+    got, why = T.pull("front", PICK, 1, { pick = function() return false end })
+    check("...none it takes at the chest: nothing, and why", got == 0 and left() == "enchanted"
+        and why == "the container on the front has no more minecraft:diamond_pickaxe that opts.pick takes (got 0 of 1)", tostring(why))
 end
 
 --------------------------------------------------------------------------

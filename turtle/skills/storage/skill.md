@@ -40,6 +40,9 @@ a job that plans on what the chests hold, and after crafting or dropping by hand
 - `T.fetch`, `T.prepare`, `T.stow` and `T.craftPlan` keep to the chests within 48 blocks of
   where the call began (`maxDistance`): the why says what another base holds and how far;
   `{ far = true }` goes there (fuel and time: ask first).
+- Of several same-named items `T.fetch` and `T.pull` take a tool that will equip (not worn,
+  not enchanted) first; `{ pick = function(d) return ... end }` chooses by the chest's item
+  detail (`d.damage`, `d.enchantments`).
 - Counts go stale: after your own `turtle.drop`/`suck` at a known chest, call
   `T.recount(side)` while still beside it. `T.craft` and `T.craftBatch` recount for you.
   Before a plan that depends on counts (`T.craftPlan`, a big build), `T.catalogue()`.

@@ -807,6 +807,8 @@ end
 -- that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no
 -- room.  As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }):
 -- what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there.
+-- Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and
+-- opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...).
 -- opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
@@ -842,7 +844,7 @@ function T.fetch(name, n, opts)
                 local noRoomFor
                 for _, item in ipairs(namesToPull(name, side)) do
                     if got >= n then break end
-                    local took, pullWhy = T.pull(side, item, n - got)
+                    local took, pullWhy = T.pull(side, item, n - got, { pick = opts.pick })
                     got = got + took
                     if pullWhy and text.contains(pullWhy, "no room") then noRoomFor = item; break end
                 end
@@ -857,11 +859,12 @@ function T.fetch(name, n, opts)
         end
     end, opts.stay)
     if got >= n then return got end
+    local picked = opts.pick and " that opts.pick takes" or ""
     if farC then
-        return got, (why or "the chests within opts.maxDistance " .. r.d .. " hold no more " .. name) .. " (got " .. got .. " of " .. n ..
-            "); " .. farWords(r, farN, farC, true)
+        return got, (why or "the chests within opts.maxDistance " .. r.d .. " hold no more " .. name .. picked) .. " (got " .. got ..
+            " of " .. n .. "); " .. farWords(r, farN, farC, true)
     end
-    return got, (why or "the chests hold no more " .. name) .. " (got " .. got .. " of " .. n .. ")"
+    return got, (why or "the chests hold no more " .. name .. picked) .. " (got " .. got .. " of " .. n .. ")"
 end
 
 --------------------------------------------------------------------------

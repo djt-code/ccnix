@@ -2961,20 +2961,48 @@ function T.compactContainer(side)
     end)
 end
 
+-- (ADR-0019 D6) Would the stack whose item detail is d go on as a turtle
+-- upgrade?  Only a tool with no wear and no enchantments does.
+local function upgradeOk(d)
+    return (d.damage or 0) == 0 and not (d.enchantments and next(d.enchantments))
+end
+
+-- Which of the container's stacks of `name` (items: its list) to take:
+-- the lowest slot, but for a tool one that would go on as an upgrade
+-- first, and with `pick` only a stack whose item detail pick(detail) is
+-- true for.  The slot, or nil.  The item detail is read only for a tool
+-- or with `pick` (a call each).
+local function stackToTake(chest, items, name, pick)
+    local slots = {}
+    for slot, it in pairs(items) do
+        if it.name == name then slots[#slots + 1] = slot end
+    end
+    table.sort(slots)
+    local tool = T.isTool(name)
+    if not pick and not (tool and #slots > 1) then return slots[1] end
+    local fallback
+    for _, slot in ipairs(slots) do
+        local d = chest.getItemDetail(slot)
+        if d and (not pick or pick(d)) then
+            if not tool or upgradeOk(d) then return slot end
+            fallback = fallback or slot
+        end
+    end
+    return fallback
+end
+
 -- Move a stack of `name` into the container's first slot, where sucking
--- from it takes from.  Whatever is in slot 1 goes to an empty slot, or,
+-- from it takes from (which stack: stackToTake's, `pick` its test).
+-- Whatever is in slot 1 goes to an empty slot, or,
 -- with the container full, into an empty turtle slot (taken with `suck`,
 -- the turtle.suck for the container's side) that is returned so the
 -- caller can put it back.  Returns found, held.  That slot is never
 -- `keep` (the slot the caller fills: T.takeInto's), and is one outside the
 -- crafting grid when there is one (the last empty slot), as a craft round
 -- fills the grid's cells one by one.
-local function frontStack(chest, name, suck, keep)
+local function frontStack(chest, name, suck, keep, pick)
     local items = chest.list()
-    local from
-    for slot, it in pairs(items) do
-        if it.name == name and (not from or slot < from) then from = slot end
-    end
+    local from = stackToTake(chest, items, name, pick)
     if not from then return false end
     if from == 1 then return true end
     local self = peripheral.getName(chest)
@@ -3108,10 +3136,15 @@ end
 --
 -- A part stack of it is topped up first, else an empty slot is used.  Sucking from a side takes the
 -- container's first stack whatever it is, so each time the wanted stack is moved to the front first (as
--- T.takeInto does), and as many stacks are taken as it needs.  Needs a container it can read (a chest or a
--- barrel).  When short of n, why is: no container, none left in it, or no room in the turtle.
-function T.pull(side, name, n)
+-- T.takeInto does), and as many stacks are taken as it needs.  Of several stacks it takes the lowest slot's, but
+-- a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by
+-- the container's item detail (name, count, damage, enchantments...): true for a stack it may take.  Needs a
+-- container it can read (a chest or a barrel).  When short of n, why is: no container, none left in it (that
+-- opts.pick takes), or no room in the turtle.
+function T.pull(side, name, n, opts)
     n = n or 1
+    local pick = opts and opts.pick
+    if pick ~= nil and type(pick) ~= "function" then return 0, "opts.pick is a function(detail)" end
     if side ~= "front" and side ~= "top" and side ~= "bottom" then
         return 0, "the side is \"front\", \"top\" or \"bottom\", not " .. tostring(side)
     end
@@ -3126,9 +3159,9 @@ function T.pull(side, name, n)
         for _ = 1, 256 do
             local have = T.countItem(name) - start
             if have >= n then return end
-            local found, held = frontStack(chest, name, suck)
+            local found, held = frontStack(chest, name, suck, nil, pick)
             if not found then
-                why = "the container on the " .. side .. " has no more " .. name
+                why = "the container on the " .. side .. " has no more " .. name .. (pick and " that opts.pick takes" or "")
                 return
             end
             local into

@@ -514,10 +514,10 @@ T.restockFrom(side, name, target, opts)
 T.takeInto(side, name, n, slot)
     Take `name` from the container on `side` into the turtle's slot `slot` (empty, or holding some of it already) until that slot holds n (at most a stack). Needs a readable container. Returns how many the slot holds.
 
-T.pull(side, name, n)
+T.pull(side, name, n, opts)
     Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into whatever slots will have it. Returns how many it got and, when short of n, why.
 
-    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it, or no room in the turtle.
+    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Of several stacks it takes the lowest slot's, but a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by the container's item detail (name, count, damage, enchantments...): true for a stack it may take. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it (that opts.pick takes), or no room in the turtle.
 
 == Junk ==
 
@@ -1114,7 +1114,7 @@ T.where(name)
 T.fetch(name, n, opts)
     Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 
-    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...). opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 
 == What there is, everywhere ==
 
