@@ -945,9 +945,19 @@ end
 local NO_TOOL = "No tool to dig with"
 local equipToDig
 
--- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom
+-- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom; false, nothing
 local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
-                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone" }
+                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone",
+                   ["minecraft:air"] = false, ["minecraft:cave_air"] = false, ["minecraft:void_air"] = false,
+                   ["minecraft:water"] = false, ["minecraft:flowing_water"] = false, ["minecraft:lava"] = false,
+                   ["minecraft:flowing_lava"] = false, ["minecraft:fire"] = false, ["minecraft:soul_fire"] = false,
+                   ["minecraft:bubble_column"] = false, ["minecraft:light"] = false }
+
+-- What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
+function T.digDrop(name)
+    if name == nil or DIG_DROP[name] == false then return nil end
+    return DIG_DROP[name] or name
+end
 
 -- Is there a slot for what digging `name` drops: a free one, or a stack of it with room?
 local function roomForDrop(name)

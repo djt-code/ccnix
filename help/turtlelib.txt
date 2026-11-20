@@ -131,6 +131,9 @@ T.withUnprotected(names, fn, ...)
 T.neverDig(name)
     Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
 
+T.digDrop(name)
+    What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
+
 T.turnRight()
     Turn a quarter turn to the right, keeping T.dir and the saved position right.
 
@@ -571,7 +574,7 @@ Each goes over the box in rows along its longer side, one way and back (a serpen
 T.pave(box, item, opts)
     Pave a floor: every cell of the layer `box` (y1 = y2: the floor's own layer) made `item`, the turtle going over it in rows a block above, digging down what's there and placing down: one move a cell. True, info; false, why, info.
 
-    A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
+    A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it, and the whole pave before it moves when the kinds the map shows to dig need more free slots than there are). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
 
 T.clearBox(box, opts)
     Clear a box (a tunnel, a room) to air, three layers a pass: along the middle layer of each three, digging ahead, above and below, a third of the moves of digging cell by cell. True, info; false, why, info.
