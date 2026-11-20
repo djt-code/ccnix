@@ -243,6 +243,16 @@ scene("a chain hanging down (axis y) with a floor to click", {
 scene("a chain lying along x onto a block beyond to the east", {
     item = CHAIN, blocks = { stone(1, 0, 3) }, opts = { axis = "x" },
     expect = { { 0, 0, 3, "chain", { axis = "x" } } }, approach = "front", from = { -1, 0, 3 } })
+-- (ADR-0019 D7 B) a chain along x over a floor, nothing beyond: the why says opts.temp props only from below
+do
+    fresh(nil, { stone(-1, -1, 3), stone(0, -1, 3), stone(1, -1, 3) })
+    knowAll()
+    W.give(1, CHAIN, 4)
+    local name, why = T.placeAt(0, 0, 3, CHAIN, { axis = "x" })
+    check("a chain along x over a floor with nothing beyond: refused, the why saying opts.temp props only from below, so put a block beyond first",
+        name == nil and why:find("opts.temp props only from below", 1, true) ~= nil and why:find("put a block beyond", 1, true) ~= nil,
+        tostring(why) .. " / " .. W.show(0, 0, 3))
+end
 scene("a lantern hanging under a block (opts.hanging = true), nothing under the cell", {
     item = LANTERN, blocks = { stone(0, 1, 3) }, opts = { hanging = true },
     expect = { { 0, 0, 3, "lantern", { hanging = true } } } })

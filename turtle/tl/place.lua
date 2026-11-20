@@ -642,7 +642,8 @@ end
 -- Why one approach can't give `want`, in words, or nil if the table says it can (or may: a fact the map doesn't know).
 -- The stand is taken; or the row that would give it needs a block the map says isn't there; or it lands on a row that
 -- gives something else.  An approach that only faces the wrong way is nil too: the one facing the right way says more.
--- A second result is true when the stand is what is wrong, whichever way the turtle would face.
+-- A second result is true when the stand is what is wrong, whichever way the turtle would face; a third, the fact the
+-- row needs ("beyond", "floor", ...) when a missing block is what is wrong.
 local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
     local sx, sy, sz = standFor(kind, h, tx, ty, tz)
     local stand = nameAt(sx, sy, sz)
@@ -674,13 +675,13 @@ local function whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base,
     if not needed then return nil end
     local c = cells[needed]
     return "needs " .. (fam.hang and "a block to hang it on " or "a block ") .. FACT_WORDS[kind][needed] .. ", and the map has "
-        .. tostring(names[needed] or "nothing it knows") .. " at " .. c[1] .. "," .. c[2] .. "," .. c[3]
+        .. tostring(names[needed] or "nothing it knows") .. " at " .. c[1] .. "," .. c[2] .. "," .. c[3], false, needed
 end
 
 -- Why the approaches the table rules out can't give `want` at the target: a list of "<approach>: <why>", in the order
--- plan goes through them, each said once.
+-- plan goes through them, each said once; and true if a sideways one wants a block beyond the target that isn't there.
 local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
-    local out, said = {}, {}
+    local out, said, beyond = {}, {}, false
     local function fact(name, top)
         if famName == "slab" and name == item then return nil end
         return factAbout(fam, name, top)
@@ -689,7 +690,8 @@ local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
     for _, kind in ipairs({ "front", "down", "up" }) do
         for h = 0, 3 do
             if (kind == "front" or turning or h == T.dir) and #fam[kind] > 0 then
-                local why, standing = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+                local why, standing, needed = whyNotOne(famName, fam, learned, want, kind, h, tx, ty, tz, base, dig, fact)
+                beyond = beyond or (kind == "front" and needed == "beyond")
                 local line = why and approachWords(kind, h, tx, ty, tz, base, turning and not standing) .. ": " .. why
                 if line and not said[line] then
                     said[line] = true
@@ -698,7 +700,7 @@ local function whyNot(famName, fam, item, learned, want, tx, ty, tz, base, dig)
             end
         end
     end
-    return out
+    return out, beyond
 end
 
 -- A list in a message: the first SHOWN, joined with "; ", and how many more.
@@ -1530,9 +1532,11 @@ function T.placeAt(x, y, z, item, opts)
         table.sort(asked)
         local what = shortName(item) .. (#asked > 0 and (" with " .. table.concat(asked, " ")) or "") ..
             " at " .. x .. "," .. y .. "," .. z
-        local others = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
+        local others, beyond = whyNot(famName, fam, item, learned, want, x, y, z, base, move.dig)
         local rest = #others > 0 and (" (the rest: " .. listed(others) .. ")") or ""
         local _, notes = supportPlans(famName, fam, item, learned, want, x, y, z, base, {}, opts)
+        -- (ADR-0019 D7) a sideways placement that wants a block beyond: opts.temp won't put one there
+        if beyond then notes[#notes + 1] = "opts.temp props only from below, so put a block beyond first to place it sideways" end
         local noted = #notes > 0 and (" (" .. table.concat(notes, "; ") .. ")") or ""
         if lastWhy then
             return nil, "couldn't place " .. what .. ": " .. lastWhy .. " (" .. #attempts .. (#attempts == 1 and " way" or " ways")
