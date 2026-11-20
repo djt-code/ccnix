@@ -256,14 +256,14 @@ The lowest slot today.
    - `T.cfg.dimension = "nether"` once covers the light functions;
    - `fileio` only through `require`;
    - a sideways placement needs a block beyond (D7 B).
-3. [ ] News lines for this pass, in the model's terms.
+3. [x] News lines for this pass, in the model's terms.
 
 ### Phase 3: the decisions
-1. [ ] D1 to D8 as decided.
+1. [x] D1 to D8 as decided (#135: D1, D4; #137: D3, D5, D8; #151: D2, D6; D7 in #130).
 
 ### Phase 4: release (on the owner's ok) and hand back
-1. [ ] UNTESTED.md's section with its issue.
-2. [ ] Version bump and release, as D9 says.
+1. [x] The in-game checks: #172, one sub-issue a check (UNTESTED.md retired for issues meanwhile).
+2. [x] Version bump and release, as D9 says: 0.54.0.
 3. [ ] The next goal: "read what's new, retire `resume()` in testlog.lua if the harness's file is
    enough, and keep /claude/report_harness_v6.md as you work". Then the checks this pass couldn't do:
    - 01 after the version bump;
