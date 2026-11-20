@@ -15,6 +15,6 @@ Runs the program named by the setting ccnix.autostart (mine, farm, mow, autocomp
   autocompost
       autocompost.
   claude
-      a goal it was working at when it went down (/claude/resume.txt), with claude.resume = true: `claude --resume`, which tells the model it was interrupted and carries on (API money spent with nobody there, so only when set).  Otherwise claude, waiting for a goal.
+      a goal it was working at when it went down (/claude/resume.txt), with claude.resume = true: `claude --resume`, which tells the model it was interrupted and carries on (API money spent with nobody there, so only when set).  Otherwise claude, waiting for a goal, with the options the last session had (the setting claude.options).
 
 With init at boot (`ccnix setup init`), the job runs as a service of its own name instead (service mine: `autostart --now`, not started again when it ends), so what it prints is kept in the system log (/var/log/messages) and the console is free: `service status mine`, `tail -f /var/log/messages`, `service stop mine` (as Ctrl+T) and `service start mine` (picks it up again).  Stop the service before running the program by hand.

@@ -485,9 +485,12 @@ local function gpsAble()
     return false
 end
 
--- Run fn(...) with GPS to ask: as it is with a modem on, with one from the inventory swapped in and back, or not at all.
--- fn's results; nil when there's no GPS (no modem, turned off, no side to swap one onto).
-function withGps(fn, ...)
+-- Run fn(...) with GPS to ask: as it is with a wireless modem on, else one from the inventory swapped in and back.
+-- fn's results, or nil alone when there's no GPS: no modem on or aboard, turtle.gps false, no side to swap one onto.
+--
+-- T.withGps(gps.locate) is a fix with a modem swapped in for it if need be; T.gpsHere uses it.  The swap is
+-- T.withPeripheral's: the chunk controller never comes off.
+function T.withGps(fn, ...)
     local how = gpsAble()
     if not how then return nil end
     if how == true then return fn(...) end
@@ -496,6 +499,7 @@ function withGps(fn, ...)
     if not res[1] then return nil end
     return table.unpack(res, 2, res.n)
 end
+withGps = T.withGps
 
 -- The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
 --

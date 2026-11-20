@@ -14,7 +14,7 @@ tried, and close it when the section is empty.
 
 In game, after `/ccnix rom update`: a turtle with a wireless (or ender) modem equipped, within reach of four gpsd hosts in its dimension. Its notes come out on the console (and in claude's goal, as "[Position check: ...]").
 
-- **claude**: a goal after the turtle was moved a block by hand: the model's goal carries the "[Position check: ...]" line; one moved far: it's told T.pos is left as counted.
+- **claude**: a goal after the turtle was carried far: it's told T.pos is left as counted.
 
 ## ADR-0015: the fourth field report: real seconds, two bases, crafting counts, the model's helpers (ccnix 0.54.0) (#102)
 
@@ -22,30 +22,11 @@ In-game order: `/ccnix rom update`; on a computer `ccnix` (it says the server's 
 turtle 10's goal: "read what's new, retire the helpers it names, fix your placement-tricks skill and task41.lua,
 and keep /claude/report_harness_v5.md as you work". The v5 report says what held.
 
-- **The tick rate**: with `/tick rate 60`, `ccnix` says "The server ticks 60 times a second"; `sleep 10` takes ten
-  real seconds; a chat ask with a 60 s timeout ends after a real minute, reminders on real time; `T.harvest
-  { timeout = 60 }` stops after a real minute; `ping -c 3` a second apart; a TCP connection (telnet, irc, curl) to a
-  machine outside the game no longer times out early. Back at 20 after `/tick rate 20`, within about 10 seconds.
-- **Chat and signs**: an arrow and a dash in what the model says in chat, and on a sign it writes, show as -> and -
-  (no "a-hat" and boxes).
-- **Two bases**: at one base, `T.stow` with a chest for the item only at the other: it stays aboard, the why naming
-  the far chest and how far; `T.stow{ far = true }` goes. `T.sortChests` at one base moves nothing to the other.
-  `T.addChest` with "*brick*" beside a "*_stairs" chest warns; brick stairs go to the stairs chest.
-- **`T.catalogue(spots)`**: five chests side by side cost about their own walk, not the round of every chest.
-- **Crafting from a full chest**: a `T.craftBatch` of nether brick stairs and slabs from a nearly full chest makes
-  every round in full; a short one names the ingredient and counts; a batch that would fill the chest is refused.
-- **Placement**: a chain with `axis`, a lantern with `hanging = true` under a block and `false` on a floor; an
-  option `T.placeAt` doesn't take is refused; a placement that closes the turtle in warns, and with `opts.exit` is
-  refused.
-- **`T.build`**: a new plan after one whose every cell was tried (some failed) starts.
-- **Digs**: `T.digCell` of glowstone is refused unless `lossy = true`; a full inventory in a claude session refuses
-  a dig ("no room for what digging ... drops") instead of dropping it.
-- **`T.travel` far**: a target 100+ blocks off goes in legs, "hopped: N legs".
-- **The new functions**: `T.planLights` over a dark road; `T.pave` of a road floor (one move a cell); `T.clearBox`
-  of a 3-high tunnel (a move a column); `T.sweep` after a dig job (a chest in the box untouched); `T.replace{
-  digBelow = true }` of a buried block; `T.walkable{ with }`.
-- **The harness**: a goal summarized at 150k, the summary keeping what's new; `check(code)`; `helpers()` naming what
-  the library has now; a loop printing the same why comes back once with "(xN)"; the "was local" note once a name.
+- **The tick rate**: with `/tick rate 60`, `ccnix` says "The server ticks 60 times a second"; `sleep 10` in the
+  shell takes ten real seconds; `ping -c 3` a second apart; a TCP connection (telnet, irc, curl) to a machine
+  outside the game no longer times out early.
+- **Two bases**: `T.stow{ far = true }` goes to the far base's chest.
+- **Crafting from a full chest**: a short round names the ingredient and the counts.
 
 ## ADR-0014: mine keeps going (ccnix 0.54.0) (#95)
 
@@ -86,34 +67,22 @@ the dark cells matched where mobs spawned, and whether the lint's split quieted 
 
 - **Tidy notes**: with /claude/memories over 32 KB the session's first task is the tidy: notes.md about 12 KB,
   the rest in /claude/notes-archive/<date>.md, settled procedures as skills; `/tidy` on demand.
-- **Skills**: the first message lists the six shipped skills (and the model's own); a goal like "light the
-  courtyard" gets "Skills that may fit: light-an-area" and the model reads it; `skill(...)` writes its own;
+- **Skills**: the first message lists the six shipped skills (and the model's own); `skill(...)` writes its own;
   `/skills` lists them.
 - **Compaction at a goal's end**: typing a goal while it runs waits for it.
-- **Compaction mid-goal**: a long goal reaching 250k compacts after a batch of results, keeping the last turns,
-  and carries on; no "bound to a different conversation" error. The log shows where the compaction call read
-  from the cache.
-- **Chat while code runs**: say something during a long travel or stow run: it comes with that run's results;
-  a dig mid-run brings the pickaxe back and the run carries on; `chatHeard()`; "took N s" on each result; the
-  chunk controller never moves; `T.withPeripheral` (the scanner) while the chat box holds the side.
+- **Chat while code runs**: a dig mid-run brings the pickaxe back and the run carries on; the chunk controller
+  never moves; `T.withPeripheral` (the scanner) while the chat box holds the side.
 - **Reports with no player set**: with `turtle.player` unset, the chat tool, `T.report` and mine's messages
   reach everyone, and claude's start says so.
 - **Long replies**: a 64000-token reply streams within CC's timeout; a cut-off says thinking or writing.
 - **Light**: `T.darkCells(box, {dimension = "nether"})`: compare with where mobs actually appear
   (mods may change spawning); honey, slime and packed ice floors; `T.light` through glass and slabs.
-- **Attachments**: `T.attachedTo` under a torch, a button, dust; `T.digCell(..., {attached = "refuse"})`
-  refuses and names them.
-- **Signs**: `opts.toward` on a wall and in the open (which way a standing sign placed by a turtle faces:
-  rotation 0 faces south); `T.signFor` in front of the player; a sign and a torch on top of a wall or fence.
-- **Item names**: redstone dust by `T.placeAt` and in a plan (`redstone_wire`); seeds on farmland; `T.undo`
-  takes both back.
+- **Attachments**: `T.attachedTo` under a button and under dust.
+- **Item names**: seeds on farmland, and `T.undo` taking them back.
 - **Facings**: a piston, observer, repeater and comparator placed by facing (first guesses, learnt).
-- **digBelow**: a soul-soil floor with none aboard; on solid ground the neighbour dug as a way out, both put
-  back, both in the undo journal.
-- **Lint and routes**: `player:` lines show the plan's own; a stair bench is quiet; a wall torch in a walkway
-  warned of; a route blocked by its own torches says where.
-- **Storage**: `T.cfg.tools = {"*_pickaxe"}` and `T.stow` puts looted swords away; a craft at a known chest
-  re-reads it; `T.addChest` on a double chest's other half says so.
+- **Lint and routes**: `T.build`'s printed `player:` lines show the plan's own; a route blocked by its own
+  torches says where. (The wall torch in a plan's walkway failed in v5: fixed in 0.54.0, see ADR-0019.)
+- **Storage**: a craft at a known chest re-reads it.
 - **setup**: `setup claude` installs help/claude-news.txt and turtle/skills/.
 
 ## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0) (#85)
@@ -125,12 +94,9 @@ like "read what's new, then build a short staircase with a top slab under each s
 - **Resume**: `sysctl ccnix.autostart=claude` and `claude.resume=true`, then reboot mid-goal (or restart the
   server): claude starts with "You were interrupted (reboot)..." and the goal, with the session's --steps and
   --cache. With resume off it just waits for a goal; Ctrl+T leaves nothing to resume.
-- **Signs**: standing signs on top of a wall (placed by hand in v3: placeAt refused them, fixed for 0.53)
-  and the 15-character line against the game; `T.placeDir(d, text)`.
-- **Top slabs**: `opts.digBelow = true` on a floor with a free cell beside it: the floor dug, the slab
-  placed, the same floor block back (through `T.build` too).
-- **Routes**: a route into a room of doors fails at once with "walled in by ..." (never fired in v3);
-  `T.harvest` on a block with every side solid names `opts.move = {dig = true}`.
+- **Signs**: `T.placeDir(d, text)`.
+- **Top slabs**: `opts.digBelow = true` through `T.build`.
+- **Routes**: a route into a room of doors fails at once with "walled in by ..." (never fired in v3 or v5).
 - **Frames**: stop `mine` mid-tunnel, re-zero (a program started with `--here` away from home), then
   `mine --resume`: refused with "re-zeroed ... (frame N, now M)" and marked stale, and autostart leaves it.
   The same for a half-built `T.build` and `T.undo`.
@@ -141,29 +107,19 @@ In-game order: on the castle turtle, after `/ccnix rom update`, give claude a go
 retire the helpers it names, then carry on, and keep /claude/report_harness_v3.md as you work"; the items
 below come up as it works, or try them by asking for them.
 
-- **Chat**: the `chat` tool says something in game; with ask, a reply "claude <text>" from the player in
-  `turtle.player` comes back (another player's doesn't), and typing at the turtle answers too. `T.report.ask`
-  from code the same. After 15 quiet minutes the model is reminded (`claude.remindChat`).
-- **Status line and review**: each lua result ends with position, fuel used, free slots and lava/water seen;
-  `review = true` shows the code and runs only on a yes.
+- **Chat**: another player's reply doesn't come back; typing at the turtle answers too. After 15 quiet minutes
+  the model is reminded (`claude.remindChat`).
 - **Helpers**: a broken helper file beside good ones is
   named at the start and the rest still load; `print` at the top of helpers.lua works.
 - **The conversation**: `/new` at the goal prompt starts afresh with memory kept.
-- **Liquids**: `T.moveTo(..., {dig = true})` beside the moat refuses ("would release lava at ..."), and plans
-  round it; `T.digCell` beside lava refuses; with `liquid = true` it digs. `T.harvest` skips blocks touching
-  water sources too.
-- **Areas and routes**: `T.inside({"a", "b"}, fn)` digs a cell in two overlapping areas; `T.travel` into the
-  keep through its open hall without unprotecting; "no route" names the area or door that walled it in.
+- **Liquids**: with `liquid = true` a dig beside lava digs. `T.harvest` skips blocks touching water sources.
+- **Areas and routes**: `T.travel` into the keep through its open hall without unprotecting.
 - **Moves and lists**: `T.up` at the old 16 says why (claude sessions now allow 256); `T.keep` and `dig` as a
   list or a set, globs too.
-- **Storage and crafting**: the catalogue counts a double chest once (bricks against what is really there);
-  `T.where` ages; `T.craftBatch` (torches from logs, one stash), `T.craftPlan`, `T.smeltAt` at the permanent
-  furnaces, `T.prepare`, `T.inventoryReport`, `T.fetch{stay = true}`; coal from coal blocks with no recipe added.
-- **Building**: `T.build(plan, {order = "column"})` on a wall: fuel against the old 807 for 58 blocks; a build
-  that circles stops with "circling: ...".
-- **Smaller ones**: `T.refuelFromLava` leaves the protected moat alone; autoDump says when it fails and stops
-  after two; a finished job no longer ends every chat message (mine's and farm's reports too); `T.retrace(n)`
-  walks back; the map keeps the castle's cubes when it evicts (`T.map.stats()`); `--model sonnet`.
+- **Storage and crafting**: coal from coal blocks with no recipe added.
+- **Building**: a build that circles stops with "circling: ...".
+- **Smaller ones**: autoDump says when it fails and stops after two; a finished job no longer ends every chat
+  message (mine's and farm's reports too); the map keeps the castle's cubes when it evicts (`T.map.stats()`); `--model sonnet`.
 
 ## The mod's icon (ccnix-mod 0.26.10) (#83)
 
@@ -881,6 +837,40 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-20 UTC (recorded 2026-11-19) — turtle 10's v5 test pass in the nether, a plan with an ID and an expected
+  result per check, on 0.54.0's code before the version bump (50 PASS, 4 FAIL, 1 SKIP; ADR-0019's Context has the
+  numbers):
+  - ADR-0018 claude: moved 2 blocks by hand, the goal carried "[Position check: The saved position was 2.2
+    blocks off: corrected from GPS ...]" (from a step).
+  - ADR-0015 tick rate: `rt.tickRate()` 20, then 60 at once after `/tick rate 60`, back to 20 within 12 s; a
+    chat ask with a 60 s timeout ended after 60.3 real s; `T.harvest{timeout = 20}` stopped after 21.8 s.
+  - ADR-0015 chat and signs: an arrow and a dash read as -> and - in chat and on a sign.
+  - ADR-0015 two bases: `T.stow` kept iron aboard, naming the chest 140 blocks off; `T.sortChests` moved 3 stacks
+    at its own base only; "*brick*" beside "*_stairs" warned, the stairs went to the stairs chest.
+  - ADR-0015 `T.catalogue`: 5 chests for 8 fuel; a double chest's other half known as one chest.
+  - ADR-0015 crafting: `T.craftBatch` refused with "needs 7 free slots ... has 5", then made 12 slabs in full.
+  - ADR-0015 placement: chain with an axis, hanging and standing lanterns, an unknown option refused and
+    named, a closing-in placement warned, `opts.exit` refused (the exit as the target cell: fixed since).
+  - ADR-0015 `T.build`: a new plan after a failed one started, `info.previous` listing the failure.
+  - ADR-0015 digs: glowstone refused unless `lossy = true`; a full inventory refused the dig, nothing spilled.
+  - ADR-0015 `T.travel`: "hopped: 6 legs of about 16", 105 fuel for about 109 blocks.
+  - ADR-0015 new functions: `T.planLights`, `T.pave` (a move a cell), `T.clearBox` (14 moves for 15 columns),
+    `T.sweep` (the chest in the box untouched), `T.replace{digBelow = true}`, `T.walkable{with}`.
+  - ADR-0015 harness: summarized once mid-goal, the results file and the 0.54 notes kept; `check(code)`;
+    `helpers()`; "(x20)"; the "was local" note.
+  - ADR-0013: "Skills that may fit" on a goal; chat during a run came with its results, `chatHeard()`, "took
+    N s"; `T.attachedTo` and `attached = "refuse"` under a torch; signs toward a reader on a wall and in the
+    open, `T.signFor`, a torch and a sign on wall posts, a 15-character line; redstone dust by `T.placeAt` and
+    as `redstone_wire` in a plan, both undone; `digBelow` on soul sand, both floors back, in the journal; a
+    stair bench quiet; `T.cfg.tools` stowing a sword and keeping the pickaxe; a double chest's other half.
+  - ADR-0012: a top slab with `digBelow`; standing signs on a wall post; `T.harvest` with every side solid
+    names `opts.move`.
+  - ADR-0011: the chat tool, an ask answered by the player; the status line; `review = true`; `T.moveTo` and
+    `T.digCell` beside lava refused; `T.inside({"a", "b"})`; "no route" naming the area; the catalogue's
+    double chest; `T.where` ages; `T.craftBatch`, `T.craftPlan`, `T.prepare`, `T.smeltAt`,
+    `T.inventoryReport`, `T.fetch{stay = true}`; `order = "column"` 2 fuel a cell (the old 807 for 58);
+    `T.refuelFromLava` leaving the moat alone; `T.retrace(5)`.
 
 - 2026-11-17 (recorded 2026-11-19) — from turtle 10's v4 report and its log, on ccnix 0.53.0 (ADR-0015's
   Context has the numbers):
