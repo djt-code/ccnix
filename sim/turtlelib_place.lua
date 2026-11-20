@@ -7,7 +7,7 @@
 --     the four facings and in a world whose heading 0 is not north;
 --   * a log's axis (standing, lying along the heading, lying across); a torch on a wall (both ways round, one
 --     reached by a route round the support) and standing (on top of a fence, a wall or a pane too, though none of
---     them holds one on a side); a sign and its text (standing on a wall or a fence too); a ladder (sideways, and from above
+--     them holds one on a side); a sign and its text (standing on a wall or a fence too; the text as a list of lines); a ladder (sideways, and from above
 --     and below in a shaft, facing the wall it goes on), button, lever, trapdoor, fence gate, chest;
 --   * signs toward a reader (opts.toward, ADR-0013 D6.3): a wall sign when a block stands behind the cell, else
 --     standing at the nearest of the four rotations a turtle gives (how far off said; in a world turned too; reached
@@ -476,6 +476,10 @@ do
     scene("a sign with a floor and no wall: it stands", {
         item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Keep\nout" }, expect = { { 0, 0, 3, "oak_sign" } } })
     check("...the lines as given, each its own", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
+    -- (ADR-0019) the text as a list of lines
+    scene("a sign's text as a list of lines", {
+        item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = { "Keep", "out" } }, expect = { { 0, 0, 3, "oak_sign" } } })
+    check("...each its own line, as with newlines", signLines(0, 0, 3) == "|Keep|out|", signLines(0, 0, 3))
     scene("a sign's UTF-8 text (an arrow, a dash) as the game shows it, spelled out", {
         item = SIGN, blocks = { stone(0, -1, 3) }, opts = { text = "Gate \226\134\146\nRoad \226\128\148 Ember" },
         expect = { { 0, 0, 3, "oak_sign" } } })
@@ -489,6 +493,12 @@ do
     local name, why = T.placeAt(0, 0, 3, SIGN, { text = "one two three four five six seven eight nine ten eleven twelve" })
     check("text that will not fit 4 lines of 15 is refused with why, nothing placed, no move", name == nil
         and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil and atCell(0, 0, 0), tostring(why))
+    name, why = T.placeAt(0, 0, 3, SIGN, { text = { "one", "two", "three", "four, too long for one" } })
+    check("...a list of lines too, a line longer than 15 wrapping past the 4th", name == nil
+        and why:find("4 lines of 15", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, SIGN, { text = { "one", 2 } })
+    check("...a list with something not a string in it: refused, saying which", name == nil
+        and why:find("line 2 of a sign's text is a number", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
     W.give(2, STONE, 4)
     name, why = T.placeAt(0, 0, 3, STONE, { text = "hello" })
     check("text on a block that is not a sign is refused", name == nil and why:find("only a sign", 1, true) ~= nil and W.get(0, 0, 3) == nil,

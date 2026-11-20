@@ -758,11 +758,17 @@ local function needsMet(fam, tx, ty, tz)
     return nil
 end
 
--- A sign's text as its lines: opts.text wrapped to SIGN_WIDTH, each newline starting a line; nil and why if it is not
--- a sign, or the text takes more than SIGN_LINES lines.
+-- A sign's text as its lines: opts.text (a string, or a list of strings taken as joined by newlines) wrapped to
+-- SIGN_WIDTH, each newline starting a line; nil and why if it is not a sign, or the text takes more than SIGN_LINES lines.
 local function signLines(item, famName, said)
     if famName ~= "sign" then return nil, "only a sign takes text, and " .. item .. " is not one" end
-    if type(said) ~= "string" then return nil, "a sign's text is a string" end
+    if type(said) == "table" then
+        for i, line in ipairs(said) do
+            if type(line) ~= "string" then return nil, "line " .. i .. " of a sign's text is a " .. type(line) .. ", not a string" end
+        end
+        said = table.concat(said, "\n")
+    end
+    if type(said) ~= "string" then return nil, "a sign's text is a string, or a list of lines" end
     local lines = text.wrap(convert.fromUTF8(said), SIGN_WIDTH)   -- (as the game shows it: CC passes a byte a character)
     if #lines > SIGN_LINES then
         return nil, "a sign holds " .. SIGN_LINES .. " lines of " .. SIGN_WIDTH .. " characters, and this text wraps to " .. #lines
@@ -1372,8 +1378,8 @@ end
 -- under the cell to stand on), false stands it on the block below; opts.axis is a chain's too.  opts.toward = { x, y, z }, the cell a reader stands in, turns a sign to them: a wall sign when the map shows a
 -- sturdy block behind the cell (on the far side from the reader), else a standing sign at the nearest of the four
 -- rotations (how.toward says which, and how many degrees off the reader's way it is).  Other opts: move (passed to T.moveTo; default { path = true, scan = false }), inside (a protected area the job may
--- dig and walk in), tries (approaches to try, default 6), text (a sign's: wrapped to 4 lines of 15 characters, a
--- newline starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
+-- dig and walk in), tries (approaches to try, default 6), text (a sign's, a string or a list of lines: wrapped to 4
+-- lines of 15 characters, a newline or a new entry starting a line; more is refused), temp (a block to put above the target for a moment, below), digBelow
 -- (below), exit ({ x, y, z }: below).  A cell that already holds the item as wanted comes back as it is; one holding
 -- anything else is not touched.  A placement that closes the turtle in (no way, through what the map shows empty or
 -- unknown, out of where it stands: a dozen blocks, or to opts.exit) is made with how.warning saying so; with
