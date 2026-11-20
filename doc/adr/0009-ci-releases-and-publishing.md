@@ -510,7 +510,7 @@ changed it as follows.
 12. [x] Readiness for the sites (the page text is ccnix-mod's `doc/listing.md`; the attribution check is done; the icon is still to make): the description and summary, a 400×400 logo, Modrinth's disclosures, the network-use note, and the attribution check above.
 13. [x] The user creates the Modrinth (and CurseForge) projects and their tokens, and adds them as secrets and variables.
 14. [x] The mc-publish steps (D7): built (ccnix-mod #6), each idle until its token is set. The first upload goes to moderation.
-15. [x] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11). (Done 2026-11-17: one issue a section, #55 to #85, and one a known issue, #52 to #54; each section's heading carries its number, and a new section gets its issue when it ships.)
+15. [x] Later, on its own: UNTESTED.md's entries as `needs-in-game-test` issues (D11). (Done 2026-11-17: one issue a section, #55 to #85, and one a known issue, #52 to #54; each section's heading carries its number, and a new section gets its issue when it ships. 2026-11-19: UNTESTED.md retired: one issue a check, sub-issues of the section issues, on the board with Area and Release; the Tested record kept in #153.)
 
 Items 12 to 14: the icon was made, both projects created and their tokens
 set, and every mod release since 0.26.10 has gone to Modrinth and
