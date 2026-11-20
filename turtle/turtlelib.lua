@@ -1517,7 +1517,11 @@ local toldEquip = false                -- (said once a session that a dig put a 
 -- goes into the tool's slot).  The tools are those T.cfg.tools names (every one, unset), a pickaxe first; one that
 -- won't go on (damaged or enchanted) is passed over for the next.  Says so the first time.  True if one went on.
 equipToDig = function()
-    local before = { left = T.equipped("left"), right = T.equipped("right") }
+    -- (an old CC:Tweaked asks the sides by a swap through an empty slot: with none, no tool goes on)
+    local okL, left = pcall(T.equipped, "left")
+    local okR, right = pcall(T.equipped, "right")
+    if not (okL and okR) then return false end
+    local before = { left = left, right = right }
     local side, rank
     for _, s in ipairs(EQUIP_SIDES) do
         local held = before[s]
