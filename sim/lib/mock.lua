@@ -127,7 +127,19 @@ end
 
 --------------------------------------------------------------------------
 -- Containers: c[slot] = { name, count }, `size` slots
+--
+-- A stack may carry what the game's item detail says of a tool: damage and
+-- enchantments ({ { name, level } }).  They go with it from slot to slot,
+-- into the turtle and back; in the turtle such a stack is `damaged` (it
+-- won't equip, as equipmentApi has it).
 --------------------------------------------------------------------------
+local EXTRAS = { "damage", "enchantments", "damaged" }
+
+-- The stack `to` given what `from` carries besides its name and count.
+local function withExtras(to, from)
+    for _, k in ipairs(EXTRAS) do to[k] = from[k] end
+    return to
+end
 -- Drop n from the selected slot into the container (matching stacks
 -- first, then empty slots).  True if any went in.
 function M.dropInto(S, c, size, n)
@@ -147,7 +159,7 @@ function M.dropInto(S, c, size, n)
     for s = 1, size do
         if left == 0 then break end
         if not c[s] then
-            c[s] = { name = it.name, count = math.min(left, max) }
+            c[s] = withExtras({ name = it.name, count = math.min(left, max) }, it)
             left = left - c[s].count
         end
     end
@@ -177,7 +189,8 @@ function M.suckFrom(S, c, size, n)
                         it.count = it.count + t
                         left = left - t
                     elseif left > 0 and not it and (pass == 2 or i == S.sel) then
-                        S.inv[i] = { name = d.name, count = math.min(left, max) }
+                        S.inv[i] = withExtras({ name = d.name, count = math.min(left, max) }, d)
+                        if (d.damage or 0) > 0 or d.enchantments then S.inv[i].damaged = true end
                         left = left - S.inv[i].count
                     end
                 end
@@ -205,7 +218,10 @@ function M.containerPeripheral(c, size, name)
         end,
         getItemDetail = function(s)
             local d = c[s]
-            return d and { name = d.name, count = d.count, maxCount = M.stackSize(d.name) } or nil
+            if not d then return nil end
+            local detail = withExtras({ name = d.name, count = d.count, maxCount = M.stackSize(d.name) }, d)
+            detail.damaged = nil                -- (the mock's own mark, not the game's)
+            return detail
         end,
         pushItems = function(to, from, limit, toSlot)
             local d = c[from]
@@ -213,7 +229,7 @@ function M.containerPeripheral(c, size, name)
             local t = c[toSlot]
             if t and t.name ~= d.name then return 0 end
             local n = math.min(limit or 64, d.count, M.stackSize(d.name) - (t and t.count or 0))
-            if t then t.count = t.count + n else c[toSlot] = { name = d.name, count = n } end
+            if t then t.count = t.count + n else c[toSlot] = withExtras({ name = d.name, count = n }, d) end
             d.count = d.count - n
             if d.count == 0 then c[from] = nil end
             PUSHES = (PUSHES or 0) + 1

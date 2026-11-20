@@ -1038,7 +1038,7 @@ end
 check("the system prompt holds every line of turtle/tl/index.txt, whole", nIndexLines > 100, nIndexLines)
 check("...among them the ones for the wrap, protection and the new moves",
     sys24:find("T.protect(name, x1, y1, z1, x2, y2, z2) - ", 1, true) and sys24:find("T.onChange(fn) - ", 1, true)
-        and sys24:find("T.moveTo(x, y, z, opts) - ", 1, true) and sys24:find("T.pull(side, name, n) - ", 1, true)
+        and sys24:find("T.moveTo(x, y, z, opts) - ", 1, true) and sys24:find("T.pull(side, name, n, opts) - ", 1, true)
         and sys24:find("T.withPeripheral(name, fn) - ", 1, true) and sys24:find("T.dumpJunk() - ", 1, true))
 check("it says where the full reference is and how to read part of it with fs",
     sys24:find("help/turtlelib.txt", 1, true) and sys24:find('all:find("T.moveTo(", 1, true)', 1, true)
