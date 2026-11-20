@@ -271,7 +271,7 @@ local function deliver(box, who, message, tries, wait)
     if not ok then return nil, why end
     for _ = 1, tries do
         if chat.flush() then return true end
-        sleep(wait)
+        realtime.sleep(wait)            -- (the cooldown is in real seconds)
     end
     return nil, "the chat box stayed busy"
 end
@@ -300,7 +300,7 @@ end
 -- The player is the setting turtle.player (opts.player overrides it); with none, it's said to everyone in the chat (ADR-0013
 -- D3: what reports speaks to everyone unless turtle.player makes it private).  A chat box on a side is used
 -- as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side.  The
--- chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1).  opts.plain sends the
+-- chat box's cooldown is retried opts.tries times (default 5), opts.wait real seconds apart (default 1).  opts.plain sends the
 -- text alone.  T.report(said, opts) does the same.
 --
 -- opts.from names a side ("top", "bottom" or "front") whose container may hold the chat box: with none aboard or attached, one is

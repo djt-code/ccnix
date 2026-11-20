@@ -850,7 +850,7 @@ T.job.clear()
 T.report.now(said, opts)
     Tell the player `said`, with where the turtle is, its fuel and the job's progress (until it is finished) added: true, or nil and why.
 
-    The player is the setting turtle.player (opts.player overrides it); with none, it's said to everyone in the chat (ADR-0013 D3: what reports speaks to everyone unless turtle.player makes it private). A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
+    The player is the setting turtle.player (opts.player overrides it); with none, it's said to everyone in the chat (ADR-0013 D3: what reports speaks to everyone unless turtle.player makes it private). A chat box on a side is used as it is; otherwise one aboard is equipped for the moment (T.withPeripheral), which puts back what was on that side. The chat box's cooldown is retried opts.tries times (default 5), opts.wait real seconds apart (default 1). opts.plain sends the text alone. T.report(said, opts) does the same.
 
     opts.from names a side ("top", "bottom" or "front") whose container may hold the chat box: with none aboard or attached, one is taken out of it for the telling and put back after (a program that keeps its chat box in the chest at home).
 

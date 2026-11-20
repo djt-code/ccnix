@@ -106,6 +106,7 @@ local fileio = require("fileio")
 local tables = require("tables")
 local getopt = require("getopt")
 local glob = require("glob")
+local realtime = require("realtime")   -- (waits a person counts, at any server tick rate)
 
 --------------------------------------------------------------------------
 -- Configuration (override from the program)
@@ -117,7 +118,7 @@ T.cfg = {
     margin     = 1,     -- columns outside the grid usable for detours
     maxReplans = 10,    -- BFS re-plans per target before giving up
     lowFuel    = 50,    -- top up from inventory below this
-    waitBeforeHit = 3,  -- seconds a move waits for what stands in its way (a player steps aside) before hitting it
+    waitBeforeHit = 3,  -- real seconds a move waits for what stands in its way (a player steps aside) before hitting it
     topupFuel  = 1000,  -- ...to about this level
     fuelMargin = 30,    -- spare fuel kept beyond the trip home (detours)
     maxClimb   = 3,     -- terrain stepping: max climb per column
@@ -1520,11 +1521,11 @@ local function stuck(move, digWhy, why)
 end
 
 -- Something in the way of a move into an open cell ("Movement obstructed": a mob, a player, a minecart): for the
--- first T.cfg.waitBeforeHit seconds it is waited for (a player steps aside), then hit.  `state.waited` keeps the time
--- across tries.  True when it hit.
+-- first T.cfg.waitBeforeHit real seconds it is waited for (a player steps aside: lib/realtime, at any server tick rate),
+-- then hit.  `state.waited` keeps the time across tries.  True when it hit.
 local function inTheWay(why, hit, state)
     if why and tostring(why):find("obstructed", 1, true) and state.waited < (T.cfg.waitBeforeHit or 0) then
-        sleep(0.5)
+        realtime.sleep(0.5)
         state.waited = state.waited + 0.5
         return false
     end
