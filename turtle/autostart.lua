@@ -29,7 +29,8 @@
 --                `claude --resume`, which tells the model it was
 --                interrupted and carries on (API money spent with nobody
 --                there, so only when set).  Otherwise claude, waiting for
---                a goal.
+--                a goal, with the options the last session had (the
+--                setting claude.options).
 --
 -- With init at boot (`ccnix setup init`), the job runs as a service of
 -- its own name instead (service mine: `autostart --now`, not started

@@ -127,6 +127,8 @@ T.cfg = {
     -- digNeedsRoom: true, a dig with no slot for what it drops (none free, no stack of it with room) is refused
     -- with a why, rather than the drop spilling on the ground.  Off for programs (mine, farm and mow make room
     -- their own way); claude's sessions turn it on.
+    -- equipToDig: true, a dig that fails "No tool to dig with" with a tool aboard puts it on and digs again (it
+    -- says so once).  Off for programs, which use T.withTool; claude's sessions turn it on.
     -- tools: nil, the tools a job keeps (T.isEssential).  Unset, every tool aboard is essential, never junk or
     -- stowed; set to names or globs ({ "*_pickaxe", "*_hoe" }, a set too; {} for none), only the tools equipped
     -- (or parked aboard by a swap) and those it names are, so T.stow and T.dumpJunk put looted ones away.
@@ -483,9 +485,12 @@ local function gpsAble()
     return false
 end
 
--- Run fn(...) with GPS to ask: as it is with a modem on, with one from the inventory swapped in and back, or not at all.
--- fn's results; nil when there's no GPS (no modem, turned off, no side to swap one onto).
-function withGps(fn, ...)
+-- Run fn(...) with GPS to ask: as it is with a wireless modem on, else one from the inventory swapped in and back.
+-- fn's results, or nil alone when there's no GPS: no modem on or aboard, turtle.gps false, no side to swap one onto.
+--
+-- T.withGps(gps.locate) is a fix with a modem swapped in for it if need be; T.gpsHere uses it.  The swap is
+-- T.withPeripheral's: the chunk controller never comes off.
+function T.withGps(fn, ...)
     local how = gpsAble()
     if not how then return nil end
     if how == true then return fn(...) end
@@ -494,6 +499,7 @@ function withGps(fn, ...)
     if not res[1] then return nil end
     return table.unpack(res, 2, res.n)
 end
+withGps = T.withGps
 
 -- The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
 --
@@ -939,9 +945,23 @@ reframers[#reframers + 1] = function(move)
     for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
 end
 
--- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom
+-- What a dig with no tool on gets back from CC, and what puts one on for T.cfg.equipToDig (below, with the upgrades)
+local NO_TOOL = "No tool to dig with"
+local equipToDig
+
+-- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom; false, nothing
 local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
-                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone" }
+                   ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone",
+                   ["minecraft:air"] = false, ["minecraft:cave_air"] = false, ["minecraft:void_air"] = false,
+                   ["minecraft:water"] = false, ["minecraft:flowing_water"] = false, ["minecraft:lava"] = false,
+                   ["minecraft:flowing_lava"] = false, ["minecraft:fire"] = false, ["minecraft:soul_fire"] = false,
+                   ["minecraft:bubble_column"] = false, ["minecraft:light"] = false }
+
+-- What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
+function T.digDrop(name)
+    if name == nil or DIG_DROP[name] == false then return nil end
+    return DIG_DROP[name] or name
+end
 
 -- Is there a slot for what digging `name` drops: a free one, or a stack of it with room?
 local function roomForDrop(name)
@@ -958,7 +978,8 @@ end
 -- listeners are told it), then dig (with the tool side the caller named,
 -- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
 -- refused too.  A dig of a block a hoe tills is looked at again after, since
--- the block may still be there, changed.
+-- the block may still be there, changed.  With T.cfg.equipToDig, a dig that
+-- failed for want of a tool puts one aboard on and digs again.
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -975,6 +996,8 @@ for name, side in pairs(DIG_SIDE) do
                 .. "stow or drop something first, or set it false to let drops fall)"
         end
         needTool()
+        local res = table.pack(raw[name](...))
+        if not res[1] and res[2] == NO_TOOL and T.cfg.equipToDig and equipToDig() then res = table.pack(raw[name](...)) end
         return afterwards(function()
             forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
@@ -985,7 +1008,7 @@ for name, side in pairs(DIG_SIDE) do
                 if now then event.kind, event.block, event.state = "change", now, nowState end
             end
             tell(event)
-        end, raw[name](...))
+        end, table.unpack(res, 1, res.n))
     end
 end
 
@@ -1487,6 +1510,55 @@ function T.withPeripheral(name, fn)
     if not back then print("T.withPeripheral: " .. tostring(notBack)) end
     if not res[1] then error(res[2], 0) end
     return true, table.unpack(res, 2, res.n)
+end
+
+-- The tools a dig can put on (T.cfg.equipToDig), best first: a pickaxe digs whatever a turtle can.
+local DIG_TOOLS = { "_pickaxe", "_shovel", "_axe", "_hoe" }
+local toldEquip = false                -- (said once a session that a dig put a tool on)
+
+-- For a dig that failed for want of a tool (T.cfg.equipToDig): put a tool aboard on, on the side that holds no
+-- chunk controller (nor T.cfg.keepSide's), an empty side first, else the other upgrade's (a modem or scanner, which
+-- goes into the tool's slot).  The tools are those T.cfg.tools names (every one, unset), a pickaxe first; one that
+-- won't go on (damaged or enchanted) is passed over for the next.  Says so the first time.  True if one went on.
+equipToDig = function()
+    -- (an old CC:Tweaked asks the sides by a swap through an empty slot: with none, no tool goes on)
+    local okL, left = pcall(T.equipped, "left")
+    local okR, right = pcall(T.equipped, "right")
+    if not (okL and okR) then return false end
+    local before = { left = left, right = right }
+    local side, rank
+    for _, s in ipairs(EQUIP_SIDES) do
+        local held = before[s]
+        if not upgradeKept(s, held) then
+            local r = held == nil and 0 or (T.isTool(held) and 1 or 2)
+            if not rank or r < rank then side, rank = s, r end
+        end
+    end
+    if not side then return false end
+    local slots, taken = {}, {}
+    for _, suffix in ipairs(DIG_TOOLS) do
+        for slot = 1, 16 do
+            local it = turtle.getItemDetail(slot)
+            if it and not taken[slot] and text.endsWith(it.name, suffix) and (T.cfg.tools == nil or listed(T.cfg.tools, it.name)) then
+                slots[#slots + 1], taken[slot] = { slot = slot, name = it.name }, true
+            end
+        end
+    end
+    local sel = turtle.getSelectedSlot()
+    for _, c in ipairs(slots) do
+        turtle.select(c.slot)
+        if equipSide(side) then
+            turtle.select(sel)
+            if not toldEquip then
+                toldEquip = true
+                print(string.format("A dig put the %s on the %s (T.cfg.equipToDig)%s.", c.name, side,
+                    before[side] and string.format("; the %s it took off is in slot %d", before[side], c.slot) or ""))
+            end
+            return true
+        end
+    end
+    turtle.select(sel)
+    return false
 end
 
 --------------------------------------------------------------------------
@@ -2961,20 +3033,48 @@ function T.compactContainer(side)
     end)
 end
 
+-- (ADR-0019 D6) Would the stack whose item detail is d go on as a turtle
+-- upgrade?  Only a tool with no wear and no enchantments does.
+local function upgradeOk(d)
+    return (d.damage or 0) == 0 and not (d.enchantments and next(d.enchantments))
+end
+
+-- Which of the container's stacks of `name` (items: its list) to take:
+-- the lowest slot, but for a tool one that would go on as an upgrade
+-- first, and with `pick` only a stack whose item detail pick(detail) is
+-- true for.  The slot, or nil.  The item detail is read only for a tool
+-- or with `pick` (a call each).
+local function stackToTake(chest, items, name, pick)
+    local slots = {}
+    for slot, it in pairs(items) do
+        if it.name == name then slots[#slots + 1] = slot end
+    end
+    table.sort(slots)
+    local tool = T.isTool(name)
+    if not pick and not (tool and #slots > 1) then return slots[1] end
+    local fallback
+    for _, slot in ipairs(slots) do
+        local d = chest.getItemDetail(slot)
+        if d and (not pick or pick(d)) then
+            if not tool or upgradeOk(d) then return slot end
+            fallback = fallback or slot
+        end
+    end
+    return fallback
+end
+
 -- Move a stack of `name` into the container's first slot, where sucking
--- from it takes from.  Whatever is in slot 1 goes to an empty slot, or,
+-- from it takes from (which stack: stackToTake's, `pick` its test).
+-- Whatever is in slot 1 goes to an empty slot, or,
 -- with the container full, into an empty turtle slot (taken with `suck`,
 -- the turtle.suck for the container's side) that is returned so the
 -- caller can put it back.  Returns found, held.  That slot is never
 -- `keep` (the slot the caller fills: T.takeInto's), and is one outside the
 -- crafting grid when there is one (the last empty slot), as a craft round
 -- fills the grid's cells one by one.
-local function frontStack(chest, name, suck, keep)
+local function frontStack(chest, name, suck, keep, pick)
     local items = chest.list()
-    local from
-    for slot, it in pairs(items) do
-        if it.name == name and (not from or slot < from) then from = slot end
-    end
+    local from = stackToTake(chest, items, name, pick)
     if not from then return false end
     if from == 1 then return true end
     local self = peripheral.getName(chest)
@@ -3108,10 +3208,15 @@ end
 --
 -- A part stack of it is topped up first, else an empty slot is used.  Sucking from a side takes the
 -- container's first stack whatever it is, so each time the wanted stack is moved to the front first (as
--- T.takeInto does), and as many stacks are taken as it needs.  Needs a container it can read (a chest or a
--- barrel).  When short of n, why is: no container, none left in it, or no room in the turtle.
-function T.pull(side, name, n)
+-- T.takeInto does), and as many stacks are taken as it needs.  Of several stacks it takes the lowest slot's, but
+-- a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by
+-- the container's item detail (name, count, damage, enchantments...): true for a stack it may take.  Needs a
+-- container it can read (a chest or a barrel).  When short of n, why is: no container, none left in it (that
+-- opts.pick takes), or no room in the turtle.
+function T.pull(side, name, n, opts)
     n = n or 1
+    local pick = opts and opts.pick
+    if pick ~= nil and type(pick) ~= "function" then return 0, "opts.pick is a function(detail)" end
     if side ~= "front" and side ~= "top" and side ~= "bottom" then
         return 0, "the side is \"front\", \"top\" or \"bottom\", not " .. tostring(side)
     end
@@ -3126,9 +3231,9 @@ function T.pull(side, name, n)
         for _ = 1, 256 do
             local have = T.countItem(name) - start
             if have >= n then return end
-            local found, held = frontStack(chest, name, suck)
+            local found, held = frontStack(chest, name, suck, nil, pick)
             if not found then
-                why = "the container on the " .. side .. " has no more " .. name
+                why = "the container on the " .. side .. " has no more " .. name .. (pick and " that opts.pick takes" or "")
                 return
             end
             local into

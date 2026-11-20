@@ -1038,7 +1038,7 @@ end
 check("the system prompt holds every line of turtle/tl/index.txt, whole", nIndexLines > 100, nIndexLines)
 check("...among them the ones for the wrap, protection and the new moves",
     sys24:find("T.protect(name, x1, y1, z1, x2, y2, z2) - ", 1, true) and sys24:find("T.onChange(fn) - ", 1, true)
-        and sys24:find("T.moveTo(x, y, z, opts) - ", 1, true) and sys24:find("T.pull(side, name, n) - ", 1, true)
+        and sys24:find("T.moveTo(x, y, z, opts) - ", 1, true) and sys24:find("T.pull(side, name, n, opts) - ", 1, true)
         and sys24:find("T.withPeripheral(name, fn) - ", 1, true) and sys24:find("T.dumpJunk() - ", 1, true))
 check("it says where the full reference is and how to read part of it with fs",
     sys24:find("help/turtlelib.txt", 1, true) and sys24:find('all:find("T.moveTo(", 1, true)', 1, true)
@@ -2636,4 +2636,69 @@ check("gps: GPS far from the count: the goal says so, and T.pos is left as count
         and m2:find("ask the player before moving far.]", 1, true) and Mine.files[data(".turtlepos")]:find("^0 0 0 0"), m2)
 gps = nil
 peripheral.getNames, peripheral.getType, peripheral.call = rawNames, rawType, rawCall
+end
+
+-- ADR-0019 D1: the code's sleep is in real seconds (realtime.sleep), os.clock and os.startTimer stay game time, and
+--     gps is a global; the prompt says so and names T.gpsHere for a fix with a modem swapped in.  (The server at 60
+--     ticks a second: a game second is a third of a real one.)  D3: T.cfg.equipToDig is on in a session.
+do
+local clocks = { game = 0, real = 5000000 }
+local sleepWas, clockWas, epochWas, gpsWas = sleep, os.clock, os.epoch, gps
+sleep = function(s) clocks.game, clocks.real = clocks.game + s, clocks.real + s / 3 end
+os.clock = function() return clocks.game end
+os.epoch = function() return math.floor(clocks.real * 1000 + 0.5) end
+gps = { locate = function() return 100, 64, -50 end }
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local r, g = os.epoch('utc'), os.clock()\nsleep(10)\n"
+        .. "return string.format('%.1f real, %.1f game', (os.epoch('utc') - r) / 1000, os.clock() - g)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return gps.locate()" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return T.cfg.equipToDig" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("wait ten seconds")
+sleep, os.clock, os.epoch, gps = sleepWas, clockWas, epochWas, gpsWas
+local s1, g1, e1 = resultsIn(2).toolu_1, resultsIn(3).toolu_2, resultsIn(4).toolu_3
+check("D1: sleep(10) in the code at 60 ticks a second lasts 10 real seconds (30 game ones on os.clock)",
+    s1 and s1.content == "-> 10.0 real, 30.0 game", s1 and s1.content)
+check("D1: gps is a global in the code", g1 and g1.content == "-> 100\n-> 64\n-> -50", g1 and g1.content)
+check("D3: T.cfg.equipToDig is on in a session", e1 and e1.content == "-> true", e1 and e1.content)
+local sys = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local tool = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("D1: the prompt says sleep is real seconds and os.clock game time, and names T.gpsHere for a modem swapped in",
+    sys:find("Your sleep is realtime.sleep (real seconds); os.clock and os.startTimer count game time", 1, true)
+        and sys:find("T.gpsHere() swaps one in from the inventory for the fix", 1, true)
+        and not sys:find("sleep, os.clock and os.startTimer count game ticks", 1, true)
+        and tool:find("sleep (real seconds), gps, fs and io in scope", 1, true))
+end
+
+-- ADR-0019 D4: each session keeps its options in the setting claude.options, and a claude started without them (as
+--     autostart's plain `claude` after a reboot) takes them; a flag given wins, and is kept in turn; --confirm isn't
+--     kept.  (The settings: a table, saved when told.)
+do
+local SETD, saves = {}, 0
+settings = { define = function() end, get = function(n) return SETD[n] end, set = function(n, v) SETD[n] = v end,
+             save = function() saves = saves + 1 end }
+local function startLine() return ((Mine.files["claude.log"] or ""):match("start: claude[^\n]*")) or "" end
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig the tunnel", "--steps", "400", "--cache", "1h", "--confirm")
+check("D4: a session keeps its options in claude.options (not --confirm), saved",
+    SETD["claude.options"] == "--steps 400 --cache 1h" and saves == 1, tostring(SETD["claude.options"]))
+fresh({ "say hello", "" })
+HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
+run()
+local r1 = HTTP.requests[1] and HTTP.requests[1].body
+check("D4: a plain claude (as autostart starts it after a reboot) starts with them, and says so",
+    r1 and r1.cache_control.ttl == "1h" and startLine():find("steps 400, cache 1h", 1, true)
+        and not startLine():find("confirming", 1, true)
+        and Mine.logHas("^Options from the last session %(claude%.options%): %-%-steps 400 %-%-cache 1h%.$") and saves == 1,
+    startLine())
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("dig more", "--steps", "9")
+check("D4: a flag given wins over the kept one, and is kept in turn",
+    startLine():find("steps 9, cache 1h", 1, true) and SETD["claude.options"] == "--steps 9 --cache 1h" and saves == 2,
+    startLine() .. " / " .. tostring(SETD["claude.options"]))
+settings = nil
 end

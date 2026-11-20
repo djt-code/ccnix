@@ -990,12 +990,12 @@ end
 -- cell that would cut the way to exit is refused).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
--- warnings, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning; opts.exit
--- refuses those instead, each cell failing with why) }.
+-- warnings, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
+-- opts.exit refuses those instead, each cell failing with why) }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
 -- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
--- at 3,1,4: ..."), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never
--- change the result.
+-- at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and those round it
+-- (terrain, other buildings) as one count ("player: 4 more round it"); they never change the result.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
@@ -1151,7 +1151,7 @@ function T.build(plan, opts)
         local ok, warnings, lint = pcall(T.lint, target)
         if not ok and warnings == "Terminated" then error(warnings, 0) end
         if ok and warnings then
-            info.warnings = warnings
+            info.warnings, info.topDrops = warnings, lint.topDrops
             for _, line in ipairs(lint.planSummary or lint.summary) do print("player: " .. line) end
             if (lint.around or 0) > 0 then print("player: " .. lint.around .. " more round it (T.lint(box) lists them)") end
         end

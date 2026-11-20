@@ -1052,13 +1052,8 @@ function T.gpsCheck(saved)
             c and ("facing " .. COMPASS_NAME[c] .. " (from " .. how .. ")") or ("the heading kept (" .. how .. ")"))
 end
 
--- Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
---
--- For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes
--- home, and the map and the world origin follow, so later checks agree.  The facing comes from a scan, else a step.
-function T.gpsHere()
-    ensure()
-    if not (S.world and S.frame.aligned) then return nil, "no world origin to place it by" end
+-- Where the turtle stands by GPS (set as T.pos, not saved)
+local function gpsHere()
     local x, y, z = gpsCell()
     if not x then return nil, y end
     local loc = T.toLocal(x, y, z)
@@ -1067,6 +1062,22 @@ function T.gpsHere()
     if not c then return nil, how end
     loc = T.toLocal(fx, fy, fz)
     return { x = loc.x, y = loc.y, z = loc.z, dir = headingOf(c) }, how
+end
+
+-- Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
+--
+-- A wireless modem in the inventory is swapped in for the fix when none is on, and back (T.withGps).  For a start
+-- with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the
+-- map and the world origin follow, so later checks agree.  The facing comes from a scan, else a step.
+function T.gpsHere()
+    ensure()
+    if not (S.world and S.frame.aligned) then return nil, "no world origin to place it by" end
+    local res = table.pack(T.withGps(gpsHere))
+    if res.n == 1 and res[1] == nil then
+        return nil, "no GPS to ask: no wireless modem on the turtle or in its inventory, or no side to swap one onto"
+            .. " (or turtle.gps is false)"
+    end
+    return table.unpack(res, 1, res.n)
 end
 
 --------------------------------------------------------------------------

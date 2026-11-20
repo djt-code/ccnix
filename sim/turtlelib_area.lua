@@ -2,7 +2,9 @@
 --
 -- tl.area (ADR-0015 D8: the claude model's own helpers, made library functions) on sim/lib/buildworld's mock world:
 --   * T.pave: a floor of mixed blocks laid in one item, a move a cell; what is the item already left; opts.exclude; a
---     floor box that isn't one layer refused; the item running out stops it, saying so;
+--     floor box that isn't one layer refused; the item running out stops it, saying so; (ADR-0019 D8) with
+--     T.cfg.digNeedsRoom, the kinds the map shows to dig against the free slots: too many refused with the counts
+--     before it moves; enough room (a stack to join, a free slot), or a floor the map hasn't seen, and it goes;
 --   * T.clearBox: a solid tunnel cleared three layers a pass (fewer moves than cells), nothing outside the box dug; a
 --     protected area inside it left, each cell failing with why; opts.maxFuel stops it;
 --   * T.sweep: the items lying in a box picked up, never a chest's (a chest in the box keeps what it holds).
@@ -81,6 +83,44 @@ do
     ok, why, info = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
     check("...the item running out stops it, saying so", ok == false and why == "pave: out of minecraft:stone_bricks (4 placed)"
         and info.placed == 4, tostring(why))
+
+    -- (ADR-0019 D8) room for what it digs: dirt, planks and andesite in a floor of stone; full stacks of glass in
+    -- slots 2 to 15, one slot free
+    local PLANKS, ANDESITE, GLASS = "minecraft:oak_planks", "minecraft:andesite", "minecraft:glass"
+    local function mixed(know)
+        local list = cube({}, 1, -1, 1, 5, -1, 3, STONE)
+        list[#list + 1] = { 2, -1, 2, DIRT }
+        list[#list + 1] = { 3, -1, 3, PLANKS }
+        list[#list + 1] = { 4, -1, 1, ANDESITE }
+        fresh(list, know)
+        T.cfg.digNeedsRoom = true
+        W.give(1, BRICKS, 20)
+        for slot = 2, 15 do W.give(slot, GLASS, 64) end
+    end
+    mixed()
+    moves = W.S.moves
+    local nothing
+    nothing, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
+    check("T.cfg.digNeedsRoom: four kinds to dig and one slot free: refused with the counts, before it moves",
+        nothing == nil and why == "pave: what it would dig won't fit: the map shows 4 kinds to dig (minecraft:andesite x1, "
+            .. "minecraft:cobblestone x12, minecraft:dirt x1, minecraft:oak_planks x1), 4 of them with no stack aboard to join, and 1 slot "
+            .. "is free (T.cfg.digNeedsRoom; T.stow or drop something first, or a smaller box)"
+            and W.S.moves == moves and has(2, -1, 2, DIRT), tostring(why))
+    mixed({ -3, 0, -3, 10, 5, 10 })
+    ok, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
+    check("...a floor the map hasn't seen: it goes as before (stopping at the first dig with no room)", ok ~= nil and W.S.moves > moves,
+        tostring(why))
+    local floor = cube({}, 1, -1, 1, 5, -1, 3, DIRT)
+    floor[#floor + 1] = { 2, -1, 2, PLANKS }
+    fresh(floor)
+    T.cfg.digNeedsRoom = true
+    W.give(1, BRICKS, 20)
+    W.give(2, DIRT, 10)
+    for slot = 3, 15 do W.give(slot, GLASS, 64) end
+    ok, info = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
+    check("...room enough (a stack of dirt to join, a slot for the planks): it paves", ok == true and info.placed == 15
+        and W.carrying(DIRT) == 24 and W.carrying(PLANKS) == 1,
+        tostring(ok) .. " " .. tostring(info and info.placed) .. " placed, " .. W.carrying(DIRT) .. " dirt, " .. W.carrying(PLANKS) .. " planks")
 end
 
 --------------------------------------------------------------------------

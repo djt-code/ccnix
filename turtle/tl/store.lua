@@ -433,17 +433,57 @@ function T.forgetChest(x, y, z, side)
     return false, "no chest is known at " .. tostring(x) .. "," .. tostring(y) .. "," .. tostring(z) .. " on the " .. tostring(side)
 end
 
+-- (ADR-0015 D1, ADR-0019 D2) How far a trip goes for chests, one rule for T.stow, T.fetch, T.prepare, T.chests and
+-- T.craftPlan: opts.maxDistance (REACH) from opts.near ({ x, y, z }, else where the turtle is when the call begins), or
+-- anywhere with opts.far.  The reach { d, from, far }, or nil and why.
+local function reachOf(opts)
+    local d = opts.maxDistance or REACH
+    if type(d) ~= "number" or d < 0 then return nil, "opts.maxDistance is a number of blocks, 0 or more" end
+    local from = opts.near or T.here()
+    if type(from) ~= "table" or type(from.x or from[1]) ~= "number" then return nil, "opts.near is a cell { x, y, z }" end
+    return { d = d, from = { x = from.x or from[1], y = from.y or from[2], z = from.z or from[3] }, far = opts.far and true or false }
+end
+
+-- Is the chest c (where the turtle stands for it) within the reach r?
+local function within(r, c) return r.far or T.dist(r.from, c) <= r.d end
+
+-- What the chests beyond the reach r hold of something, as words: "6 are farther (the nearest at 100,0,1, 100 blocks
+-- off, over opts.maxDistance 48: opts.far = true goes)".  n is the count, c the nearest of those chests, `more` says
+-- "6 more".
+local function farWords(r, n, c, more)
+    return n .. (more and " more" or "") .. " are farther (the nearest at " .. T.posKey(cellOf(c)) .. ", " .. T.dist(r.from, c) ..
+        " blocks off, over opts.maxDistance " .. r.d .. ": opts.far = true goes)"
+end
+
 -- The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
 --
 -- seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's
--- cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.
-function T.chests()
+-- cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.  With opts (maxDistance,
+-- near, far, as T.fetch takes them) two lists: the chests within reach, and those beyond it, nearest first, each with
+-- distance (blocks from where the reach is measured) and cell (the chest's own); nil and why for a bad opts.
+function T.chests(opts)
     local list = load()
     for i, c in ipairs(list) do
         list[i] = copyOf(c)
         list[i].seen = list[i].seen or 0
     end
-    return list
+    if opts == nil then return list end
+    local r, why = reachOf(opts)
+    if not r then return nil, why end
+    local near, far = {}, {}
+    for _, c in ipairs(list) do
+        if within(r, c) then
+            near[#near + 1] = c
+        else
+            c.distance, c.cell = T.dist(r.from, c), cellOf(c)
+            far[#far + 1] = c
+        end
+    end
+    table.sort(far, function(a, b)
+        if a.distance ~= b.distance then return a.distance < b.distance end
+        return keyOf(a) < keyOf(b)
+    end)
+    return near, far
 end
 
 --------------------------------------------------------------------------
@@ -759,33 +799,52 @@ local function namesToPull(name, side)
     return out
 end
 
--- Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before
+-- Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before
 -- (opts.stay: stay at the last chest).  Returns how many came aboard, and why if that is short of n.
 --
 -- `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the
 -- items that match are taken, by name.  The chests come nearest first, each read again as it is visited (so a chest
 -- that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no
--- room.  opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+-- room.  As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }):
+-- what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there.
+-- Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and
+-- opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...).
+-- opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
     n = n or 1
     if not (whole(n) and n >= 1) then return 0, "fetch wants a whole number of items" end
     name = full(name)
     local move = opts.move or MOVE
+    local r, rWhy = reachOf(opts)
+    if not r then return 0, rWhy end
     local holders, total = T.where(name)
     if not holders then return 0, total end
     if total == 0 then return 0, "no chest is known to hold " .. name .. " (T.catalogue reads them again)" end
+    -- (the chests beyond the reach: how many they hold and the nearest, for the why)
+    local near, farN, farC = {}, 0, nil
+    for _, c in ipairs(holders) do
+        if within(r, c) then
+            near[#near + 1] = c
+        else
+            farN = farN + c.count
+            if not farC or T.dist(r.from, c) < T.dist(r.from, farC) then farC = c end
+        end
+    end
+    if #near == 0 then
+        return 0, "no chest within opts.maxDistance " .. r.d .. " holds " .. name .. "; " .. farWords(r, farN, farC)
+    end
     local got, why = 0, nil
     local list = load()
     round(move, function()
-        for _, c in ipairs(holders) do
+        for _, c in ipairs(near) do
             if got >= n then return end
             local side, reason = arrive(c, move)
             if side then
                 local noRoomFor
                 for _, item in ipairs(namesToPull(name, side)) do
                     if got >= n then break end
-                    local took, pullWhy = T.pull(side, item, n - got)
+                    local took, pullWhy = T.pull(side, item, n - got, { pick = opts.pick })
                     got = got + took
                     if pullWhy and text.contains(pullWhy, "no room") then noRoomFor = item; break end
                 end
@@ -800,7 +859,12 @@ function T.fetch(name, n, opts)
         end
     end, opts.stay)
     if got >= n then return got end
-    return got, (why or "the chests hold no more " .. name) .. " (got " .. got .. " of " .. n .. ")"
+    local picked = opts.pick and " that opts.pick takes" or ""
+    if farC then
+        return got, (why or "the chests within opts.maxDistance " .. r.d .. " hold no more " .. name .. picked) .. " (got " .. got ..
+            " of " .. n .. "); " .. farWords(r, farN, farC, true)
+    end
+    return got, (why or "the chests hold no more " .. name .. picked) .. " (got " .. got .. " of " .. n .. ")"
 end
 
 --------------------------------------------------------------------------
@@ -1075,11 +1139,8 @@ function T.stow(opts)
     if #list == 0 then return nil, "no chests are known: T.addChest (and a bulk chest), then T.stow" end
     local scoped, boxWhy = inScope(list, opts.box)
     if not scoped then return nil, boxWhy end
-    local reach = opts.maxDistance or REACH
-    if type(reach) ~= "number" or reach < 0 then return nil, "opts.maxDistance is a number of blocks, 0 or more" end
-    local from = opts.near or T.here()
-    if type(from) ~= "table" or type(from.x or from[1]) ~= "number" then return nil, "opts.near is a cell { x, y, z }" end
-    from = { x = from.x or from[1], y = from.y or from[2], z = from.z or from[3] }
+    local r, rWhy = reachOf(opts)
+    if not r then return nil, rWhy end
     local inScopeSet = {}
     for _, c in ipairs(scoped) do inScopeSet[c] = true end
     local keep = opts.keep and T.nameTest(opts.keep)
@@ -1096,7 +1157,7 @@ function T.stow(opts)
     local function targets(l, name, tried)
         local can = {}
         for _, c in ipairs(l) do
-            if inScopeSet[c] and not tried[keyOf(c) .. name] and (opts.far or T.dist(from, c) <= reach) then
+            if inScopeSet[c] and not tried[keyOf(c) .. name] and within(r, c) then
                 for i, place in ipairs(PLACES) do
                     if place(c, name, l) then can[#can + 1] = { c = c, place = i, d = T.dist(T.pos, c) }; break end
                 end
@@ -1116,14 +1177,14 @@ function T.stow(opts)
     end
     -- (an item whose chests are all out of reach: said where the one it would go to is, ranked as targets() ranks
     -- them, by place and then distance: the chest for it, then one holding it, then the bulk chest)
-    if not opts.far then
+    if not r.far then
         for name in pairs(names) do
             if #targets(list, name, {}) == 0 then
                 local far, farD, farPlace
                 for _, c in ipairs(scoped) do
                     for i, place in ipairs(PLACES) do
                         if place(c, name, list) then
-                            local d = T.dist(from, c)
+                            local d = T.dist(r.from, c)
                             if not far or i < farPlace or (i == farPlace and d < farD) then far, farD, farPlace = c, d, i end
                             break
                         end
@@ -1131,7 +1192,7 @@ function T.stow(opts)
                 end
                 if far then
                     notes[name] = { PLACE_WORDS[farPlace] .. " is at " .. T.posKey(cellOf(far)) .. ", " .. farD ..
-                        " blocks off (over opts.maxDistance " .. reach .. ": opts.far = true goes)" }
+                        " blocks off (over opts.maxDistance " .. r.d .. ": opts.far = true goes)" }
                 end
             end
         end
@@ -1319,11 +1380,13 @@ end
 -- Getting ready for a job
 --------------------------------------------------------------------------
 
--- What is short as words: "cobblestone: need 64, have 20; torch: need 8, have 0".
-local function shortWords(short)
+-- What is short as words: "cobblestone: need 64, have 20; torch: need 8, have 0", with what the chests beyond the reach
+-- r hold of it (s.far, the nearest s.farC): "glowstone: need 2, have 0, 6 are farther (the nearest at ...)".
+local function shortWords(short, r)
     local parts = {}
     for i, s in ipairs(short) do
-        parts[i] = (text.stripPrefix(s.item, NS) or s.item) .. ": need " .. s.need .. ", have " .. s.have
+        parts[i] = (text.stripPrefix(s.item, NS) or s.item) .. ": need " .. s.need .. ", have " .. s.have ..
+            (s.far and ", " .. farWords(r, s.far, s.farC) or "")
     end
     return table.concat(parts, "; ")
 end
@@ -1337,8 +1400,10 @@ end
 -- everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard
 -- whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last
 -- chest).  Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what.
--- spec.move is T.moveTo's.
--- Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
+-- As T.stow and T.fetch, only chests within spec.maxDistance (48) of where it began count and are gone to (what the
+-- farther ones hold is said); spec.far = true takes them all.  spec.move is T.moveTo's.
+-- Info is { fetched = { name = n }, stowed, short = { { item, need, have, far } }, free } (far: how many the chests
+-- beyond the reach hold).
 function T.prepare(spec)
     spec = spec or {}
     local need = spec.need or {}
@@ -1354,29 +1419,44 @@ function T.prepare(spec)
     end
     local names = tables.sortedKeys(want)
     if #load() == 0 then return nil, "no chests are known: T.addChest, then T.catalogue" end
+    local r, rWhy = reachOf(spec)
+    if not r then return nil, rWhy end
     local short = {}
     for _, name in ipairs(names) do
         local have = T.countItem(name)
         if have < want[name] then
-            local _, stored = T.where(name)
-            if have + (stored or 0) < want[name] then short[#short + 1] = { item = name, need = want[name], have = have + (stored or 0) } end
+            local stored, far, farC = 0, 0, nil
+            for _, c in ipairs(T.where(name) or {}) do
+                if within(r, c) then
+                    stored = stored + c.count
+                else
+                    far = far + c.count
+                    if not farC or T.dist(r.from, c) < T.dist(r.from, farC) then farC = c end
+                end
+            end
+            if have + stored < want[name] then
+                short[#short + 1] = { item = name, need = want[name], have = have + stored, far = farC and far or nil, farC = farC }
+            end
         end
     end
     if #short > 0 and not spec.partial then
-        return nil, "short of " .. shortWords(short) .. " (aboard and in the chests as last read; T.catalogue reads them " ..
+        return nil, "short of " .. shortWords(short, r) .. " (aboard and in the chests as last read; T.catalogue reads them " ..
             "again, spec.partial goes for what there is)", { short = short }
     end
+    local scope = { maxDistance = r.d, near = r.from, far = r.far }
     local move = spec.move or MOVE
     local info = { fetched = {}, stowed = 0, short = {}, free = 0 }
     local notes = {}
     local ok, why = round(move, function()
-        local stowed, stowWhy, stowInfo = T.stow({ all = true, keep = names, stay = true, move = move })
+        local stowed, stowWhy, stowInfo = T.stow({ all = true, keep = names, stay = true, move = move, maxDistance = scope.maxDistance,
+                                                   near = scope.near, far = scope.far })
         if stowed then stowInfo = stowWhy else notes[#notes + 1] = "stowing: " .. tostring(stowWhy) end
         info.stowed = stowInfo and stowInfo.stowed or 0
         for _, name in ipairs(names) do
             local missing = want[name] - T.countItem(name)
             if missing > 0 then
-                local got, fetchWhy = T.fetch(name, missing, { stay = true, move = move })
+                local got, fetchWhy = T.fetch(name, missing, { stay = true, move = move, maxDistance = scope.maxDistance,
+                                                               near = scope.near, far = scope.far })
                 info.fetched[name] = got
                 if got < missing then notes[#notes + 1] = tostring(fetchWhy) end
             end
@@ -1390,7 +1470,7 @@ function T.prepare(spec)
     info.free = T.freeSlots()
     local fails = {}
     if not ok then fails[#fails + 1] = tostring(why) end
-    if #info.short > 0 then fails[#fails + 1] = "short of " .. shortWords(info.short) end
+    if #info.short > 0 then fails[#fails + 1] = "short of " .. shortWords(info.short, r) end
     if info.free < slots then
         fails[#fails + 1] = "only " .. info.free .. " slots free, " .. slots .. " wanted (what is needed, tools, fuel and " ..
             "what no chest would take stay aboard)"

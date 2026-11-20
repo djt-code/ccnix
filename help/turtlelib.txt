@@ -74,6 +74,11 @@ T.startAtHome(force)
 
 == The position from GPS (ADR-0018) ==
 
+T.withGps(fn, ...)
+    Run fn(...) with GPS to ask: as it is with a wireless modem on, else one from the inventory swapped in and back. fn's results, or nil alone when there's no GPS: no modem on or aboard, turtle.gps false, no side to swap one onto.
+
+    T.withGps(gps.locate) is a fix with a modem swapped in for it if need be; T.gpsHere uses it. The swap is T.withPeripheral's: the chunk controller never comes off.
+
 T.checkedPos(again)
     The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
 
@@ -130,6 +135,9 @@ T.withUnprotected(names, fn, ...)
 
 T.neverDig(name)
     Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
+
+T.digDrop(name)
+    What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
 
 T.turnRight()
     Turn a quarter turn to the right, keeping T.dir and the saved position right.
@@ -514,10 +522,10 @@ T.restockFrom(side, name, target, opts)
 T.takeInto(side, name, n, slot)
     Take `name` from the container on `side` into the turtle's slot `slot` (empty, or holding some of it already) until that slot holds n (at most a stack). Needs a readable container. Returns how many the slot holds.
 
-T.pull(side, name, n)
+T.pull(side, name, n, opts)
     Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into whatever slots will have it. Returns how many it got and, when short of n, why.
 
-    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it, or no room in the turtle.
+    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Of several stacks it takes the lowest slot's, but a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by the container's item detail (name, count, damage, enchantments...): true for a stack it may take. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it (that opts.pick takes), or no room in the turtle.
 
 == Junk ==
 
@@ -571,7 +579,7 @@ Each goes over the box in rows along its longer side, one way and back (a serpen
 T.pave(box, item, opts)
     Pave a floor: every cell of the layer `box` (y1 = y2: the floor's own layer) made `item`, the turtle going over it in rows a block above, digging down what's there and placing down: one move a cell. True, info; false, why, info.
 
-    A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
+    A cell already holding the item is left as it is. What a dig gives comes aboard (T.cfg.digNeedsRoom refuses a dig with no room for it, and the whole pave before it moves when the kinds the map shows to dig need more free slots than there are). It stops when the item runs out, the fuel does or opts.maxFuel is spent. opts: exclude, maxFuel, inside, move (T.moveTo's for going between rows and to the start; default { path = true, scan = false }). Info is { placed, there (already the item), failed, stopped, spent }.
 
 T.clearBox(box, opts)
     Clear a box (a tunnel, a room) to air, three layers a pass: along the middle layer of each three, digging ahead, above and below, a third of the moves of digging cell by cell. True, info; false, why, info.
@@ -684,7 +692,7 @@ T.blueprint.put(plan, x, y, z, item)
 T.build(plan, opts)
     Build a plan (opts.order = "column": walls for less fuel), materials checked first, progress kept, stopping if it circles. Returns true, info; false, why, info when it stopped or cells failed; nil, why when it couldn't begin.
 
-    `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a reboot. The same plan again carries on too (its failed cells tried again); a different plan while one has cells not yet tried is refused unless opts.restart (the refusal counts what was tried and what failed). One whose every cell was tried, some failing, doesn't stand in the way: the new plan starts, and info.previous = { name, failed } lists the old one's failures. It first counts what the cells still to do need against what is on board, and refuses if anything is short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a function) unless opts.partial; cells with no item left fail one by one. A cell that fails is noted and the build goes on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them). Nothing is dug out of a cell it fills: a block in the way is a failure. A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead. opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the order it began with. A build saved before a re-zero (T.frameStale) is not carried on: T.build() says why and marks it stale, and a plan given starts afresh. The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E"; opts.fuelWatch = false turns it off. opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan = false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart, partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow, temp and exit (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow; a cell that would cut the way to exit is refused). Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell }, warnings, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning; opts.exit refuses those instead, each cell failing with why) }. Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom at 3,1,4: ..."), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never change the result.
+    `plan` is a plan (table or text); nil carries on the build saved in the data file after a stop, a crash or a reboot. The same plan again carries on too (its failed cells tried again); a different plan while one has cells not yet tried is refused unless opts.restart (the refusal counts what was tried and what failed). One whose every cell was tried, some failing, doesn't stand in the way: the new plan starts, and info.previous = { name, failed } lists the old one's failures. It first counts what the cells still to do need against what is on board, and refuses if anything is short (the reply's third value lists { item, need, have, short }, and what T.canCraft says if there is such a function) unless opts.partial; cells with no item left fail one by one. A cell that fails is noted and the build goes on; the failed ones are tried again at the end of a later run (opts.retry = false leaves them). Nothing is dug out of a cell it fills: a block in the way is a failure. A cell the map already shows holding the block (with its state) is taken as done without a look, so a plan built over itself, or carried on after a crash, goes quickly; opts.look goes and looks at every cell instead. opts.order is "layer" (the default) or "column" (see the overview: cheaper for walls); a build carried on keeps the order it began with. A build saved before a re-zero (T.frameStale) is not carried on: T.build() says why and marks it stale, and a plan given starts afresh. The fuel watch counts the moves and stops the build, progress kept, when after 8 cells they come to over 3 times T.fuelFor's estimate for the cells so far: "circling: N fuel for M cells, estimate E"; opts.fuelWatch = false turns it off. opts: at ({ x, y, z }: build with the plan's anchor here), look, move (for T.moveTo; default { path = true, scan = false }), inside (a protected area the job owns), limit (the most cells to try in this run), restart, partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow, temp and exit (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow; a cell that would cut the way to exit is refused). Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell }, warnings, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning; opts.exit refuses those instead, each cell failing with why) }. Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and those round it (terrain, other buildings) as one count ("player: 4 more round it"); they never change the result.
 
 == Checking ==
 
@@ -730,9 +738,9 @@ T.canCraft(name, n, opts)
 == Planning ==
 
 T.craftPlan(targets, opts)
-    Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
+    Plan crafting { [name] = n } down the recipe tree against the inventory and chests within 48 blocks: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 
-    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok }.
+    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok, far }. As T.fetch, only chests within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all. A short plan's far ({ name = n }) is what the chests beyond would give it, and the why says where they are.
 
 == Crafting from a chest ==
 
@@ -948,7 +956,7 @@ T.blockKind(name)
 T.lint(what, opts)
     What stops a two-tall player in a build (a box or a plan), read-only: headroom, a flight's approach and exit, diagonal railings, drops over 3, lights in the way. A list of { rule, x, y, z, text }, and info (info.rules; opts.rules).
 
-    `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own cells and states, the map for the cells it leaves alone and round it). The cells looked at are the box's and, for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too. A warning is { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop, lantern or light (see the overview), x, y, z the cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved. Warnings, not refusals: a design may break a rule on purpose. Nil and why if it can't start. Info is { cells, unchecked (stairs with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50), rules (a count by rule), summary (a line a rule: its first warning, and how many more) }. opts.rules (a list of rule names) checks only those. The limit is shared: the list takes each rule's first, then each one's second, and so on, so one rule with many can't crowd out the others. For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and around (the counts) and planSummary (the summary of the plan's own). T.build prints only those, and a count of the rest.
+    `what` is a box of the map ({ x1, y1, z1, x2, y2, z2 }, or the fields) or a plan (as T.build takes one: its own cells and states, the map for the cells it leaves alone and round it). The cells looked at are the box's and, for walking on its top, the layer over it; the cells round them (an approach, a drop) are read too. A warning is { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop, lantern or light (see the overview), x, y, z the cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved. Warnings, not refusals: a design may break a rule on purpose. Nil and why if it can't start. Info is { cells, unchecked (stairs with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50), rules (a count by rule), summary (a line a rule: its first warning, and how many more) }. opts.rules (a list of rule names) checks only those. The limit is shared: the list takes each rule's first, then each one's second, and so on, so one rule with many can't crowd out the others. For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and around (the counts) and planSummary (the summary of the plan's own). T.build prints only those, and a count of the rest. Two or more drops on the plan's top (walk cells in the layer over it: the tops of walls, mostly) are one line of the plan's summary, "N drops on the plan's top", their cells info.topDrops ({ x, y, z } each); the warnings keep them all.
 
 == Walking ==
 
@@ -1085,10 +1093,10 @@ T.addChest(x, y, z, side, bulk, opts)
 T.forgetChest(x, y, z, side)
     Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 
-T.chests()
+T.chests(opts)
     The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
 
-    seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.
+    seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything. With opts (maxDistance, near, far, as T.fetch takes them) two lists: the chests within reach, and those beyond it, nearest first, each with distance (blocks from where the reach is measured) and cell (the chest's own); nil and why for a bad opts.
 
 == Going to a chest ==
 
@@ -1112,9 +1120,9 @@ T.where(name)
     It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds) and age how long ago that was, so an old count can be read again first. Nil and why when no chest is known.
 
 T.fetch(name, n, opts)
-    Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+    Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 
-    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...). opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 
 == What there is, everywhere ==
 
@@ -1144,7 +1152,7 @@ T.sortChests(opts)
 T.prepare(spec)
     Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch what is, come back, check the room. True, info; false, why, info (what is short, too few slots free); nil, why.
 
-    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
+    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. As T.stow and T.fetch, only chests within spec.maxDistance (48) of where it began count and are gone to (what the farther ones hold is said); spec.far = true takes them all. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have, far } }, free } (far: how many the chests beyond the reach hold).
 
 T.autoDump()
     Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.
@@ -1199,7 +1207,7 @@ T.gpsCheck(saved)
 T.gpsHere()
     Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
 
-    For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the map and the world origin follow, so later checks agree. The facing comes from a scan, else a step.
+    A wireless modem in the inventory is swapped in for the fix when none is on, and back (T.withGps). For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the map and the world origin follow, so later checks agree. The facing comes from a scan, else a step.
 
 == The map ==
 

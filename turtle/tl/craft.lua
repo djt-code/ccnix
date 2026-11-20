@@ -850,7 +850,9 @@ function resolve(st, name, n, visiting, top)
 end
 
 -- What there is to plan with: opts.stock (counts by name), else the inventory and the chest at opts.chest (a side), else
--- the inventory and every chest T.catalogue has read.
+-- the inventory and the chests T.catalogue has read within reach (opts.maxDistance, near, far: T.chests' reach).  The
+-- counts by name, and with the chests also what the chests beyond the reach hold and the nearest of them; nil and why
+-- for a bad reach.
 local function planStock(opts)
     if type(opts.stock) == "table" then
         local n = {}
@@ -858,14 +860,19 @@ local function planStock(opts)
         return n
     end
     if opts.chest ~= nil then return stockOf(chestSide(opts)) end
-    local n = stockOf(nil)
-    if fs.exists(T.dataPath(".chests")) then
-        local chests = T.need("chests")
-        for _, c in ipairs(chests and chests() or {}) do
-            for name, count in pairs(c.items) do n[name] = (n[name] or 0) + count end
-        end
+    local n, far = stockOf(nil), {}
+    if not fs.exists(T.dataPath(".chests")) then return n, far end
+    local chests = T.need("chests")
+    if not chests then return n, far end
+    local near, beyond = chests({ maxDistance = opts.maxDistance, near = opts.near, far = opts.far })
+    if not near then return nil, beyond end
+    for _, c in ipairs(near) do
+        for name, count in pairs(c.items) do n[name] = (n[name] or 0) + count end
     end
-    return n
+    for _, c in ipairs(beyond) do
+        for name, count in pairs(c.items) do far[name] = (far[name] or 0) + count end
+    end
+    return n, far, beyond
 end
 
 -- Counts by name as words, sorted: "coal 2, stick 1".
@@ -875,7 +882,7 @@ local function countsText(counts)
     return table.concat(parts, ", ")
 end
 
--- Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok },
+-- Plan crafting { [name] = n } down the recipe tree against the inventory and chests within 48 blocks: { steps, base, short, ok },
 -- and why when short; nil, why.  T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 --
 -- `targets` is { [name] = n } or { { name, n }, ... }.  The tree is followed down (torches need sticks and coal, sticks
@@ -884,7 +891,9 @@ end
 -- made, and what can't be made is short.  The targets themselves are made, not taken from what there is.  Smelting is
 -- not planned: charcoal or glass that isn't there is short.  The plan is { targets, steps = { { name, n, crafts } } in
 -- the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it),
--- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok }.
+-- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok, far }.  As T.fetch, only chests
+-- within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all.  A short plan's far
+-- ({ name = n }) is what the chests beyond would give it, and the why says where they are.
 function T.craftPlan(targets, opts)
     opts = opts or {}
     if type(targets) ~= "table" then return nil, "T.craftPlan wants the items to make: { [name] = n } or { { name, n }, ... }" end
@@ -901,11 +910,34 @@ function T.craftPlan(targets, opts)
         want[name] = (want[name] or 0) + n
     end
     if #order == 0 then return nil, "nothing to plan: no targets" end
-    local st = newState(planStock(opts))
+    local stock, far, beyond = planStock(opts)
+    if not stock then return nil, far end
+    local st = newState(stock)
     for _, name in ipairs(order) do resolve(st, name, want[name], {}, true) end
     local plan = { targets = want, steps = st.steps, base = st.base, short = st.short, ok = next(st.short) == nil }
     if plan.ok then return plan end
-    return plan, "short of " .. countsText(st.short) .. " (not there, and not to be crafted from what is)"
+    local why = "short of " .. countsText(st.short) .. " (not there, and not to be crafted from what is)"
+    if not (far and next(far)) then return plan, why end
+    -- (ADR-0019 D2) what the chests beyond the reach would add: the plan again with them counted, and what it takes
+    -- over what is here; the nearest chest that holds some of it said)
+    local all = copyOf(stock)
+    for name, n in pairs(far) do all[name] = (all[name] or 0) + n end
+    local withFar = newState(all)
+    for _, name in ipairs(order) do resolve(withFar, name, want[name], {}, true) end
+    local extra = {}
+    for name, n in pairs(withFar.base) do
+        if n > (stock[name] or 0) then extra[name] = n - (stock[name] or 0) end
+    end
+    if not next(extra) then return plan, why end
+    plan.far = extra
+    local at
+    for _, c in ipairs(beyond) do
+        for name in pairs(extra) do
+            if (c.items[name] or 0) > 0 then at = at or c end
+        end
+    end
+    return plan, why .. "; only at a far base: " .. countsText(extra) .. " (the nearest at " .. T.posKey(at.cell) .. ", " ..
+        at.distance .. " blocks off: opts.far = true counts those chests)"
 end
 
 --------------------------------------------------------------------------
