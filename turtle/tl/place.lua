@@ -905,6 +905,16 @@ local AIRS = { [AIR] = true, ["minecraft:cave_air"] = true }
 -- The cells beside a cell, as directions
 local SIDES = { "up", "down", 0, 1, 2, 3 }
 
+-- A cell as { x, y, z } or { x =, y =, z = }: its x, y, z, or nil if it isn't one of whole numbers.
+local function cellOf(c)
+    if type(c) ~= "table" then return nil end
+    local xyz = { c.x or c[1], c.y or c[2], c.z or c[3] }
+    for i = 1, 3 do
+        if type(xyz[i]) ~= "number" or xyz[i] ~= math.floor(xyz[i]) then return nil end
+    end
+    return xyz[1], xyz[2], xyz[3]
+end
+
 -- (ADR-0015 D5) Would a block at x, y, z close the turtle in: no way out, through cells the map shows empty (air or
 -- water) or has never seen, to `exit` ({ x, y, z }), or with none to a cell OPEN_AT blocks from where it stands?
 -- Why, if so; nil if there is a way, or the search can't tell (it looks at SEAL_CELLS cells at most).  A way out that
@@ -914,8 +924,9 @@ local PASSES = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:water"
 local function closesIn(x, y, z, exit)
     local start = T.here()
     local key = function(a, b, c) return a .. "," .. b .. "," .. c end
-    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [key(x, y, z)] = true }, { start }, 1
-    local goal = exit and key(exit.x or exit[1], exit.y or exit[2], exit.z or exit[3])
+    local target = key(x, y, z)
+    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [target] = true }, { start }, 1
+    local goal = exit and key(cellOf(exit))
     while queue[head] do
         local c = queue[head]
         head = head + 1
@@ -924,7 +935,7 @@ local function closesIn(x, y, z, exit)
             local v = T.DELTA[d]
             local nx, ny, nz = c.x + v[1], c.y + v[2], c.z + v[3]
             local k = key(nx, ny, nz)
-            if k == goal then return nil end
+            if k == goal and k ~= target then return nil end          -- (the cell being placed is no way out)
             if not seen[k] then
                 seen[k] = true
                 local name = nameAt(nx, ny, nz)
@@ -1217,16 +1228,6 @@ end
 -- A sign turned toward a reader
 --------------------------------------------------------------------------
 
--- A cell as { x, y, z } or { x =, y =, z = }: its x, y, z, or nil if it isn't one of whole numbers.
-local function cellOf(c)
-    if type(c) ~= "table" then return nil end
-    local xyz = { c.x or c[1], c.y or c[2], c.z or c[3] }
-    for i = 1, 3 do
-        if type(xyz[i]) ~= "number" or xyz[i] ~= math.floor(xyz[i]) then return nil end
-    end
-    return xyz[1], xyz[2], xyz[3]
-end
-
 -- The headings nearest the way dx, dz (in the turtle's frame) points: one, or two when it is a diagonal.
 local function headingsToward(dx, dz)
     local hx, hz = dx > 0 and 1 or 3, dz > 0 and 0 or 2
@@ -1376,7 +1377,7 @@ end
 -- (below), exit ({ x, y, z }: below).  A cell that already holds the item as wanted comes back as it is; one holding
 -- anything else is not touched.  A placement that closes the turtle in (no way, through what the map shows empty or
 -- unknown, out of where it stands: a dozen blocks, or to opts.exit) is made with how.warning saying so; with
--- opts.exit it's refused.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
+-- opts.exit it's refused (and an opts.exit that is the target cell itself, which is no way out).  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
 -- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
@@ -1403,6 +1404,14 @@ function T.placeAt(x, y, z, item, opts)
     end
     if type(item) ~= "string" or item == "" then return nil, "placeAt wants the item's name, like minecraft:oak_stairs" end
     if not text.contains(item, ":") then item = "minecraft:" .. item end
+    if opts.exit ~= nil then
+        local ex, ey, ez = cellOf(opts.exit)
+        if not ex then return nil, "opts.exit is a cell { x, y, z }, whole numbers" end
+        if ex == x and ey == y and ez == z then
+            return nil, "opts.exit " .. x .. "," .. y .. "," .. z .. " is the cell being placed: the exit is a cell the turtle "
+                .. "can still get to after it (beside it, or beyond)"
+        end
+    end
     if opts.toward ~= nil then
         local aimed, aim = towardOpts(x, y, z, item, opts)
         if not aimed then return nil, aim end

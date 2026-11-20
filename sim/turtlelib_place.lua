@@ -215,6 +215,16 @@ do
     check("opts.exit: a block that would close the last way to it is refused, saying why", name == nil
         and why:find("won't place stone at 0,0,3: no way from 0,0,2 to opts.exit 0,0,6 after it", 1, true) ~= nil and W.get(0, 0, 3) == nil,
         tostring(why))
+    -- (ADR-0019) the exit the cell being placed: it "reached" the exit through the block it placed, sealing the turtle in
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0, 3 } })
+    check("opts.exit the target cell itself: refused, saying it's the cell being placed, nothing placed", name == nil
+        and why:find("opts.exit 0,0,3 is the cell being placed", 1, true) ~= nil and W.get(0, 0, 3) == nil, tostring(why))
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { x = 0, y = 0, z = 3 } })
+    check("...given as { x =, y =, z = } too", name == nil and why:find("is the cell being placed", 1, true) ~= nil and W.get(0, 0, 3) == nil,
+        tostring(why))
+    name, why = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0 } })
+    check("...and an opts.exit that isn't a cell is refused", name == nil and why == "opts.exit is a cell { x, y, z }, whole numbers"
+        and W.get(0, 0, 3) == nil, tostring(why))
     local placed, _, how = T.placeAt(0, 0, 3, STONE)
     check("...without it, placed with a warning that the turtle is closed in", placed == STONE and how and how.warning
         and how.warning:find("warning: placed stone at 0,0,3, but the turtle at 0,0,2 is closed in after it", 1, true) ~= nil,
