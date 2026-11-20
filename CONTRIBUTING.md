@@ -44,11 +44,15 @@ it in the pull request that ships something. When that merges and `main`
 is green, a release `vX.Y.Z` is made with notes from the merged pull
 requests. Nobody tags by hand.
 
-What's built but not yet tried in a real game goes in
-[UNTESTED.md](UNTESTED.md), and moves to its Tested section once tried.
-Each section there has an issue labelled `needs-in-game-test` (its
-number in the heading): open it with the section, tick its checks as
-they're tried, and close it when the section is empty.
+What's built but not yet tried in a real game is an issue labelled
+`needs-in-game-test`, one a check, in the repo whose code it tests, on
+the ccnix board with its Area and Release (the version that ships it).
+A change's checks are sub-issues of one `needs-in-game-test` issue for
+the change (an ADR, a feature), whose body says how to set the test up.
+Close a check once it's been tried, with a comment saying what happened
+(a failure gets a bug of its own, linked there), and the parent once its
+checks are closed. (UNTESTED.md, the list this replaced, is in the git
+history; what it recorded as tried is in #153.)
 
 ## Changes that touch ccnix-mod too
 
