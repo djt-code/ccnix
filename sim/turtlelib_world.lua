@@ -1101,10 +1101,21 @@ check("gps: a modem in the inventory: swapped in for the check, the count correc
     and why and why:find("1 block off", 1, true), tostring(why))
 check("gps: ...and swapped back: the pickaxe and the chunk controller on, the modem aboard", EQ.left == PICK
     and EQ.right == CONTROLLER and M.carried(S, MODEM_ITEM) == 1, tostring(EQ.left) .. " " .. tostring(EQ.right))
+-- T.gpsHere (what claude's prompt names for a fix, ADR-0019 D1): the modem swapped in for it too, and back
+do
+    local here, how = T.gpsHere()
+    check("gps: T.gpsHere with the modem in the inventory: swapped in for the fix, and back",
+        here and here.x == 1 and here.y == 0 and here.z == 0 and EQ.left == PICK and EQ.right == CONTROLLER
+            and M.carried(S, MODEM_ITEM) == 1, tostring(how) .. "; " .. tostring(EQ.left))
+end
 S.inv[16] = nil
 for slot, it in pairs(S.inv) do if it and it.name == MODEM_ITEM then S.inv[slot] = nil end end
 pos, why = T.checkedPos(true)
 check("gps: no modem on or aboard: not asked", why == nil)
+do
+    local here, how = T.gpsHere()
+    check("gps: ...and T.gpsHere says why there's no fix", here == nil and how:find("no wireless modem", 1, true), tostring(how))
+end
 MODEM = true
 EQ.left = SCANNER
 carry(-1, 0, 0)
