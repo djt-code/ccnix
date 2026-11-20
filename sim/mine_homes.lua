@@ -262,3 +262,61 @@ withSettings({ ["mine.wait"] = false }, function() run("--resume") end)
 check("bulk in a valuables chest, bulk chest full: only what it took goes back",
     count(chestAt(-1, 0, 16), "minecraft:cobblestone") == 64, tostring(count(chestAt(-1, 0, 16), "minecraft:cobblestone")))
 check("back at the start", atStart())
+
+-- 10. hauling far out (every 16 homes, z=256), carrying no coal (in the
+--     field it goes into torches) and the start's top chest out of it (it
+--     all went out with the supplies): the fuel in the tunnel's homes fills
+--     the tank on the way back, and it goes back out without asking for
+--     more at the start; the stock it took from a home is put back on the
+--     way out from the start's top chest; only a tunnel with none left has
+--     it ask
+local function farHaul(emptyHomes, topUp)
+    fresh(40, 200, { bigStart = true })
+    FUEL, LOWEST = 300, 300
+    local hauling = false
+    ONPRINT = function(line)
+        if hauling or not line:find("back to the start with the valuables", 1, true) then return end
+        hauling = true
+        for s = 1, 16 do
+            if Mine.inv[s] and Mine.inv[s].name == "minecraft:coal" then Mine.inv[s] = nil end
+        end
+        for k = 1, 16 do
+            if emptyHomes(k) then
+                local c = chestAt(-1, 0, 16 * k)
+                for s = 1, Mine.SIZE do
+                    if c[s] and c[s].name == "minecraft:coal" then c[s] = nil end
+                end
+            end
+        end
+        if topUp then table.insert(chestAt(0, 1, 0), { name = "minecraft:coal", count = topUp }) end
+    end
+    withSettings({ ["mine.haulEvery"] = 16, ["mine.wait"] = false },
+        function() run("2", "2", "264", "--spacing", "16") end)
+    ONPRINT = nil
+    return hauling
+end
+local function homeCoal(k) return count(chestAt(-1, 0, 16 * k), "minecraft:coal") end
+local function never() return false end
+
+local hauled = farHaul(never)
+check("far haul, no coal on board: the supplies in its home take it back out, no wait at the start",
+    hauled and logHas("Fuel from the homes on the way") and not logHas("put fuel in the start's top chest")
+    and jobState() == "done", tostring(jobState()))
+check("...the homes behind keep their stock", homeCoal(1) == 8 and homeCoal(15) == 8, homeCoal(1) .. ", " .. homeCoal(15))
+check("back at the start", atStart())
+
+hauled = farHaul(function(k) return k == 16 end)
+check("its home out of fuel too: the stocks along the way take it back out",
+    hauled and logHas("Fuel from the homes on the way") and not logHas("put fuel in the start's top chest")
+    and jobState() == "done", tostring(jobState()))
+check("...the furthest homes' stock used first, said to be short with none at the start to put back",
+    homeCoal(15) < 8 and homeCoal(1) == 8 and logHas("short of their fuel stock"), homeCoal(15) .. ", " .. homeCoal(1))
+
+hauled = farHaul(function(k) return k == 16 end, 64)
+check("...with coal in the start's top chest, the stock is put back on the way out",
+    hauled and logHas("Fuel from the homes on the way") and homeCoal(15) == 8 and not logHas("short of their fuel stock")
+    and jobState() == "done", homeCoal(15) .. " in home 15")
+
+hauled = farHaul(function() return true end)
+check("no fuel left in the tunnel: it asks at the start", hauled
+    and logHas("put fuel in the start's top chest") and jobState() == "stopped", tostring(jobState()))

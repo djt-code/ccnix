@@ -19,7 +19,8 @@
 -- (the tunnel, for INGRESS: water flowing into it where it's open, past
 -- the block just dug), WASHED (torches water took), PLACED, DIGS, SPLIT,
 -- SPILLED, TRAVEL_DIGS (digging on a trip home and back), STOP_AT_DIG (a
--- Ctrl+T after so many digs), ONMOVE(ox, oy, oz, nx, ny, nz).  Minecarts:
+-- Ctrl+T after so many digs), ONMOVE(ox, oy, oz, nx, ny, nz), ONPRINT(line)
+-- (each line the program prints, as it prints it).  Minecarts:
 -- Mine.ENTITIES[key] = { item = name, inv = {...} } (a chest minecart has
 -- an inv); what they spill lies in Mine.GROUND[key].  BURNT[name]: what
 -- refuelling burnt; CRAFTED[name]: what a crafting table made.  Chests
@@ -877,6 +878,7 @@ SIM_WORLD = { W = { get = get }, P = P, moves = function() return Mine.moves end
 -- The program's output; a trip home ("... at (x,y,z): back to home") is
 -- noted, to count what's dug on it (TRAVEL_DIGS)
 M.capturePrint(Mine, function(line)
+    if ONPRINT then ONPRINT(line) end
     if line:find("for the supplies.", 1, true) and not SUPPLIES_FROM then SUPPLIES_FROM = Mine.moves end
     local bx, by, bz = line:match("at %((-?%d+),(-?%d+),(-?%d+)%): back to home")
     if bx then TRAVELLING, LEFT_SPOT, BACK = true, false, { tonumber(bx), tonumber(by), tonumber(bz) } end

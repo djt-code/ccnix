@@ -72,10 +72,10 @@
 --    thrown on the floor behind the home (it despawns), and the run goes
 --    on.
 --  * Out of chests for the next home, or of fuel: it goes back to the
---    start (hauling on the way), says what it needs (and tells the player,
---    with mine.report), and looks in the top chest every minute until it's
---    there, then goes back out and on (`sysctl mine.wait=false` stops
---    instead).
+--    start (hauling on the way, and taking fuel from the homes it passes),
+--    says what it needs (and tells the player, with mine.report), and
+--    looks in the top chest every minute until it's there, then goes back
+--    out and on (`sysctl mine.wait=false` stops instead).
 --  * A finished tunnel brings its last home's supplies (chests, fuel,
 --    torches, wood, the crafting table) back to the start, for the next
 --    tunnel; one that stopped leaves them there for `--resume`.
@@ -157,6 +157,10 @@
 --    for bulk blocks or fuel go to the home ahead).
 --  * Fuel: the tank always keeps enough to get back to the start; the
 --    turtle refuels from each home's chest, and coal it mines lands there.
+--    Going back to the start to haul or for supplies, it tops up from the
+--    homes it passes (their fuel stock too) for the trip back out, and
+--    only asks for fuel at the start when the tunnel has none left.  The
+--    stock it took is put back on the way out, from the start's top chest.
 --    It only burns coal, charcoal and the like, never wood or chests.
 --  * Mineshafts: rails in the tunnel, its walls or floor are dug out (and
 --    the wall or floor filled), and minecarts in its way broken; both are
@@ -3080,10 +3084,16 @@ end
 
 -- From the home the turtle is at, walk back to the start collecting the
 -- valuables from every home on the way, and leave them at the start.
--- True if it got there and the start's chests took everything.
-function walkBackCollecting()
+-- `keep`: fuel to have in the tank at the start (for the trip back out):
+-- short of it, it tops up from each home's chest as it passes, the one it
+-- works from first, the fuel stock a home keeps too (noted in `drained`,
+-- to put back on the way out: see refillStocks).  The start's top chest
+-- is the last resort.  True if it got there and the start's chests took
+-- everything.
+function walkBackCollecting(keep)
     leftBehind = {}
     print("Walking back to the start, collecting valuables.")
+    local was, took = turtle.getFuelLevel(), 0
     for k = home.k, 1, -1 do
         local h = homeAt(k)
         alongAxis("x", 0); alongAxis("y", 0)
@@ -3092,10 +3102,19 @@ function walkBackCollecting()
         leaveBulk(h, k > 1)                -- (home 1: the last of it; none goes to the start)
         if containerOn("front") then
             bulkOutOfValuables(h)
+            if keep and was ~= "unlimited" and not T.hasFuel(h.z + T.cfg.fuelMargin + keep) then
+                local before = turtle.getFuelLevel()     -- (before the valuables fill the inventory)
+                T.refuelFrom("front", h.z + T.cfg.fuelMargin + keep)
+                took = took + turtle.getFuelLevel() - before
+                if drained and fuelIn("front") < FUEL_STOCK then drained[k] = true end
+            end
             local left = collect("front")
             if left > 0 then leftBehind[k] = left end
             if left == 0 and not hasSupplies(chestCounts("front")) then pickUpGrown(h) end
         end
+    end
+    if took > 0 then
+        print(string.format("Fuel from the homes on the way: %d (fuel %s).", took, tostring(turtle.getFuelLevel())))
     end
     alongAxis("x", 0); alongAxis("y", 0)
     alongAxis("z", 0)
@@ -3153,6 +3172,49 @@ function takeKit()
     end
 end
 
+-- Fuel items in the container on `side`.
+function fuelIn(side)
+    local n = 0
+    for name, c in pairs(chestCounts(side)) do
+        if T.fuel[name] then n = n + c end
+    end
+    return n
+end
+
+-- Homes whose fuel stock a walk back took (see walkBackCollecting); nil
+-- outside a trip to the start.
+drained = nil
+
+-- On the way back out (from the start, facing along the tunnel), the
+-- fuel stock taken from the homes before `upTo` put back, from the fuel
+-- it brings from the start's top chest, as far as that goes.
+function refillStocks(upTo)
+    local short = 0
+    for k = 1, upTo - 1 do
+        if drained and drained[k] then
+            local h = homeAt(k)
+            alongAxis("z", h.z)
+            T.face(h.face)
+            local have = containerOn("front") and fuelIn("front") or FUEL_STOCK
+            for s = 1, 16 do
+                if have >= FUEL_STOCK then break end
+                local it = turtle.getItemDetail(s)
+                if it and T.fuel[it.name] then
+                    turtle.select(s)
+                    turtle.drop(math.min(it.count, FUEL_STOCK - have))
+                    have = have + it.count - turtle.getItemCount(s)
+                end
+            end
+            turtle.select(1)
+            if have < FUEL_STOCK then short = short + 1 end
+        end
+    end
+    if short > 0 then
+        print(string.format("%d homes are short of their fuel stock (%d each): none left to put back.", short, FUEL_STOCK))
+    end
+    drained = nil
+end
+
 -- From the home it works from, back to the start hauling every home's
 -- valuables there (as many trips as it takes, the emptied grown chests
 -- picked up on the way), then, once the start has what it needs
@@ -3168,7 +3230,9 @@ function viaStart(why, need)
     T.cfg.lowFuel = 1                       -- (the tank keeps enough to get back; each trip out is checked first)
     print(why .. ": back to the start with the valuables.")
     local full = "The chests at the start are full: no room for what it brings back."
-    if not walkBackCollecting() then stop(full) end
+    local outAndBack = 2 * working.z + T.cfg.fuelMargin + (need.fuel or FUEL_WORK)
+    drained = {}
+    if not walkBackCollecting(outAndBack) then stop(full) end
     for _ = 1, 20 do                        -- what didn't fit on board: more trips, the furthest first
         local far = 0
         for k in pairs(leftBehind) do far = math.max(far, k) end
@@ -3179,7 +3243,7 @@ function viaStart(why, need)
         alongAxis("z", h.z)
         T.face(h.face)
         home = h
-        if not walkBackCollecting() then stop(full) end
+        if not walkBackCollecting(outAndBack) then stop(full) end
     end
     stats.hauls = stats.hauls + 1
     local told = false
@@ -3188,11 +3252,12 @@ function viaStart(why, need)
             need.chests - chestsAtStart()), told)
         told = true
     end
-    fuelAtStart(2 * working.z + T.cfg.fuelMargin + (need.fuel or FUEL_WORK), why)
+    fuelAtStart(outAndBack, why)
     home = homeAt(0)
     takeSupplies(ROOM + 2)
     takeKit()
     print(string.format("Back out to home %d (z=%d).", working.k, working.z))
+    refillStocks(working.k)
     alongAxis("z", working.z)
     T.face(working.face)
     home = working
