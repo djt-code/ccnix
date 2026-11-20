@@ -1178,11 +1178,13 @@ local function batchAt(side, list, entries, opts)
     -- (every product stays in the chest till the end, a stack or more each: all of them need room, not the biggest)
     local products = 0
     for _, e in ipairs(entries) do products = products + math.ceil(e.n / stackOf(e.name)) end
-    local info = { crafted = {}, failed = {}, taken = {}, left = {} }
+    local info = { crafted = {}, failed = {}, taken = {}, left = {}, used = {} }
     local take = takeTest(list, entries, opts.take)
     local function failed(e, why) info.failed[#info.failed + 1] = { name = e.name, n = e.n, why = why } end
-    local stashWhy
+    local stashWhy, before
+    local leftWhy = {}                                   -- (why each that stayed did: pull's own words)
     local ran, benchWhy = atBench(side, products, "the products", function(bench)
+        before = T.containerCounts(side) or {}           -- (what the chest had of each before: not the batch's to take)
         stashWhy = workWith(side, function()
             for i, e in ipairs(entries) do
                 if T.freeSlots() < 16 then                -- (a stash that didn't all go in: the chest is full)
@@ -1207,12 +1209,17 @@ local function batchAt(side, list, entries, opts)
             end
         end, function()
             if not take then return end
+            -- (an intermediate a later recipe used is not owed: only what the batch added to the chest, the inventory
+            -- back aboard, comes aboard)
+            local after = T.containerCounts(side) or {}
             for _, name in ipairs(tables.sortedKeys(info.crafted)) do
                 local made = info.crafted[name]
-                if made > 0 and take(name) then
-                    local got = T.pull(side, name, made)
+                local owed = math.max(0, math.min(made, (after[name] or 0) - (before[name] or 0)))
+                if owed < made then info.used[name] = made - owed end
+                if owed > 0 and take(name) then
+                    local got, why = T.pull(side, name, owed)
                     info.taken[name] = got
-                    if got < made then info.left[name] = made - got end
+                    if got < owed then info.left[name], leftWhy[name] = owed - got, why end
                 end
             end
         end)
@@ -1226,7 +1233,7 @@ local function batchAt(side, list, entries, opts)
     end
     local stayed = tables.sortedKeys(info.left)
     if #stayed > 0 then
-        return false, info.left[stayed[1]] .. " " .. shortName(stayed[1]) .. " stayed in the chest: no room for them in the turtle", info
+        return false, info.left[stayed[1]] .. " " .. shortName(stayed[1]) .. " stayed in the chest: " .. tostring(leftWhy[stayed[1]]), info
     end
     return true, info
 end
@@ -1242,7 +1249,8 @@ end
 -- the products stay in the chest unless opts.take (true: what was asked for, a plan's targets; or a name, list or
 -- set of names) brings them aboard.  A recipe that can't be made is noted and the rest go on.  opts: chest, take,
 -- partial (craft what the ingredients allow), move.  Info is { crafted = { name = n }, failed = { { name, n, why } },
--- taken = { name = n }, left = { name = n } (made, but no room aboard) }.  A chest T.addChest knows is read again after
+-- taken = { name = n }, left = { name = n } (made, but it stayed in the chest: the why says why), used = { name = n }
+-- (made, then used by a later recipe: not owed to opts.take) }.  A chest T.addChest knows is read again after
 -- (T.recount).
 function T.craftBatch(list, opts)
     opts = opts or {}
