@@ -85,19 +85,17 @@ the dark cells matched where mobs spawned, and whether the lint's split quieted 
 - **Skills**: the first message lists the six shipped skills (and the model's own); a goal like "light the
   courtyard" gets "Skills that may fit: light-an-area" and the model reads it; `skill(...)` writes its own;
   `/skills` lists them.
-- **Compaction at a goal's end**: a goal ending over 100k logs "compacted: N messages into a summary of M
-  tokens"; the next goal starts on the summary and the skill list. Typing a goal while it runs waits for it.
+- **Compaction at a goal's end**: typing a goal while it runs waits for it.
 - **Compaction mid-goal**: a long goal reaching 250k compacts after a batch of results, keeping the last turns,
   and carries on; no "bound to a different conversation" error. The log shows where the compaction call read
   from the cache.
-- **Cost**: the log's "cache: written again" lines are rare (a compaction, a TTL gap), not every goal.
 - **Chat while code runs**: say something during a long travel or stow run: it comes with that run's results;
   a dig mid-run brings the pickaxe back and the run carries on; `chatHeard()`; "took N s" on each result; the
   chunk controller never moves; `T.withPeripheral` (the scanner) while the chat box holds the side.
 - **Reports with no player set**: with `turtle.player` unset, the chat tool, `T.report` and mine's messages
   reach everyone, and claude's start says so.
 - **Long replies**: a 64000-token reply streams within CC's timeout; a cut-off says thinking or writing.
-- **Light**: `T.darkCells(box, {dimension = "nether"})` on a lit room: compare with where mobs actually appear
+- **Light**: `T.darkCells(box, {dimension = "nether"})`: compare with where mobs actually appear
   (mods may change spawning); honey, slime and packed ice floors; `T.light` through glass and slabs.
 - **Attachments**: `T.attachedTo` under a torch, a button, dust; `T.digCell(..., {attached = "refuse"})`
   refuses and names them.
@@ -110,8 +108,8 @@ the dark cells matched where mobs spawned, and whether the lint's split quieted 
   back, both in the undo journal.
 - **Lint and routes**: `player:` lines show the plan's own; a stair bench is quiet; a wall torch in a walkway
   warned of; a route blocked by its own torches says where.
-- **Storage**: `T.cfg.tools = {"*_pickaxe"}` and `T.stow` puts looted swords away; `T.addChest(..., {holds})`,
-  `T.sortChests()`; a craft at a known chest re-reads it; `T.addChest` on a double chest's other half says so.
+- **Storage**: `T.cfg.tools = {"*_pickaxe"}` and `T.stow` puts looted swords away; a craft at a known chest
+  re-reads it; `T.addChest` on a double chest's other half says so.
 - **setup**: `setup claude` installs help/claude-news.txt and turtle/skills/.
 
 ## ADR-0012: building for the player, a chat box that listens, resuming (ccnix 0.52.0) (#85)
@@ -139,17 +137,14 @@ In-game order: on the castle turtle, after `/ccnix rom update`, give claude a go
 retire the helpers it names, then carry on, and keep /claude/report_harness_v3.md as you work"; the items
 below come up as it works, or try them by asking for them.
 
-- **What's new**: the first goal after the update carries "ccnix was updated from 0.50.x to 0.51.0" and the
-  0.51.0 lines of `help claude-news`; `/claude/.version` is written; the next session doesn't repeat it.
 - **Chat**: the `chat` tool says something in game; with ask, a reply "claude <text>" from the player in
   `turtle.player` comes back (another player's doesn't), and typing at the turtle answers too. `T.report.ask`
   from code the same. After 15 quiet minutes the model is reminded (`claude.remindChat`).
 - **Status line and review**: each lua result ends with position, fuel used, free slots and lava/water seen;
   `review = true` shows the code and runs only on a yes.
-- **Helpers**: `keep("name", code)` writes `/claude/helpers/name.lua`; a broken helper file beside good ones is
+- **Helpers**: a broken helper file beside good ones is
   named at the start and the rest still load; `print` at the top of helpers.lua works.
-- **The conversation**: the log's `tokens:` lines over a long goal, against the 200k to 341k of 0.50 (old code
-  and thinking are cleared now); `/new` at the goal prompt starts afresh with memory kept.
+- **The conversation**: `/new` at the goal prompt starts afresh with memory kept.
 - **Liquids**: `T.moveTo(..., {dig = true})` beside the moat refuses ("would release lava at ..."), and plans
   round it; `T.digCell` beside lava refuses; with `liquid = true` it digs. `T.harvest` skips blocks touching
   water sources too.
@@ -882,6 +877,18 @@ numbers, the text tools and the network tools. Still to try:
   reboot it was listening (`netstat -tnl`). (#52)
 
 ## Tested
+
+- 2026-11-17 (recorded 2026-11-19) — from turtle 10's v4 report and its log, on ccnix 0.53.0 (ADR-0015's
+  Context has the numbers):
+  - ADR-0011 What's new: its first goal carried the 0.53.0 news, read at the start.
+  - ADR-0011 `keep("name", code)`: "keep("settings", ...) re-ran and rewrote the helper in one call".
+  - ADR-0011 the conversation: goals peaked at 183k tokens, against the 200k to 341k of 0.50.
+  - ADR-0013 compaction at a goal's end: 3 compactions, summaries of 2.3k to 2.7k tokens, each next goal
+    starting at about 33k.
+  - ADR-0013 cost: no "cache: written again" in 237 calls.
+  - ADR-0013 storage: `T.addChest(..., {holds})` on 8 known chests; `T.sortChests()` fixed the overlaps.
+  - ADR-0013 light: `T.darkCells` in the nether found 384 spawnable dark cells, lit down to 3 (not yet
+    compared with where mobs appear).
 
 - 2026-11-19 — ADR-0014 (main before 0.54.0), a 10x10 endless tunnel in the overworld (`mine.length=0`,
   `mine.haulEvery=8`), still running:
