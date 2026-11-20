@@ -59,6 +59,10 @@ to try `--new` over it and the supplies coming home.
   "Threw away N bulk blocks"; no stop.
 - **Waiting**: out of chests (or fuel) it goes home, says what it needs (and in chat with mine.report), looks
   every minute, and carries on after you put them in; `service stop mine` or Ctrl+T ends the wait.
+- **Fuel from the tunnel**: a haul far out (the endless miner's next one, at home 56) with no fuel in the start's
+  top chest: "Fuel from the homes on the way: N (fuel F)" on the walk back, and straight back out, no "put fuel
+  in the start's top chest". With coal in the top chest, the homes whose fuel stock it took get theirs back on
+  the way out (8 each); with none, "N homes are short of their fuel stock". It asks only when the tunnel has none.
 - **`--new` over the same tunnel**: `mine --new` (or `--resume`) of a finished tunnel carries it on as a plain
   `mine` with a longer `mine.length` did (tested).
 - **Crafting through turtlelib**: chests and torches crafted from mineshaft wood at a home, the crafting table
