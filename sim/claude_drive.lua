@@ -2637,3 +2637,37 @@ check("gps: GPS far from the count: the goal says so, and T.pos is left as count
 gps = nil
 peripheral.getNames, peripheral.getType, peripheral.call = rawNames, rawType, rawCall
 end
+
+-- ADR-0019 D1: the code's sleep is in real seconds (realtime.sleep), os.clock and os.startTimer stay game time, and
+--     gps is a global; the prompt says so and names T.gpsHere for a fix with a modem swapped in.  (The server at 60
+--     ticks a second: a game second is a third of a real one.)  D3: T.cfg.equipToDig is on in a session.
+do
+local clocks = { game = 0, real = 5000000 }
+local sleepWas, clockWas, epochWas, gpsWas = sleep, os.clock, os.epoch, gps
+sleep = function(s) clocks.game, clocks.real = clocks.game + s, clocks.real + s / 3 end
+os.clock = function() return clocks.game end
+os.epoch = function() return math.floor(clocks.real * 1000 + 0.5) end
+gps = { locate = function() return 100, 64, -50 end }
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local r, g = os.epoch('utc'), os.clock()\nsleep(10)\n"
+        .. "return string.format('%.1f real, %.1f game', (os.epoch('utc') - r) / 1000, os.clock() - g)" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return gps.locate()" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "return T.cfg.equipToDig" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("wait ten seconds")
+sleep, os.clock, os.epoch, gps = sleepWas, clockWas, epochWas, gpsWas
+local s1, g1, e1 = resultsIn(2).toolu_1, resultsIn(3).toolu_2, resultsIn(4).toolu_3
+check("D1: sleep(10) in the code at 60 ticks a second lasts 10 real seconds (30 game ones on os.clock)",
+    s1 and s1.content == "-> 10.0 real, 30.0 game", s1 and s1.content)
+check("D1: gps is a global in the code", g1 and g1.content == "-> 100\n-> 64\n-> -50", g1 and g1.content)
+check("D3: T.cfg.equipToDig is on in a session", e1 and e1.content == "-> true", e1 and e1.content)
+local sys = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+local tool = HTTP.requests[1] and HTTP.requests[1].body.tools[1].description or ""
+check("D1: the prompt says sleep is real seconds and os.clock game time, and names T.gpsHere for a modem swapped in",
+    sys:find("Your sleep is realtime.sleep (real seconds); os.clock and os.startTimer count game time", 1, true)
+        and sys:find("T.gpsHere() swaps one in from the inventory for the fix", 1, true)
+        and not sys:find("sleep, os.clock and os.startTimer count game ticks", 1, true)
+        and tool:find("sleep (real seconds), gps, fs and io in scope", 1, true))
+end

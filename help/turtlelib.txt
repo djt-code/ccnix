@@ -74,6 +74,11 @@ T.startAtHome(force)
 
 == The position from GPS (ADR-0018) ==
 
+T.withGps(fn, ...)
+    Run fn(...) with GPS to ask: as it is with a wireless modem on, else one from the inventory swapped in and back. fn's results, or nil alone when there's no GPS: no modem on or aboard, turtle.gps false, no side to swap one onto.
+
+    T.withGps(gps.locate) is a fix with a modem swapped in for it if need be; T.gpsHere uses it. The swap is T.withPeripheral's: the chunk controller never comes off.
+
 T.checkedPos(again)
     The saved position, checked against GPS where there is GPS: the position, and a line saying what GPS changed.
 
@@ -1199,7 +1204,7 @@ T.gpsCheck(saved)
 T.gpsHere()
     Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
 
-    For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the map and the world origin follow, so later checks agree. The facing comes from a scan, else a step.
+    A wireless modem in the inventory is swapped in for the fix when none is on, and back (T.withGps). For a start with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the map and the world origin follow, so later checks agree. The facing comes from a scan, else a step.
 
 == The map ==
 
