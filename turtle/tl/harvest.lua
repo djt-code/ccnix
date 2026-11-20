@@ -404,8 +404,24 @@ local function burnBucket()
     return burned and turtle.getFuelLevel() > before
 end
 
+-- What came of the tries at lava that came to nothing, for a why: "1,-1,1 flowing, 3,-1,3 out of reach", three at most
+-- and how many more; nil if every try took lava up.
+local TRIES_SHOWN = 3
+local function triesText(tries)
+    local parts = {}
+    for _, t in ipairs(tries) do
+        if t.found ~= "taken" then parts[#parts + 1] = T.posKey(t) .. " " .. t.found end
+    end
+    if #parts == 0 then return nil end
+    local shown = {}
+    for i = 1, math.min(#parts, TRIES_SHOWN) do shown[i] = parts[i] end
+    local out = table.concat(shown, ", ")
+    if #parts > TRIES_SHOWN then out = out .. " and " .. (#parts - TRIES_SHOWN) .. " more (info.tries)" end
+    return out
+end
+
 -- Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and
--- come back, facing as before.  Returns true, fuel gained; false, why, fuel gained; nil, why.
+-- come back, facing as before.  Returns true, fuel gained, info; false, why, fuel gained, info; nil, why.
 --
 -- `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit
 -- the tank (1000 each), or when no lava source is left to reach.  It needs an empty bucket aboard (a lava bucket aboard
@@ -413,7 +429,9 @@ end
 -- the bucket goes on it, and one that proves to be flowing, not a source, is passed over.  Lava in a protected area is
 -- left (the area T.inside names is the job's), and so is lava in opts.exclude, a list of areas' names and boxes.
 -- opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan =
--- false }, never into lava).
+-- false }, never into lava).  Info, once it has gone looking, is { tries = { { x, y, z, found } } }: each cell tried, in
+-- order, and what it found there ("taken", "flowing", "out of reach", "not lava (minecraft:air)", ...); when it comes
+-- back short, the why says what the tries that came to nothing found, and where.
 function T.refuelFromLava(target, opts)
     opts = opts or {}
     local skip, badExclude = excluded(opts.exclude)
@@ -448,6 +466,7 @@ function T.refuelFromLava(target, opts)
     if #candidates == 0 then return false, "the map knows no lava source", gained() end
     local tries, stopWhy = opts.tries or 20, nil
     local tried = 0
+    local info = { tries = {} }
     while turtle.getFuelLevel() < target and fits() and #candidates > 0 and tried < tries do
         local best = 1
         for i = 2, #candidates do
@@ -456,24 +475,34 @@ function T.refuelFromLava(target, opts)
         local c = table.remove(candidates, best)
         tried = tried + 1
         local scooped = false
+        local found = "out of reach"                     -- (no stand beside it the turtle could get to)
         for _, s in ipairs(standsFor(c, false)) do
             local ok = T.moveTo(s.x, s.y, s.z, move)
             if ok then
                 local d = T.dirTo(c)
                 local seen, data = T.look(d)
                 if not (seen and type(data) == "table" and LAVA[data.name]) then
-                    T.map.set(c.x, c.y, c.z, seen and type(data) == "table" and data.name or AIR, seen and data.state or nil)
+                    local name = seen and type(data) == "table" and data.name or AIR
+                    T.map.set(c.x, c.y, c.z, name, seen and data.state or nil)
+                    found = "not lava (" .. name .. ")"
                 elseif data.state and tonumber(data.state.level) ~= 0 then
                     T.map.set(c.x, c.y, c.z, data.name, data.state)
+                    found = "flowing"
                 else
                     local sel = turtle.getSelectedSlot()
-                    if T.selectItem(BUCKET) and T.placeDir(d) then scooped = true else stopWhy = "the bucket would not take the lava up at " .. T.posKey(c) end
+                    if T.selectItem(BUCKET) and T.placeDir(d) then
+                        scooped, found = true, "taken"
+                    else
+                        stopWhy, found = "the bucket would not take the lava up at " .. T.posKey(c), "the bucket would not take it up"
+                    end
                     turtle.select(sel)
                 end
                 break
             end
         end
+        info.tries[#info.tries + 1] = { x = c.x, y = c.y, z = c.z, found = found }
         if scooped and not burnBucket() then
+            info.tries[#info.tries].found = "taken, but it would not burn"
             stopWhy = "took lava up but it would not burn"
             break
         end
@@ -481,9 +510,12 @@ function T.refuelFromLava(target, opts)
     local back, backWhy = reach(from, move)
     T.face(dir)
     local ok = turtle.getFuelLevel() >= target or not fits()
-    if not back then return false, "couldn't get back to " .. T.posKey(from) .. ": " .. tostring(backWhy), gained() end
-    if ok then return true, gained() end
-    return false, stopWhy or (#candidates == 0 and "no more lava sources it could reach") or ("gave up after " .. tried .. " tries"), gained()
+    if not back then return false, "couldn't get back to " .. T.posKey(from) .. ": " .. tostring(backWhy), gained(), info end
+    if ok then return true, gained(), info end
+    local why = stopWhy or (#candidates == 0 and "no more lava sources it could reach") or ("gave up after " .. tried .. " tries")
+    local said = not stopWhy and triesText(info.tries)
+    if said then why = why .. ": " .. said end
+    return false, why, gained(), info
 end
 
 --------------------------------------------------------------------------
