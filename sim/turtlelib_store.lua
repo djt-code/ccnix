@@ -12,6 +12,8 @@
 --   * T.where: the chests with an item (a name, a glob, no namespace), nearest first, with the total;
 --   * T.fetch: goes to the chest that has it, takes the count (across chests when it must), keeps the list right, tries
 --     the next chest when one is empty behind its back, stops for no room, comes back; a glob as T.where takes it;
+--     (ADR-0019 D2) only chests within opts.maxDistance (48) of where it began, the why saying what is farther and
+--     where, opts.far and a larger opts.maxDistance going there; T.prepare counting and fetching within it too;
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
@@ -741,6 +743,49 @@ do
     ok, why = T.stow()
     check("...with only the bulk chest there: it's called the bulk chest", ok == false
         and why:find("the bulk chest is at 100,0,1, 100 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
+end
+
+do
+    -- ADR-0019 D2: one reach for fetching as for stowing.  Glowstone only at the far base (100 blocks east), cobblestone
+    -- here and there: T.fetch and T.prepare don't go the 100 blocks, the why naming the chest and how far; opts.far goes
+    local GLOW = "minecraft:glowstone"
+    local FAR_NOTE = "6 are farther (the nearest at 100,0,1, 100 blocks off, over opts.maxDistance 48: opts.far = true goes)"
+    setUp()
+    W.set(100, 0, 1, "minecraft:chest")
+    fill(100, 0, 1, { [1] = { GLOW, 6 }, [2] = { COBBLE, 32 } })
+    T.addChest(100, 0, 0, 0)
+    T.catalogue()
+    local moves = W.S.moves
+    local got, why = T.fetch(GLOW, 4)
+    check("D2: T.fetch stays at its base: glowstone only 100 blocks off isn't gone for, the why naming the chest, how far and opts.far",
+        got == 0 and W.S.moves == moves and here() and why == "no chest within opts.maxDistance 48 holds minecraft:glowstone; " .. FAR_NOTE,
+        tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch(COBBLE, 70)
+    check("...what is here is taken, the rest said to be farther", got == 64 and carrying(COBBLE) == 64 and chestHas(100, 0, 1, COBBLE) == 32
+        and why == "the chests within opts.maxDistance 48 hold no more minecraft:cobblestone (got 64 of 70); 32 more are farther (the nearest "
+            .. "at 100,0,1, 100 blocks off, over opts.maxDistance 48: opts.far = true goes)" and here(), tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch(GLOW, 4, { far = true })
+    check("...opts.far = true goes there", got == 4 and why == nil and carrying(GLOW) == 4 and chestHas(100, 0, 1, GLOW) == 2 and here(),
+        tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch(GLOW, 1, { maxDistance = 200 })
+    check("...and so does a larger opts.maxDistance", got == 1 and carrying(GLOW) == 5, tostring(got) .. " " .. tostring(why))
+    got, why = T.fetch(GLOW, 1, { maxDistance = -1 })
+    check("...a bad opts.maxDistance: nothing, and why", got == 0 and why == "opts.maxDistance is a number of blocks, 0 or more", tostring(why))
+
+    -- T.prepare counts only the chests within reach before it moves, and fetches only from them
+    setUp()
+    W.set(100, 0, 1, "minecraft:chest")
+    fill(100, 0, 1, { [1] = { GLOW, 6 } })
+    T.addChest(100, 0, 0, 0)
+    T.catalogue()
+    moves = W.S.moves
+    local ok, info
+    ok, why, info = T.prepare({ need = { glowstone = 2 } })
+    check("D2: T.prepare short here, the rest at the far base: refused before moving, saying where the rest is", ok == nil and W.S.moves == moves
+        and why == "short of glowstone: need 2, have 0, " .. FAR_NOTE .. " (aboard and in the chests as last read; T.catalogue reads them again, "
+            .. "spec.partial goes for what there is)" and info.short[1].far == 6, tostring(why))
+    ok, why = T.prepare({ need = { glowstone = 2 }, far = true })
+    check("...spec.far = true fetches it from there", ok == true and carrying(GLOW) == 2 and here(), tostring(why))
 end
 
 do

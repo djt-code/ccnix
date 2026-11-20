@@ -172,7 +172,7 @@ T.addRecipe(spec) - Add a recipe (modded items, say): out (the item made), count
 T.recipe(name) - The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
 T.canCraft(name, n, opts) - Can the item be crafted: true, or false, why and the short list. Counts the inventory and the chest.
 Planning:
-T.craftPlan(targets, opts) - Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
+T.craftPlan(targets, opts) - Plan crafting { [name] = n } down the recipe tree against the inventory and chests within 48 blocks: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 Crafting from a chest:
 T.craft(name, n, opts) - Craft n of an item from a chest (stash the inventory, fill the grid, craft, put it all back): true and how many, or false/nil and why.
 T.craftBatch(list, opts) - Craft a list { { name, n }, ... } (only what it names) or a T.craftPlan plan (sticks for torches too) with one stash, the products left in the chest (opts.take: aboard): true, info; false, why, info if some failed; nil, why.
@@ -235,14 +235,14 @@ T.ignite(x, y, z, opts) - Light a fire in the cell x, y, z with flint and steel,
 The list of chests, in a data file:
 T.addChest(x, y, z, side, bulk, opts) - Tell the turtle of a chest: it stands at x, y, z (the turtle's frame), the chest on `side` ("up", "down" or a heading 0 to 3); opts.holds: globs of what it is for. True (and a note if known or changed), or nil and why.
 T.forgetChest(x, y, z, side) - Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
-T.chests() - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
+T.chests(opts) - The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
 Going to a chest:
 T.recount(side) - Read the known chest on `side` of the turtle ("front", "top"/"up", "bottom"/"down") again, into the list of chests. The chest as T.chests gives it, or nil and why.
 Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the chest's side), else every chest known. True, info; false, why, info if some couldn't be read; nil, why.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 What there is, everywhere:
 T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:

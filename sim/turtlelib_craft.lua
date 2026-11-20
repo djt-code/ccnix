@@ -18,7 +18,8 @@
 --     there is used first (but a target always made), any planks from the log there is, a mixed chest, coal from a coal
 --     block, a loop in the recipes ending, two targets sharing, the catalogue's chests counted; T.craftBatch(plan) crafts
 --     it and opts.take brings the targets aboard, a short plan refused; T.craft and T.craftBatch at a chest the catalogue
---     knows read it again (T.recount), so the list says what they took and left;
+--     knows read it again (T.recount), so the list says what they took and left; (ADR-0019 D2) only the catalogue's
+--     chests within opts.maxDistance count, what only a far base has listed as plan.far, opts.far counting it;
 --   * the redstone and the rest the turtle's model wrote for itself (ADR-0013): a barrel from mixed planks and wooden slabs,
 --     a soul campfire from nether stems, a repeater's plan through redstone torches, a lever, a stone button and iron
 --     doors in one batch, a respawn anchor's recipe (the mock's rows written apart from the game's recipe files);
@@ -667,6 +668,27 @@ do
     local plan = T.craftPlan({ ["minecraft:torch"] = 4 })
     check("with no chest named, the catalogue's chests and the inventory are what there is", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1",
         plan and countsLine(plan.base) .. " / " .. countsLine(plan.short))
+end
+
+do
+    -- ADR-0019 D2: the chests within opts.maxDistance (48) are what there is; what only a far base has is listed apart
+    fresh()
+    fill(0, 0, 1, { [1] = { "minecraft:oak_log", 3 } })
+    W.set(100, 0, 1, "minecraft:chest")
+    fill(100, 0, 1, { [1] = { "minecraft:coal", 5 } })
+    T.addChest(0, 0, 0, 0)
+    T.addChest(100, 0, 0, 0)
+    T.catalogue()
+    local plan, why = T.craftPlan({ ["minecraft:torch"] = 4 })
+    check("D2: T.craftPlan counts the chests here only: the coal 100 blocks off is short here, listed as at a far base", plan and not plan.ok
+        and plan.short["coal or charcoal"] == 1 and plan.far and countsLine(plan.far) == "coal 1"
+        and why == "short of coal or charcoal 1 (not there, and not to be crafted from what is); only at a far base: coal 1 (the nearest at "
+            .. "100,0,1, 100 blocks off: opts.far = true counts those chests)", tostring(why))
+    plan, why = T.craftPlan({ ["minecraft:torch"] = 4 }, { far = true })
+    check("...opts.far = true counts the far base's chests", plan and plan.ok and countsLine(plan.base) == "coal 1, oak_log 1" and plan.far == nil,
+        tostring(why))
+    plan = T.craftPlan({ ["minecraft:stick"] = 4 })
+    check("...a plan the chests here cover has no far list", plan and plan.ok and plan.far == nil, plan and countsLine(plan.short))
 end
 
 do

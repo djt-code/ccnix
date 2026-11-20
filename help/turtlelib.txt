@@ -730,9 +730,9 @@ T.canCraft(name, n, opts)
 == Planning ==
 
 T.craftPlan(targets, opts)
-    Plan crafting { [name] = n } down the recipe tree against the inventory and the chests: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
+    Plan crafting { [name] = n } down the recipe tree against the inventory and chests within 48 blocks: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 
-    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok }.
+    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok, far }. As T.fetch, only chests within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all. A short plan's far ({ name = n }) is what the chests beyond would give it, and the why says where they are.
 
 == Crafting from a chest ==
 
@@ -1085,10 +1085,10 @@ T.addChest(x, y, z, side, bulk, opts)
 T.forgetChest(x, y, z, side)
     Forget the chest at this place (as T.addChest was given it, or another stand for the same chest). True, or false and why.
 
-T.chests()
+T.chests(opts)
     The chests the turtle knows, as a list of { x, y, z, side, bulk, seen, other, holds, items = { name = count } }.
 
-    seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything.
+    seen is when the chest was last read (seconds, the clock T.catalogue uses), 0 if never; other is the other half's cell of a double chest; holds the globs of what it is for (T.addChest), nil for anything. With opts (maxDistance, near, far, as T.fetch takes them) two lists: the chests within reach, and those beyond it, nearest first, each with distance (blocks from where the reach is measured) and cell (the chest's own); nil and why for a bad opts.
 
 == Going to a chest ==
 
@@ -1112,9 +1112,9 @@ T.where(name)
     It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds) and age how long ago that was, so an old count can be read again first. Nil and why when no chest is known.
 
 T.fetch(name, n, opts)
-    Go to the chests that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+    Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
 
-    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 
 == What there is, everywhere ==
 
@@ -1144,7 +1144,7 @@ T.sortChests(opts)
 T.prepare(spec)
     Get ready for a job in one trip, T.prepare{ need = { [name] = n }, freeSlots = k }: stow what isn't needed, fetch what is, come back, check the room. True, info; false, why, info (what is short, too few slots free); nil, why.
 
-    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have } }, free }.
+    spec.need is { [name] = n }: what the turtle should carry (names, minecraft: assumed), spec.freeSlots how many slots must be empty after (default 0). The chests' list (as last read) is checked first: if they and the turtle together hold too little of something it refuses before moving, naming what is short, unless spec.partial. Then it stows everything that isn't needed (but never a tool T.isEssential keeps, fuel or a peripheral; what is needed stays aboard whole), fetches what is missing, nearest chest first, and comes back facing as before (spec.stay: stays at the last chest). Then it counts again: anything still short, or fewer free slots than asked, is a failure that says what. As T.stow and T.fetch, only chests within spec.maxDistance (48) of where it began count and are gone to (what the farther ones hold is said); spec.far = true takes them all. spec.move is T.moveTo's. Info is { fetched = { name = n }, stowed, short = { { item, need, have, far } }, free } (far: how many the chests beyond the reach hold).
 
 T.autoDump()
     Make room: stow what is not kept (T.stow), or dump the junk (T.dumpJunk) if there are no chests; T.cfg.autoDump = true runs it when the inventory is nearly full. The results are those of the one it ran; nil and why if neither is set up.

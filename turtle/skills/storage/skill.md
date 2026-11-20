@@ -37,6 +37,9 @@ a job that plans on what the chests hold, and after crafting or dropping by hand
   and `T.addChest` it with a category.
 - `T.where(name)` lists the chests with an item and the age of each count; `T.fetch(name, n)`
   goes and takes it; `T.prepare{ need = { ... }, freeSlots = k }` does a job's trip at once.
+- `T.fetch`, `T.prepare`, `T.stow` and `T.craftPlan` keep to the chests within 48 blocks of
+  where the call began (`maxDistance`): the why says what another base holds and how far;
+  `{ far = true }` goes there (fuel and time: ask first).
 - Counts go stale: after your own `turtle.drop`/`suck` at a known chest, call
   `T.recount(side)` while still beside it. `T.craft` and `T.craftBatch` recount for you.
   Before a plan that depends on counts (`T.craftPlan`, a big build), `T.catalogue()`.
