@@ -2027,6 +2027,11 @@ run("what about reboots")
 local sys37 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("the prompt says /claude/resume.txt holds the goal, to add where it is",
     sys37:find("While a goal is under way /claude/resume.txt holds it, for a resume after a reboot", 1, true) ~= nil)
+-- ADR-0019 (G10: the model asked for a reboot and ended its reply, which ended the goal and deleted the file)
+check("...that the file is the harness's, lines added under its first; and that ending a reply ends the goal and deletes it,"
+        .. " so a planned reboot stays in the goal",
+    sys37:find("The file is the harness's: add lines under its first, never rewrite it", 1, true) ~= nil
+        and sys37:find("Ending your reply ends the goal and deletes the file: for a planned reboot, stay in the goal (a chat ask, or a call that waits)", 1, true) ~= nil)
 end
 
 -- 38. how much log is kept (ADR-0012 D5): past claude.logSize the log
