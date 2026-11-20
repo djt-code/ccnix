@@ -23,10 +23,10 @@
 --                   piglins, piglins, hoglins and blazes (the walk-target check every pathfinding monster passes,
 --                   MC-156004); ghasts and magma cubes whatever the light: only the floor or the room stops them
 -- The turtle can't tell which dimension it is in: opts.dimension says, else the setting T.cfg.dimension, else it is
--- the overworld.  Only two cells of room are asked for (an enderman wants three, a ghast more, a spider a wider
--- space), and the game's chances (sky light at night, the distance from a player) aren't modelled.  Mods in a pack can
--- change spawning, and a block the tables don't know is taken as a solid one: check in game, comparing the dark cells
--- with where mobs appeared.
+-- the overworld.  In the nether, T.cfg.dimension = "nether" once covers T.darkCells and T.planLights.  Only two cells
+-- of room are asked for (an enderman wants three, a ghast more, a spider a wider space), and the game's chances (sky
+-- light at night, the distance from a player) aren't modelled.  Mods in a pack can change spawning, and a block the
+-- tables don't know is taken as a solid one: check in game, comparing the dark cells with where mobs appeared.
 
 local T = require("turtlelib")
 local text = require("text")
@@ -453,8 +453,8 @@ end
 -- overworld and the end what a player calls lit (8: crops grow, and the spawning limit, 0, is far under it)
 local PLAN_MIN = { overworld = 8, ["end"] = 8, nether = 12 }
 
--- The fewest lights, of the places given, that bring every cell to opts.min (8; 12 in the nether): a list of
--- { x, y, z, name } to place, nearest first, and info; nil and why.
+-- The fewest lights, of the places given, that bring every cell to opts.min (8; 12 with T.cfg.dimension = "nether",
+-- set once for T.darkCells too): a list of { x, y, z, name } to place, nearest first, and info; nil and why.
 --
 -- `cells` are the cells to light ({ x, y, z }: a walkway's feet cells, T.darkCells' list); `candidates` the cells a
 -- light may go in ({ x, y, z } or { x, y, z, name }: in the wall beside a path, the floor under it).  It reads the map

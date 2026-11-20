@@ -2123,8 +2123,8 @@ function T.digCell(x, y, z, opts)
     return run()
 end
 
--- The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where
--- it moved to last.
+-- The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as {x=, y=, z=} tables (c.x,
+-- not c[1]); the last is where it moved to last.
 --
 -- Every move through turtlelib or the turtle API adds to it, by any program; T.retrace walks it back.  It lives in memory
 -- (a reboot starts it again) and moves with the frame when the turtle re-zeroes.

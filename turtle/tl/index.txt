@@ -80,7 +80,7 @@ T.isFalling(name) - Does this block fall when what is under it goes (sand, grave
 T.cellSet(spec) - The cells of a list or set (opts.digOnly) as a set of "x,y,z" keys, or nil and why.
 T.moveTo(x, y, z, opts) - Move to x, y, z, digging only what opts.dig allows: true (and a warning, if any), or false, why, the block and cell that stopped it. opts: order, dig, digOnly, avoid, inside, liquid; path = true hands a blocked run to T.travel.
 T.digCell(x, y, z, opts) - Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
-T.trail() - The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as { x, y, z }; the last is where it moved to last.
+T.trail() - The breadcrumb trail: the cells the turtle moved through lately (up to 200), oldest first, as {x=, y=, z=} tables (c.x, not c[1]); the last is where it moved to last.
 T.retrace(n, opts) - Walk back along the trail over the last n cells (default all of it), skipping loops. True and the moves made, or false, why and the moves made.
 T.turnsTo(d) - Turns it takes to face direction d (none for up or down).
 T.eachAround(skip, fn) - Call fn(d) with each direction but `skip`, the fewest turns away first (so up and down, and the way it faces, come before any turn).
@@ -208,7 +208,7 @@ T.undo(n, opts) - Put back what the journal wrote down, newest first: the last n
 tl.light: block light over the map, and the cells where a mob could spawn in the dark:
 T.light(box, opts) - The block light in a box from the map: a function level(x, y, z) giving a cell's light (0 to 15; nil for a cell outside the box), and info; nil and why.
 T.darkCells(box, opts) - Where a mob could spawn in a box: a list of { x, y, z, light } (the feet cell) at or under the dimension's limit, darkest first, opts.limit at most (50; info.more the rest), and info (info.unsure: cells to inspect); nil and why.
-T.planLights(cells, candidates, opts) - The fewest lights, of the places given, that bring every cell to opts.min (8; 12 in the nether): a list of { x, y, z, name } to place, nearest first, and info; nil and why.
+T.planLights(cells, candidates, opts) - The fewest lights, of the places given, that bring every cell to opts.min (8; 12 with T.cfg.dimension = "nether", set once for T.darkCells too): a list of { x, y, z, name } to place, nearest first, and info; nil and why.
 tl.lint: a build as a two-tall player meets it: warnings about its stairs, railings, drops and lights, and paths:
 T.blockKind(name) - What a block is to a player, by its name: the kind's name (open, railing, stairs, slab, solid, ...) and a copy of its facts ({ pass, floor, height, ... }).
 The lint:
