@@ -3,7 +3,7 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
 == 0.54.0
-The server ticks 60 times a second, not 20: sleep, os.clock and os.startTimer count game ticks and ran 3x fast. Timeouts are real seconds now (T.report.ask, the chat tool's ask, T.harvest's opts.timeout); require("realtime") gives now(), sleep(s), timer(s) and tickRate() in real seconds. Waits your notes timed were about a third as long as they said.
+The server ticks 60 times a second, not 20: os.clock and os.startTimer count game ticks and run 3x fast. sleep(n) in your code is real seconds now, whatever the tick rate. Timeouts are real seconds too (T.report.ask, the chat tool's ask, T.harvest's opts.timeout); require("realtime") gives now(), sleep(s), timer(s) and tickRate() in real seconds. Waits your notes timed were about a third as long as they said.
 Chat no longer shows mojibake: arrows and dashes you write are spelled out (-> and -) for the game.
 Two bases: T.stow takes the nearest chest that will have an item, within 48 blocks of where it began (opts.far goes farther; the why says where the far one is); T.sortChests sorts the site you're at, never between bases. Where holds overlap ("*brick*" and "*_stairs") the more specific wins, and T.addChest warns.
 T.catalogue(spots) reads only the spots now, not every chest known.
@@ -18,8 +18,22 @@ New: T.planLights(cells, candidates, opts) picks the fewest lights to bring cell
 T.darkCells: info.unsure lists the cells to inspect; the summary says when the list is cut. T.lint: opts.rules, and the limit is shared between rules. T.scanBox routes round and scans from near a centre it can't reach. T.posKey and T.dist say so when given a list.
 The sandbox has no load, loadstring, _G or coroutine: check(code) compiles without running. helpers() lists what each helper file defines and the names T has too: run it and retire what the library does now.
 Your helpers/task41.lua sets T.keep = {...} wholesale, wiping what your settings helper keeps each session: add to T.keep instead (T.keep[name] = true).
-A goal is summarized at 150k now (was 250k), and the summary keeps these notes until you act on them. Repeated lines in a result come once with (xN).
+A goal is summarized at 150k now (was 250k), and the summary keeps these notes until you act on them. Three or more identical lines in a row in a result come once with (xN); short lines like end never fold, so printed code comes back whole.
 GPS: with a wireless modem on you or in your inventory (swapped in for the check) and GPS hosts in range, your T.pos is checked against GPS at each goal's start: put right if it's up to 16 blocks off (a "[Position check: ...]" line says so), found if it was lost, and the world origin set from GPS if there's none. Farther off, nothing is corrected and you're told: ask the player. A world origin the player gave follows GPS where they disagree (the line names both). T.checkedPos() asks again.
+Ending a reply ends the goal and deletes /claude/resume.txt. For a planned reboot, stay in the goal: ask in chat with ask = true, which waits. resume.txt is the harness's: add lines under its first line, don't rewrite it (your testlog.lua resume() can go if this does the job).
+The options a session starts with (--steps, --cache, --model, --effort) are kept in the setting claude.options: a plain claude after a reboot starts with them, not on 60 steps and a 5-minute cache.
+gps is a global in your code; gps.locate answers only with a wireless modem on. T.gpsHere() swaps one in from your inventory for the fix and puts back what was there; T.withGps(fn) runs code with one on.
+A peripheral you put on yourself stays on: claude's put-back and T.withPeripheral put a side back only if it still holds what they put on, and say so when they don't.
+A dig that finds no tool on puts the pickaxe from your inventory on (never on the chunk controller's side; a modem there goes into the inventory) and says so once (T.cfg.equipToDig, on in your sessions). It doesn't put the modem back.
+T.fetch, T.prepare and T.craftPlan keep to chests within 48 blocks of where the call starts, as T.stow does. The why says what another base holds, the nearest chest and how far (a plan lists it in plan.far); { far = true } or maxDistance = n goes there: ask the player first. T.fetch takes the globs T.where takes ("*_sword").
+Of several of the same tool in a chest, T.fetch and T.pull take one that will go on (not worn, not enchanted) first; opts.pick = function(d) ... end chooses by the chest's item detail (d.damage, d.enchantments).
+T.lint warns of a plan's wall torch (or lantern, sign) in a walkway now: the plan's item is read as its wall form. T.build gives the drops on top of your walls as one line, the cells in info.topDrops.
+T.pave counts what it would dig against your free slots before it moves, and refuses with the counts if it won't fit; T.digDrop(name) says what a block drops.
+T.placeAt refuses opts.exit at the cell it's placing in. A sign's text may be a list of lines. A sideways chain in the open needs a block beyond the target first: opts.temp props only from below.
+T.planLights takes the nether's light 12 from T.darkCells' list; or set T.cfg.dimension = "nether" once and the light functions all use it.
+T.craftBatch{take = true} no longer says "no room" for planks or sticks a later recipe used up. T.addChest's overlap warning names real items only, three at most. T.stow's far note names the chest for the item and its kind; T.sortChests says "at this site". T.refuelFromLava's why says what each try found, and where.
+fileio is there only through require("fileio"). T.trail's entries are {x=, y=, z=}.
+-- ADR-0019 (#129; #130-#132, #135, #137, #151; in-game checks as sub-issues of its needs-in-game-test issue): the fifth field report's fixes and decisions.
 -- ADR-0018 (#116 for the in-game checks): the turtle programs take their position from GPS.
 -- ADR-0015 (#98-#101, #103; in-game checks #102): real seconds, mojibake, two bases, crafting counts, placement, the model's helpers as library functions.
 

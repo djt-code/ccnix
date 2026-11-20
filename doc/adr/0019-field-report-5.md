@@ -1,6 +1,6 @@
 # ADR-0019: What the turtle's 0.54 test pass found: put-back peripherals, reach for fetch and crafting, lint on plans, and the sandbox's clock (fifth pass)
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-19)
 **Date:** 2026-11-19
 **Deciders:** Dan Theisen
 
@@ -85,7 +85,8 @@ Three read-only reviewers checked the report against the field log, the library 
 
 ## Decision
 
-Proposed: D1 to D9 below, each with a recommendation; Phases 0 to 2 go ahead meanwhile.
+Accepted 2026-11-19: the owner took every recommendation: D1 A, D2 A, D3 A, D4 A, D5 A, D6 A, D7 B, D8 A and
+D9 A (one release, 0.54.0). Phases 0 to 2 went ahead meanwhile (#130 to #132).
 
 ## Options considered
 
@@ -204,7 +205,7 @@ The lowest slot today.
 
 ### Phase 0
 1. [x] Baseline twice, byte for byte (done: identical).
-2. [ ] Each field failure a scenario first, failing on today's code:
+2. [x] Each field failure a scenario first, failing on today's code:
    - a plan's wall torch in a walkway (lint);
    - `opts.exit` the target cell;
    - code printed with repeated `end` lines;
@@ -218,51 +219,51 @@ The lowest slot today.
    - a sign's lines as a list.
 
 ### Phase 1: no decision
-1. [ ] Lint reads a plan's torch, lantern or sign with a facing as its wall form (`T.blockOfItem`),
+1. [x] Lint reads a plan's torch, lantern or sign with a facing as its wall form (`T.blockOfItem`),
    in `T.lint` and `T.build`'s lint.
-2. [ ] `T.placeAt` refuses `opts.exit` equal to the target cell, and the closed-in search never counts
+2. [x] `T.placeAt` refuses `opts.exit` equal to the target cell, and the closed-in search never counts
    the cell being placed as a way out.
-3. [ ] The (xN) folding folds only adjacent runs of three or more identical lines, and never a short
+3. [x] The (xN) folding folds only adjacent runs of three or more identical lines, and never a short
    line (four characters or fewer trimmed, like `end`).
-4. [ ] `T.equipPeripheral`'s restore:
+4. [x] `T.equipPeripheral`'s restore:
    - puts back only when the side still holds what it put on, otherwise leaves the side and says why;
    - the empty-slot fallback only when the side was empty;
    - checks the equip, trying the other slots of the same name.
 
    `T.withPeripheral` and claude's put-back report a failed restore instead of dropping it.
-5. [ ] `T.craftBatch{take = true}`: an intermediate used by a later recipe isn't "no room"; the why is
+5. [x] `T.craftBatch{take = true}`: an intermediate used by a later recipe isn't "no room"; the why is
    pull's own.
-6. [ ] `T.addChest`'s overlap warning tests only real names (the chests' contents, the inventory,
+6. [x] `T.addChest`'s overlap warning tests only real names (the chests' contents, the inventory,
    recipe outputs), groups them by chest, and caps the list at three and "N more".
-7. [ ] `T.stow`'s far note ranks a chest for the item before a bulk chest and names which it is.
+7. [x] `T.stow`'s far note ranks a chest for the item before a bulk chest and names which it is.
    `T.sortChests` says "at this site".
-8. [ ] `T.fetch` takes the globs `T.where` takes: a matching name from each holder's contents.
-9. [ ] `T.darkCells` tags its list with the dimension, and `T.planLights` reads it before
+8. [x] `T.fetch` takes the globs `T.where` takes: a matching name from each holder's contents.
+9. [x] `T.darkCells` tags its list with the dimension, and `T.planLights` reads it before
    `T.cfg.dimension`.
-10. [ ] A sign's text may be a list of lines.
-11. [ ] `T.refuelFromLava`'s why and info list what each try found (flowing, out of reach) and where.
-12. [ ] Real-second waits: `waitBeforeHit` and the chat box's cooldown move to `lib/realtime`.
-13. [ ] claude's version reads `deploy/version` from the ROM each start, not only the value boot kept
+10. [x] A sign's text may be a list of lines.
+11. [x] `T.refuelFromLava`'s why and info list what each try found (flowing, out of reach) and where.
+12. [x] Real-second waits: `waitBeforeHit` and the chat box's cooldown move to `lib/realtime`.
+13. [x] claude's version reads `deploy/version` from the ROM each start, not only the value boot kept
     (a `/ccnix rom update` without a reboot otherwise keeps the old one).
 
 ### Phase 2: what the model reads
-1. [ ] The prompt:
+1. [x] The prompt:
    - ending a reply ends the goal and deletes `resume.txt`: for a planned reboot, stay in the goal
      (a chat ask, or a call that waits);
    - `resume.txt` is the harness's: add lines under its first, don't rewrite it.
-2. [ ] Index and help:
+2. [x] Index and help:
    - `T.trail`'s entries are `{x=, y=, z=}`;
    - `T.cfg.dimension = "nether"` once covers the light functions;
    - `fileio` only through `require`;
    - a sideways placement needs a block beyond (D7 B).
-3. [ ] News lines for this pass, in the model's terms.
+3. [x] News lines for this pass, in the model's terms.
 
 ### Phase 3: the decisions
-1. [ ] D1 to D8 as decided.
+1. [x] D1 to D8 as decided (#135: D1, D4; #137: D3, D5, D8; #151: D2, D6; D7 in #130).
 
 ### Phase 4: release (on the owner's ok) and hand back
-1. [ ] UNTESTED.md's section with its issue.
-2. [ ] Version bump and release, as D9 says.
+1. [x] The in-game checks: #172, one sub-issue a check (UNTESTED.md retired for issues meanwhile).
+2. [x] Version bump and release, as D9 says: 0.54.0.
 3. [ ] The next goal: "read what's new, retire `resume()` in testlog.lua if the harness's file is
    enough, and keep /claude/report_harness_v6.md as you work". Then the checks this pass couldn't do:
    - 01 after the version bump;
