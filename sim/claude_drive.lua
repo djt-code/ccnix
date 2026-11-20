@@ -1701,6 +1701,16 @@ local n5 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] =
     { { code = 400, body = { type = "error", error = { type = "invalid_request_error", message = "nope" } } } })
 check("a first goal that never reached the model: the version isn't kept, so the news comes again", Mine.files["claude/.version"] == "0.50.2\n",
     tostring(Mine.files["claude/.version"]))
+-- ADR-0019: the ROM's deploy/version is read at each start, before what boot kept (a /ccnix rom update without a
+-- reboot leaves ccnix.version behind); with no file to read, boot's is used
+ccnix = { version = "0.51.0", find = function(rel) if fs.exists(rel) then return "/" .. rel end end }
+local n7 = newsRun({ ["deploy/version"] = "0.52.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.51.0\n" })
+check("the ROM updated since boot (it kept 0.51.0, deploy/version says 0.52.0): the news for 0.52.0, and 0.52.0 kept",
+    n7 == "what's new\n\n[ccnix was updated from 0.51.0 to 0.52.0; what changed for you:\n- not yet]"
+        and Mine.files["claude/.version"] == "0.52.0\n", n7)
+local n8 = newsRun({ ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.2\n" })
+check("...no deploy/version to read: the version boot kept", n8:find("updated from 0.50.2 to 0.51.0;", 1, true) ~= nil, n8)
+ccnix = nil
 local REAL_NEWS = repoFile("help/claude-news.txt")
 local n6 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = REAL_NEWS, ["claude/.version"] = "0.50.2\n" })
 check("the real news file reads: its 0.51.0 lines, the note for people left out",

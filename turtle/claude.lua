@@ -1876,16 +1876,16 @@ end
 --------------------------------------------------------------------------
 -- What's new since the version the model last ran with
 --------------------------------------------------------------------------
--- The ccnix version in use, as `ccnix version` tells it: what this boot
--- read (ccnix.version: the updates' deploy/version, else the ROM's), else
--- the first line of deploy/version where ccnix's files are; nil if none.
+-- The ccnix version in use: the first line of deploy/version where
+-- ccnix's files are (the updates', else the ROM's), read at each start,
+-- so a `/ccnix rom update` without a reboot counts; else what this boot
+-- read (ccnix.version, as `ccnix version` tells it); nil if neither says.
 local function ccnixVersion()
-    local v = ccnix and ccnix.version
-    if v == nil or v == "unversioned" then
-        local file = findFile("deploy/version")
-        v = file and text.trim((text.cut(fileio.read(file) or "", "\n")))
-    end
-    if v == nil or v == "" or v == "unversioned" then return nil end
+    local function known(v) return v ~= nil and v ~= "" and v ~= "unversioned" end
+    local file = findFile("deploy/version")
+    local v = file and text.trim((text.cut(fileio.read(file) or "", "\n")))
+    if not known(v) then v = ccnix and ccnix.version end
+    if not known(v) then return nil end
     return v
 end
 
