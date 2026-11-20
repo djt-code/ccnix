@@ -10,6 +10,8 @@
 --     a wall torch (soul, redstone) in a walk cell's head or feet cell, a flush light suggested (not one over head height,
 --     and a lantern at head height warned of by the lantern rule alone);
 --   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
+--     (ADR-0019) a torch with a facing is its wall torch, so the light rule fires (in T.lint and T.build's lint), and
+--     a torch with none stands;
 --   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
 --     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
 --     info.warnings, and without it doesn't;
@@ -296,6 +298,22 @@ do
     check("...stairs with no facing are counted as unchecked", info and info.unchecked == 1, tostring(info and info.unchecked))
     local nothing, why = T.lint("not a plan")
     check("...something that is neither a box nor a plan is refused with why", nothing == nil and type(why) == "string", tostring(why))
+
+    -- (ADR-0019) a plan names a wall torch by its item (a torch with a facing): lint reads it as the wall torch
+    fresh(cube(-2, 0, -2, 4, 0, 4, STONE))
+    know(-3, -1, -3, 5, 4, 5)
+    local function torchPlan(torch)
+        return T.blueprint.new({ anchor = { 1, 1, 2 }, legend = { B = STONE, t = torch },
+            layers = { { "B", "." }, { "B", "t" }, { "B" } } })
+    end
+    warnings = T.lint(torchPlan("minecraft:wall_torch[facing=south]"))
+    local light = ofRule(warnings, "light")
+    check("a plan's wall torch at head height over a walk cell is warned of (the light rule)", #light == 1 and at(light, 1, 1, 1) ~= nil
+        and light[1].text:find("wall_torch at 1,2,1", 1, true) ~= nil, texts(warnings))
+    warnings = T.lint(torchPlan("minecraft:soul_torch[facing=south]"))
+    check("...named as its item with a facing too (a soul torch)", #ofRule(warnings, "light") == 1, texts(warnings))
+    warnings = T.lint(torchPlan("minecraft:torch"))
+    check("...a torch with no facing stands, and isn't", #ofRule(warnings, "light") == 0, texts(warnings))
 end
 
 --------------------------------------------------------------------------
@@ -352,6 +370,19 @@ do
         and said:find("player: 1 more round it (T.lint(box) lists them)", 1, true) ~= nil and #info.warnings == 2, said)
     warnings = T.lint({ -1, 0, 1, 5, 4, 3 })
     check("...a box's lint has no tags", warnings and #warnings == 2 and warnings[1].where == nil, texts(warnings))
+
+    -- (ADR-0019) T.build's lint reads a plan's wall torch as one too
+    fresh(cube(-2, 0, -2, 4, 0, 4, STONE))
+    know(-3, -1, -3, 5, 4, 5)
+    W.give(1, STONE, 3)
+    W.give(2, "minecraft:torch", 1)
+    for i = #PRINTED, 1, -1 do PRINTED[i] = nil end
+    plan = T.blueprint.new({ anchor = { 1, 1, 2 }, legend = { B = STONE, t = "minecraft:wall_torch[facing=south]" },
+        layers = { { "B", "." }, { "B", "t" }, { "B" } } })
+    ok, info = T.build(plan, { name = "torch" })
+    said = table.concat(PRINTED, " | ")
+    check("T.build prints the light rule's line for a plan's wall torch over a walk cell",
+        ok == true and at(ofRule(info.warnings, "light"), 1, 1, 1) ~= nil and said:find("player: light at 1,1,1", 1, true) ~= nil, said)
 end
 
 --------------------------------------------------------------------------

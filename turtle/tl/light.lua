@@ -363,7 +363,8 @@ end
 -- list of { max, mobs, count }), anyLight and anyLightCount (the nether), unsure (a list of the cells, { x, y, z },
 -- over a slab or stair whose half the map lacks, taken as a bottom one: inspect them, since a top one is a floor),
 -- unseen (cells of the box the map never saw), sources, guessed, cut (as T.light), summary (a line, which says "listed
--- the darkest N of M" when the list is cut) }.  Mods can change spawning: check in game.
+-- the darkest N of M" when the list is cut) }.  The list's own dimension field names the dimension too ("nether"), so
+-- T.planLights lights it to that dimension's level.  Mods can change spawning: check in game.
 function T.darkCells(box, opts)
     opts = opts or {}
     local asked = opts.dimension or T.cfg.dimension or "overworld"
@@ -410,7 +411,7 @@ function T.darkCells(box, opts)
         for _, c in ipairs(dark) do if c.light <= g.max then n = n + 1 end end
         info.groups[#info.groups + 1] = { max = g.max, mobs = g.mobs, count = n }
     end
-    local out = {}
+    local out = { dimension = dimName }
     for i, c in ipairs(dark) do
         if i <= limit then out[i] = c else info.more = info.more + 1 end
     end
@@ -462,14 +463,15 @@ local PLAN_MIN = { overworld = 8, ["end"] = 8, nether = 12 }
 -- done; then, again and again, the candidate that brings the most cells still dark to opts.min is taken (a greedy
 -- cover: few lights, not always the fewest), until all are lit or no candidate helps.  The light is opts.item
 -- (default minecraft:lantern, 15; a torch 14, glowstone 15, a soul lantern 10), or a candidate's own name.  opts:
--- min, item, dimension (the default min: T.cfg.dimension, else the overworld).  Info is { lit (already at min), covered
--- (by the lights chosen), left (a list of the cells no candidate reaches), lights, summary }.  Nothing is placed:
--- T.placeAt them (a lantern's opts.hanging, a torch on a wall) and T.darkCells to check.
+-- min, item, dimension (the default min's; else the one T.darkCells' list says, else T.cfg.dimension, else the
+-- overworld).  Info is { lit (already at min), covered (by the lights chosen), left (a list of the cells no candidate
+-- reaches), lights, summary }.  Nothing is placed: T.placeAt them (a lantern's opts.hanging, a torch on a wall) and
+-- T.darkCells to check.
 function T.planLights(cells, candidates, opts)
     opts = opts or {}
     if type(cells) ~= "table" or #cells == 0 then return nil, "planLights wants a list of cells { x, y, z } to light" end
     if type(candidates) ~= "table" or #candidates == 0 then return nil, "planLights wants a list of candidate cells { x, y, z } for lights" end
-    local dimName = dimensionOf(opts.dimension or T.cfg.dimension or "overworld")
+    local dimName = dimensionOf(opts.dimension or cells.dimension or T.cfg.dimension or "overworld")
     if not dimName then return nil, "opts.dimension is overworld, nether or end" end
     local min = opts.min or PLAN_MIN[dimName]
     if not (whole(min) and min >= 1 and min <= 15) then return nil, "opts.min is a light level, 1 to 15" end

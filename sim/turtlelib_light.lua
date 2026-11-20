@@ -12,7 +12,8 @@
 --     glowstone and a chest are not, a carpet or a rail over stone leaves no room, a slab with no state is counted as
 --     unsure; the nether's groups (light 7 or less, 11 or less, and the cells lit over 11 listed apart for ghasts and
 --     magma cubes), magma a floor there but not in the overworld; opts.max; the list cut at opts.limit with the rest
---     counted; the summary line; T.cfg.dimension and a dimension it doesn't know.
+--     counted; the summary line; T.cfg.dimension and a dimension it doesn't know; (ADR-0019) the list names its
+--     dimension, and T.planLights lights to that dimension's level (after opts.dimension, before T.cfg.dimension).
 --   * A big box yields to the rest of the computer as it goes, with the same answer.
 -- tl.attach (ADR-0013 D6.2), on the same mock:
 --   * T.attachedTo: a torch on top, a ladder and a wall torch facing away on the sides, a lantern hanging under, all
@@ -272,9 +273,22 @@ do
         info.summary == "nether: of 20 spawnable cells, 14 at light 7 or less (skeletons, wither skeletons, endermen), 18 at light 11 "
             .. "or less (zombified piglins, piglins, hoglins, blazes); the darkest 14,1,0 at 0; 2 more take ghasts, magma cubes "
             .. "whatever the light (a slab or glass floor, or no room, stops them)", info.summary)
+    -- (ADR-0019) the list says which dimension it is from, and T.planLights goes by it (lights in the wall at head height)
+    local candidates = {}
+    for x = 1, 20 do candidates[#candidates + 1] = { x, 2, 1 } end
+    local _, plan = T.planLights(cells, candidates)
+    check("T.darkCells' list carries its dimension, and T.planLights lights the nether's cells to its 12 by it",
+        cells.dimension == "nether" and plan and plan.summary:find("to light 12", 1, true) ~= nil, plan and plan.summary)
+    _, plan = T.planLights(cells, candidates, { dimension = "overworld" })
+    check("...opts.dimension goes first", plan and plan.summary:find("to light 8", 1, true) ~= nil, plan and plan.summary)
     cells, info = T.darkCells(BOX)
     check("...the same in the overworld: only the 4 cells at 0 are dark, magma no floor there, nothing listed apart",
         #cells == 4 and info.spawnable == 19 and info.anyLight == nil and find(cells, 20, 1, 0) and not find(cells, 18, 1, 0), info.summary)
+    T.cfg.dimension = "nether"
+    _, plan = T.planLights(cells, candidates)
+    check("...and the list's before T.cfg.dimension: the overworld's cells to 8", cells.dimension == "overworld"
+        and plan and plan.summary:find("to light 8", 1, true) ~= nil, plan and plan.summary)
+    T.cfg.dimension = nil
     T.cfg.dimension = "minecraft:the_nether"
     cells, info = T.darkCells(BOX)
     check("T.cfg.dimension says which, the game's name too", info.dimension == "nether" and #cells == 18)
