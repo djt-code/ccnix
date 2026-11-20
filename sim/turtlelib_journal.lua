@@ -715,3 +715,35 @@ do
     check("T.report stamps T.report.lastTold too", T.report.lastTold() == math.floor(EPOCH / 1000))
     os.pullEvent, os.startTimer = nil, nil
 end
+
+-- ADR-0019: two waits meant in real seconds, on a server at 60 ticks a second (a game second of sleep lasts a third of
+-- a real one): T.report's busy chat box is asked again opts.wait real seconds apart, and a move waits
+-- T.cfg.waitBeforeHit real seconds for what stands in its way before hitting it
+do
+    local sleepWas = sleep
+    local function fast() sleep = function(s) CLK = CLK + s; EPOCH = EPOCH + s * 1000 * 20 / TPS end end
+    TPS = 60
+    fresh()
+    fast()
+    W.give(1, CHAT, 1)
+    BUSY = 2
+    local from = EPOCH
+    local ok, why = T.report("slow", { plain = true, wait = 1 })
+    local took = (EPOCH - from) / 1000
+    check("a busy chat box at 60 ticks a second: asked again after opts.wait (1) real second, not a third of one",
+        ok == true and BUSY == 0 and took >= 0.95 and took < 1.5, string.format("%s; %.2f real s", tostring(why), took))
+
+    fresh()
+    fast()
+    local blocked, hits, hitAt = true, 0, nil
+    local forwardWas, attackWas = T.raw.forward, T.raw.attack
+    T.raw.forward = function() if blocked then return false, "Movement obstructed" end return forwardWas() end
+    T.raw.attack = function() hits = hits + 1; hitAt = hitAt or EPOCH; blocked = false; return true end
+    from = EPOCH
+    local moved = T.forward()
+    T.raw.forward, T.raw.attack = forwardWas, attackWas
+    local waited = ((hitAt or EPOCH) - from) / 1000
+    check("something in the way at 60 ticks a second: waited for T.cfg.waitBeforeHit (3) real seconds, then hit once, and moved",
+        moved == true and hits == 1 and waited >= 2.9 and waited < 3.6, string.format("%s, %d hits, %.2f real s", tostring(moved), hits, waited))
+    sleep, TPS = sleepWas, 20
+end

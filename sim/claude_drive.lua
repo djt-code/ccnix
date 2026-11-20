@@ -1260,6 +1260,8 @@ HTTP.queue = {
     reply({ toolUse("lua", { code = "W = 1\nlocal function W() return 7 end\nlocal function x() return 8 end\nreturn W(), x()" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "for i = 1, 20 do print('no route: walled in by stone') end\nprint('the end')\nreturn 1" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "print(string.rep('a', 6100))" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "print('if a then\\nx\\nend\\nif b then\\ny\\nend')" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "print('a\\nb\\na')\nprint('#####.\\n......\\n#####.\\n#####.')" }) }, "tool_use"),
     reply({ text("Done.") }, "end_turn"),
 }
 run("keep things")
@@ -1295,6 +1297,12 @@ check("a line printed 20 times comes back once, with how many times, the rest af
     l10 and l10.content == "no route: walled in by stone (x20)\nthe end\n-> 1", l10 and l10.content)
 check("output a little over the limit is sent whole: no \"(3 characters left out)\"",
     l11 and #l11.content == 6100 and not l11.content:find("left out", 1, true), l11 and #l11.content)
+-- ADR-0019: only a run of three or more alike, side by side, folds, and never a short line: printed code keeps its ends
+local l12, l13 = resultsIn(13).toolu_12, resultsIn(14).toolu_13
+check("...printed code comes back as it was: a short line like `end` never folds",
+    l12 and l12.content == "if a then\nx\nend\nif b then\ny\nend", l12 and l12.content)
+check("...nor do lines apart, nor two alike side by side (map rows)",
+    l13 and l13.content == "a\nb\na\n#####.\n......\n#####.\n#####.", l13 and l13.content)
 fresh({ "" })
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("what do I keep")
@@ -1693,6 +1701,16 @@ local n5 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] =
     { { code = 400, body = { type = "error", error = { type = "invalid_request_error", message = "nope" } } } })
 check("a first goal that never reached the model: the version isn't kept, so the news comes again", Mine.files["claude/.version"] == "0.50.2\n",
     tostring(Mine.files["claude/.version"]))
+-- ADR-0019: the ROM's deploy/version is read at each start, before what boot kept (a /ccnix rom update without a
+-- reboot leaves ccnix.version behind); with no file to read, boot's is used
+ccnix = { version = "0.51.0", find = function(rel) if fs.exists(rel) then return "/" .. rel end end }
+local n7 = newsRun({ ["deploy/version"] = "0.52.0\n", ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.51.0\n" })
+check("the ROM updated since boot (it kept 0.51.0, deploy/version says 0.52.0): the news for 0.52.0, and 0.52.0 kept",
+    n7 == "what's new\n\n[ccnix was updated from 0.51.0 to 0.52.0; what changed for you:\n- not yet]"
+        and Mine.files["claude/.version"] == "0.52.0\n", n7)
+local n8 = newsRun({ ["help/claude-news.txt"] = NEWS35, ["claude/.version"] = "0.50.2\n" })
+check("...no deploy/version to read: the version boot kept", n8:find("updated from 0.50.2 to 0.51.0;", 1, true) ~= nil, n8)
+ccnix = nil
 local REAL_NEWS = repoFile("help/claude-news.txt")
 local n6 = newsRun({ ["deploy/version"] = "0.51.0\n", ["help/claude-news.txt"] = REAL_NEWS, ["claude/.version"] = "0.50.2\n" })
 check("the real news file reads: its 0.51.0 lines, the note for people left out",
@@ -1871,6 +1889,28 @@ shell.run, io = shellRunWas, ioWas36
 check("run_program: the pickaxe back on before the program runs, the controller where it was",
     progEQ == CONTROLLER .. " | " .. PICK and DURING[1] == CONTROLLER .. " | " .. CHAT and DURING[2] == DURING[1], tostring(progEQ))
 
+-- ADR-0019: the model's code equips a modem by hand over the listening chat box; at the goal's end the put-back
+-- leaves the modem on, and the next goal is told the pickaxe couldn't go back
+listenFresh(CONTROLLER, PICK, true)
+Mine.inv[3] = { name = MODEM, count = 1 }
+SCRIPT = { { "sim_http" }, { "sim_http" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.select(3); turtle.equipRight(); return turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+answers[1] = "next"
+answers[2] = ""
+run("put the modem on")
+local g36m = HTTP.requests[3] and HTTP.requests[3].body.messages
+local next36m = g36m and g36m[#g36m].content
+local NOTBACK = "the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the " .. PICK .. " not put back"
+check("a modem equipped by hand over the listening chat box stays on at the goal's end; the pickaxe stays in the inventory",
+    EQ.left == CONTROLLER and EQ.right == MODEM and chatAboard() == 1 and Mine.inv[2] and Mine.inv[2].name == PICK, tostring(EQ.right))
+check("...the next goal is told the pickaxe couldn't go back, and the log says so",
+    type(next36m) == "string" and next36m:find("[After listening to the chat: " .. NOTBACK .. "]", 1, true) ~= nil
+        and (Mine.files["claude.log"] or ""):find("listener: " .. NOTBACK, 1, true) ~= nil, tostring(next36m))
+
 listenFresh(CONTROLLER, MODEM, true)
 HTTP.queue = {
     reply({ toolUse("lua", { code = "return 1" }) }, "tool_use"),
@@ -1987,6 +2027,11 @@ run("what about reboots")
 local sys37 = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
 check("the prompt says /claude/resume.txt holds the goal, to add where it is",
     sys37:find("While a goal is under way /claude/resume.txt holds it, for a resume after a reboot", 1, true) ~= nil)
+-- ADR-0019 (G10: the model asked for a reboot and ended its reply, which ended the goal and deleted the file)
+check("...that the file is the harness's, lines added under its first; and that ending a reply ends the goal and deletes it,"
+        .. " so a planned reboot stays in the goal",
+    sys37:find("The file is the harness's: add lines under its first, never rewrite it", 1, true) ~= nil
+        and sys37:find("Ending your reply ends the goal and deletes the file: for a planned reboot, stay in the goal (a chat ask, or a call that waits)", 1, true) ~= nil)
 end
 
 -- 38. how much log is kept (ADR-0012 D5): past claude.logSize the log

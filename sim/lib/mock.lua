@@ -322,10 +322,12 @@ end
 
 -- Upgrades on each side (the global EQ = { left = name, right = name }):
 -- equipping swaps the selected slot with the side.  `onEquip(side)` runs
--- after a swap.
+-- after a swap.  A stack marked `damaged` (a worn or enchanted tool) isn't
+-- an upgrade: CC refuses it, and nothing moves.
 function M.equipmentApi(S, onEquip)
     local function equip(side)
         local it = S.inv[S.sel]
+        if it and it.damaged then return false, "Not a valid upgrade" end
         S.inv[S.sel] = EQ[side] and { name = EQ[side], count = 1 } or nil
         EQ[side] = it and it.name
         if onEquip then onEquip(side) end
