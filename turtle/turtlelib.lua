@@ -127,6 +127,8 @@ T.cfg = {
     -- digNeedsRoom: true, a dig with no slot for what it drops (none free, no stack of it with room) is refused
     -- with a why, rather than the drop spilling on the ground.  Off for programs (mine, farm and mow make room
     -- their own way); claude's sessions turn it on.
+    -- equipToDig: true, a dig that fails "No tool to dig with" with a tool aboard puts it on and digs again (it
+    -- says so once).  Off for programs, which use T.withTool; claude's sessions turn it on.
     -- tools: nil, the tools a job keeps (T.isEssential).  Unset, every tool aboard is essential, never junk or
     -- stowed; set to names or globs ({ "*_pickaxe", "*_hoe" }, a set too; {} for none), only the tools equipped
     -- (or parked aboard by a swap) and those it names are, so T.stow and T.dumpJunk put looted ones away.
@@ -939,6 +941,10 @@ reframers[#reframers + 1] = function(move)
     for _, c in ipairs(trail.cells) do c.x, c.y, c.z = move(c.x, c.y, c.z) end
 end
 
+-- What a dig with no tool on gets back from CC, and what puts one on for T.cfg.equipToDig (below, with the upgrades)
+local NO_TOOL = "No tool to dig with"
+local equipToDig
+
 -- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom
 local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
                    ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone" }
@@ -958,7 +964,8 @@ end
 -- listeners are told it), then dig (with the tool side the caller named,
 -- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
 -- refused too.  A dig of a block a hoe tills is looked at again after, since
--- the block may still be there, changed.
+-- the block may still be there, changed.  With T.cfg.equipToDig, a dig that
+-- failed for want of a tool puts one aboard on and digs again.
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -975,6 +982,8 @@ for name, side in pairs(DIG_SIDE) do
                 .. "stow or drop something first, or set it false to let drops fall)"
         end
         needTool()
+        local res = table.pack(raw[name](...))
+        if not res[1] and res[2] == NO_TOOL and T.cfg.equipToDig and equipToDig() then res = table.pack(raw[name](...)) end
         return afterwards(function()
             forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
@@ -985,7 +994,7 @@ for name, side in pairs(DIG_SIDE) do
                 if now then event.kind, event.block, event.state = "change", now, nowState end
             end
             tell(event)
-        end, raw[name](...))
+        end, table.unpack(res, 1, res.n))
     end
 end
 
@@ -1487,6 +1496,51 @@ function T.withPeripheral(name, fn)
     if not back then print("T.withPeripheral: " .. tostring(notBack)) end
     if not res[1] then error(res[2], 0) end
     return true, table.unpack(res, 2, res.n)
+end
+
+-- The tools a dig can put on (T.cfg.equipToDig), best first: a pickaxe digs whatever a turtle can.
+local DIG_TOOLS = { "_pickaxe", "_shovel", "_axe", "_hoe" }
+local toldEquip = false                -- (said once a session that a dig put a tool on)
+
+-- For a dig that failed for want of a tool (T.cfg.equipToDig): put a tool aboard on, on the side that holds no
+-- chunk controller (nor T.cfg.keepSide's), an empty side first, else the other upgrade's (a modem or scanner, which
+-- goes into the tool's slot).  The tools are those T.cfg.tools names (every one, unset), a pickaxe first; one that
+-- won't go on (damaged or enchanted) is passed over for the next.  Says so the first time.  True if one went on.
+equipToDig = function()
+    local before = { left = T.equipped("left"), right = T.equipped("right") }
+    local side, rank
+    for _, s in ipairs(EQUIP_SIDES) do
+        local held = before[s]
+        if not upgradeKept(s, held) then
+            local r = held == nil and 0 or (T.isTool(held) and 1 or 2)
+            if not rank or r < rank then side, rank = s, r end
+        end
+    end
+    if not side then return false end
+    local slots, taken = {}, {}
+    for _, suffix in ipairs(DIG_TOOLS) do
+        for slot = 1, 16 do
+            local it = turtle.getItemDetail(slot)
+            if it and not taken[slot] and text.endsWith(it.name, suffix) and (T.cfg.tools == nil or listed(T.cfg.tools, it.name)) then
+                slots[#slots + 1], taken[slot] = { slot = slot, name = it.name }, true
+            end
+        end
+    end
+    local sel = turtle.getSelectedSlot()
+    for _, c in ipairs(slots) do
+        turtle.select(c.slot)
+        if equipSide(side) then
+            turtle.select(sel)
+            if not toldEquip then
+                toldEquip = true
+                print(string.format("A dig put the %s on the %s (T.cfg.equipToDig)%s.", c.name, side,
+                    before[side] and string.format("; the %s it took off is in slot %d", before[side], c.slot) or ""))
+            end
+            return true
+        end
+    end
+    turtle.select(sel)
+    return false
 end
 
 --------------------------------------------------------------------------
