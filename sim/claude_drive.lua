@@ -1260,6 +1260,8 @@ HTTP.queue = {
     reply({ toolUse("lua", { code = "W = 1\nlocal function W() return 7 end\nlocal function x() return 8 end\nreturn W(), x()" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "for i = 1, 20 do print('no route: walled in by stone') end\nprint('the end')\nreturn 1" }) }, "tool_use"),
     reply({ toolUse("lua", { code = "print(string.rep('a', 6100))" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "print('if a then\\nx\\nend\\nif b then\\ny\\nend')" }) }, "tool_use"),
+    reply({ toolUse("lua", { code = "print('a\\nb\\na')\nprint('#####.\\n......\\n#####.\\n#####.')" }) }, "tool_use"),
     reply({ text("Done.") }, "end_turn"),
 }
 run("keep things")
@@ -1295,6 +1297,12 @@ check("a line printed 20 times comes back once, with how many times, the rest af
     l10 and l10.content == "no route: walled in by stone (x20)\nthe end\n-> 1", l10 and l10.content)
 check("output a little over the limit is sent whole: no \"(3 characters left out)\"",
     l11 and #l11.content == 6100 and not l11.content:find("left out", 1, true), l11 and #l11.content)
+-- ADR-0019: only a run of three or more alike, side by side, folds, and never a short line: printed code keeps its ends
+local l12, l13 = resultsIn(13).toolu_12, resultsIn(14).toolu_13
+check("...printed code comes back as it was: a short line like `end` never folds",
+    l12 and l12.content == "if a then\nx\nend\nif b then\ny\nend", l12 and l12.content)
+check("...nor do lines apart, nor two alike side by side (map rows)",
+    l13 and l13.content == "a\nb\na\n#####.\n......\n#####.\n#####.", l13 and l13.content)
 fresh({ "" })
 HTTP.queue = { reply({ text("Done.") }, "end_turn") }
 run("what do I keep")

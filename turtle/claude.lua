@@ -780,21 +780,24 @@ local function clip(s)
     return s:sub(1, half) .. "\n... (" .. (#s - MAX_OUTPUT) .. " characters left out) ...\n" .. s:sub(-half)
 end
 
--- Lines printed more than once (a loop printing the same why), each kept where it first came, with how many times:
--- "no route: walled in (x12)".  A line said once is left as it is.  So repeats don't take the room the rest needs
--- before the output is clipped.
+-- A run of three or more alike lines side by side (a loop printing the same why) kept once, with how many times:
+-- "no route: walled in (x12)".  Everything else is left as it is: alike lines apart (map rows), two side by side, and
+-- a short line (four characters or fewer trimmed, like code's `end`) however often it comes.  So repeats don't take
+-- the room the rest needs before the output is clipped.
 local function foldRepeats(s)
+    local FOLD_RUN, FOLD_SHORTEST = 3, 4
     local lines = text.split(s, "\n", true)
-    local count = {}
-    for _, line in ipairs(lines) do count[line] = (count[line] or 0) + 1 end
-    local out, said = {}, {}
-    for _, line in ipairs(lines) do
-        if count[line] == 1 or line == "" then
-            out[#out + 1] = line
-        elseif not said[line] then
-            said[line] = true
-            out[#out + 1] = line .. " (x" .. count[line] .. ")"
+    local out, i = {}, 1
+    while i <= #lines do
+        local line, last = lines[i], i
+        while lines[last + 1] == line do last = last + 1 end
+        local run = last - i + 1
+        if run >= FOLD_RUN and #text.trim(line) > FOLD_SHORTEST then
+            out[#out + 1] = line .. " (x" .. run .. ")"
+        else
+            for _ = 1, run do out[#out + 1] = line end
         end
+        i = last + 1
     end
     return table.concat(out, "\n")
 end
