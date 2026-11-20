@@ -391,8 +391,9 @@ end
 -- The lint
 --------------------------------------------------------------------------
 
--- A line a rule for the warnings found (a list a rule) that keep(w) passes: its first, and how many more.
-local function summaryOf(found, keep)
+-- A line a rule for the warnings found (a list a rule) that keep(w) passes: its first, and how many more; then
+-- extra[rule], a line of its own, if there is one.
+local function summaryOf(found, keep, extra)
     local lines = {}
     for _, rule in ipairs(RULES) do
         local first, n = nil, 0
@@ -403,6 +404,7 @@ local function summaryOf(found, keep)
             end
         end
         if first then lines[#lines + 1] = first.text .. (n > 1 and (" (and " .. (n - 1) .. " more like it)") or "") end
+        if extra and extra[rule] then lines[#lines + 1] = extra[rule] end
     end
     return lines
 end
@@ -410,6 +412,7 @@ end
 local function always() return true end
 local function ofPlan(w) return w.where == "plan" end
 local function roundIt(w) return w.where == "around" end
+local function belowTop(w) return w.where == "plan" and not w.top end
 
 -- What stops a two-tall player in a build (a box or a plan), read-only: headroom, a flight's approach and exit,
 -- diagonal railings, drops over 3, lights in the way.  A list of { rule, x, y, z, text }, and info (info.rules;
@@ -428,6 +431,8 @@ local function roundIt(w) return w.where == "around" end
 -- For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is
 -- one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and
 -- around (the counts) and planSummary (the summary of the plan's own).  T.build prints only those, and a count of the rest.
+-- Two or more drops on the plan's top (walk cells in the layer over it: the tops of walls, mostly) are one line of the
+-- plan's summary, "N drops on the plan's top", their cells info.topDrops ({ x, y, z } each); the warnings keep them all.
 function T.lint(what, opts)
     opts = opts or {}
     local view, x1, y1, z1, x2, y2, z2, plan = viewOf(what)
@@ -462,8 +467,10 @@ function T.lint(what, opts)
     local function warn(rule, x, y, z, words, named)
         if only and not only[rule] then return end
         local list = found[rule]
-        list[#list + 1] = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words,
-                            where = plan and where(x, y, z, named or {}) or nil }
+        local w = { rule = rule, x = x, y = y, z = z, text = rule .. " at " .. key(x, y, z) .. ": " .. words,
+                    where = plan and where(x, y, z, named or {}) or nil }
+        w.top = w.where == "plan" and rule == "drop" and y == y2 + 1 or nil
+        list[#list + 1] = w
     end
     for y = y1, y2 + 1 do
         for z = z1, z2 do
@@ -491,7 +498,17 @@ function T.lint(what, opts)
     local passes = { always }
     if plan then
         passes = { ofPlan, roundIt }
-        info.planSummary = summaryOf(found, ofPlan)
+        local tops = {}
+        for _, w in ipairs(found.drop) do
+            if w.top then tops[#tops + 1] = { w.x, w.y, w.z } end
+        end
+        if #tops > 1 then
+            info.topDrops = tops
+            info.planSummary = summaryOf(found, belowTop, { drop = #tops .. " drops on the plan's top (y " .. (y2 + 1)
+                .. "): wall tops, unless players walk there (their cells: info.topDrops)" })
+        else
+            info.planSummary = summaryOf(found, ofPlan)
+        end
         info.inPlan, info.around = 0, 0
     end
     for _, keep in ipairs(passes) do
