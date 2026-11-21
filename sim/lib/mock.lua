@@ -169,39 +169,57 @@ function M.dropInto(S, c, size, n)
     return moved > 0
 end
 
--- Suck up to n from the container's first stack: into the selected slot
--- first, then any slot holding the same item, then empty ones (as CC
--- does).  True if anything came out.
-function M.suckFrom(S, c, size, n)
-    for s = 1, size do
-        local d = c[s]
-        if d then
-            local max = M.stackSize(d.name)
-            local want = math.min(n or 64, d.count)
-            local left = want
-            local order = { S.sel }
-            for i = 1, 16 do if i ~= S.sel then order[#order + 1] = i end end
-            for pass = 1, 2 do
-                for _, i in ipairs(order) do
-                    local it = S.inv[i]
-                    if left > 0 and it and it.name == d.name and it.count < max then
-                        local t = math.min(left, max - it.count)
-                        it.count = it.count + t
-                        left = left - t
-                    elseif left > 0 and not it and (pass == 2 or i == S.sel) then
-                        S.inv[i] = withExtras({ name = d.name, count = math.min(left, max) }, d)
-                        if (d.damage or 0) > 0 or d.enchantments then S.inv[i].damaged = true end
-                        left = left - S.inv[i].count
-                    end
-                end
+-- Move up to `want` of the container's stack d (slot s) into the turtle:
+-- the selected slot first, then any slot holding the same item, then empty
+-- ones.  Returns how many moved.
+local function suckStack(S, c, s, want)
+    local d = c[s]
+    local max = M.stackSize(d.name)
+    local left = math.min(want, d.count)
+    local first = left
+    local order = { S.sel }
+    for i = 1, 16 do if i ~= S.sel then order[#order + 1] = i end end
+    for pass = 1, 2 do
+        for _, i in ipairs(order) do
+            local it = S.inv[i]
+            if left > 0 and it and it.name == d.name and it.count < max then
+                local t = math.min(left, max - it.count)
+                it.count = it.count + t
+                left = left - t
+            elseif left > 0 and not it and (pass == 2 or i == S.sel) then
+                S.inv[i] = withExtras({ name = d.name, count = math.min(left, max) }, d)
+                if (d.damage or 0) > 0 or d.enchantments then S.inv[i].damaged = true end
+                left = left - S.inv[i].count
             end
-            local took = want - left
-            d.count = d.count - took
-            if d.count == 0 then c[s] = nil end
-            return took > 0
         end
     end
-    return false
+    local took = first - left
+    d.count = d.count - took
+    if d.count == 0 then c[s] = nil end
+    return took
+end
+
+-- Suck up to n from the container, as CC: Tweaked 1.120 does (its
+-- ContainerTransfer.moveItem): the first stack, then, while short of n, each
+-- later stack of the same item, and each of those is asked for the whole n
+-- again (not what is left), so one suck can bring more than n: up to the room
+-- the turtle has.  It stops once n or more have moved.  True if anything came
+-- out.
+function M.suckFrom(S, c, size, n)
+    local limit, moved, name = n or 64, 0, nil
+    for s = 1, size do
+        local d = c[s]
+        if d and (name == nil or d.name == name) then
+            if name == nil then
+                name = d.name
+                limit = math.min(limit, M.stackSize(d.name))
+            end
+            local took = suckStack(S, c, s, limit)
+            moved = moved + took
+            if moved >= limit or took == 0 then break end
+        end
+    end
+    return moved > 0
 end
 
 -- The container as a peripheral (what peripheral.wrap gives): list, size,

@@ -352,6 +352,14 @@ got = T.pull("front", COBBLE, 50)
 check("it tops up a part stack first", got == 50 and S.inv[2].count == 64 and carrying(COBBLE) == 90 and S.inv[3].count == 26,
     got .. " / " .. S.inv[2].count)
 
+-- a short stack in front (#340): CC:T's suck of 28 from a stack of 8 goes on to the next stack asking for 28 again
+reset(CONTROLLER, PICK)
+fill({ { COBBLE, 8 }, { COBBLE, 64 } })
+put(1, PICK)
+got = T.pull("front", COBBLE, 28)
+check("a short stack in front: exactly what was asked, no more", got == 28 and carrying(COBBLE) == 28 and inChest(COBBLE) == 44,
+    got .. " / " .. carrying(COBBLE) .. " aboard")
+
 -- a full chest, the wanted stack at the back: the stack in front is held meanwhile
 reset(CONTROLLER, PICK)
 local full = {}

@@ -213,6 +213,19 @@ do
     check("...and nothing to make sticks of: refused", ok == nil and made:find("planks", 1, true) ~= nil, tostring(made))
 end
 
+do
+    fresh()
+    -- the field's round (#340): a 2x2 of 60 a cell from stacks of 64, 64, 64 and 48.  CC:T's suck goes on to the next
+    -- stack asking for the whole count again, so a cell whose front stack was short took up to 64, and the last cell
+    -- came up short ("the chest gave 52 (0 still in it)")
+    fill(0, 0, 1, { [1] = { "minecraft:stone", 64 }, [2] = { "minecraft:stone", 64 }, [3] = { "minecraft:stone", 64 },
+                    [4] = { "minecraft:stone", 48 } })
+    W.give(1, TABLE, 1)
+    local ok, made = T.craft("minecraft:stone_bricks", 240)
+    check("240 stone bricks from 240 stone in uneven stacks: one round of 60 a cell, every cell filled", ok == true and made == 240
+        and carrying("minecraft:stone_bricks") == 240 and chestHas("minecraft:stone") == 0, tostring(made) .. " / " .. inventory())
+end
+
 --------------------------------------------------------------------------
 -- Short, no room, no table, no chest
 --------------------------------------------------------------------------
