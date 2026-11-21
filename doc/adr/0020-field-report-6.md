@@ -149,43 +149,44 @@ the replaced record was a finished build (4 of 4 cells).
 ## Action items
 
 ### Phase 0
-1. [ ] Baseline twice, byte for byte.
-2. [ ] Each field failure a scenario first, failing on today's code: the CC:T suck in the mock, then a round
+1. [x] Baseline twice, byte for byte.
+2. [x] Each field failure a scenario first, failing on today's code: the CC:T suck in the mock, then a round
    over uneven stacks; a recipe added twice; the iron loop; two bases' bulk chests; a seal on a build's retry;
    unseen cells for lint and pave; glowstone's drop; spare intermediates; a sleep after a tick-rate change; the
    put-back line after a dig.
 
-### Phase 1: no decision
-1. [ ] `T.takeInto` and `T.pull` suck no more than the front stack holds (#340).
-2. [ ] `T.addRecipe` replaces a row it added for the same product and cells; a refusal names the recipe it
+### Phase 1: no decision (#353, #354, #355)
+1. [x] `T.takeInto` and `T.pull` suck no more than the front stack holds (#340).
+2. [x] `T.addRecipe` replaces a row it added for the same product and cells; a refusal names the recipe it
    tried (#341).
-3. [ ] `T.craftPlan` sees a loop through stock and takes the name from stock (#346).
-4. [ ] One bulk chest a site; "no bulk chest" counts the site (#347). `T.addChest`'s overlap warning keeps to
+3. [x] `T.craftPlan` sees a loop through stock and takes the name from stock (#346).
+4. [x] One bulk chest a site; "no bulk chest" counts the site (#347). `T.addChest`'s overlap warning keeps to
    the site.
-5. [ ] Lint reads an unseen cell above a plan cell as air and counts other unseen cells in `info.unseen`
+5. [x] Lint reads an unseen cell above a plan cell as air and counts other unseen cells in `info.unseen`
    (#348).
-6. [ ] `T.digDrop` gets glowstone, sea lanterns, glass, ice and the ores; the wrapped dig selects a part stack
+6. [x] `T.digDrop` gets glowstone, sea lanterns, glass, ice and the ores; the wrapped dig selects a part stack
    of the drop first (#349).
-7. [ ] `T.craftBatch`'s `info.spare` (#350).
-8. [ ] `lib/realtime`: a sleep measured as it goes, so a stale rate can't make it long, and a measure that
+7. [x] `T.craftBatch`'s `info.spare` (#350).
+8. [x] `lib/realtime`: a sleep measured as it goes, so a stale rate can't make it long, and a measure that
    disagrees replaces the stored rate (#345).
-9. [ ] The put-back line says when it was true, and what the side holds after the call (#344).
-10. [ ] The log's `start:` line says where the options came from; the date with each goal.
+9. [x] The put-back line says when it was true, and what the side holds after the call (#344).
+10. [x] The log's `start:` line says where the options came from; today's date at the end of the system prompt (it
+    changes the cached prompt once a day, at midnight UTC).
 
-### Phase 2: what the model reads
-1. [ ] Help and index (#351): "1 light"; `T.gpsHere`'s second value; `T.pull` reorders the chest; `damage =
+### Phase 2: what the model reads (#356)
+1. [x] Help and index (#351): "1 light"; `T.gpsHere`'s second value; `T.pull` reorders the chest; `damage =
    0`; `T.sortChests`' summary; `T.undo(n)` counts entries; `T.blueprint.put` and the plan's layers;
    `T.build()`'s record (D2).
-2. [ ] News lines for this pass.
+2. [x] News lines for this pass.
 
-### Phase 3: the decisions and the stories
-1. [ ] D1, D3, D4 as decided.
-2. [ ] #339: the prompts read with lib/readline: its keys, a history file, Ctrl+C and Ctrl+D, Tab for the
+### Phase 3: the decisions and the stories (#354, #355, #357)
+1. [x] D1, D3, D4 as decided.
+2. [x] #339: the prompts read with lib/readline: its keys, a history file, Ctrl+C and Ctrl+D, Tab for the
    commands, the pager on PgUp and the wheel.
-3. [ ] #93: Shift+Enter (and Alt+Enter, for telnet) continue a goal on the next line; `/goal <path>` and
+3. [x] #93: Shift+Enter (and Alt+Enter, for telnet) continue a goal on the next line; `/goal <path>` and
    `--goal-file` read one from a file.
 
 ### Phase 4: release (on the owner's ok) and hand back
-1. [ ] The in-game checks: one `needs-in-game-test` issue for the pass, a sub-issue a check.
+1. [x] The in-game checks: #358, a sub-issue a check (#359 to #379).
 2. [ ] Version bump and release: 0.55.0.
 3. [ ] The v7 test plan (`/turtle-test-pass`), with #200, #210 and #217 set up again.
