@@ -17,6 +17,18 @@ local N = require("net")
 local check = M.check
 
 local W = SW.new(PROJ)
+
+-- ip up waits a moment for a device that has one of its addresses too:
+-- with nothing else left to happen, the last timer started fires (time
+-- passing to it)
+local lastTimer
+do
+    local start = W.os.startTimer
+    W.os.startTimer = function(...) lastTimer = start(...); return lastTimer end
+end
+local function lastTimerFires(w)
+    if #w.T.events == 0 and lastTimer then w.T.events[1] = { "timer", lastTimer } end
+end
 local function show(s) return (tostring(s):gsub("\n", "|")) end
 
 -- settings and modems, as the programs see them (real globals)
@@ -127,10 +139,15 @@ check("... none on its network: says to give dev; a bad MAC refused", r.status ~
     and r2.status == 2 and r2.errText:find("bad MAC"), show(r.errText) .. show(r2.errText))
 r = W:run("ip", "neigh", "add", "10.0.20.9", "lladdr", "02:cc:00:00:09:05", "dev", "back.20")
 
+r = W:run("ip", "route", "add", "10.9.0.0/16", "via", "10.0.1.2")
+check("ip route via this computer's own address, the network down: refused, saying why (Linux: invalid gateway)",
+    r.status ~= 0 and r.errText:find("10.0.1.2 is this computer's own address (back): a route goes via another router", 1, true)
+        and not (STORE["net.routes"] or ""):find("10.9.0.0"), show(r.errText))
+
 --------------------------------------------------------------------------
 -- ip up / down
 --------------------------------------------------------------------------
-r = W:run("ip", "up")
+r = W:run("ip", "up", { events = {}, onPull = lastTimerFires })
 check("ip up: two interfaces, the channels opened (VLAN 20: 60020)", r.out:find("up: 2 interfaces")
     and OPENED["back:60000"] and OPENED["back:60020"] and _G.ccnet ~= nil, show(r.out) .. show(r.errText))
 r = W:run("ip")
@@ -139,6 +156,34 @@ check("ip: up, the interfaces (no MACs) and routes", r.out:find("^up") and r.out
     show(r.out))
 r = W:run("ip", "-d", "a")
 check("ip -d a while up: the MACs", r.out:find("back%s+10%.0%.1%.2/24%s+02:cc:00:00:01:05 rx 0"), show(r.out))
+r = W:run("ip", "route", "add", "10.9.0.0/16", "via", "10.0.1.2")
+check("... and up: refused by the stack, the same words", r.status ~= 0
+    and r.errText:find("10.0.1.2 is this computer's own address (back)", 1, true), show(r.errText))
+
+-- a Network Gateway with this computer's address (a computer given the
+-- gateway's): it answers ip up's announcement, and ip up says so
+do
+    local answered
+    r = W:run("ip", "up", { events = {}, onPull = function(w)
+        if not answered then
+            answered = true
+            local me = _G.ccnet.ifaces.back
+            _G.ccnet.receive("back", 60000, { ccnet = 1, dst = me.mac, src = "02:cc:ff:00:00:00", type = "arp",
+                data = { op = "reply", sha = "02:cc:ff:00:00:00", spa = me.ip, tha = me.mac, tpa = me.ip } })
+        end
+        lastTimerFires(w)
+    end })
+    check("ip up when a Network Gateway has the address: says who, and what to do; status 1", r.status == 1
+        and r.errText:find("10.0.1.2 on back is in use by 02:cc:ff:00:00:00, a Network Gateway: give this computer "
+            .. "another address (ip addr add back <a.b.c.d/len>)", 1, true) and r.out:find("up: 2 interfaces"),
+        show(r.errText) .. show(r.out))
+    r = W:run("ip", "a")
+    check("ip a shows the conflict on its interface", r.out:find("back%s+10%.0%.1%.2/24.*CONFLICT: 02:cc:ff:00:00:00 has it too")
+        and not r.out:find("back%.20[^|]*CONFLICT"), show(r.out))
+    r = W:run("ip", "up", { events = {}, onPull = lastTimerFires })
+    check("ip up again, nobody else answering: no conflict", r.status == 0 and r.errText == ""
+        and not W:run("ip", "a").out:find("CONFLICT"), show(r.errText))
+end
 r = W:run("ip", "neigh")
 check("ip neigh after ip up: the permanent entries, marked so", r.out:find("10%.0%.1%.7%s+02:cc:00:00:07:05 dev back permanent")
     and r.out:find("10%.0%.20%.9%s+02:cc:00:00:09:05 dev back%.20 permanent")
@@ -1002,7 +1047,8 @@ help = help or { path = function() return "/rom/help" end, setPath = function() 
 local turtleWas = turtle
 turtle = nil
 STORE["net.boot"], STORE["net.forward"] = nil, nil
-r = W:session({}, function() return W:osRun("ccnix/deploy/setup.lua", { "--autostart", "router", "--no-reboot" }) end)
+r = W:session({ events = {}, onPull = lastTimerFires },
+    function() return W:osRun("ccnix/deploy/setup.lua", { "--autostart", "router", "--no-reboot" }) end)
 local startup = W:read("startup.lua") or ""
 check("setup --autostart router on a computer: net.boot and forwarding on, the router at boot; startup runs boot.lua first and `--end` last",
     STORE["net.boot"] == true and STORE["net.forward"] == true and STORE["ccnix.autostart"] == "router"

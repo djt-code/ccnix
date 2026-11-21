@@ -25,7 +25,12 @@
 --  * ARP: who has 10.0.1.5?  A request is broadcast; the owner answers
 --    with its MAC.  Answers are kept ARP_TTL seconds.  Packets wait while
 --    an address is asked for (ARP_TRIES requests, a second apart), then
---    are dropped as "host unreachable".
+--    are dropped as "host unreachable".  S.announce(iface) asks who has
+--    the interface's own address (a gratuitous ARP, as `ip up` sends):
+--    another device that has it too answers, and any ARP from another MAC
+--    with this computer's address is a conflict (RFC 5227): noted,
+--    counted (addressConflicts), kept in S.conflicts and a net_conflict
+--    event.
 --  * IP (layer 3): addresses "a.b.c.d" with a prefix length ("10.0.1.5/24"),
 --    a packet { src, dst, ttl, proto = "icmp" | "udp" | "tcp", data, id }.  Routes:
 --    each interface's own network, and static ones ("10.0.2.0/24 via
@@ -267,6 +272,7 @@ function N.new(opts)
     local S = {
         id = opts.id, forward = opts.forward or false, rpfilter = N.rpfilter(opts.rpfilter),
         ifaces = {}, links = {}, routes = {}, arp = {}, pending = {}, sockets = {}, tcpPorts = {},
+        conflicts = {},     -- iface -> { ip, mac, at }: another device said it has this interface's address
         counters = { forwarded = 0, dropped = 0, spoofed = 0 },
         log = {},
         taps = {},          -- fn(dir, iface, frame): every frame in ("in") or out ("out"), as tcpdump wants
@@ -349,6 +355,11 @@ function N.new(opts)
         end
         if not iface or not S.ifaces[iface] then
             return false, "no interface on " .. (gw and ("the gateway's network (" .. gw .. ")") or "that network")
+        end
+        for _, ifc in pairs(S.ifaces) do
+            if g == ifc.ip then
+                return false, gw .. " is this computer's own address (" .. ifc.name .. "): a route goes via another router"
+            end
         end
         S.deleteRoute(cidr)
         S.routes[#S.routes + 1] = { net = netOf(net, len), len = len, gw = g, iface = iface }
@@ -603,7 +614,8 @@ function N.new(opts)
         local orig = { src = pkt.src, dst = pkt.dst, proto = pkt.proto, id = d.id, seq = d.seq,
                        sport = d.sport, dport = d.dport }
         if mine or isMine(pkt.src) then
-            queue("net_icmp", kind, N.ipString(pkt.dst), code, orig)
+            -- (from this computer itself: its own address, as Linux's ping says "From 10.1.0.10")
+            queue("net_icmp", kind, N.ipString(pkt.src), code, orig)
             return
         end
         S.sendIP(pkt.src, "icmp", { type = kind, code = code, orig = orig })
@@ -700,9 +712,31 @@ function N.new(opts)
         output(copy, r, false)
     end
 
+    -- Another device says it has ifc's address (RFC 5227's conflict): noted,
+    -- counted, kept for ip addr, and a net_conflict event (iface, address,
+    -- the other's MAC) for ip up.  The address is kept: whichever device
+    -- the others asked last gets the packets, so neither works well.
+    local function conflict(ifc, mac)
+        count("addressConflicts")
+        local was = S.conflicts[ifc.name]
+        if not (was and was.mac == mac and was.ip == ifc.ip) then
+            note("address conflict: " .. N.ipString(ifc.ip) .. " on " .. ifc.name .. " is also " .. mac .. "'s", 3)
+        end
+        S.conflicts[ifc.name] = { ip = ifc.ip, mac = mac, at = clock() }
+        queue("net_conflict", ifc.name, N.ipString(ifc.ip), mac)
+    end
+
     local function arpIn(ifc, a)
         if type(a) ~= "table" or type(a.spa) ~= "number" or type(a.sha) ~= "string" then return end
         count(a.op == "request" and "arpRequestsIn" or "arpRepliesIn")
+        if a.spa == ifc.ip and a.sha ~= ifc.mac then
+            conflict(ifc, a.sha)
+            if a.op == "request" and a.tpa == ifc.ip then       -- (its announcement: say this one has it too)
+                count("arpRepliesOut")
+                sendFrame(ifc, a.sha, "arp", { op = "reply", sha = ifc.mac, spa = ifc.ip, tha = a.sha, tpa = a.spa })
+            end
+            return
+        end
         local known = S.arp[ifc.name][a.spa]
         if a.tpa == ifc.ip then
             learn(ifc, a.spa, a.sha)
@@ -713,6 +747,17 @@ function N.new(opts)
         elseif known then
             learn(ifc, a.spa, a.sha)        -- (it moved: keep up)
         end
+    end
+
+    -- Announce interface `name`'s address (a gratuitous ARP request: who
+    -- has my own address?).  A device that has it too answers, and that
+    -- answer is a conflict (above).  false if there's no such interface.
+    function S.announce(name)
+        local ifc = S.ifaces[name]
+        if not ifc then return false end
+        count("arpRequestsOut")
+        sendFrame(ifc, N.BROADCAST, "arp", { op = "request", sha = ifc.mac, spa = ifc.ip, tpa = ifc.ip })
+        return true
     end
 
     -- A frame from interface `iface`.
