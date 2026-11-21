@@ -179,3 +179,21 @@ do
     check("...the chest in the box keeps what it holds", W.get(3, 0, 3).inv[1] and W.get(3, 0, 3).inv[1].count == 10
         and W.carrying("minecraft:cobblestone") == 0)
 end
+
+--------------------------------------------------------------------------
+-- (#349) what a dig drops, and the part stack it joins
+--------------------------------------------------------------------------
+do
+    fresh({ { 0, 0, 1, "minecraft:netherrack" } })
+    check("T.digDrop: glowstone gives its dust, iron ore raw iron, glass nothing, stone cobblestone",
+        T.digDrop("minecraft:glowstone") == "minecraft:glowstone_dust" and T.digDrop("minecraft:iron_ore") == "minecraft:raw_iron"
+            and T.digDrop("minecraft:glass") == nil and T.digDrop("minecraft:red_stained_glass") == nil
+            and T.digDrop("minecraft:stone") == "minecraft:cobblestone", tostring(T.digDrop("minecraft:glowstone")))
+    W.give(1, "minecraft:stone_bricks", 10)
+    W.give(5, "minecraft:netherrack", 61)
+    turtle.select(1)
+    local ok, digWhy = turtle.dig()
+    check("a dig joins the part stack of its drop (slot 5), not the empty slot after the selected one; the selection kept",
+        ok == true and W.S.inv[5].count == 62 and W.S.inv[2] == nil and turtle.getSelectedSlot() == 1,
+        tostring(ok) .. " " .. tostring(digWhy) .. ", slot 5 " .. tostring(W.S.inv[5] and W.S.inv[5].count) .. ", slot 2 " .. tostring(W.S.inv[2] and W.S.inv[2].name))
+end
