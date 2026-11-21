@@ -3268,7 +3268,9 @@ end
 -- a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by
 -- the container's item detail (name, count, damage, enchantments...): true for a stack it may take.  Needs a
 -- container it can read (a chest or a barrel).  When short of n, why is: no container, none left in it (that
--- opts.pick takes), or no room in the turtle.
+-- opts.pick takes), or no room in the turtle.  It moves stacks about in the container to get at them, so slot numbers
+-- read before (list(), getItemDetail) are stale after.  A clean tool's detail has damage = 0, not nil: a pick for worn
+-- ones tests (d.damage or 0) > 0.
 function T.pull(side, name, n, opts)
     n = n or 1
     local pick = opts and opts.pick

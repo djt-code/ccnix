@@ -36,7 +36,8 @@
 -- layer.  A stair, slab, log, torch or door goes through T.placeAt for the state it names.  The plan is kept as text
 -- in the data file .build, and how far the build has got (the number of the last cell tried, the cells that failed,
 -- with why, and the order) in .build.progress, so a stop, a crash or a reboot carries on where it was, in the same
--- order, with a plain T.build().  A build that spends over three times the fuel T.fuelFor gives for its cells stops
+-- order, with a plain T.build(): the last plan given, finished or not (T.undo doesn't change it).  An unfinished one is
+-- never replaced by a new plan without opts.restart; a finished one is, its failed cells in info.previous.  A build that spends over three times the fuel T.fuelFor gives for its cells stops
 -- and says it is circling.  A build never digs a block out of a cell it fills (T.replace swaps blocks).  A finished
 -- build can protect itself (opts.protect).
 --
@@ -509,8 +510,10 @@ function T.blueprint.extent(plan)
     return a.x, a.y, a.z - math.max(depth, 1) + 1, a.x + math.max(width, 1) - 1, a.y + #plan.layers - 1, a.z
 end
 
--- Set one cell of a plan to a block (`item`, with a state in brackets if it has one; "air" for air; nil or " " to leave
--- it alone).  Returns true, or nil and why.
+-- Set one cell of a plan, in its layers, to a block (`item`, with a state in brackets if it has one; "air" for air; nil
+-- or " " to leave it alone).  Returns true, or nil and why.
+--
+-- (A plan from T.blueprint.fill of air makes room for any cell of its box.)
 --
 -- The cell must be in one of the plan's layers, and no lower in x or higher in z than the anchor; the lines of the layer
 -- grow to hold it.

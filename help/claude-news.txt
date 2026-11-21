@@ -2,6 +2,19 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.55.0
+Craft rounds make the whole count now: CC's suck went on to the next stack asking for the whole count again, so a cell took more than it needed and the last came up short ("the chest gave 52 (0 still in it)"). T.pull and T.fetch take exactly what you ask.
+T.addRecipe replaces a recipe you added before for the same item with the same cells filled (the second value says so). Your quartz pillar's "No matching recipes" was your first, wrong pillar recipe (from quartz blocks) still there, tried when the cut blocks ran short. A table refusal names what the grid held.
+T.craftPlan no longer plans a loop (ingots into a block and back): a target whose recipes go round to it is taken from what there is. T.craftBatch's info.spare lists what it made and didn't take (planks and sticks left over).
+One bulk chest a base now: T.addChest(..., true) at the far base no longer unmarks home's. Your loot chest lost its bulk flag that way on 11-18: mark it again with T.addChest. The overlap warning keeps to the chests at the same base.
+T.build refuses a placement that would close you in and tries the cell's next way in; a cell with none fails, saying why (opts.refuseSeal = false only warns). That is how the lighthouse corner sealed you in.
+T.lint reads the cells over a plan that the map hasn't seen as air, so wall-top drops show before you scan; info.unseen and a summary line count what it couldn't check. T.pave counts unseen cells as one more kind to dig: with no slot for them it refuses before it moves (scan first).
+T.digDrop knows glowstone (dust), sea lanterns, glass and ice (nothing) and the ores. A dig's drop joins a part stack of it instead of starting a new one.
+sleep in your code is right just after the tick rate changes (the first sleep of a call ran 1.1 s long: a stale tick-rate measure).
+The put-back line after a call says what the side held when it was to be put back, and what it holds now.
+settings.get(name), settings.getNames() and settings.getDetails(name) are in your code, read-only (T.saveSettings writes). The system prompt ends with today's date (UTC): date your files by it.
+T.sortChests' info.summary says how many stacks of how many kinds it moved: every misplaced stack in the base's chests, the player's too. T.pull moves stacks about in the chest: slot numbers read before are stale after. A clean tool's detail has damage = 0, not nil. T.gpsHere's second value is how the facing was found ("a scan" or "a step"). T.undo(n) counts entries: a paved cell is two (a dig and a place). T.blueprint.put sets cells in a plan's layers only: fill the box with air first for room. T.build() carries on the last plan given, finished or not.
+-- ADR-0020 (#340-#342, #344-#351; D1-D4): the v6 test pass's findings.
 == 0.54.0
 The server ticks 60 times a second, not 20: os.clock and os.startTimer count game ticks and run 3x fast. sleep(n) in your code is real seconds now, whatever the tick rate. Timeouts are real seconds too (T.report.ask, the chat tool's ask, T.harvest's opts.timeout); require("realtime") gives now(), sleep(s), timer(s) and tickRate() in real seconds. Waits your notes timed were about a third as long as they said.
 Chat no longer shows mojibake: arrows and dashes you write are spelled out (-> and -) for the game.

@@ -938,6 +938,8 @@ do
         and chestHas(-3, 0, 1, STONE) == 10 and chestHas(0, 0, -3, DIRT) == 30)
     check("...info says what moved and how many stacks", info and info.moved[PLANKS] == 45 and info.moved[IRON] == 7 and info.stacks == 3
         and #info.left == 0 and info.more == false)
+    check("...and info.summary says it: 3 stacks of 2 kinds, every misplaced stack (#351)", info and info.summary ==
+        "moved 3 stacks of 2 kinds (every misplaced stack in the site's chests, whoever put it there)", info and info.summary)
     check("...the turtle is home, facing as before, carrying nothing it took", here() and carrying(PLANKS) == 0 and carrying(IRON) == 0)
     check("...the list is right", line(T.chests(), 2, -2, "down").items[PLANKS] == 45 and line(T.chests(), 3, 0, 0).items[PLANKS] == nil)
     check("nothing was thrown into the world", (W.thrown or 0) == 0)
