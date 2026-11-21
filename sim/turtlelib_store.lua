@@ -805,6 +805,24 @@ do
     ok, why = T.stow()
     check("...with only the bulk chest there: it's called the bulk chest", ok == false
         and why:find("the bulk chest is at 100,0,1, 100 blocks off (over opts.maxDistance 48", 1, true) ~= nil, tostring(why))
+
+    -- (#347) one bulk chest a site: the far base's bulk chest leaves this base's alone, and the other way round
+    setUp()
+    W.set(100, 0, 1, "minecraft:chest")
+    T.addChest(100, 0, 0, 0, true)
+    check("two bases, a bulk chest each: naming the far base's leaves this base's bulk", line(T.chests(), C.x, C.z, C.side).bulk == true
+        and line(T.chests(), 100, 0, 0).bulk == true)
+    W.give(1, GLOW, 6)
+    ok, why = T.stow()
+    check("...and T.stow puts what no chest here is for in the bulk chest here", ok == true and chestHas(0, 0, -3, GLOW) == 6, tostring(why))
+    T.addChest(A.x, A.y, A.z, A.side, true)
+    check("...a second bulk chest at this base unmarks this base's first, not the far one", line(T.chests(), A.x, A.z, A.side).bulk == true
+        and line(T.chests(), C.x, C.z, C.side).bulk == false and line(T.chests(), 100, 0, 0).bulk == true)
+    -- holds that overlap only at the other base aren't warned of: sorting never mixes the bases
+    T.addChest(100, 0, 0, 0, { holds = "*_log" })
+    W.give(2, "minecraft:oak_log", 1)                 -- (a real name both take: the warning names what it sees)
+    local _, note = T.addChest(D.x, D.y, D.z, D.side, { holds = "oak_log" })
+    check("...a chest's holds overlapping only the far base's: no warning", note == nil or not note:find("100,0,1", 1, true), tostring(note))
 end
 
 do

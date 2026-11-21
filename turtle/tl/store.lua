@@ -318,6 +318,28 @@ local function moreChests(n) return "; and " .. n .. (n == 1 and " more chest ov
 -- The item name without minecraft: (a modded one keeps its namespace).
 local function shortName(name) return text.stripPrefix(name, NS) or name end
 
+-- The chests in sites: groups no more than SITE apart, chest to chest.  A table chest -> its site (a list).
+local function sitesOf(list)
+    local siteOf = {}
+    for _, c in ipairs(list) do
+        if not siteOf[c] then
+            local site, queue = { c }, { c }
+            siteOf[c] = site
+            while #queue > 0 do
+                local a = table.remove(queue)
+                for _, b in ipairs(list) do
+                    if not siteOf[b] and T.dist(cellOf(a), cellOf(b)) <= SITE then
+                        siteOf[b] = site
+                        site[#site + 1] = b
+                        queue[#queue + 1] = b
+                    end
+                end
+            end
+        end
+    end
+    return siteOf
+end
+
 -- T.addChest's warning for holds `globs` that overlap the other chests' (ADR-0015 D2), or nil: one part for each chest,
 -- each pair of globs with the real names both take and which glob wins (the more specific); three of each list at most.
 local function overlapWarning(c, globs, list)
@@ -364,7 +386,8 @@ end
 -- a heading 0 to 3); opts.holds: globs of what it is for.  True (and a note if known or changed), or nil and why.
 --
 -- The heading is T.dir's; "top" and "bottom" are up and down.  Nothing is visited: T.catalogue reads what is in it.  With `bulk` true it becomes the bulk chest, where T.stow
--- puts what no chest holds already (there is one bulk chest; the earlier one is a plain chest again).  Adding a chest
+-- puts what no chest holds already (there is one bulk chest a site, a base's chests within 48 blocks of each other: the
+-- site's earlier one is a plain chest again; another base's stays).  Adding a chest
 -- again, from this stand or another, or the other half of a known double chest, keeps the one record and what was
 -- written down of it, and the note says which it is ("already known: the other half of the double chest at 3,0,1,
 -- reached from 3,0,0 side 0").  Kept in the data file .chests.
@@ -408,10 +431,12 @@ function T.addChest(x, y, z, side, bulk, opts)
     end
     if newHolds ~= nil then c.holds = newHolds or nil end
     -- (ADR-0015 D2: holds that overlap another chest's are said, and which wins)
-    local warning = newHolds and overlapWarning(c, newHolds, list)
+    -- (only the chests of its own site: sorting never moves things between bases)
+    local site = sitesOf(list)[c]
+    local warning = newHolds and overlapWarning(c, newHolds, site)
     if warning then known = known and (known .. "; " .. warning) or warning end
     if bulk then
-        for _, q in ipairs(list) do q.bulk = false end
+        for _, q in ipairs(site) do q.bulk = false end
         c.bulk = true
     end
     local ok, why = save(list)
@@ -1011,27 +1036,6 @@ local function leftWords(left, notes, list)
     return reasons, "some stayed aboard: " .. table.concat(parts, "; ")
 end
 
--- The chests in sites: groups no more than SITE apart, chest to chest.  A table chest -> its site (a list).
-local function sitesOf(list)
-    local siteOf = {}
-    for _, c in ipairs(list) do
-        if not siteOf[c] then
-            local site, queue = { c }, { c }
-            siteOf[c] = site
-            while #queue > 0 do
-                local a = table.remove(queue)
-                for _, b in ipairs(list) do
-                    if not siteOf[b] and T.dist(cellOf(a), cellOf(b)) <= SITE then
-                        siteOf[b] = site
-                        site[#site + 1] = b
-                        queue[#queue + 1] = b
-                    end
-                end
-            end
-        end
-    end
-    return siteOf
-end
 
 -- The chests opts.box ({ x1, y1, z1, x2, y2, z2 }) takes in (all of them with none), or nil and why.
 local function inScope(list, box)
@@ -1203,7 +1207,11 @@ function T.stow(opts)
         if n > 0 then info.left[name] = n end
     end
     if next(info.left) then
-        local reasons, why = leftWords(info.left, notes, list)
+        local reach = {}                              -- (a bulk chest out of reach is no bulk chest for this)
+        for _, c in ipairs(list) do
+            if inScopeSet[c] and within(r, c) then reach[#reach + 1] = c end
+        end
+        local reasons, why = leftWords(info.left, notes, reach)
         info.reasons = reasons
         return false, why, info
     end

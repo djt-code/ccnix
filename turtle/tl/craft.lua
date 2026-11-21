@@ -346,6 +346,18 @@ local function define(spec)
     rows[#rows + 1] = rowOf(spec)
 end
 
+-- Which cells of a shape are filled, as text ("1,1 2,1"): two recipes with the same are the same layout.
+local function cellsKey(shape)
+    local out = {}
+    for y, line in ipairs(shape) do
+        for x = 1, #line do
+            local ch = line:sub(x, x)
+            if ch ~= "." and ch ~= " " then out[#out + 1] = x .. "," .. y end
+        end
+    end
+    return table.concat(out, " ")
+end
+
 -- The built-in recipes: vanilla's building and tool basics, and the redstone a build wants.
 -- Wood
 define { out = "{}_planks", count = 4, shape = { "L" }, of = "L", from = LOGS }
@@ -602,12 +614,24 @@ end
 -- A letter in the shape is a name, a list of names or a glob (a name with no namespace is minecraft:'s); a dot is an
 -- empty cell; mixed = true lets one letter stand for different items (any planks).  A family has out with {} in it and
 -- of = "X" for the letter that is the block, with from = a list of blocks, or map = { result = block }.  The newest
--- recipe is tried first.  Kept in memory only: put the calls in /claude/helpers.lua to have them each session.
+-- recipe is tried first.  A recipe added before (by T.addRecipe, not a built-in) for the same item with the same cells
+-- filled is replaced, so a wrong one put right doesn't stay behind to be tried when the right one runs short; then
+-- the second value says so.  Kept in memory only: put the calls in /claude/helpers.lua to have them each session.
 function T.addRecipe(spec)
     local why = checkRow(spec)
     if why then return nil, why end
-    table.insert(rows, 1, rowOf(spec))
-    return true
+    local row = rowOf(spec)
+    row.added = true
+    local cells, note = cellsKey(row.shape), nil
+    for i = #rows, 1, -1 do
+        local old = rows[i]
+        if old.added and old.out == row.out and cellsKey(old.shape) == cells then
+            table.remove(rows, i)
+            note = "replaces the recipe for " .. row.out .. " added before, with the same cells filled"
+        end
+    end
+    table.insert(rows, 1, row)
+    return true, note
 end
 
 -- The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
@@ -701,11 +725,12 @@ end
 -- A plan's working state: left (what there is, by name), spare (made over what was asked, by name), base (taken from
 -- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order).
 local function newState(stock)
-    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {} }
+    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {}, roundTo = {} }
 end
 
 local function copyState(st)
-    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {} }
+    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {},
+                  roundTo = copyOf(st.roundTo) }
     for i, s in ipairs(st.steps) do out.steps[i] = { name = s.name, n = s.n, crafts = s.crafts } end
     return out
 end
@@ -813,36 +838,50 @@ end
 
 -- n of the item: what was made over before first, then what there is (unless `top`: a target is made), then made by
 -- the recipe that leaves the least short; what is left is short.  A recipe that needs the item it is making on the way
--- (coal from a coal block from coal) is not one: st.loop says it went round.  Changes st.
-function resolve(st, name, n, visiting, top)
-    local spare = math.min(st.spare[name] or 0, n)
-    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
-    if not top then
-        local use = math.min(st.left[name] or 0, n)
-        if use > 0 then
-            st.left[name] = st.left[name] - use
-            st.base[name] = (st.base[name] or 0) + use
-            n = n - use
-        end
+-- (coal from a coal block from coal) is not one: st.loop says it went round, even when what there is would cover it (an
+-- ingot from a block from the ingots there are).  A target whose every recipe goes round is taken from what there is.
+-- Changes st.
+local function fromStock(st, name, n)
+    local use = math.min(st.left[name] or 0, n)
+    if use > 0 then
+        st.left[name] = st.left[name] - use
+        st.base[name] = (st.base[name] or 0) + use
     end
-    if n == 0 then return end
+    return n - use
+end
+
+function resolve(st, name, n, visiting, top)
     if visiting[name] then
         st.loop = true
+        st.roundTo[name] = true
         return
     end
+    local spare = math.min(st.spare[name] or 0, n)
+    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
+    if not top then n = fromStock(st, name, n) end
+    if n == 0 then return end
     visiting[name] = true
     local best, bestShort
-    local before = shortTotal(st)
+    local before, came = shortTotal(st), {}
     for _, cand in ipairs(candidatesFor(name)) do
         local trial = copyState(st)
         expand(trial, cand, name, n, visiting)
+        for k in pairs(trial.roundTo) do came[k] = true end
         local s = shortTotal(trial) - before
         if not trial.loop and (not best or s < bestShort) then best, bestShort = trial, s end
         if best and s == 0 then break end
         breathe()
     end
     visiting[name] = nil
+    -- (a target whose recipe goes round back to it, when there is enough of it, is taken from what there is: an ingot
+    -- isn't made from a block made from the ingots there are)
+    local roundTo = best and best.roundTo or came
+    if top and roundTo[name] and (st.left[name] or 0) >= n then
+        fromStock(st, name, n)
+        return
+    end
     if not best then
+        for k in pairs(came) do st.roundTo[k] = true end
         st.short[name] = (st.short[name] or 0) + n
         return
     end
@@ -979,7 +1018,14 @@ local function oneRound(bench, side, outName, r)
         if res == "Terminated" then error(res, 0) end
         return made, "the crafting failed: " .. tostring(res)
     end
-    if res == false then return made, "the crafting table would not craft: " .. tostring(msg or "no recipe matched") end
+    if res == false then
+        local held, seen = {}, {}
+        for _, c in ipairs(r.layout) do
+            if not seen[c.item] then seen[c.item] = true; held[#held + 1] = shortName(c.item) end
+        end
+        return made, "the crafting table would not craft: " .. tostring(msg or "no recipe matched") .. " (the grid held "
+            .. table.concat(held, ", ") .. " for " .. shortName(outName) .. ": is that recipe right? T.addRecipe replaces one)"
+    end
     return made, shortWhy
 end
 
@@ -1210,7 +1256,7 @@ local function batchAt(side, list, entries, opts)
     -- (every product stays in the chest till the end, a stack or more each: all of them need room, not the biggest)
     local products = 0
     for _, e in ipairs(entries) do products = products + math.ceil(e.n / stackOf(e.name)) end
-    local info = { crafted = {}, failed = {}, taken = {}, left = {}, used = {} }
+    local info = { crafted = {}, failed = {}, taken = {}, left = {}, used = {}, spare = {} }
     local take = takeTest(list, entries, opts.take)
     local function failed(e, why) info.failed[#info.failed + 1] = { name = e.name, n = e.n, why = why } end
     local stashWhy, before
@@ -1240,15 +1286,15 @@ local function batchAt(side, list, entries, opts)
                 end
             end
         end, function()
-            if not take then return end
             -- (an intermediate a later recipe used is not owed: only what the batch added to the chest, the inventory
-            -- back aboard, comes aboard)
+            -- back aboard, comes aboard; what isn't taken is spare, in the chest)
             local after = T.containerCounts(side) or {}
             for _, name in ipairs(tables.sortedKeys(info.crafted)) do
                 local made = info.crafted[name]
                 local owed = math.max(0, math.min(made, (after[name] or 0) - (before[name] or 0)))
                 if owed < made then info.used[name] = made - owed end
-                if owed > 0 and take(name) then
+                if owed > 0 and not (take and take(name)) then info.spare[name] = owed end
+                if owed > 0 and take and take(name) then
                     local got, why = T.pull(side, name, owed)
                     info.taken[name] = got
                     if got < owed then info.left[name], leftWhy[name] = owed - got, why end
@@ -1282,7 +1328,8 @@ end
 -- set of names) brings them aboard.  A recipe that can't be made is noted and the rest go on.  opts: chest, take,
 -- partial (craft what the ingredients allow), move.  Info is { crafted = { name = n }, failed = { { name, n, why } },
 -- taken = { name = n }, left = { name = n } (made, but it stayed in the chest: the why says why), used = { name = n }
--- (made, then used by a later recipe: not owed to opts.take) }.  A chest T.addChest knows is read again after
+-- (made, then used by a later recipe: not owed to opts.take), spare = { name = n } (made and not taken: in the chest,
+-- like the planks and sticks a plan made more of than it used) }.  A chest T.addChest knows is read again after
 -- (T.recount).
 function T.craftBatch(list, opts)
     opts = opts or {}
