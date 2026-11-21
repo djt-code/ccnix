@@ -949,23 +949,68 @@ end
 local NO_TOOL = "No tool to dig with"
 local equipToDig
 
--- What a dig of these drops instead of the block itself (the common ones), for T.cfg.digNeedsRoom; false, nothing
+-- What a dig of these drops instead of the block itself (the common ones, with a pickaxe and no silk touch), for
+-- T.cfg.digNeedsRoom and for joining a part stack; false, nothing
 local DIG_DROP = { ["minecraft:stone"] = "minecraft:cobblestone", ["minecraft:deepslate"] = "minecraft:cobbled_deepslate",
                    ["minecraft:grass_block"] = "minecraft:dirt", ["minecraft:redstone_wire"] = "minecraft:redstone",
+                   ["minecraft:glowstone"] = "minecraft:glowstone_dust", ["minecraft:sea_lantern"] = "minecraft:prismarine_crystals",
+                   ["minecraft:clay"] = "minecraft:clay_ball", ["minecraft:snow_block"] = "minecraft:snowball",
+                   ["minecraft:bookshelf"] = "minecraft:book", ["minecraft:melon"] = "minecraft:melon_slice",
+                   ["minecraft:coal_ore"] = "minecraft:coal", ["minecraft:deepslate_coal_ore"] = "minecraft:coal",
+                   ["minecraft:iron_ore"] = "minecraft:raw_iron", ["minecraft:deepslate_iron_ore"] = "minecraft:raw_iron",
+                   ["minecraft:copper_ore"] = "minecraft:raw_copper", ["minecraft:deepslate_copper_ore"] = "minecraft:raw_copper",
+                   ["minecraft:gold_ore"] = "minecraft:raw_gold", ["minecraft:deepslate_gold_ore"] = "minecraft:raw_gold",
+                   ["minecraft:nether_gold_ore"] = "minecraft:gold_nugget", ["minecraft:nether_quartz_ore"] = "minecraft:quartz",
+                   ["minecraft:diamond_ore"] = "minecraft:diamond", ["minecraft:deepslate_diamond_ore"] = "minecraft:diamond",
+                   ["minecraft:emerald_ore"] = "minecraft:emerald", ["minecraft:deepslate_emerald_ore"] = "minecraft:emerald",
+                   ["minecraft:lapis_ore"] = "minecraft:lapis_lazuli", ["minecraft:deepslate_lapis_ore"] = "minecraft:lapis_lazuli",
+                   ["minecraft:redstone_ore"] = "minecraft:redstone", ["minecraft:deepslate_redstone_ore"] = "minecraft:redstone",
+                   ["minecraft:glass"] = false, ["minecraft:glass_pane"] = false, ["minecraft:tinted_glass"] = "minecraft:tinted_glass",
+                   ["minecraft:ice"] = false, ["minecraft:packed_ice"] = false, ["minecraft:blue_ice"] = false,
                    ["minecraft:air"] = false, ["minecraft:cave_air"] = false, ["minecraft:void_air"] = false,
                    ["minecraft:water"] = false, ["minecraft:flowing_water"] = false, ["minecraft:lava"] = false,
                    ["minecraft:flowing_lava"] = false, ["minecraft:fire"] = false, ["minecraft:soul_fire"] = false,
                    ["minecraft:bubble_column"] = false, ["minecraft:light"] = false }
 
--- What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
+-- What digging the block `name` gives (cobblestone for stone, glowstone dust for glowstone, raw iron for iron ore); nil
+-- for air, a fluid, or a block that gives nothing (glass, ice: a pickaxe has no silk touch).
 function T.digDrop(name)
     if name == nil or DIG_DROP[name] == false then return nil end
+    if text.endsWith(name, "_stained_glass") or text.endsWith(name, "_stained_glass_pane") then return nil end
     return DIG_DROP[name] or name
+end
+
+-- (#349) CC: Tweaked puts a dug block's drop in the first slot, counting on from the selected one, that is empty or
+-- holds it with room: an empty slot ahead of a part stack of it starts a second stack.  When that would happen, the
+-- slot of a part stack is selected for the dig: the selected slot to put back after, or nil if nothing changed.
+local function joinPartStack(name)
+    local drop = T.digDrop(name)
+    if not drop then return nil end
+    local sel = turtle.getSelectedSlot()
+    for i = 0, 15 do
+        local s = (sel - 1 + i) % 16 + 1
+        local n = turtle.getItemCount(s)
+        if n == 0 then break end
+        local it = turtle.getItemDetail(s)
+        if it and it.name == drop and turtle.getItemSpace(s) > 0 then return nil end
+    end
+    for s = 1, 16 do
+        local n = turtle.getItemCount(s)
+        if n > 0 and turtle.getItemSpace(s) > 0 then
+            local it = turtle.getItemDetail(s)
+            if it and it.name == drop then
+                turtle.select(s)
+                return sel
+            end
+        end
+    end
+    return nil
 end
 
 -- Is there a slot for what digging `name` drops: a free one, or a stack of it with room?
 local function roomForDrop(name)
-    local drop = DIG_DROP[name] or name
+    local drop = T.digDrop(name)
+    if not drop then return true end
     for s = 1, 16 do
         if turtle.getItemCount(s) == 0 then return true end
         local it = turtle.getItemDetail(s)
@@ -996,8 +1041,10 @@ for name, side in pairs(DIG_SIDE) do
                 .. "stow or drop something first, or set it false to let drops fall)"
         end
         needTool()
+        local putBack = ok and type(data) == "table" and data.name and joinPartStack(data.name)
         local res = table.pack(raw[name](...))
         if not res[1] and res[2] == NO_TOOL and T.cfg.equipToDig and equipToDig() then res = table.pack(raw[name](...)) end
+        if putBack then turtle.select(putBack) end
         return afterwards(function()
             forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end

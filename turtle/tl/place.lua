@@ -333,7 +333,7 @@ end
 local WANTED = { "facing", "half", "axis", "face", "type", "rotation", "hanging" }
 -- Every option T.placeAt takes (one it doesn't is named, not ignored)
 local PLACE_OPTS = { facing = true, half = true, axis = true, face = true, type = true, rotation = true, hanging = true,
-                     toward = true, move = true, inside = true, tries = true, text = true, temp = true, digBelow = true,
+                     toward = true, move = true, inside = true, tries = true, text = true, temp = true, digBelow = true, refuseSeal = true,
                      exit = true }
 
 --------------------------------------------------------------------------
@@ -926,14 +926,14 @@ end
 -- (ADR-0015 D5) Would a block at x, y, z close the turtle in: no way out, through cells the map shows empty (air or
 -- water) or has never seen, to `exit` ({ x, y, z }), or with none to a cell OPEN_AT blocks from where it stands?
 -- Why, if so; nil if there is a way, or the search can't tell (it looks at SEAL_CELLS cells at most).  A way out that
--- needs a dig (through the build) isn't one.
+-- needs a dig (through the build) isn't one.  With `before`, the cell is left as it is: is the turtle closed in now?
 local OPEN_AT, SEAL_CELLS = 12, 4000
 local PASSES = { [AIR] = true, ["minecraft:cave_air"] = true, ["minecraft:water"] = true }
-local function closesIn(x, y, z, exit)
+local function closesIn(x, y, z, exit, before)
     local start = T.here()
     local key = function(a, b, c) return a .. "," .. b .. "," .. c end
     local target = key(x, y, z)
-    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [target] = true }, { start }, 1
+    local seen, queue, head = { [key(start.x, start.y, start.z)] = true, [target] = not before or nil }, { start }, 1
     local goal = exit and key(cellOf(exit))
     while queue[head] do
         local c = queue[head]
@@ -1385,7 +1385,8 @@ end
 -- (below), exit ({ x, y, z }: below).  A cell that already holds the item as wanted comes back as it is; one holding
 -- anything else is not touched.  A placement that closes the turtle in (no way, through what the map shows empty or
 -- unknown, out of where it stands: a dozen blocks, or to opts.exit) is made with how.warning saying so; with
--- opts.exit it's refused (and an opts.exit that is the target cell itself, which is no way out).  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
+-- opts.exit it's refused (and an opts.exit that is the target cell itself, which is no way out); with opts.refuseSeal
+-- (T.build sets it) that way is refused and the next one tried, unless the map shows the turtle closed in already.  When the plain ways have run out, a top half (a slab, stair or trapdoor) is placed from below with
 -- support: with nothing above it to place against, a temporary block goes there first (a cobblestone, dirt, planks or
 -- bricks on board, or opts.temp) and is taken away again; with a floor under it, only when opts.digBelow = true, the
 -- floor is dug to stand in and put back after with the same block (carry one, unless the floor comes back as itself
@@ -1494,34 +1495,40 @@ function T.placeAt(x, y, z, item, opts)
                 if sealed and opts.exit then
                     return nil, "won't place " .. shortName(item) .. " at " .. x .. "," .. y .. "," .. z .. ": " .. sealed
                 end
-                T.selectItem(item)
-                local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h), message)
-                if not placed then
-                    lastWhy = "the game would not place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," ..
-                        app.sz .. " (" .. app.kind .. "): " .. tostring(placeWhy)
-                    attempts[#attempts + 1] = words .. ": the game refused (" .. tostring(placeWhy) .. ")"
+                if sealed and opts.refuseSeal and not closesIn(x, y, z, opts.exit, true) then
+                    -- (T.build's way: not from here, another way may leave a way out)
+                    lastWhy = "won't place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," .. app.sz .. ": " .. sealed
+                    attempts[#attempts + 1] = words .. ": it would close the turtle in"
                 else
-                    local name, state = lookAtTarget(app.kind, app.h)
-                    if not name then
-                        lastWhy = "placed " .. shortName(item) .. " but nothing is there to inspect"
-                        attempts[#attempts + 1] = words .. ": nothing there after"
+                    T.selectItem(item)
+                    local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h), message)
+                    if not placed then
+                        lastWhy = "the game would not place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," ..
+                            app.sz .. " (" .. app.kind .. "): " .. tostring(placeWhy)
+                        attempts[#attempts + 1] = words .. ": the game refused (" .. tostring(placeWhy) .. ")"
                     else
-                        noteInMap(x, y, z, name, state)
-                        if app.certain and learnFrom(learned, famName, app.kind, app.row, app.h, base, item, name, state) then
-                            saveLearned(learned)
-                        end
-                        if accepted(item, want, name, state) then
-                            return name, state, { approach = app.kind, from = { x = app.sx, y = app.sy, z = app.sz },
-                                                  heading = app.h, tries = attempt, lines = lines,
-                                                  warning = sealed and ("warning: placed " .. shortName(item) .. " at " .. x .. ","
-                                                      .. y .. "," .. z .. ", but " .. sealed) or nil }
-                        end
-                        lastWhy = "got " .. describe(name, state) .. " from " .. app.sx .. "," .. app.sy .. "," ..
-                            app.sz .. " (" .. app.kind .. ")"
-                        attempts[#attempts + 1] = words .. ": got " .. describe(name, state)
-                        local dug, digWhy = takeBack(app.kind, app.h, x, y, z)
-                        if not dug then
-                            return nil, lastWhy .. ", and couldn't dig it out: " .. tostring(digWhy)
+                        local name, state = lookAtTarget(app.kind, app.h)
+                        if not name then
+                            lastWhy = "placed " .. shortName(item) .. " but nothing is there to inspect"
+                            attempts[#attempts + 1] = words .. ": nothing there after"
+                        else
+                            noteInMap(x, y, z, name, state)
+                            if app.certain and learnFrom(learned, famName, app.kind, app.row, app.h, base, item, name, state) then
+                                saveLearned(learned)
+                            end
+                            if accepted(item, want, name, state) then
+                                return name, state, { approach = app.kind, from = { x = app.sx, y = app.sy, z = app.sz },
+                                                      heading = app.h, tries = attempt, lines = lines,
+                                                      warning = sealed and ("warning: placed " .. shortName(item) .. " at " .. x .. ","
+                                                          .. y .. "," .. z .. ", but " .. sealed) or nil }
+                            end
+                            lastWhy = "got " .. describe(name, state) .. " from " .. app.sx .. "," .. app.sy .. "," ..
+                                app.sz .. " (" .. app.kind .. ")"
+                            attempts[#attempts + 1] = words .. ": got " .. describe(name, state)
+                            local dug, digWhy = takeBack(app.kind, app.h, x, y, z)
+                            if not dug then
+                                return nil, lastWhy .. ", and couldn't dig it out: " .. tostring(digWhy)
+                            end
                         end
                     end
                 end

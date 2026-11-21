@@ -108,8 +108,16 @@ do
             and W.S.moves == moves and has(2, -1, 2, DIRT), tostring(why))
     mixed({ -3, 0, -3, 10, 5, 10 })
     ok, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
-    check("...a floor the map hasn't seen: it goes as before (stopping at the first dig with no room)", ok ~= nil and W.S.moves > moves,
-        tostring(why))
+    check("...a floor the map hasn't seen, one slot free: one more kind fits, so it goes (stopping at the first dig with no room)",
+        ok ~= nil and W.S.moves > moves, tostring(why))
+    -- (ADR-0020 D3, #348) unseen cells are one more kind: with no slot free it refuses before it moves
+    mixed({ -3, 0, -3, 10, 5, 10 })
+    W.give(16, GLASS, 64)
+    moves = W.S.moves
+    nothing, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
+    check("...a floor the map hasn't seen and no slot free: refused, the unseen cells counted as one more kind", nothing == nil
+        and tostring(why):find("15 cells not in the map, counted as one more kind (T.scanBox first)", 1, true) ~= nil
+        and W.S.moves == moves, tostring(why))
     local floor = cube({}, 1, -1, 1, 5, -1, 3, DIRT)
     floor[#floor + 1] = { 2, -1, 2, PLANKS }
     fresh(floor)
@@ -170,4 +178,22 @@ do
         and W.carrying("minecraft:oak_sapling") == 1 and info.picked == 6, tostring(info and info.picked))
     check("...the chest in the box keeps what it holds", W.get(3, 0, 3).inv[1] and W.get(3, 0, 3).inv[1].count == 10
         and W.carrying("minecraft:cobblestone") == 0)
+end
+
+--------------------------------------------------------------------------
+-- (#349) what a dig drops, and the part stack it joins
+--------------------------------------------------------------------------
+do
+    fresh({ { 0, 0, 1, "minecraft:netherrack" } })
+    check("T.digDrop: glowstone gives its dust, iron ore raw iron, glass nothing, stone cobblestone",
+        T.digDrop("minecraft:glowstone") == "minecraft:glowstone_dust" and T.digDrop("minecraft:iron_ore") == "minecraft:raw_iron"
+            and T.digDrop("minecraft:glass") == nil and T.digDrop("minecraft:red_stained_glass") == nil
+            and T.digDrop("minecraft:stone") == "minecraft:cobblestone", tostring(T.digDrop("minecraft:glowstone")))
+    W.give(1, "minecraft:stone_bricks", 10)
+    W.give(5, "minecraft:netherrack", 61)
+    turtle.select(1)
+    local ok, digWhy = turtle.dig()
+    check("a dig joins the part stack of its drop (slot 5), not the empty slot after the selected one; the selection kept",
+        ok == true and W.S.inv[5].count == 62 and W.S.inv[2] == nil and turtle.getSelectedSlot() == 1,
+        tostring(ok) .. " " .. tostring(digWhy) .. ", slot 5 " .. tostring(W.S.inv[5] and W.S.inv[5].count) .. ", slot 2 " .. tostring(W.S.inv[2] and W.S.inv[2].name))
 end

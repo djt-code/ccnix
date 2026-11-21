@@ -25,7 +25,7 @@ T.excludeTest(list) - A test of cells against an opts.exclude list (protected ar
 T.inside(names, fn, ...) - Run fn(...) as a job that owns the protected areas `names` (one name, or a list): digging in them is allowed meanwhile (other areas still hold). Puts it back after, even if fn errors (the error goes on); returns fn's results.
 T.withUnprotected(names, fn, ...) - Run fn(...) with digging allowed in the protected areas `names` (one name, or a list): T.inside by another name.
 T.neverDig(name) - Is this block one the dig functions refuse (a container, spawner or ComputerCraft block)? mine's own list of blocks never to dig.
-T.digDrop(name) - What digging the block `name` gives (cobblestone for stone); nil for air or a fluid.
+T.digDrop(name) - What digging the block `name` gives (cobblestone for stone, glowstone dust for glowstone, raw iron for iron ore); nil for air, a fluid, or a block that gives nothing (glass, ice: a pickaxe has no silk touch).
 T.turnRight() - Turn a quarter turn to the right, keeping T.dir and the saved position right.
 T.turnLeft() - Turn a quarter turn to the left, keeping T.dir and the saved position right.
 T.face(d) - Turn to face heading d (0 to 3, as T.dir) by the shorter way.

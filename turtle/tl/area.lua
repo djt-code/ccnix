@@ -59,14 +59,17 @@ local function setUp(name, box, opts)
 end
 
 -- With T.cfg.digNeedsRoom, would what the map shows `p`'s cells (a list of { x, y, z }) give, dug, fit aboard?  Each
--- kind of drop (T.digDrop) wants a stack of it with room, or a free slot; cells the map hasn't seen, already `keep`
--- or protected aren't counted.  Nil, or why not, with the counts.
+-- kind of drop (T.digDrop) wants a stack of it with room, or a free slot; cells already `keep` or protected aren't
+-- counted, and cells the map hasn't seen are one more kind between them (ADR-0020 D3: whatever is there wants a slot).
+-- Nil, or why not, with the counts.
 local function noRoomFor(cells, keep)
     if not T.cfg.digNeedsRoom then return nil end
-    local count, kinds = {}, {}
+    local count, kinds, unseen = {}, {}, 0
     for _, c in ipairs(cells) do
         local name = T.map.get(c.x, c.y, c.z)
-        local drop = name ~= keep and not T.guarded(c.x, c.y, c.z) and T.digDrop(name)
+        local guarded = T.guarded(c.x, c.y, c.z)
+        if name == nil and not guarded then unseen = unseen + 1 end
+        local drop = name ~= nil and name ~= keep and not guarded and T.digDrop(name)
         if drop then
             if not count[drop] then kinds[#kinds + 1] = drop end
             count[drop] = (count[drop] or 0) + 1
@@ -81,13 +84,15 @@ local function noRoomFor(cells, keep)
         end
         if not merges then need[#need + 1] = drop end
     end
-    if #need <= free then return nil end
+    local wants = #need + (unseen > 0 and 1 or 0)
+    if wants <= free then return nil end
     table.sort(kinds)
     local listed = {}
     for i, drop in ipairs(kinds) do listed[i] = drop .. " x" .. count[drop] end
     return string.format("what it would dig won't fit: the map shows %d kinds to dig (%s), %d of them with no stack aboard "
-        .. "to join, and %d slot%s free (T.cfg.digNeedsRoom; T.stow or drop something first, or a smaller box)", #kinds,
-        table.concat(listed, ", "), #need, free, free == 1 and " is" or "s are")
+        .. "to join, %sand %d slot%s free (T.cfg.digNeedsRoom; T.stow or drop something first, or a smaller box)", #kinds,
+        table.concat(listed, ", "), #need, unseen > 0 and (unseen .. " cells not in the map, counted as one more kind (T.scanBox first), ") or "",
+        free, free == 1 and " is" or "s are")
 end
 
 -- The result from info: true, info; or false, why, info.

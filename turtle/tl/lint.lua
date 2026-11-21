@@ -138,19 +138,21 @@ local function heightOf(c)
 end
 
 -- A view of the world: cell(x, y, z) -> { kind, name, state }, or nil for a cell never seen.  read(x, y, z) gives
--- a name and state, or nil; each cell is read once.
-local function newView(read)
+-- a name and state, or nil; each cell is read once.  `unseen` (a set) gets the key of each cell read that the map has
+-- never seen, and of each read as air for want of it (read's third value true).
+local function newView(read, unseen)
     local memo = {}
     return function(x, y, z)
         local k = key(x, y, z)
         local c = memo[k]
         if c == nil then
-            local name, state = read(x, y, z)
+            local name, state, assumed = read(x, y, z)
             if type(name) == "string" then
                 c = { kind = kindOf(name), name = name, state = type(state) == "table" and state or nil }
             else
                 c = false
             end
+            if unseen and (c == false or assumed) then unseen[k] = true end
             memo[k] = c
         end
         return c or nil
@@ -170,14 +172,16 @@ local function planBlock(name, state)
 end
 
 -- The view and the box for a box or a plan: view, x1, y1, z1, x2, y2, z2, and the plan (nil for a box); or nil and why.
-local function viewOf(what)
+-- `unseen` is newView's.  (#348) A cell over one of a plan's that the map has never seen is read as air: the plan is
+-- to be built where it hasn't been looked at yet, and its top is walked on unless something is there.
+local function viewOf(what, unseen)
     if type(what) == "table" and (what.x1 ~= nil or type(what[1]) == "number") then
         local v = what
         if what.x1 ~= nil then v = { what.x1, what.y1, what.z1, what.x2, what.y2, what.z2 } end
         for i = 1, 6 do
             if not whole(v[i]) then return nil, "a box is { x1, y1, z1, x2, y2, z2 }, whole numbers" end
         end
-        return newView(mapRead), math.min(v[1], v[4]), math.min(v[2], v[5]), math.min(v[3], v[6]),
+        return newView(mapRead, unseen), math.min(v[1], v[4]), math.min(v[2], v[5]), math.min(v[3], v[6]),
             math.max(v[1], v[4]), math.max(v[2], v[5]), math.max(v[3], v[6])
     end
     if type(what) == "string" or (type(what) == "table" and what.layers ~= nil) then
@@ -189,8 +193,10 @@ local function viewOf(what)
         return newView(function(x, y, z)
             local name, state = bp.at(plan, x, y, z)
             if name then return planBlock(name, state), state end
-            return mapRead(x, y, z)
-        end), x1, y1, z1, x2, y2, z2, plan
+            local seen, seenState = mapRead(x, y, z)
+            if seen == nil and bp.at(plan, x, y - 1, z) then return "minecraft:air", nil, true end
+            return seen, seenState
+        end, unseen), x1, y1, z1, x2, y2, z2, plan
     end
     return nil, "lint wants a box { x1, y1, z1, x2, y2, z2 } or a plan"
 end
@@ -424,7 +430,8 @@ local function belowTop(w) return w.where == "plan" and not w.top end
 -- { rule, x, y, z, text }: rule is headroom, approach, exit, railing, drop, lantern or light (see the overview), x, y, z the
 -- cell (the stair, the railing or the walk cell), text says it in plain words with the cells involved.  Warnings, not
 -- refusals: a design may break a rule on purpose.  Nil and why if it can't start.  Info is { cells, unchecked (stairs
--- with no facing in the map or no origin: only their headroom looked at), more (warnings past opts.limit, default 50),
+-- with no facing in the map or no origin: only their headroom looked at), unseen (cells read that the map has never
+-- seen: not checked, and said in a summary line; over a plan they are taken as air), more (warnings past opts.limit, default 50),
 -- rules (a count by rule), summary (a line a rule: its first warning, and how many more) }.  opts.rules (a list of
 -- rule names) checks only those.  The limit is shared: the list takes each rule's first, then each one's second, and
 -- so on, so one rule with many can't crowd out the others.
@@ -435,7 +442,8 @@ local function belowTop(w) return w.where == "plan" and not w.top end
 -- plan's summary, "N drops on the plan's top", their cells info.topDrops ({ x, y, z } each); the warnings keep them all.
 function T.lint(what, opts)
     opts = opts or {}
-    local view, x1, y1, z1, x2, y2, z2, plan = viewOf(what)
+    local unseen = {}
+    local view, x1, y1, z1, x2, y2, z2, plan = viewOf(what, unseen)
     if not view then return nil, x1 end
     local cells = (x2 - x1 + 1) * (y2 - y1 + 1) * (z2 - z1 + 1)
     if cells > MAX_CELLS then return nil, "the box is " .. cells .. " cells; a lint reads " .. MAX_CELLS .. " at most" end
@@ -494,6 +502,15 @@ function T.lint(what, opts)
         if #found[rule] > 0 then info.rules[rule] = #found[rule] end
     end
     info.summary = summaryOf(found, always)
+    -- (#348: what the map hasn't seen can't be checked; said, so a clean lint over unscanned ground isn't taken as one)
+    local unseenLine
+    info.unseen = 0
+    for _ in pairs(unseen) do info.unseen = info.unseen + 1 end
+    if info.unseen > 0 then
+        unseenLine = info.unseen .. " cells read aren't in the map" .. (plan and " (those over the plan taken as air)" or "")
+            .. ": what is there wasn't checked; T.scanBox or a look round first"
+        info.summary[#info.summary + 1] = unseenLine
+    end
     -- (a plan's own warnings first, so the limit cuts those round it)
     local passes = { always }
     if plan then
@@ -509,6 +526,7 @@ function T.lint(what, opts)
         else
             info.planSummary = summaryOf(found, ofPlan)
         end
+        if unseenLine then info.planSummary[#info.planSummary + 1] = unseenLine end
         info.inPlan, info.around = 0, 0
     end
     for _, keep in ipairs(passes) do

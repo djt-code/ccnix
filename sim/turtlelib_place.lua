@@ -234,6 +234,26 @@ do
     W.give(1, STONE, 4)
     placed, _, how = T.placeAt(0, 0, 3, STONE, { exit = { 0, 0, 6 } })
     check("...in the open, no warning and no refusal", placed == STONE and how and how.warning == nil, tostring(how and how.warning))
+    -- (ADR-0020 D1, #342) opts.refuseSeal, as T.build sets it: the way from inside is refused, and the next way (from
+    -- beyond the cell, the way out) taken
+    fresh(nil, walls)
+    knowAll()
+    W.give(1, STONE, 4)
+    local sealWhy
+    placed, sealWhy, how = T.placeAt(0, 0, 3, STONE, { refuseSeal = true })
+    local at = T.here()
+    check("opts.refuseSeal: not from inside the corridor, but from beyond the cell: placed, the turtle outside, no warning",
+        placed == STONE and how and how.warning == nil and at.z == 4, tostring(sealWhy) .. " / " .. tostring(how and how.warning) .. " at " .. T.posKey(at))
+    -- closed in already (the corridor's far end walled too): nothing to keep open, so it is placed, with the warning
+    local closed = {}
+    for _, b in ipairs(walls) do closed[#closed + 1] = b end
+    closed[#closed + 1] = stone(0, 0, 5)
+    fresh(nil, closed)
+    knowAll()
+    W.give(1, STONE, 4)
+    placed, sealWhy, how = T.placeAt(0, 0, 3, STONE, { refuseSeal = true })
+    check("...closed in already: placed, with the warning (no way out was lost)", placed == STONE and how and how.warning ~= nil,
+        tostring(placed) .. " " .. tostring(sealWhy) .. " " .. tostring(how and how.warning))
 end
 
 -- ADR-0015: a chain lies as a log does (it had no axis to place by); a lantern stands or hangs (opts.hanging)
