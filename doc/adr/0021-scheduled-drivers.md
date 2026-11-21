@@ -1,6 +1,9 @@
 # ADR-0021: Scheduled drivers: an `at` queue on the turtle, one lock on its motors and its thought, and caps no prompt can lift
 
-**Status:** Proposed (2026-11-20): D1 to D11 below are the owner's to decide
+**Status:** Withdrawn (2026-11-20). The owner chose a central controller for scheduled work (D1's option B),
+so the queue lives on ADR-0006's turtled, not on the turtle. What this ADR proposed is folded into
+[ADR-0006](0006-turtle-fleet-control.md), "Scheduled drivers". It is kept as the record of the options and
+of what ccnix had when it was written (its Context and Sims sections, which ADR-0006 cites).
 **Date:** 2026-11-20
 **Deciders:** Dan Theisen
 
