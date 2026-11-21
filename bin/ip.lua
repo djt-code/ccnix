@@ -1,7 +1,10 @@
 -- ip.lua -- set up and look at the network (lib/net.lua)
 --
 --   ip                               the interfaces, routes and whether it's up
---   ip up | ip down                  start or stop the network on this computer
+--   ip up | ip down                  start or stop the network on this computer;
+--                                    ip up announces each address, and says (and
+--                                    fails) if another device has one too: the
+--                                    gateway's 10.1.0.1, another computer's
 --   ip boot [off]                    start it at every boot: the setting net.boot,
 --                                    which startup goes by (setup's net and router
 --                                    apps turn it on)
@@ -13,6 +16,8 @@
 --   ip addr del <iface>
 --   ip route                         the routing table
 --   ip route add <net/len|default> via <gw> [dev <iface>]
+--                                    (gw is another router: never this computer's
+--                                    own address)
 --   ip route del <net/len|default>
 --   ip route get <addr> [dev <iface>]
 --                                    the way a packet to addr would go: the
@@ -82,6 +87,7 @@ local net = require("net")
 local scan = require("scan")
 local text = require("text")
 local tables = require("tables")
+local realtime = require("realtime")
 local args = { ... }
 
 -- options, before the command: -d[etails] (one or two dashes, any cut)
@@ -226,12 +232,25 @@ local function saveRoutes(list)
     save()
 end
 
+-- How long ip up waits for a device that has one of its addresses too
+-- (it answers the announcement at once: a tick or two)
+local CONFLICT_WAIT = 0.5
+
+-- What ip up says when another device has an interface's address
+local function conflictWords(iface, addr, mac)
+    local who = mac:sub(1, 8) == "02:cc:ff" and (mac .. ", a Network Gateway") or mac
+    return string.format("%s on %s is in use by %s: give this computer another address (ip addr add %s <a.b.c.d/len>)",
+        addr, iface, who, iface)
+end
+
 local function showAddr(S)
     if S then
         for _, name in ipairs(tables.sortedKeys(S.ifaces)) do
             local i = S.ifaces[name]
-            out(string.format("%-12s %-18s %srx %d tx %d%s", name, net.cidrString(i.ip, i.len),
-                details and (i.mac .. " ") or "", i.rx, i.tx, i.vlan and (" (vlan " .. i.vlan .. ")") or ""))
+            local clash = S.conflicts and S.conflicts[name]
+            out(string.format("%-12s %-18s %srx %d tx %d%s%s", name, net.cidrString(i.ip, i.len),
+                details and (i.mac .. " ") or "", i.rx, i.tx, i.vlan and (" (vlan " .. i.vlan .. ")") or "",
+                clash and clash.ip == i.ip and ("  CONFLICT: " .. clash.mac .. " has it too") or ""))
         end
     else
         local cfg = net.config()
@@ -304,9 +323,25 @@ elseif cmd == "help" then
 elseif cmd == "up" then
     noMore(2)
     local S2, problems = net.up()
-    for _, p in ipairs(problems) do cu.err(p) end
     local n = 0
-    for _ in pairs(S2.ifaces) do n = n + 1 end
+    for name in pairs(S2.ifaces) do
+        n = n + 1
+        S2.announce(name)
+    end
+    -- (anyone else with one of these addresses answers the announcement
+    -- at once: wait a moment for them)
+    if n > 0 then
+        local timer, said = realtime.timer(CONFLICT_WAIT), {}
+        while true do
+            local ev, a, b, c = os.pullEvent()
+            if ev == "timer" and a == timer then break end
+            if ev == "net_conflict" and not said[a] then
+                said[a] = true
+                problems[#problems + 1] = conflictWords(a, b, c)
+            end
+        end
+    end
+    for _, p in ipairs(problems) do cu.err(p) end
     out(string.format("up: %d interface%s%s", n, n == 1 and "" or "s", S2.forward and ", forwarding" or ""))
     if #problems > 0 then cu.exit(1) end
 elseif cmd == "down" then
@@ -428,6 +463,14 @@ elseif cmd == "route" then
         local r = { net = dest, gw = gw, iface = dev }
         if not net.parseCIDR(r.net) then badWords(cmd, "bad network " .. r.net) end
         if not net.parseIP(r.gw) then badWords(cmd, "bad gateway " .. r.gw) end
+        if not S then           -- (up, the stack says so itself)
+            for name, cidr in pairs(net.config().ifaces) do
+                if net.parseIP(r.gw) == net.parseCIDR(cidr) then
+                    cu.fail(r.gw .. " is this computer's own address (" .. name .. "): a route goes via another router")
+                    return cu.exit()
+                end
+            end
+        end
         if S then
             local ok, err = S.addRoute(r.net, r.gw, r.iface)
             if not ok then cu.fail(err); return cu.exit() end

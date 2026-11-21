@@ -179,6 +179,8 @@ run(4)
 e = events(1, "net_icmp")[1]
 check("no ARP answer: three requests, then host unreachable", e and e[2] == "unreachable" and e[4] == "host"
     and e[5].id == 78, e and tostring(e[4]))
+check("an error this computer makes itself comes from its own address (as Linux's \"From 10.0.1.2\"), not the one asked for",
+    e and e[3] == "10.0.1.2", e and tostring(e[3]))
 
 -- 5. no route at the router: net unreachable, from it
 clear()
@@ -623,4 +625,29 @@ do
             and B.counters.tcpSegsIn > 0 and A.counters.tcpRetransmits > 0 and B.counters.tcpResetsIn > 0
             and B.counters.tcpResetsOut > 0 and C.counters.arpRepliesOut > 0 and A.counters.arpRepliesIn > 0
             and R1.counters.arpRequestsIn > 0)
+end
+
+-- An address two devices have (RFC 5227's conflict).  E takes A's
+-- address on A's wire (as a computer given the gateway's address does).
+do
+    clear()
+    check("a route via this computer's own address is refused, saying why",
+        select(2, A.addRoute("10.9.0.0/16", "10.0.1.2")) == "10.0.1.2 is this computer's own address (back): a route goes via another router"
+            and A.route(N.parseIP("10.9.0.1")).len == 0)
+    local E = computer(5)
+    plug(E, "back", "10.0.1.2/24", "lanA")
+    check("announcing an address: a gratuitous ARP request", E.announce("back") and not E.announce("left"))
+    run()
+    local ev = events(5, "net_conflict")[1]
+    check("the device that has it already answers, and the newcomer hears the conflict: interface, address, the other's MAC",
+        ev and ev[2] == "back" and ev[3] == "10.0.1.2" and ev[4] == N.mac(1, "back"), ev and tostring(ev[4]))
+    check("and the one that had it hears it too", #events(1, "net_conflict") == 1
+        and A.conflicts.back and A.conflicts.back.mac == N.mac(5, "back"))
+    check("each kept for ip addr, counted and noted", E.conflicts.back and E.conflicts.back.ip == N.parseIP("10.0.1.2")
+        and E.counters.addressConflicts == 1 and E.log[#E.log] == "address conflict: 10.0.1.2 on back is also "
+            .. N.mac(1, "back") .. "'s", E.log[#E.log])
+    check("neither learns its own address as the other's MAC", A.arp.back[N.parseIP("10.0.1.2")] == nil
+        and E.arp.back[N.parseIP("10.0.1.2")] == nil)
+    check("no conflict for an address nobody else has", #events(3, "net_conflict") == 0 and C.announce("top")
+        and (run() or true) and #events(3, "net_conflict") == 0)
 end

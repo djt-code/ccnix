@@ -3,7 +3,7 @@ ip: set up and look at the network (lib/net.lua)
   ip
       the interfaces, routes and whether it's up
   ip up | ip down
-      start or stop the network on this computer
+      start or stop the network on this computer; ip up announces each address, and says (and fails) if another device has one too: the gateway's 10.1.0.1, another computer's
   ip boot [off]
       start it at every boot: the setting net.boot, which startup goes by (setup's net and router apps turn it on)
   ip link
@@ -16,6 +16,7 @@ ip: set up and look at the network (lib/net.lua)
   ip route
       the routing table
   ip route add <net/len|default> via <gw> [dev <iface>]
+      (gw is another router: never this computer's own address)
   ip route del <net/len|default>
   ip route get <addr> [dev <iface>]
       the way a packet to addr would go: the next hop (via), interface, source address, the route that picked them, and what ARP knows of the next hop
