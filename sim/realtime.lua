@@ -56,7 +56,7 @@ R.timer(10)
 check("timer(10) at 60: a CC timer of 30 game seconds, 10 real ones", near(TIMERS[#TIMERS], 30), TIMERS[#TIMERS])
 local from = REAL
 R.sleep(5)
-check("sleep(5) at 60: 5 real seconds, one CC sleep of 15", near((REAL - from) / 1000, 5), (REAL - from) / 1000)
+check("sleep(5) at 60: 5 real seconds (in halves, each at the rate measured so far)", math.abs((REAL - from) / 1000 - 5) < 0.01, (REAL - from) / 1000)
 
 -- 3. the rate changes while it runs: measured again over 10 real seconds
 TPS = 20
@@ -73,6 +73,39 @@ from = REAL
 R.sleep(6)
 check("sleep(6) with the measure 20 and the server at 60: waits again by what the first go took, 6 real seconds in all",
     (REAL - from) / 1000 >= 5.95 and (REAL - from) / 1000 <= 6.05, (REAL - from) / 1000)
+
+-- (#345) the other way: the measure 60 and the server set back to 20.  A sleep by the stale measure waited three times
+-- what was asked, and the next one (the window not yet 10 s) again
+R = fresh()
+TPS = 60
+R.tickRate()
+pass(3)
+R.tickRate()                                    -- (measured: 60)
+TPS = 20
+pass(1)
+from = REAL
+R.sleep(3)
+local first = (REAL - from) / 1000
+check("sleep(3) with the measure 60 and the server back at 20: 3 real seconds, not 9", first >= 2.95 and first <= 3.05, first)
+from = REAL
+R.sleep(3)
+check("...and the next sleep, the window not yet 10 s: 3 real seconds too (the measure it made is kept)",
+    (REAL - from) / 1000 >= 2.95 and (REAL - from) / 1000 <= 3.05 and near(R.tickRate(), 20), (REAL - from) / 1000 .. " s, rate " .. R.tickRate())
+-- a measure that spans the change (about 27): the field's 4.1 s for 3
+R = fresh()
+TPS = 60
+R.tickRate()
+pass(3)
+R.tickRate()
+pass(2)
+TPS = 20
+pass(8)
+R.tickRate()                                    -- (a window of 10 s, 2 at 60 and 8 at 20: about 28)
+from = REAL
+R.sleep(3)
+check("a measure spanning the change (about 28 for 20): sleep(3) is 3 real seconds, not 4.1", (REAL - from) / 1000 >= 2.95
+    and (REAL - from) / 1000 <= 3.05, (REAL - from) / 1000)
+REAL = math.ceil(REAL)                          -- (back on a whole millisecond, as os.epoch gives)
 
 -- 4. a window over a minute (the computer may have been unloaded): not used
 R = fresh()
@@ -99,7 +132,7 @@ os.epoch = nil
 TPS = 60
 from = GAME
 R.sleep(4)
-check("no os.epoch: 20, and sleep(4) is CC's sleep(4)", R.tickRate() == 20 and GAME - from == 4)
+check("no os.epoch: 20, and sleep(4) is CC's sleep(4)", R.tickRate() == 20 and near(GAME - from, 4))
 os.epoch = function(kind) return math.floor(REAL) end
 
 -- 7. lib/net on real seconds

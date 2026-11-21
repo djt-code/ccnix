@@ -17,7 +17,8 @@
 -- SCAN_TURN (a scanner whose idea of forward is turned), WORLD_COORDS (one
 -- that gives world coordinates), WATERY (water flows) and BOX {x0,x1,y0,y1}
 -- (the tunnel, for INGRESS: water flowing into it where it's open, past
--- the block just dug), WASHED (torches water took), PLACED, DIGS, SPLIT,
+-- the block just dug), NEED_TOOL (a dig with no pickaxe on fails "No tool
+-- to dig with", as CC's does), WASHED (torches water took), PLACED, DIGS, SPLIT,
 -- SPILLED, TRAVEL_DIGS (digging on a trip home and back), STOP_AT_DIG (a
 -- Ctrl+T after so many digs), ONMOVE(ox, oy, oz, nx, ny, nz), ONPRINT(line)
 -- (each line the program prints, as it prints it).  Minecarts:
@@ -494,6 +495,9 @@ local function dig(x, y, z)
         STOP_AT_DIG = nil
         STOPPED_HERE = true
         error("Terminated", 0)
+    end
+    if NEED_TOOL and not ((EQ.left or ""):find("pickaxe", 1, true) or (EQ.right or ""):find("pickaxe", 1, true)) then
+        return false, "No tool to dig with"
     end
     local b = get(x, y, z)
     if b and b.inv and not passable(b) then return digChest(x, y, z, b) end

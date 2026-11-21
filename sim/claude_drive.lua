@@ -1904,12 +1904,32 @@ answers[2] = ""
 run("put the modem on")
 local g36m = HTTP.requests[3] and HTTP.requests[3].body.messages
 local next36m = g36m and g36m[#g36m].content
-local NOTBACK = "the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the " .. PICK .. " not put back"
+local NOTBACK = "when it was to be put back, the right side held the " .. MODEM .. ", not the " .. CHAT .. " put on: left as it was, and the " .. PICK
+    .. " not put back"
 check("a modem equipped by hand over the listening chat box stays on at the goal's end; the pickaxe stays in the inventory",
     EQ.left == CONTROLLER and EQ.right == MODEM and chatAboard() == 1 and Mine.inv[2] and Mine.inv[2].name == PICK, tostring(EQ.right))
 check("...the next goal is told the pickaxe couldn't go back, and the log says so",
-    type(next36m) == "string" and next36m:find("[After listening to the chat: " .. NOTBACK .. "]", 1, true) ~= nil
+    type(next36m) == "string" and next36m:find("[After listening to the chat: " .. NOTBACK .. "; the right side holds the " .. MODEM .. " now]", 1, true) ~= nil
         and (Mine.files["claude.log"] or ""):find("listener: " .. NOTBACK, 1, true) ~= nil, tostring(next36m))
+
+-- (#344) the field's case: the modem put on by hand over the chat box, then a dig.  The dig's put-back finds the modem
+-- there (the line says so, as it was then), and the dig with no pickaxe on puts the pickaxe on (T.cfg.equipToDig): the
+-- note the model reads says what the side holds when it reads it, not the modem
+listenFresh(CONTROLLER, PICK, true)
+Mine.inv[3] = { name = MODEM, count = 1 }
+NEED_TOOL = true
+SCRIPT = { { "sim_http" }, { "sim_http" }, { "sim_http" } }
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "turtle.select(3); turtle.equipRight(); return turtle.dig(), turtle.getEquippedRight().name" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+answers[1] = ""
+run("dig with the modem on")
+NEED_TOOL = nil
+local said344 = textsIn(2)
+check("a dig after a modem put on by hand: the put-back line says what the side held then, and the note what it holds now",
+    said344:find("when it was to be put back, the right side held the " .. MODEM, 1, true) ~= nil
+        and said344:find("; the right side holds the " .. PICK .. " now", 1, true) ~= nil and EQ.right == PICK, said344)
 
 listenFresh(CONTROLLER, MODEM, true)
 HTTP.queue = {
@@ -2669,7 +2689,9 @@ check("D1: the prompt says sleep is real seconds and os.clock game time, and nam
     sys:find("Your sleep is realtime.sleep (real seconds); os.clock and os.startTimer count game time", 1, true)
         and sys:find("T.gpsHere() swaps one in from the inventory for the fix", 1, true)
         and not sys:find("sleep, os.clock and os.startTimer count game ticks", 1, true)
-        and tool:find("sleep (real seconds), gps, fs and io in scope", 1, true))
+        and tool:find("sleep (real seconds), gps, settings (read-only: get, getNames, getDetails), fs and io in scope", 1, true))
+check("the system prompt ends with the date (ADR-0020: the model dated its files days off without it)",
+    sys:find("\n\nToday is %d%d%d%d%-%d%d%-%d%d %(UTC%)%.$") ~= nil, sys:sub(-60))
 end
 
 -- ADR-0019 D4: each session keeps its options in the setting claude.options, and a claude started without them (as
@@ -2694,11 +2716,23 @@ check("D4: a plain claude (as autostart starts it after a reboot) starts with th
         and not startLine():find("confirming", 1, true)
         and Mine.logHas("^Options from the last session %(claude%.options%): %-%-steps 400 %-%-cache 1h%.$") and saves == 1,
     startLine())
+check("...and the log's start line says where they came from (the reboot check's evidence)",
+    startLine():find("; from claude.options: --steps 400 --cache 1h", 1, true) ~= nil, startLine())
 fresh({ "" })
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("dig more", "--steps", "9")
 check("D4: a flag given wins over the kept one, and is kept in turn",
     startLine():find("steps 9, cache 1h", 1, true) and SETD["claude.options"] == "--steps 9 --cache 1h" and saves == 2,
     startLine() .. " / " .. tostring(SETD["claude.options"]))
+-- ADR-0020 D4: the settings, read-only, in the code
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return settings.get('claude.options'), settings.set == nil" }) }, "tool_use"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+run("read a setting")
+local set1 = resultsIn(2).toolu_1
+check("ADR-0020 D4: settings.get in the code reads a setting; there's no settings.set", set1 and set1.content == "-> --steps 9 --cache 1h\n-> true",
+    set1 and set1.content)
 settings = nil
 end

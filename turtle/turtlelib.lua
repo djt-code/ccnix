@@ -1512,7 +1512,7 @@ function T.equipPeripheral(name, opts)
         end
         local known, now = pcall(T.equipped, side)
         if known and now ~= name then
-            return settle(false, string.format("the %s side holds %s now, not the %s put on: left as it is, %s", side,
+            return settle(false, string.format("when it was to be put back, the %s side held %s, not the %s put on: left as it was, %s", side,
                 now and ("the " .. now) or "nothing", name, was and ("and the " .. was .. " not put back") or "not emptied"))
         end
         local undo = was and ("put the " .. was .. " back on the " .. side) or ("take the " .. name .. " off the " .. side)

@@ -222,7 +222,7 @@ q, restore = T.equipPeripheral(CHAT)
 S.sel = 2; turtle.equipRight(); S.sel = 1        -- (a modem equipped by hand over the chat box)
 back, notBack = restore()
 check("a modem equipped by hand over the chat box stays on: false and why, the pickaxe left in the inventory",
-    back == false and notBack == "the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the "
+    back == false and notBack == "when it was to be put back, the right side held the " .. MODEM .. ", not the " .. CHAT .. " put on: left as it was, and the "
         .. PICK .. " not put back" and EQ.right == MODEM and carrying(PICK) == 1 and carrying(CHAT) == 1, tostring(notBack))
 reset(CONTROLLER, nil)
 put(1, CHAT); put(2, MODEM)
@@ -230,7 +230,7 @@ q, restore = T.equipPeripheral(CHAT)
 S.sel = 2; turtle.equipRight(); S.sel = 1
 back, notBack = restore()
 check("...and over a side that was empty, the modem isn't taken off either",
-    back == false and notBack:find("left as it is, not emptied", 1, true) and EQ.right == MODEM and carrying(MODEM) == 0, tostring(notBack))
+    back == false and notBack:find("left as it was, not emptied", 1, true) and EQ.right == MODEM and carrying(MODEM) == 0, tostring(notBack))
 reset(CONTROLLER, PICK)
 put(1, CHAT)
 q, restore = T.equipPeripheral(CHAT)
@@ -261,7 +261,7 @@ ok, result = T.withPeripheral(CHAT, function() S.sel = 2; turtle.equipRight(); S
 print = printWas
 check("T.withPeripheral: fn's modem stays on, fn's result comes back, and why the side wasn't put back is printed",
     ok == true and result == "said" and EQ.right == MODEM and #printed == 1
-        and printed[1] == "T.withPeripheral: the right side holds the " .. MODEM .. " now, not the " .. CHAT .. " put on: left as it is, and the "
+        and printed[1] == "T.withPeripheral: when it was to be put back, the right side held the " .. MODEM .. ", not the " .. CHAT .. " put on: left as it was, and the "
         .. PICK .. " not put back", printed[1])
 
 --------------------------------------------------------------------------
