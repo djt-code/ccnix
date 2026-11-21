@@ -881,7 +881,8 @@ local function putCell(cell, move, look, support)
             -- (nothing seen there: some other way in may do)
         end
     end
-    local opts = { move = move, digBelow = support.digBelow, temp = support.temp, exit = support.exit }
+    local opts = { move = move, digBelow = support.digBelow, temp = support.temp, exit = support.exit,
+                   refuseSeal = support.refuseSeal ~= false }
     for key, value in pairs(want) do opts[key] = value end
     local name, stateOrWhy, how = T.placeAt(cell.x, cell.y, cell.z, cell.name, opts)
     if not name then return false, stateOrWhy end
@@ -987,7 +988,9 @@ end
 -- partial, retry, protect ("keep", true or an area name: protect the finished build under the plan's name, or
 -- that name; only when no cell failed), order, fuelWatch, player (false: no T.lint at the end), digBelow, temp and exit
 -- (for T.placeAt: a top slab on a floor is placed from where the floor is, dug and put back, only with digBelow; a
--- cell that would cut the way to exit is refused).
+-- cell that would cut the way to exit is refused), refuseSeal (ADR-0020 D1: by default a placement after which the map
+-- shows no way out for the turtle is refused, and the cell's next way in tried; a cell with none fails, saying why;
+-- false only warns, in info.sealed).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
 -- warnings, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
