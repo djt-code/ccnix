@@ -561,7 +561,7 @@ function T.planLights(cells, candidates, opts)
         if da ~= db then return da < db end
         return key(a.x, a.y, a.z) < key(b.x, b.y, b.z)
     end)
-    info.summary = #picks .. " lights bring " .. info.covered .. " cells to light " .. min .. " (" .. info.lit .. " were already)"
+    info.summary = #picks .. (#picks == 1 and " light brings " or " lights bring ") .. info.covered .. " cells to light " .. min .. " (" .. info.lit .. " were already)"
         .. (#info.left > 0 and ("; " .. #info.left .. " no candidate reaches (info.left)") or "")
     return picks, info
 end

@@ -1064,7 +1064,8 @@ local function gpsHere()
     return { x = loc.x, y = loc.y, z = loc.z, dir = headingOf(c) }, how
 end
 
--- Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir }, or nil and why.
+-- Where the turtle stands in its frame by GPS, and the way it faces: { x, y, z, dir } and how the facing was found ("a
+-- scan" or "a step"), or nil and why.
 --
 -- A wireless modem in the inventory is swapped in for the fix when none is on, and back (T.withGps).  For a start
 -- with --here when GPS puts the turtle far from where it was saved (T.startAtHome): the spot becomes home, and the
