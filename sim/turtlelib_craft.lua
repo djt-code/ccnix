@@ -373,6 +373,26 @@ do
     pairOk, pairWhy = T.craft("mod:pair", 1)
     check("...with 3 oak planks (and the birch) a pair is made of the oak", pairOk == true and carrying("mod:pair") == 1 and chestHas("minecraft:oak_planks") == 1
         and chestHas("minecraft:birch_planks") == 1, tostring(pairWhy) .. " " .. chestLine())
+    -- a recipe added wrong and then right (#341): the right one replaces the wrong, which would otherwise be tried when
+    -- the right one is short and refused by the table ("No matching recipes")
+    table.insert(B.RECIPES, 1, { name = "pillar", shape = { "A", "A" }, key = { A = function(n) return n == "mod:cut" end }, mixed = false,
+        out = function() return "mod:pillar", 2 end })
+    fresh()
+    T.addRecipe { out = "mod:pillar", count = 2, shape = { "b", "b" }, key = { b = "mod:block" } }
+    local again, note = T.addRecipe { out = "mod:pillar", count = 2, shape = { "a", "a" }, key = { a = "mod:cut" } }
+    check("a recipe added again for the same item and cells replaces the first, and says so", again == true and note
+        and note:find("replaces the recipe for mod:pillar", 1, true) ~= nil, tostring(note))
+    fill(0, 0, 1, { [1] = { "mod:cut", 2 }, [2] = { "mod:block", 64 } })
+    W.give(1, TABLE, 1)
+    local pOk, pWhy = T.craft("mod:pillar", 4)
+    check("...so with too little of the right one it is short, not refused by the table with the wrong one",
+        pOk == nil and tostring(pWhy):find("short of", 1, true) ~= nil and not tostring(pWhy):find("would not craft", 1, true), tostring(pWhy))
+    -- a refusal by the table names what the grid held
+    T.addRecipe { out = "mod:pillar", count = 2, shape = { "b", "b" }, key = { b = "mod:block" } }
+    fill(0, 0, 1, { [1] = { "mod:block", 4 } })
+    pOk, pWhy = T.craft("mod:pillar", 2)
+    check("a recipe the table refuses: the why names what the grid held", pOk ~= true and tostring(pWhy):find("would not craft", 1, true)
+        and tostring(pWhy):find("the grid held block for pillar", 1, true) ~= nil, tostring(pWhy))
     -- the newest recipe is tried first
     T.addRecipe { out = "minecraft:stick", count = 1, shape = { "P" }, key = { P = "minecraft:coal" } }
     local stick = T.recipe("minecraft:stick")
@@ -391,7 +411,9 @@ do
         local good2, why = T.addRecipe(spec)
         if not good2 then bads[#bads + 1] = i .. ": " .. tostring(why) end
     end
-    check("every built-in recipe is a valid spec", #bads == 0 and #rows == 2 * #copies, table.concat(bads, "; "))
+    -- (the copies of rows added before replace those, and copies sharing an item and cells replace each other, so the
+    -- table grows by less than the copies)
+    check("every built-in recipe is a valid spec", #bads == 0 and #rows > #copies, table.concat(bads, "; "))
 end
 
 --------------------------------------------------------------------------

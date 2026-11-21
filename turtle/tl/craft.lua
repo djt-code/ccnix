@@ -346,6 +346,18 @@ local function define(spec)
     rows[#rows + 1] = rowOf(spec)
 end
 
+-- Which cells of a shape are filled, as text ("1,1 2,1"): two recipes with the same are the same layout.
+local function cellsKey(shape)
+    local out = {}
+    for y, line in ipairs(shape) do
+        for x = 1, #line do
+            local ch = line:sub(x, x)
+            if ch ~= "." and ch ~= " " then out[#out + 1] = x .. "," .. y end
+        end
+    end
+    return table.concat(out, " ")
+end
+
 -- The built-in recipes: vanilla's building and tool basics, and the redstone a build wants.
 -- Wood
 define { out = "{}_planks", count = 4, shape = { "L" }, of = "L", from = LOGS }
@@ -602,12 +614,24 @@ end
 -- A letter in the shape is a name, a list of names or a glob (a name with no namespace is minecraft:'s); a dot is an
 -- empty cell; mixed = true lets one letter stand for different items (any planks).  A family has out with {} in it and
 -- of = "X" for the letter that is the block, with from = a list of blocks, or map = { result = block }.  The newest
--- recipe is tried first.  Kept in memory only: put the calls in /claude/helpers.lua to have them each session.
+-- recipe is tried first.  A recipe added before (by T.addRecipe, not a built-in) for the same item with the same cells
+-- filled is replaced, so a wrong one put right doesn't stay behind to be tried when the right one runs short; then
+-- the second value says so.  Kept in memory only: put the calls in /claude/helpers.lua to have them each session.
 function T.addRecipe(spec)
     local why = checkRow(spec)
     if why then return nil, why end
-    table.insert(rows, 1, rowOf(spec))
-    return true
+    local row = rowOf(spec)
+    row.added = true
+    local cells, note = cellsKey(row.shape), nil
+    for i = #rows, 1, -1 do
+        local old = rows[i]
+        if old.added and old.out == row.out and cellsKey(old.shape) == cells then
+            table.remove(rows, i)
+            note = "replaces the recipe for " .. row.out .. " added before, with the same cells filled"
+        end
+    end
+    table.insert(rows, 1, row)
+    return true, note
 end
 
 -- The first recipe that makes an item: { out, count, shape, key, mixed } or nil and why.
@@ -979,7 +1003,14 @@ local function oneRound(bench, side, outName, r)
         if res == "Terminated" then error(res, 0) end
         return made, "the crafting failed: " .. tostring(res)
     end
-    if res == false then return made, "the crafting table would not craft: " .. tostring(msg or "no recipe matched") end
+    if res == false then
+        local held, seen = {}, {}
+        for _, c in ipairs(r.layout) do
+            if not seen[c.item] then seen[c.item] = true; held[#held + 1] = shortName(c.item) end
+        end
+        return made, "the crafting table would not craft: " .. tostring(msg or "no recipe matched") .. " (the grid held "
+            .. table.concat(held, ", ") .. " for " .. shortName(outName) .. ": is that recipe right? T.addRecipe replaces one)"
+    end
     return made, shortWhy
 end
 
