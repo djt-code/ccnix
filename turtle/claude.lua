@@ -1629,6 +1629,7 @@ function listen.chatBox(onlyIfOn)
     local box, restore = T.equipPeripheral(CHAT_BOX, { free = true })
     if not box then return nil, restore end
     listen.chat, listen.restore = mc.new({ chatBox = box }), restore
+    listen.side = T.equipped("left") == CHAT_BOX and "left" or "right"
     return listen.chat
 end
 
@@ -1643,7 +1644,9 @@ function listen.putBack()
     if not restore then return end
     local back, notBack = restore()
     if not back then
-        listen.heard[#listen.heard + 1] = "After listening to the chat: " .. tostring(notBack)
+        -- (#344: said when the results go, the side may hold something else by then, the pickaxe a dig put on: the
+        -- note says what it holds when it's read)
+        listen.heard[#listen.heard + 1] = { text = "After listening to the chat: " .. tostring(notBack), side = listen.side }
         log("listener: " .. tostring(notBack))
     end
 end
@@ -1730,7 +1733,14 @@ end
 -- What was heard since it was last taken, as text for the model, or nil
 function listen.take()
     local all = {}
-    for _, l in ipairs(listen.heard) do all[#all + 1] = l end
+    for _, l in ipairs(listen.heard) do
+        if type(l) == "table" then
+            local known, now = pcall(T.equipped, l.side)
+            l = l.text .. (known and l.side and ("; the " .. l.side .. " side holds " .. (now and ("the " .. now) or "nothing")
+                .. " now") or "")
+        end
+        all[#all + 1] = l
+    end
     for _, l in ipairs(listen.said) do all[#all + 1] = l end
     if listen.left > 0 then all[#all + 1] = listen.left .. " more chat messages were heard and not kept." end
     listen.heard, listen.said, listen.left = {}, {}, 0
