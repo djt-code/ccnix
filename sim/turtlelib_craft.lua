@@ -686,6 +686,10 @@ do
     -- a loop in the tree (a coal block is nine coal, coal is a ninth of a block) ends
     plan = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
     check("a loop in the recipes ends: a coal block with no coal is short of 9 coal", plan.ok == false and countsLine(plan.short) == "coal 9", countsLine(plan.short))
+    -- (#346) an ingot with ingots there: a block from 9 of them and 9 back from the block is a loop, not a plan
+    plan = T.craftPlan({ ["minecraft:iron_ingot"] = 1 }, { stock = { iron_ingot = 21 } })
+    check("an ingot with 21 ingots there: no loop through a block, it is taken from what there is", plan.ok and stepsLine(plan) == ""
+        and countsLine(plan.base) == "iron_ingot 1", stepsLine(plan) .. " / " .. countsLine(plan.base) .. " / short " .. countsLine(plan.short))
     -- two targets share what there is; a list form
     plan = T.craftPlan({ { "minecraft:stick", 4 }, { "minecraft:crafting_table", 1 } }, { stock = { oak_log = 2 } })
     check("two targets from 2 logs: planks for the sticks with 2 over, the table from those and 2 more", plan.ok

@@ -725,11 +725,12 @@ end
 -- A plan's working state: left (what there is, by name), spare (made over what was asked, by name), base (taken from
 -- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order).
 local function newState(stock)
-    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {} }
+    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {}, roundTo = {} }
 end
 
 local function copyState(st)
-    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {} }
+    local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {},
+                  roundTo = copyOf(st.roundTo) }
     for i, s in ipairs(st.steps) do out.steps[i] = { name = s.name, n = s.n, crafts = s.crafts } end
     return out
 end
@@ -837,36 +838,50 @@ end
 
 -- n of the item: what was made over before first, then what there is (unless `top`: a target is made), then made by
 -- the recipe that leaves the least short; what is left is short.  A recipe that needs the item it is making on the way
--- (coal from a coal block from coal) is not one: st.loop says it went round.  Changes st.
-function resolve(st, name, n, visiting, top)
-    local spare = math.min(st.spare[name] or 0, n)
-    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
-    if not top then
-        local use = math.min(st.left[name] or 0, n)
-        if use > 0 then
-            st.left[name] = st.left[name] - use
-            st.base[name] = (st.base[name] or 0) + use
-            n = n - use
-        end
+-- (coal from a coal block from coal) is not one: st.loop says it went round, even when what there is would cover it (an
+-- ingot from a block from the ingots there are).  A target whose every recipe goes round is taken from what there is.
+-- Changes st.
+local function fromStock(st, name, n)
+    local use = math.min(st.left[name] or 0, n)
+    if use > 0 then
+        st.left[name] = st.left[name] - use
+        st.base[name] = (st.base[name] or 0) + use
     end
-    if n == 0 then return end
+    return n - use
+end
+
+function resolve(st, name, n, visiting, top)
     if visiting[name] then
         st.loop = true
+        st.roundTo[name] = true
         return
     end
+    local spare = math.min(st.spare[name] or 0, n)
+    if spare > 0 then st.spare[name] = st.spare[name] - spare; n = n - spare end
+    if not top then n = fromStock(st, name, n) end
+    if n == 0 then return end
     visiting[name] = true
     local best, bestShort
-    local before = shortTotal(st)
+    local before, came = shortTotal(st), {}
     for _, cand in ipairs(candidatesFor(name)) do
         local trial = copyState(st)
         expand(trial, cand, name, n, visiting)
+        for k in pairs(trial.roundTo) do came[k] = true end
         local s = shortTotal(trial) - before
         if not trial.loop and (not best or s < bestShort) then best, bestShort = trial, s end
         if best and s == 0 then break end
         breathe()
     end
     visiting[name] = nil
+    -- (a target whose recipe goes round back to it, when there is enough of it, is taken from what there is: an ingot
+    -- isn't made from a block made from the ingots there are)
+    local roundTo = best and best.roundTo or came
+    if top and roundTo[name] and (st.left[name] or 0) >= n then
+        fromStock(st, name, n)
+        return
+    end
     if not best then
+        for k in pairs(came) do st.roundTo[k] = true end
         st.short[name] = (st.short[name] or 0) + n
         return
     end
