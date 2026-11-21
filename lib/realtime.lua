@@ -28,8 +28,12 @@
 --                         (what to give os.startTimer for s real seconds)
 --   realtime.timer(s)     os.startTimer for s real seconds: its id
 --   realtime.sleep(s)     wait s real seconds (events in between are lost,
---                         as with sleep); checks the wall clock and waits
---                         again if the rate was off
+--                         as with sleep): over a second, in halves, each
+--                         at the rate measured so far (the first at 20 at
+--                         most), so a measure gone stale (the tick rate
+--                         changed) can't make it long;
+--                         a rate it measured that differs from the kept
+--                         one replaces it
 --
 -- The measure is kept in _G.ccnix (boot starts it), so every program on a
 -- computer shares it; without ccnix each program measures for itself.
@@ -89,18 +93,31 @@ function R.timer(s) return os.startTimer(R.ticks(math.max(s, 0))) end
 
 function R.sleep(s)
     if not os.epoch then return sleep(s) end          -- (no real clock to check)
-    local done, rate = R.now() + s, R.tickRate()     -- (s as it is at 20: sleep(2) is sleep(2))
-    -- (a few goes at most: one is the rule; a measure gone stale is put
-    -- right by what the first go took, and a test's clock may not move)
-    local wait = R.ticks(s)
-    for _ = 1, 4 do
-        local before, clock = R.now(), os.clock()
-        sleep(wait)
+    local start, clock = R.now(), os.clock()
+    local done, rate = start + s, R.tickRate()       -- (s as it is at 20: sleep(2) is sleep(2))
+    -- (#345: a measure gone stale, the server's tick rate changed since, made a sleep long, and a long go can't be
+    -- taken back.  Over a second it goes in halves, each at the rate measured since the sleep began; the first at no
+    -- more than 20, since a kept rate over the real one is what makes a sleep long.  A go that comes up short is made
+    -- up by the next.  A test's clock may not move.)
+    local measured = false
+    local first = math.min(rate, NORMAL)
+    for _ = 1, 16 do
+        local left = done - R.now()
+        if left <= 0.05 then break end
+        local before = R.now()
+        sleep((left > 1 and left / 2 or left) * (measured and rate or first) / NORMAL)
         local after = R.now()
-        if after >= done - 0.05 or after == before then return end
-        local game = os.clock() - clock
-        if game > 0 then rate = NORMAL * game / (after - before) end
-        wait = math.max(done - after, 0) * rate / NORMAL
+        if after == before then return end
+        local game, real = os.clock() - clock, after - start
+        if game > 0 and real > 0 then rate, measured = NORMAL * game / real, true end
+    end
+    -- (a measure that differs from the kept one by over 2% replaces it, so the next sleep or timer doesn't wait by the
+    -- stale one until its window closes)
+    local kept = state()
+    if measured and R.now() - start >= 1 and math.abs(rate - (kept.rate or NORMAL)) > (kept.rate or NORMAL) * 0.02 then
+        if math.abs(rate - NORMAL) < NORMAL * 0.02 then rate = NORMAL end
+        kept.rate = math.max(LOWEST, math.min(HIGHEST, rate))
+        kept.clock, kept.epoch = os.clock(), epoch()
     end
 end
 
