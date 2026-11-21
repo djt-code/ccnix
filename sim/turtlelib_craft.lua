@@ -652,6 +652,8 @@ do
     check("T.craftBatch(plan) crafts it with one stash, and opts.take brings the targets (only) aboard", ok == true and carrying("minecraft:torch") == 16
         and carrying("minecraft:stick") == 0 and chestHas("minecraft:oak_planks") == 2 and chestHas("minecraft:oak_log") == 1 and info.crafted["minecraft:stick"] == 4,
         tostring(ok) .. " " .. tostring(info) .. " / " .. inventory() .. " / " .. chestLine())
+    check("...and what it made and didn't take is info.spare: the 2 planks the sticks didn't use (#350)", ok == true and info.spare["minecraft:oak_planks"] == 2
+        and info.spare["minecraft:stick"] == nil and info.spare["minecraft:torch"] == nil, ok == true and tostring(info.spare["minecraft:oak_planks"]) or "")
 
     -- short: what is missing, and the batch refuses it
     local short, swhy = T.craftPlan({ { "minecraft:torch", 8 } }, { stock = { oak_log = 1 } })
