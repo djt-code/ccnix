@@ -401,6 +401,22 @@ do
     check("...T.build prints that one line, and info.topDrops has the cells",
         ok == true and #PRINTED == 1 and said:find("player: 5 drops on the plan's top", 1, true) == 1 and #info.topDrops == 5
             and at(ofRule(info.warnings, "drop"), 2, 5, 2) ~= nil, said)
+
+    -- (#348) the same wall, the map knowing all round but the cells over its top (as in the field: built where it hadn't
+    -- looked yet): those are taken as air, its tops walked on unless something is there, and the unseen cells are said
+    fresh(cube(-3, -1, -3, 7, -1, 5, STONE))
+    know(-3, -1, -3, 7, 4, 5)
+    know(-3, 5, -3, 7, 6, 1)
+    know(-3, 5, 3, 7, 6, 5)
+    know(-3, 5, 2, -1, 6, 2)
+    know(5, 5, 2, 7, 6, 2)
+    know(0, 6, 2, 4, 6, 2)
+    plan = T.blueprint.fill(0, 0, 2, 4, 4, 2, STONE)
+    warnings, lint = T.lint(plan)
+    local summary = lint and table.concat(lint.planSummary, " | ") or ""
+    check("a wall whose top the map hasn't seen: its top drops still found, and a line says how many cells weren't in the map",
+        lint and lint.topDrops and #lint.topDrops == 5 and lint.unseen == 5 and summary:find("cells read aren't in the map (those over the plan taken as air)", 1, true) ~= nil,
+        summary)
 end
 
 --------------------------------------------------------------------------
