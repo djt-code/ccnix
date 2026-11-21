@@ -15,10 +15,26 @@
 --   complete = fn(line)   Tab completion, as read()'s: a list of what
 --                         could follow the line, the first one shown
 --                         in grey after the cursor
+--   more = true           Shift+Enter (or Alt+Enter, Esc and Enter as a
+--                         telnet client sends it) ends the line with
+--                         "more": the caller reads the next line of the
+--                         same text
+--   ctrl, meta, keys      bindings, as the editor's (below)
+--   events = { name = fn(e, a) }   a binding for an event by its name
+--                         ("mouse_scroll": fn(e, direction)), taken
+--                         before the editor's own; nil goes on, a string
+--                         ends the line
 --
--- Returns the line, or nil and why: "eof" (Ctrl+D on an empty line),
--- "interrupt" (Ctrl+C: "^C" is shown and a new line started) or
--- "terminate" (Ctrl+T held, the terminate event).
+-- Returns the line, or nil, why and the line as it was: "eof" (Ctrl+D on
+-- an empty line), "interrupt" (Ctrl+C: "^C" is shown and a new line
+-- started), "terminate" (Ctrl+T held, the terminate event), "more", or
+-- what a binding returned.
+--
+--   readline.historyFile(path, max)   a history kept in a file: its
+--                         lines, oldest first (the last max, 1000 by
+--                         default: the file is cut to them), and
+--                         add(line), which puts a line typed on both (not
+--                         a blank one, nor the last one again)
 --
 --   Left, Right, Ctrl+B, Ctrl+F   a character back / forward
 --   Home, End, Ctrl+A, Ctrl+E     the start / the end of the line
@@ -44,7 +60,8 @@
 --   Tab                           the completion shown, added
 --   Ctrl+L                        clear the screen, the line drawn again
 --   Ctrl+C                        drop the line
---   Enter                         done
+--   Enter                         done (Shift+Enter, Alt+Enter: with
+--                                 opts.more, the line goes on)
 --
 -- Keys as CraftOS sends them: Ctrl+letter is the Ctrl key's event, then
 -- the letter's (and maybe its char, which is dropped).  Ctrl with Alt is
@@ -524,6 +541,12 @@ end
 local function onKey(e, code)
     if isKey(code, "leftCtrl", "rightCtrl") then e.ctrl = true; return end
     if isKey(code, "leftAlt", "rightAlt") then e.alt = true; return end
+    if isKey(code, "leftShift", "rightShift") then e.shift = true; return end
+    -- (opts.more: Shift+Enter, or Alt+Enter (Esc and Enter over telnet, which sends no Shift), goes on to another line)
+    if e.more and isKey(code, "enter", "numPadEnter") and (e.shift or ((e.alt or e.meta) and not e.ctrl)) then
+        e.meta = false
+        return "more"
+    end
     e.swallow = nil
     local letter = e.letters[code]
     if e.search then
@@ -572,8 +595,8 @@ local function newState(opts)
         prompt = opts.prompt, promptColour = opts.promptColour,
         history = opts.history or {}, complete = opts.complete,
         letters = letterKeys(), plain = plainKeys(),
-        ctrlBinds = opts.ctrl, metaBinds = opts.meta, keyBinds = opts.keys,
-        ctrl = false, alt = false, meta = false,
+        ctrlBinds = opts.ctrl, metaBinds = opts.meta, keyBinds = opts.keys, eventBinds = opts.events,
+        more = opts.more == true, ctrl = false, alt = false, meta = false, shift = false,
     }
     e.at = #e.history + 1
     return e
@@ -581,11 +604,17 @@ end
 
 -- One event: why the line is done, or nil.
 local function onEvent(e, name, a)
+    local bound = e.eventBinds and e.eventBinds[name]
+    if bound then
+        local why = bound(e, a)
+        if why then return why end
+    end
     if name == "key" then
         return onKey(e, a)
     elseif name == "key_up" then
         if isKey(a, "leftCtrl", "rightCtrl") then e.ctrl = false
-        elseif isKey(a, "leftAlt", "rightAlt") then e.alt = false end
+        elseif isKey(a, "leftAlt", "rightAlt") then e.alt = false
+        elseif isKey(a, "leftShift", "rightShift") then e.shift = false end
     elseif name == "char" then
         onChar(e, a)
     elseif name == "paste" then
@@ -638,9 +667,36 @@ function R.read(opts)
     term.setCursorBlink(false)
     pending = e.swallow                     -- (Ctrl+C's or Ctrl+D's char may come yet)
     if why == "interrupt" then term.write("^C") end
-    if why == "enter" or why == "interrupt" then print() end
+    if why == "enter" or why == "interrupt" or why == "more" then print() end
     if why == "enter" then return e.line end
-    return nil, why
+    return nil, why, e.line
+end
+
+-- A history kept in a file (see the top): lines, add.
+function R.historyFile(path, max)
+    max = max or 1000
+    local lines = {}
+    local f = fs.open(path, "r")
+    if f then
+        local all = f.readAll() or ""
+        f.close()
+        for _, l in ipairs(text.pieces(all, "\n")) do
+            if l ~= "" then lines[#lines + 1] = l end
+        end
+        if #lines > max then
+            lines = { table.unpack(lines, #lines - max + 1) }
+            local w = fs.open(path, "w")
+            if w then w.write(table.concat(lines, "\n") .. "\n"); w.close() end
+        end
+    end
+    local function add(line)
+        if scan.isBlank(line) or lines[#lines] == line then return end
+        lines[#lines + 1] = line
+        while #lines > max do table.remove(lines, 1) end
+        local a = fs.open(path, "a")
+        if a then a.write(line .. "\n"); a.close() end
+    end
+    return lines, add
 end
 
 --------------------------------------------------------------------------

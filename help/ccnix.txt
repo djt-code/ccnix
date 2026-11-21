@@ -87,6 +87,7 @@ Turtles (turtle/):
   autocompost: a turtle that sits on a composter and composts everything compostable you give it
   autostart: at boot, carry on with the turtle's job
   claude: let Claude drive the turtle
+  claudeprompt: claude's prompt: a line from the keyboard with a shell's keys
   farm: crop farming turtle for CC:Tweaked (wheat, carrots, potatoes, beetroot and sugar cane; any mix of them on one farm)
   home: send the turtle back to its job's start position
   mine: tunnel-mining turtle for CC:Tweaked

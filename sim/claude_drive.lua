@@ -21,6 +21,8 @@ os.time = function(t) if t ~= nil then return clockWas(t) end return STILL end
 local HTTP = M.httpApi()
 http = HTTP.api
 local answers = M.consoleApi(Mine, {})
+-- (the prompt reads with CraftOS read() here, the scripted answers: lib/readline's keys at it are sim/claude_prompt.lua's)
+package.loaded.readline = "sim: read() answers the prompts"
 local run = M.runner(Mine, PROJ .. "/turtle/claude.lua", {
     stats = function() return "moves: " .. Mine.moves .. ", turns: " .. Mine.turns .. ", API calls: " .. #HTTP.requests end,
     -- (Ctrl+T, as scenario 17 stops it)
@@ -2735,4 +2737,25 @@ local set1 = resultsIn(2).toolu_1
 check("ADR-0020 D4: settings.get in the code reads a setting; there's no settings.set", set1 and set1.content == "-> --steps 9 --cache 1h\n-> true",
     set1 and set1.content)
 settings = nil
+end
+
+-- #93: a goal longer than a line, from a file: /goal <file> at the prompt, --goal-file at the start
+do
+fresh({ "/goal plan.txt", "" })
+Mine.files["plan.txt"] = "build a wall\ntwo high, of stone\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run()
+local g1 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+check("#93: /goal <file> at the prompt: the file's text is the goal, all its lines", g1 == "build a wall\ntwo high, of stone",
+    tostring(g1))
+fresh({ "/goal nowhere.txt", "" })
+HTTP.queue = {}
+run()
+check("...a file that isn't there: the prompt again, nothing sent", #HTTP.requests == 0, tostring(#HTTP.requests))
+fresh({ "" })
+Mine.files["brief.txt"] = "dig a tunnel\n20 long\n"
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("--goal-file", "brief.txt")
+local g2 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
+check("#93: --goal-file at the start: the file's text is the first goal", g2 == "dig a tunnel\n20 long", tostring(g2))
 end

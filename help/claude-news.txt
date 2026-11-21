@@ -14,6 +14,8 @@ sleep in your code is right just after the tick rate changes (the first sleep of
 The put-back line after a call says what the side held when it was to be put back, and what it holds now.
 settings.get(name), settings.getNames() and settings.getDetails(name) are in your code, read-only (T.saveSettings writes). The system prompt ends with today's date (UTC): date your files by it.
 T.sortChests' info.summary says how many stacks of how many kinds it moved: every misplaced stack in the base's chests, the player's too. T.pull moves stacks about in the chest: slot numbers read before are stale after. A clean tool's detail has damage = 0, not nil. T.gpsHere's second value is how the facing was found ("a scan" or "a step"). T.undo(n) counts entries: a paved cell is two (a dig and a place). T.blueprint.put sets cells in a plan's layers only: fill the box with air first for room. T.build() carries on the last plan given, finished or not.
+A goal may have several lines now: the player types Shift+Enter between them, or gives a file with /goal <file>. The prompt has a shell's keys and keeps the goals typed in /.claude_history (not yours to write).
+-- ADR-0020 (#339, #93): the prompt edits lines as a shell does; goals of several lines.
 -- ADR-0020 (#340-#342, #344-#351; D1-D4): the v6 test pass's findings.
 == 0.54.0
 The server ticks 60 times a second, not 20: os.clock and os.startTimer count game ticks and run 3x fast. sleep(n) in your code is real seconds now, whatever the tick rate. Timeouts are real seconds too (T.report.ask, the chat tool's ask, T.harvest's opts.timeout); require("realtime") gives now(), sleep(s), timer(s) and tickRate() in real seconds. Waits your notes timed were about a third as long as they said.

@@ -358,6 +358,99 @@ l, why = edit(telnet("\4"))
 check("over telnet: Ctrl+D on an empty line", l == nil and why == "eof", show(why))
 same("over telnet: Ctrl+R", "ls -l", edit(telnet("\18ls\r"), { history = { "ls -l", "echo" } }))
 
+-- 10b. claude's prompt (turtle/claudeprompt.lua, #339 and #93): lib/readline at Goal:, > and the confirms, a history
+-- file, Ctrl+C and Ctrl+D as a shell has them, Tab for its commands, Shift+Enter for a goal's next line, the pager's keys
+do
+    package.path = PROJ .. "/turtle/?.lua;" .. package.path
+    local files, fsWas = {}, fs
+    fs = { open = function(path, mode)
+        if mode == "r" then
+            if not files[path] then return nil end
+            local data = files[path]
+            return { readAll = function() return data end, close = function() end }
+        end
+        if mode == "w" then files[path] = "" end
+        files[path] = files[path] or ""
+        return { write = function(s) files[path] = files[path] .. s end, close = function() end }
+    end }
+    package.loaded.claudeprompt = nil
+    local CP = require("claudeprompt")
+    local function ask(prompt, label, input)
+        blank()
+        T.x, T.y, T.colour = 1, 1, colours.white
+        queue = type(input) == "table" and input or events(input)
+        screens = {}
+        local ok, line, back = pcall(prompt.read, prompt, label)
+        if not ok then return nil, "error: " .. tostring(line) end
+        return line, back
+    end
+    local function join(...)
+        local out = {}
+        for _, list in ipairs({ ... }) do for _, ev in ipairs(list) do out[#out + 1] = ev end end
+        return out
+    end
+    local SHIFT_ENTER = { table.pack("key", keys.leftShift, false), table.pack("key", keys.enter, false),
+        table.pack("key_up", keys.enter), table.pack("key_up", keys.leftShift) }
+    local p = CP.new({ history = "/.claude_history", pager = true })
+    p.commands = { "/goal", "/new", "/skills", "/tidy" }
+
+    local line = ask(p, "Goal: ", "dig a hole<C-a>go and <C-e> now<CR>")
+    check("claude's prompt: Ctrl+A and Ctrl+E edit the goal (lib/readline's keys)", line == "go and dig a hole now", show(line))
+    line = ask(p, "Goal: ", "build a wall<C-w><C-w>stairs<CR>")
+    check("...Ctrl+W cuts a word", line == "build stairs", show(line))
+    line = ask(p, "> ", "<Up><Up><CR>")
+    check("...Up brings back the goals typed before", line == "go and dig a hole now", show(line))
+    check("...and they are kept in the history file (one brought back and sent again too, as a shell keeps it)",
+        files["/.claude_history"] == "go and dig a hole now\nbuild stairs\ngo and dig a hole now\n",
+        show(files["/.claude_history"]))
+    local p2 = CP.new({ history = "/.claude_history", pager = true })
+    line = ask(p2, "Goal: ", "<C-r>hole<CR>")
+    check("...a new session has them: Ctrl+R finds one", line == "go and dig a hole now", show(line))
+
+    line = ask(p, "Goal: ", "abc<C-c>def<CR>")
+    check("Ctrl+C with something typed drops the line and asks again", line == "def" and text(1) == "Goal: abc^C" and text(2) == "Goal: def",
+        show(line) .. " / " .. text(1) .. " / " .. text(2))
+    line = ask(p, "> ", "<C-c>")
+    check("...on an empty line it ends the session, as Ctrl+D does (\"\")", line == "", show(line))
+    line = ask(p, "Goal: ", "<C-d>")
+    check("Ctrl+D on an empty line ends the session", line == "", show(line))
+    local before = files["/.claude_history"]
+    line = ask(p, "Run it? [y/N] ", "y<C-c>")
+    check("at a confirm, Ctrl+C is no (with something typed too)", line == "", show(line))
+    line = ask(p, "Run it? [y/N] ", "<C-d>")
+    check("...and so is Ctrl+D", line == "", show(line))
+    line = ask(p, "Run it? [y/N] ", "y<CR>")
+    check("...a confirm's y isn't kept in the history", line == "y" and files["/.claude_history"] == before, show(files["/.claude_history"]))
+    local why
+    line, why = ask(p, "Goal: ", "<Term>")
+    check("Ctrl+T held stops claude (Terminated)", line == nil and why == "error: Terminated", show(why))
+
+    line = ask(p, "> ", "/s<Tab><CR>")
+    check("Tab completes the prompt's commands: /s gives /skills", line == "/skills", show(line))
+    line = ask(p, "> ", "/g<Tab> plan.txt<CR>")
+    check("...and /g gives /goal", line == "/goal plan.txt", show(line))
+
+    local back
+    line, back = ask(p, "> ", { table.pack("key", keys.pageUp, false) })
+    check("PgUp on an empty line opens the pager (a page up)", line == nil and back == H - 2, show(line) .. " " .. tostring(back))
+    line, back = ask(p, "> ", { table.pack("mouse_scroll", -1, 1, 1) })
+    check("...and the wheel up (a notch: 3 lines)", line == nil and back == 3, tostring(back))
+    line = ask(p, "> ", join(events("ab"), { table.pack("key", keys.pageUp, false) }, events("<CR>")))
+    check("...PgUp after typing does nothing to the line", line == "ab", show(line))
+
+    line = ask(p, "Goal: ", join(events("build a wall"), SHIFT_ENTER, events("two high<CR>")))
+    check("#93: Shift+Enter goes on to the goal's next line (\"... \"); Enter sends both", line == "build a wall\ntwo high"
+        and text(1) == "Goal: build a wall" and text(2) == "... two high", show(line) .. " / " .. text(2))
+    check("...kept in the history as one line", files["/.claude_history"]:find("build a wall two high\n", 1, true) ~= nil)
+    line = ask(p, "Goal: ", "first<M-CR>second<Esc><CR>third<CR>")
+    check("...Alt+Enter, and Esc then Enter (a telnet client's Alt), do the same", line == "first\nsecond\nthird", show(line))
+    line = ask(p, "Goal: ", join(events("first"), SHIFT_ENTER, events("oops<C-c>again<CR>")))
+    check("...Ctrl+C on a next line drops the whole goal and asks again", line == "again", show(line))
+    line = ask(p, "Run it? [y/N] ", join(events("y"), SHIFT_ENTER))
+    check("...a confirm takes no next line: Shift+Enter is Enter there", line == "y", show(line))
+    fs = fsWas
+end
+
 -- 11. ccsh at the prompt, with the real editor
 local SW = require("shellworld")
 local sw = SW.new(PROJ)
