@@ -1255,7 +1255,8 @@ end
 -- fuel is about the round of the chests with something misplaced and of the chests it goes to, once for every load
 -- (up to the turtle's free slots less one), and each stack takes a pull and a drop (a few ticks).  Info is { moved =
 -- { name = count }, stacks, chests, more, left = { { name, count, from, why } } }: left is what couldn't move, each
--- with the chest it is in and why; the why returned says them all.  opts: limit, move (T.moveTo's), stay, near, box.
+-- with the chest it is in and why; the why returned says them all; summary says how many stacks of how many kinds
+-- moved (every misplaced stack, the player's too).  opts: limit, move (T.moveTo's), stay, near, box.
 function T.sortChests(opts)
     opts = opts or {}
     local move, limit = opts.move or MOVE, opts.limit or SORT_LIMIT
@@ -1376,6 +1377,12 @@ function T.sortChests(opts)
         if next(carried) then unload() end
         if #todo > 0 then info.more = true end
     end, opts.stay)
+    -- (#351: it moves every misplaced stack in the site, the player's too, which the model didn't expect: said)
+    local kinds = 0
+    for _ in pairs(info.moved) do kinds = kinds + 1 end
+    info.summary = "moved " .. info.stacks .. " stack" .. (info.stacks == 1 and "" or "s") .. " of " .. kinds .. " kind" ..
+        (kinds == 1 and "" or "s") .. " (every misplaced stack in the site's chests, whoever put it there)" ..
+        (info.more and "; more to do (info.more)" or "")
     if #info.left == 0 then return true, info end
     local parts = {}
     for i, l in ipairs(info.left) do

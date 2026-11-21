@@ -644,7 +644,7 @@ end
 -- protected area the job may work in).  An entry that was done leaves the journal; one that could not stays, and info.failed lists
 -- it: { seq, kind, x, y, z, name, why }.  An entry written before a re-zero (T.frameStale) is not undone: it fails, saying why,
 -- and stays marked stale.  info.undone is how many went.  It does nothing to what the turtle did since to those cells
--- except as said, and it writes nothing to the journal itself.
+-- except as said, and it writes nothing to the journal itself.  An entry is one dig or one place: a cell paved over is two.
 function T.undo(n, opts)
     opts = opts or {}
     if n ~= nil and (type(n) ~= "number" or n < 1 or n ~= math.floor(n)) then return nil, "n is a whole number of entries, from 1" end
