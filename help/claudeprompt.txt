@@ -1,0 +1,25 @@
+claudeprompt: claude's prompt: a line from the keyboard with a shell's keys
+
+  local prompt = require("claudeprompt").new{ history = "/.claude_history", pager = true }
+  local line, back = prompt:read("Goal: ")
+
+What claude (turtle/claude.lua) reads at its prompts: the goal, the next line after a reply, and the y/N confirms.  It reads through lib/readline, so the prompt has ccsh's keys (that file's header lists them): moving by character and word, cutting and Ctrl+Y, Ctrl+L, the history with Up, Down and Ctrl+R, and Tab.  As a shell has them:
+
+  Ctrl+C
+      with something typed, drops the line ("^C", a new prompt); on an empty line it ends the session, as Ctrl+D does; at a confirm it is no
+  Ctrl+D
+      on an empty line, ends the session; at a confirm, no
+  Tab
+      completes the prompt's commands (prompt.commands, a list: /new, /tidy...), shown in grey as ccsh shows them
+  Shift+Enter
+      the goal goes on on the next line ("... "); Enter sends all of it.  A paste brings its first line only
+  Alt+Enter
+      the same, for telnet, which sends no Shift (Esc, Enter)
+  PgUp, the wheel up
+      on an empty line, the pager (opts.pager)
+  Ctrl+T held
+      stops claude, as before (the error "Terminated")
+
+The goals and lines typed are kept in opts.history (a file, the last 1000 lines), so Up brings back one from an earlier session; a goal of several lines is kept as one, its lines joined by spaces.  The confirms aren't kept.  Without lib/readline it reads with CraftOS read().
+
+prompt:read(label) returns the line ("" for the end of the session), or nil and how far to scroll the pager up (opts.pager: PgUp or the wheel on an empty line).

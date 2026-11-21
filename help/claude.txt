@@ -19,10 +19,14 @@ Usage:
       show each piece of code and ask before running it (the model can ask that for one piece: review = true)
   --resume
       carry on with the goal in /claude/resume.txt, in a new conversation, with the options it was given (what autostart runs after a reboot; nothing there: it asks)
+  --goal-file path
+      the goal is the file's text, as long as it is
 
 Each session keeps its --model, --effort, --steps and --cache in the setting claude.options, and a claude started without one takes it from there: autostart's plain `claude` after a reboot starts as the last session did, not on the defaults.  One given on the command line wins, and is kept in turn; `sysctl claude.options=` goes back to the defaults.  (--confirm isn't kept: it's for whoever is at the turtle.)
 
-When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), /tidy to have it tidy its notes (below), /skills to see its skills (below), or press Enter on an empty line to quit.
+When it stops, type the next thing to do (it keeps the conversation), /new to start a new conversation (its memory and files stay, and its helpers are loaded again), /tidy to have it tidy its notes (below), /skills to see its skills (below), /goal <file> for a goal written in a file, or press Enter on an empty line (or Ctrl+D, or Ctrl+C) to quit.
+
+The prompt has ccsh's keys (lib/readline; turtle/claudeprompt.lua): Ctrl+A/E, Alt+B/F, Ctrl+K/U/W and Ctrl+Y, Ctrl+L, Up and Down through the goals typed before (kept in /.claude_history across sessions), Ctrl+R to search them, Tab for the commands, Ctrl+C to drop a line. Shift+Enter (Alt+Enter over telnet) goes on to the goal's next line; Enter sends it all.  A paste brings its first line only (CC cuts it).
 
 Its skills: procedures for kinds of goal, a folder each holding skill.md (a name and a one-line description on top, then the steps). ccnix ships some in turtle/skills/; the model writes its own with skill(name, description, body) in its code, to /claude/skills/<name>/, and its own win over a shipped one of the same name.  The session's first message lists each one's name and description (and again after each summary), and the model reads one with fs when a goal fits it; a goal that shares words with a description comes with "Skills that may fit: ...".
 

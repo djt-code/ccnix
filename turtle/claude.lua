@@ -27,6 +27,7 @@
 --   --resume     carry on with the goal in /claude/resume.txt, in a new
 --                conversation, with the options it was given (what
 --                autostart runs after a reboot; nothing there: it asks)
+--   --goal-file path   the goal is the file's text, as long as it is
 --
 -- Each session keeps its --model, --effort, --steps and --cache in the
 -- setting claude.options, and a claude started without one takes it
@@ -38,8 +39,15 @@
 -- When it stops, type the next thing to do (it keeps the conversation),
 -- /new to start a new conversation (its memory and files stay, and its
 -- helpers are loaded again), /tidy to have it tidy its notes (below),
--- /skills to see its skills (below), or press Enter on an empty line to
--- quit.
+-- /skills to see its skills (below), /goal <file> for a goal written in a
+-- file, or press Enter on an empty line (or Ctrl+D, or Ctrl+C) to quit.
+--
+-- The prompt has ccsh's keys (lib/readline; turtle/claudeprompt.lua):
+-- Ctrl+A/E, Alt+B/F, Ctrl+K/U/W and Ctrl+Y, Ctrl+L, Up and Down through
+-- the goals typed before (kept in /.claude_history across sessions),
+-- Ctrl+R to search them, Tab for the commands, Ctrl+C to drop a line.
+-- Shift+Enter (Alt+Enter over telnet) goes on to the goal's next line;
+-- Enter sends it all.  A paste brings its first line only (CC cuts it).
 --
 -- Its skills: procedures for kinds of goal, a folder each holding
 -- skill.md (a name and a one-line description on top, then the steps).
@@ -382,13 +390,13 @@ local MODEL_ALIASES = { opus = "claude-opus-5-5", sonnet = "claude-sonnet-5-5", 
 --------------------------------------------------------------------------
 -- (T.options: the goal's words are free, a "-5" or a "-x" in it too;
 -- only these are options)
-local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--cache 5m|1h] [--confirm] [--resume]"
+local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|high] [--steps N] [--cache 5m|1h] [--confirm] [--resume] [--goal-file path]"
 -- A goal kept for a resume after a reboot (ADR-0012 D4): /claude/resume.txt,
 -- its first line the session's options ("options: --steps 400 --cache 1h"),
 -- then the goal and what the model added.  (The options' table is here too:
 -- that line is read with it.)
 local resume = { file = "claude/resume.txt", prefix = "options:",
-                 options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true },
+                 options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true, ["goal-file"] = "=" },
                  kept = { "model", "effort", "steps", "cache" } }      -- (the ones claude.options keeps)
 local opts, args = T.options({ ... }, resume.options)
 if not opts then
@@ -438,6 +446,16 @@ local MAX_STEPS = opts.steps and tonumber(opts.steps) or 60
 -- (5 minutes is the API's own default, so it isn't named)
 local CACHE = { type = "ephemeral", ttl = opts.cache ~= "5m" and opts.cache or nil }
 local goal = table.concat(args, " ")
+-- (#93: a goal longer than a line, from a file)
+if opts["goal-file"] then
+    local path = shell and shell.resolve and shell.resolve(opts["goal-file"]) or opts["goal-file"]
+    local given = fileio.read(path)
+    if not given or scan.isBlank(given) then
+        print("claude: no goal in " .. path .. ": the file isn't there or is empty")
+        return
+    end
+    goal = text.trim(given)
+end
 if resume.goal then
     goal = "You were interrupted (reboot); read your memory and resume: " .. resume.goal
 end
@@ -692,39 +710,24 @@ local function catchUp()
     if #pager.wrap(new, w) > h - 1 then view({ from = seen + 1 }) end
 end
 
--- read(), except that the wheel up or PgUp before anything is typed
--- comes back as `back`.
-local function readLine()
-    if not (pager and term and parallel) then return read() or "" end
-    local line, back, typed
-    parallel.waitForAny(
-        function() line = read() end,
-        function()
-            while true do
-                local ev, a = os.pullEvent()
-                if ev == "char" or ev == "paste" then typed = true
-                elseif not typed and ev == "mouse_scroll" and a < 0 then
-                    back = 3                -- as far as a notch goes in the pager
-                    return
-                elseif not typed and ev == "key" and a == keys.pageUp then
-                    back = select(2, term.getSize()) - 2      -- a page
-                    return
-                end
-            end
-        end)
-    return line or "", back
-end
+-- The prompt (turtle/claudeprompt.lua, #339): lib/readline's keys, the
+-- goals kept in /.claude_history, Shift+Enter for a goal's next line, and
+-- PgUp or the wheel up on an empty line for the pager.  The line ("" to
+-- end), or nil and how far to scroll up.  (Its commands for Tab are set
+-- with the commands, below.)
+local readLine = require("claudeprompt").new({ history = "/.claude_history", pager = pager and term and parallel and true })
 
 -- Ask for a line after `label`, the pager first if need be.
 local function ask(label)
     catchUp()
     while true do
-        if COLOUR then term.setTextColour(colours.yellow) end
-        write(label)
-        if COLOUR then term.setTextColour(colours.white) end
-        local line, back = readLine()
-        if not back then
-            keep(label .. line, COLOUR and (string.rep(blit(colours.yellow), #label) .. string.rep("0", #line)) or nil)
+        local line, back = readLine:read(label)
+        if line then
+            -- (a goal of several lines: each kept for the pager, the first after the label)
+            for i, l in ipairs(text.pieces(line, "\n")) do
+                local shownLabel = i == 1 and label or "... "
+                keep(shownLabel .. l, COLOUR and (string.rep(blit(colours.yellow), #shownLabel) .. string.rep("0", #l)) or nil)
+            end
             seen = #shown
             return line
         end
@@ -2853,7 +2856,25 @@ local COMMANDS = {
     ["/new"] = function() newConversation(); return ask("Goal: ") end,
     ["/tidy"] = function() return NOTES.tidyGoal() end,
     ["/skills"] = function() SKILLS.show(); return ask("> ") end,
+    -- (#93) /goal <file>: the goal is the file's text, as long as it is
+    ["/goal"] = function(path)
+        path = text.trim(path or "")
+        if path == "" then
+            say("yellow", "/goal <file>: the goal is the file's text (write it with edit).")
+            return ask("> ")
+        end
+        path = shell and shell.resolve and shell.resolve(path) or path
+        local given = fileio.read(path)
+        if not given or scan.isBlank(given) then
+            say("red", "No goal in " .. path .. ": the file isn't there or is empty.")
+            return ask("> ")
+        end
+        given = text.trim(given)
+        say("yellow", string.format("The goal from %s (%d lines).", path, #text.pieces(given, "\n")))
+        return given
+    end,
 }
+readLine.commands = tables.sortedKeys(COMMANDS)      -- (Tab completes them)
 
 local function main()
     if not takeSavedPos() then T.startAtHome(true) end
@@ -2917,9 +2938,11 @@ local function main()
         goal = ask("Goal: ")
     end
     while goal ~= "" do
-        local command = COMMANDS[text.trim(goal)]
+        -- (a command is the whole line, or /goal and its file)
+        local name, arg = text.cut(text.trim(goal), " ")
+        local command = COMMANDS[text.trim(goal)] or (name == "/goal" and COMMANDS[name])
         if command then
-            goal = command()
+            goal = command(arg)
         else
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)
