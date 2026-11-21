@@ -537,7 +537,7 @@ SYSTEM = text.replace(SYSTEM, "@CACHE@", CACHE_TTLS[opts.cache or "5m"])
 local TOOLS = {
     {
         name = "lua",
-        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep (real seconds), gps, fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; helpers() lists what each helper file defined, and the names T has too; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. There's no load, loadstring, _G or coroutine: check(code) compiles code without running it (true, or nil and the error), and loadfile compiles a file without running it. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
+        description = "Run Lua on the turtle. The code runs as a chunk with turtle, T (turtlelib), peripheral, http, os, textutils, math, string, table, sleep (real seconds), gps, settings (read-only: get, getNames, getDetails), fs and io in scope (fs, io, loadfile and dofile read any file but the API key and write only under /claude/), and require for ccnix's libraries text, scan, convert, path, glob, regex, tables, fileio, getopt, realtime, net, netdb, httpc and mc, and the CraftOS modules cc.strings, cc.pretty, cc.expect, cc.base64, cc.completion, cc.shell.completion, cc.image.nft, cc.audio.dfpwm and cc.require; what it prints (print, write, io.write, printError) and returns comes back to you (tables are serialised). Errors come back as an error result. Globals persist for the session (clearing old results doesn't remove them); a local ends with its call. keep(name, code) runs a helper and keeps it, in /claude/helpers/<name>.lua, for every session after; helpers() lists what each helper file defined, and the names T has too; skill(name, description, body) writes a skill of your own, /claude/skills/<name>/skill.md. There's no load, loadstring, _G or coroutine: check(code) compiles code without running it (true, or nil and the error), and loadfile compiles a file without running it. Each result ends with a status line: where the turtle is, its fuel and what the call used of it, the free slots, and lava or water beside it.",
         input_schema = {
             type = "object",
             properties = {
@@ -908,6 +908,8 @@ local API = {
     pcall = pcall, xpcall = xpcall, error = error, assert = assert,
     setmetatable = setmetatable, getmetatable = getmetatable,
     rawget = rawget, rawset = rawset, rawequal = rawequal,
+    -- (ADR-0020 D4: the settings read-only; T.saveSettings writes them)
+    settings = settings and { get = settings.get, getNames = settings.getNames, getDetails = settings.getDetails },
 }
 -- The code's globals: API's, and the running network stack as it is now
 -- (lib/net keeps it in _G.ccnet, and the code's libraries see env as _G)
@@ -2229,12 +2231,14 @@ local function body(compact)
     return textutils.serialiseJSON(asUTF8({
         model = MODEL,
         max_tokens = compact and compact.maxTokens or MAX_TOKENS,
-        -- cached: the system prompt and tools (they never change), and
-        -- the conversation up to its last block, read back by the next
-        -- call (the top-level cache_control: the API moves that mark on
-        -- as the conversation grows).  One TTL for both: a longer one
-        -- may not come after a shorter.
-        system = { { type = "text", text = SYSTEM, cache_control = CACHE } },
+        -- cached: the system prompt and tools (they change only with the
+        -- date, at midnight UTC), and the conversation up to its last
+        -- block, read back by the next call (the top-level cache_control:
+        -- the API moves that mark on as the conversation grows).  One TTL
+        -- for both: a longer one may not come after a shorter.  (The date:
+        -- the model dated its files days off without it.)
+        system = { { type = "text", text = SYSTEM .. "\n\nToday is " .. os.date("!%Y-%m-%d", now()) .. " (UTC).",
+                     cache_control = CACHE } },
         cache_control = CACHE,
         tools = TOOLS,
         messages = compact and compact.messages or messages,
@@ -2875,9 +2879,12 @@ local function main()
     end
     if CONFIRM then given[#given + 1] = "--confirm" end
     resume.given = table.concat(given, " ")
-    log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)",
+    -- (where the options came from: the command line, the last session's claude.options, the goal kept in resume.txt)
+    log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)%s%s",
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
-        CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel())))
+        CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel()),
+        #resume.taken > 0 and ("; from claude.options: " .. table.concat(resume.taken, " ")) or "",
+        resume.goal and "; resuming the goal in resume.txt" or ""))
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
     local news = whatsNew()

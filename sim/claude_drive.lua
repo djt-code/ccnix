@@ -2689,7 +2689,9 @@ check("D1: the prompt says sleep is real seconds and os.clock game time, and nam
     sys:find("Your sleep is realtime.sleep (real seconds); os.clock and os.startTimer count game time", 1, true)
         and sys:find("T.gpsHere() swaps one in from the inventory for the fix", 1, true)
         and not sys:find("sleep, os.clock and os.startTimer count game ticks", 1, true)
-        and tool:find("sleep (real seconds), gps, fs and io in scope", 1, true))
+        and tool:find("sleep (real seconds), gps, settings (read-only: get, getNames, getDetails), fs and io in scope", 1, true))
+check("the system prompt ends with the date (ADR-0020: the model dated its files days off without it)",
+    sys:find("\n\nToday is %d%d%d%d%-%d%d%-%d%d %(UTC%)%.$") ~= nil, sys:sub(-60))
 end
 
 -- ADR-0019 D4: each session keeps its options in the setting claude.options, and a claude started without them (as
@@ -2714,11 +2716,23 @@ check("D4: a plain claude (as autostart starts it after a reboot) starts with th
         and not startLine():find("confirming", 1, true)
         and Mine.logHas("^Options from the last session %(claude%.options%): %-%-steps 400 %-%-cache 1h%.$") and saves == 1,
     startLine())
+check("...and the log's start line says where they came from (the reboot check's evidence)",
+    startLine():find("; from claude.options: --steps 400 --cache 1h", 1, true) ~= nil, startLine())
 fresh({ "" })
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("dig more", "--steps", "9")
 check("D4: a flag given wins over the kept one, and is kept in turn",
     startLine():find("steps 9, cache 1h", 1, true) and SETD["claude.options"] == "--steps 9 --cache 1h" and saves == 2,
     startLine() .. " / " .. tostring(SETD["claude.options"]))
+-- ADR-0020 D4: the settings, read-only, in the code
+fresh({ "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return settings.get('claude.options'), settings.set == nil" }) }, "tool_use"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+run("read a setting")
+local set1 = resultsIn(2).toolu_1
+check("ADR-0020 D4: settings.get in the code reads a setting; there's no settings.set", set1 and set1.content == "-> --steps 9 --cache 1h\n-> true",
+    set1 and set1.content)
 settings = nil
 end
