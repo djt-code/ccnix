@@ -3145,6 +3145,15 @@ local function frontStack(chest, name, suck, keep, pick)
     return chest.pushItems(self, from, 64, 1) > 0, held
 end
 
+-- How many the container's first slot holds (after frontStack, the wanted
+-- stack).  A suck asks for no more than this: CC: Tweaked's suck goes on to
+-- the next stack of the item asking for the whole count again, so a suck of k
+-- from a front stack of fewer than k can bring more than k.
+local function frontCount(chest)
+    local first = chest.list()[1]
+    return first and first.count or 0
+end
+
 local restockWarned = {}
 
 -- Pull `name` out of the container on `side` until the turtle holds `target`
@@ -3242,7 +3251,7 @@ function T.takeInto(side, name, n, slot)
         local found, held = frontStack(chest, name, suck, slot)
         if not found then break end
         turtle.select(slot)
-        local got = suck(n - have)
+        local got = suck(math.min(n - have, frontCount(chest)))
         if held then turtle.select(held); drop() end
         if not got then break end
     end
@@ -3299,7 +3308,7 @@ function T.pull(side, name, n, opts)
                 return
             end
             turtle.select(into)
-            local got = suck(math.min(64, n - have))
+            local got = suck(math.min(64, n - have, frontCount(chest)))
             if held then turtle.select(held); drop() end
             if not got then
                 why = "couldn't take " .. name .. " from the " .. side

@@ -213,6 +213,19 @@ do
     check("...and nothing to make sticks of: refused", ok == nil and made:find("planks", 1, true) ~= nil, tostring(made))
 end
 
+do
+    fresh()
+    -- the field's round (#340): a 2x2 of 60 a cell from stacks of 64, 64, 64 and 48.  CC:T's suck goes on to the next
+    -- stack asking for the whole count again, so a cell whose front stack was short took up to 64, and the last cell
+    -- came up short ("the chest gave 52 (0 still in it)")
+    fill(0, 0, 1, { [1] = { "minecraft:stone", 64 }, [2] = { "minecraft:stone", 64 }, [3] = { "minecraft:stone", 64 },
+                    [4] = { "minecraft:stone", 48 } })
+    W.give(1, TABLE, 1)
+    local ok, made = T.craft("minecraft:stone_bricks", 240)
+    check("240 stone bricks from 240 stone in uneven stacks: one round of 60 a cell, every cell filled", ok == true and made == 240
+        and carrying("minecraft:stone_bricks") == 240 and chestHas("minecraft:stone") == 0, tostring(made) .. " / " .. inventory())
+end
+
 --------------------------------------------------------------------------
 -- Short, no room, no table, no chest
 --------------------------------------------------------------------------
@@ -360,6 +373,26 @@ do
     pairOk, pairWhy = T.craft("mod:pair", 1)
     check("...with 3 oak planks (and the birch) a pair is made of the oak", pairOk == true and carrying("mod:pair") == 1 and chestHas("minecraft:oak_planks") == 1
         and chestHas("minecraft:birch_planks") == 1, tostring(pairWhy) .. " " .. chestLine())
+    -- a recipe added wrong and then right (#341): the right one replaces the wrong, which would otherwise be tried when
+    -- the right one is short and refused by the table ("No matching recipes")
+    table.insert(B.RECIPES, 1, { name = "pillar", shape = { "A", "A" }, key = { A = function(n) return n == "mod:cut" end }, mixed = false,
+        out = function() return "mod:pillar", 2 end })
+    fresh()
+    T.addRecipe { out = "mod:pillar", count = 2, shape = { "b", "b" }, key = { b = "mod:block" } }
+    local again, note = T.addRecipe { out = "mod:pillar", count = 2, shape = { "a", "a" }, key = { a = "mod:cut" } }
+    check("a recipe added again for the same item and cells replaces the first, and says so", again == true and note
+        and note:find("replaces the recipe for mod:pillar", 1, true) ~= nil, tostring(note))
+    fill(0, 0, 1, { [1] = { "mod:cut", 2 }, [2] = { "mod:block", 64 } })
+    W.give(1, TABLE, 1)
+    local pOk, pWhy = T.craft("mod:pillar", 4)
+    check("...so with too little of the right one it is short, not refused by the table with the wrong one",
+        pOk == nil and tostring(pWhy):find("short of", 1, true) ~= nil and not tostring(pWhy):find("would not craft", 1, true), tostring(pWhy))
+    -- a refusal by the table names what the grid held
+    T.addRecipe { out = "mod:pillar", count = 2, shape = { "b", "b" }, key = { b = "mod:block" } }
+    fill(0, 0, 1, { [1] = { "mod:block", 4 } })
+    pOk, pWhy = T.craft("mod:pillar", 2)
+    check("a recipe the table refuses: the why names what the grid held", pOk ~= true and tostring(pWhy):find("would not craft", 1, true)
+        and tostring(pWhy):find("the grid held block for pillar", 1, true) ~= nil, tostring(pWhy))
     -- the newest recipe is tried first
     T.addRecipe { out = "minecraft:stick", count = 1, shape = { "P" }, key = { P = "minecraft:coal" } }
     local stick = T.recipe("minecraft:stick")
@@ -378,7 +411,9 @@ do
         local good2, why = T.addRecipe(spec)
         if not good2 then bads[#bads + 1] = i .. ": " .. tostring(why) end
     end
-    check("every built-in recipe is a valid spec", #bads == 0 and #rows == 2 * #copies, table.concat(bads, "; "))
+    -- (the copies of rows added before replace those, and copies sharing an item and cells replace each other, so the
+    -- table grows by less than the copies)
+    check("every built-in recipe is a valid spec", #bads == 0 and #rows > #copies, table.concat(bads, "; "))
 end
 
 --------------------------------------------------------------------------
@@ -617,6 +652,8 @@ do
     check("T.craftBatch(plan) crafts it with one stash, and opts.take brings the targets (only) aboard", ok == true and carrying("minecraft:torch") == 16
         and carrying("minecraft:stick") == 0 and chestHas("minecraft:oak_planks") == 2 and chestHas("minecraft:oak_log") == 1 and info.crafted["minecraft:stick"] == 4,
         tostring(ok) .. " " .. tostring(info) .. " / " .. inventory() .. " / " .. chestLine())
+    check("...and what it made and didn't take is info.spare: the 2 planks the sticks didn't use (#350)", ok == true and info.spare["minecraft:oak_planks"] == 2
+        and info.spare["minecraft:stick"] == nil and info.spare["minecraft:torch"] == nil, ok == true and tostring(info.spare["minecraft:oak_planks"]) or "")
 
     -- short: what is missing, and the batch refuses it
     local short, swhy = T.craftPlan({ { "minecraft:torch", 8 } }, { stock = { oak_log = 1 } })
@@ -651,6 +688,10 @@ do
     -- a loop in the tree (a coal block is nine coal, coal is a ninth of a block) ends
     plan = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
     check("a loop in the recipes ends: a coal block with no coal is short of 9 coal", plan.ok == false and countsLine(plan.short) == "coal 9", countsLine(plan.short))
+    -- (#346) an ingot with ingots there: a block from 9 of them and 9 back from the block is a loop, not a plan
+    plan = T.craftPlan({ ["minecraft:iron_ingot"] = 1 }, { stock = { iron_ingot = 21 } })
+    check("an ingot with 21 ingots there: no loop through a block, it is taken from what there is", plan.ok and stepsLine(plan) == ""
+        and countsLine(plan.base) == "iron_ingot 1", stepsLine(plan) .. " / " .. countsLine(plan.base) .. " / short " .. countsLine(plan.short))
     -- two targets share what there is; a list form
     plan = T.craftPlan({ { "minecraft:stick", 4 }, { "minecraft:crafting_table", 1 } }, { stock = { oak_log = 2 } })
     check("two targets from 2 logs: planks for the sticks with 2 over, the table from those and 2 more", plan.ok
