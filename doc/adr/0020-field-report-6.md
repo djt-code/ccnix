@@ -13,7 +13,7 @@ The 20 checks that passed were closed with their evidence. Its findings on the s
 #351. Its lighthouse build, the day before, had found #340 to #342.
 
 This pass takes those issues, and the two prompt stories still open for claude: #339 (the prompt edits
-lines as a shell does) and #93 (goals longer than one line). #343 (scheduled drivers) is ADR-0021.
+lines as a shell does) and #93 (goals longer than one line). #343 (scheduled drivers) went to ADR-0021, since withdrawn: it is part of ADR-0006 now.
 
 Three read-only reviewers checked the findings against the field log, the library and the harness.
 
