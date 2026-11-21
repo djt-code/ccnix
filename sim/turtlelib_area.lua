@@ -108,8 +108,16 @@ do
             and W.S.moves == moves and has(2, -1, 2, DIRT), tostring(why))
     mixed({ -3, 0, -3, 10, 5, 10 })
     ok, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
-    check("...a floor the map hasn't seen: it goes as before (stopping at the first dig with no room)", ok ~= nil and W.S.moves > moves,
-        tostring(why))
+    check("...a floor the map hasn't seen, one slot free: one more kind fits, so it goes (stopping at the first dig with no room)",
+        ok ~= nil and W.S.moves > moves, tostring(why))
+    -- (ADR-0020 D3, #348) unseen cells are one more kind: with no slot free it refuses before it moves
+    mixed({ -3, 0, -3, 10, 5, 10 })
+    W.give(16, GLASS, 64)
+    moves = W.S.moves
+    nothing, why = T.pave({ 1, -1, 1, 5, -1, 3 }, BRICKS)
+    check("...a floor the map hasn't seen and no slot free: refused, the unseen cells counted as one more kind", nothing == nil
+        and tostring(why):find("15 cells not in the map, counted as one more kind (T.scanBox first)", 1, true) ~= nil
+        and W.S.moves == moves, tostring(why))
     local floor = cube({}, 1, -1, 1, 5, -1, 3, DIRT)
     floor[#floor + 1] = { 2, -1, 2, PLANKS }
     fresh(floor)
