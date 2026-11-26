@@ -42,6 +42,8 @@ It keeps going rather than stopping (each a setting):
  * Out of chests for the next home, or of fuel: it goes back to the start (hauling on the way, and taking fuel from the homes it passes), says what it needs (and tells the player, with mine.report), and looks in the top chest every minute until it's there, then goes back out and on (`sysctl mine.wait=false` stops instead).
  * A finished tunnel brings its last home's supplies (chests, fuel, torches, wood, the crafting table) back to the start, for the next tunnel; one that stopped leaves them there for `--resume`.
 
+A spawner in the way (a dungeon's) doesn't stop it either: it's left standing (never dug), lit with a torch beside each of its sides that's in the tunnel and one on top, and the tunnel goes round it.  So do a chest, barrel or shulker box in the way.  Only a 1x1 tunnel, with no way round, stops there.
+
 The turtle's own column and row are part of the tunnel: it stands in the mouth at one bottom (or top, for negative heights) corner, and the tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3 tunnel 32 long, up and to the right of the turtle.
 
 Placement: put the turtle where the tunnel's corner should start, facing along it.  Put a chest directly ABOVE the start for valuables and one directly BELOW it for bulk (stone, cobblestone, deepslate, dirt, gravel, sand...).  Stock the top chest with fuel and with CHESTS: the turtle builds a new home out of two of them every `spacing` blocks. Torches in it too, and it lights the tunnel (unless --no-lights).  And a crafting table, so it can craft more chests and torches from wood it finds (see Crafting below).  And an empty bucket, so it burns the lava it meets for fuel (see Lava below).

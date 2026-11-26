@@ -1081,7 +1081,10 @@ recognise. Needs a pickaxe, equipped or in the inventory.
   start column's bottom row on its way back. It keeps them and reuses them.
   Behind it, torches higher up the walls are safe.
 - **Never dug:** chests, barrels, shulker boxes, spawners and ComputerCraft
-  blocks (other turtles, computers).
+  blocks (other turtles, computers). A spawner, chest, barrel or shulker box
+  in the tunnel is left standing and the tunnel goes round it. A spawner gets
+  a torch on each side that faces into the tunnel and one on top, so no mobs
+  come from it. Only a 1x1 tunnel, with no way round, stops there.
 - **Reset:** position is saved after every move. After a Ctrl+T or a server
   restart, `mine reset` brings the turtle to the **last home it built**, even
   from inside a vein: it digs straight back into the tunnel, then follows it.

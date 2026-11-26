@@ -371,6 +371,62 @@ run("2", "2", "--spacing", "8", "--new")
 check("stopped at the bedrock", logHas("Can't get through at %(%d,%d,12%) %(minecraft:bedrock%)"))
 check("back at the start", atStart())
 
+-- 5s. a spawner in the way (a dungeon's, at the floor of the start column
+--     at z=10, a chest beside it): never dug, both are left standing and
+--     gone round; the spawner gets a torch on each side that opens into
+--     the tunnel and on top (not into the wall, x=-1), and the run goes on
+--     to its end
+local SPAWNER = { name = "minecraft:spawner" }
+local function spawnerWorld()
+    setup(stock(4, 64, 16))
+    set(0, 0, 10, SPAWNER)
+    set(2, 2, 10, Mine.chest())
+    startAt(); Mine.inv, Mine.files = {}, {}
+    FUEL, LOWEST, DRY = 2000, 2000, 0
+end
+local function torchOn(x, y, z, on)
+    local b = get(x, y, z)
+    return Mine.isTorch(b) and (on == nil or b.on == on)
+end
+spawnerWorld()
+run("3", "3", "16", "--spacing", "8")
+check("the run went on past the spawner to its end", logHas("^Done:") and not logHas("Can't get through"))
+check("the spawner and the chest left standing", get(0, 0, 10) == SPAWNER and get(2, 2, 10) ~= nil and get(2, 2, 10).inv ~= nil)
+check("a torch hung on each side of it in the tunnel (-z, +z, +x) and one stood on top",
+    torchOn(0, 0, 9, "0,0,10") and torchOn(0, 0, 11, "0,0,10") and torchOn(1, 0, 10, "0,0,10") and torchOn(0, 1, 10, "0,0,10"),
+    table.concat({ tostring(torchOn(0, 0, 9, "0,0,10")), tostring(torchOn(0, 0, 11, "0,0,10")),
+                   tostring(torchOn(1, 0, 10, "0,0,10")), tostring(torchOn(0, 1, 10, "0,0,10")) }, " "))
+check("none into the wall", not torchOn(-1, 0, 10))
+check("the rest of the tunnel dug", leftIn(0, 2, 0, 2, 1, 16) == 6, leftIn(0, 2, 0, 2, 1, 16) .. " blocks left (6 wanted: the spawner, the chest, 4 torches)")
+check("said so, and in the summary", logHas("Leaving the minecraft:spawner at %(0,0,10%) standing") and logHas("Lit the spawner at %(0,0,10%) with 4 torches")
+    and logHas("Went round 2 blocks it doesn't dig %(1 spawners, lit with 4 torches%)"))
+check("what it left standing kept for later runs", (Mine.files["mine.blocked"] or ""):find("0 0 10 minecraft:spawner\n", 1, true)
+    and select(2, (Mine.files["mine.blocked"] or ""):gsub("minecraft:torch", "")) == 4, Mine.files["mine.blocked"])
+check("back at the start", atStart())
+-- 5t. the tunnel carried on further: the walk out goes round them again,
+--     digging none of the torches
+run("3", "3", "24", "--spacing", "8")
+check("carried on past them to z=24", logHas("^Done:") and leftIn(0, 2, 0, 2, 17, 24) == 0, leftIn(0, 2, 0, 2, 17, 24) .. " blocks left")
+check("its torches all still there", torchOn(0, 0, 9) and torchOn(0, 0, 11) and torchOn(1, 0, 10) and torchOn(0, 1, 10))
+check("back at the start", atStart())
+-- 5u. 1 wide and 2 tall: a torch on top would wall it off, so it's left out
+setup(stock(4, 64, 16))
+set(0, 0, 6, SPAWNER)
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 2000, 2000, 0
+run("1", "2", "12")
+check("1x2: went round over it", logHas("^Done:") and leftIn(0, 0, 0, 1, 1, 12) == 3, leftIn(0, 0, 0, 1, 1, 12) .. " blocks left")
+check("...lit either side, the top left out", torchOn(0, 0, 5, "0,0,6") and torchOn(0, 0, 7, "0,0,6") and not torchOn(0, 1, 6)
+    and logHas("with 2 torches %(1 more would have walled the tunnel off%)"))
+-- 5v. 1 by 1: no way round, so it stops and says why
+setup(stock(4, 64, 16))
+set(0, 0, 6, SPAWNER)
+startAt(); Mine.inv, Mine.files = {}, {}
+FUEL, LOWEST, DRY = 2000, 2000, 0
+run("1", "1", "12")
+check("1x1: stopped, saying there's no way round", logHas("Can't get through at %(0,0,5%) %(minecraft:spawner: no way round it in a tunnel this size%)"))
+check("back at the start", atStart())
+
 -- 5r. with mine.report on and a player to tell (turtle.player), it tells the
 --     player how the run ended, with where it is and its fuel: done, and
 --     stopped (here by the bedrock); off, or with no player, it tells no one
