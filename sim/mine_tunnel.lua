@@ -1129,7 +1129,7 @@ run("--resume")
 WATERY = false
 local wetAfter = 0
 for x = 0, 2 do for y = 0, 2 do for z = 1, 40 do if isWater(get(x, y, z)) then wetAfter = wetAfter + 1 end end end end
-check("said it's going over the tunnel on the way out", logHas("going over the tunnel for water getting in and lights out"))
+check("said it's walking out along the middle of the floor", logHas("along the middle of the floor, stopping only where water gets in"))
 check("both torches back, once the water was sealed off",
     Mine.isTorch(get(-1, 0, 29)) and Mine.isTorch(get(-1, 0, 10)))
 checkLight(0, 2, -1, 1, 40)
@@ -1192,9 +1192,31 @@ run("--resume")
 WATERY = false
 check("water from the next segment: the tunnel dry after the walk out", poolWet > 20 and wetIn() == 0,
     poolWet .. " wet before, " .. wetIn() .. " after")
-check("... without going over the segment before again and again (a dry walk out and back: 64 moves)",
-    Mine.workMoves() < 200, Mine.workMoves() .. " moves")
+check("... without going over the segment before again and again (a dry walk out and back: 64 moves;"
+    .. " the middle, then the lit wall's lane where it met water)",
+    Mine.workMoves() < 250, Mine.workMoves() .. " moves")
 check("finished", logHas("^Done"))
+
+-- 13w. the walk out through a dry 10x10 tunnel (dug to 40, homes at 16
+--      and 32; no torches on board, so none dug for): one straight walk
+--      along the middle of the floor a segment, not along every third
+--      column's floor (by the lit walls: four lanes a segment, 198 moves);
+--      stopped at its first dig, past the end of what's dug
+dugTunnel()
+for x = 0, 9 do for y = 0, 9 do for z = 1, 40 do
+    if not chestAt(x, y, z) then set(x, y, z, nil) end
+end end end
+Mine.files["mine.job"] = "10 10 48 16 2 active"
+for _, it in ipairs(stock(2, 64)) do table.insert(chestAt(0, 1, 0), it) end
+table.insert(chestAt(0, -1, 0), { name = "minecraft:cobblestone", count = 64 })
+startAt()
+Mine.files[".turtlepos"] = "0 0 0 0 flat"
+FUEL, STOP_AT_DIG = 3000, 1
+run("--resume")
+STOP_AT_DIG = nil
+check("10x10: stopped at the end of what's dug, at its first dig", P.z >= 40, "at z=" .. P.z)
+check("10x10: out to home 2 in one straight walk a segment along the middle", Mine.workMoves() < 80,
+    Mine.workMoves() .. " moves")
 
 -- 13o. the walk out, its torch at z=29 gone, with water getting in through
 --      the far wall beside that spot at two places (x=3, z=28 and 31),

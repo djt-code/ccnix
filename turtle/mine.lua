@@ -148,16 +148,19 @@
 --    on board, takes what's useful from each home it passes (fuel,
 --    torches, chests, wood, the crafting table, as much as fits: the rest
 --    stays there; and bulk blocks, for sealing water and filling holes),
---    and goes over each segment on the way:
---    along the floor by the lit wall, putting back any torch that's
---    missing (one that's there, a wall torch as the game calls it once
---    hung, is left alone), and following any water it meets to where it
---    gets in and sealing that (then lighting what the water kept dark;
---    water coming from the segment after is left to that one, gone over
---    next, rather than chased, or the segment walked again for it);
---    where it met water and the floor under that lane has a hole, or a
---    patch (cobblestone: a hole filled before, a bridge), it goes along
---    the other columns' floor there too and fills what's open;
+--    and goes over each segment on the way, in one straight walk along
+--    the middle of its floor (water getting in anywhere ends up on the
+--    floor and spreads across it to there), filling any hole under it.
+--    Only where it meets water does it stop to work: it follows the water
+--    to where it gets in and seals that (water coming from the segment
+--    after is left to that one, gone over next, rather than chased, or
+--    the segment walked again for it), then goes over the stretch round
+--    it along the floor by the lit wall, putting back any torch the water
+--    washed off (one that's there, a wall torch as the game calls it once
+--    hung, is left alone); where the floor there has a hole, or a patch
+--    (cobblestone: a hole filled before, a bridge), it goes along the
+--    other columns' floor there too and fills what's open.  Torches in
+--    the dry part aren't looked at;
 --    at each home it moves any bulk in the valuables chest down into the
 --    bulk chest.  It stops to work only where water gets in (trips then
 --    for bulk blocks or fuel go to the home ahead).
@@ -833,6 +836,7 @@ end
 
 digLimit = nil             -- `mine reset`: blocks it may dig on the way back (nil: any)
 repairing = false    -- going over tunnel dug before: any water in it is getting in from somewhere
+sealedZ = {}         -- (going over it) z of each place it sealed water getting in
 wetAt, wetLevel = nil      -- the block it last moved into through water or lava, and its level
 plugs = {}           -- key -> position: dug tunnel blocks it filled again (see dry)
 
@@ -963,14 +967,20 @@ end
 -- Seal lava or water in direction d with a bulk block.  Lava a bucket
 -- takes up (see scoop) is gone: inside the tunnel that's the end of it;
 -- in a wall, floor or ceiling the hole it leaves is filled as before.
+-- Out of bulk blocks, it goes for more first (as drying and filling do).
 function seal(d)
     if scoop(d) and inBox(neighbour(d)) then return true end
+    if not fillerDry and not T.selectItem(function(n) return FILLER[n] end) then
+        fillerKeep = FILLER_KEEP_WET       -- wet ground: carry more from now on
+        trip("Out of blocks to seal water with")
+    end
     local okb, b = look(d)
     if okb and not FLUID[b.name] and (soft(b) or waterIn(b)) and not protected(b.name) then digDir(d) end
     local ok = putFiller(d)
     if ok then
         stats.sealed = stats.sealed + 1
         opened[key(neighbour(d))] = nil
+        if repairing then sealedZ[#sealedZ + 1] = neighbour(d).z end
     end
     return ok
 end
@@ -2888,31 +2898,36 @@ function unplug()
 end
 
 -- Go over part of the tunnel dug before, from the home, for water getting
--- in: along the floor of the middle of every three columns, checking the
+-- in: in one straight walk along the middle of the floor (one walk for
+-- every SPREAD_COLS columns, in a tunnel wider than that), checking the
 -- floor under it too.  Water getting in from anywhere (walls, ceiling,
 -- floor) ends up on the floor and spreads across it, up to 7 blocks on the
--- flat and on down any slope, so it reaches one of them (if the middle
--- one's floor isn't dug yet, another of the three that is).  Water it
+-- flat and on down any slope, so it reaches the middle (if the middle
+-- column's floor isn't dug yet, the nearest one that is).  Water it
 -- finds is getting in, so it follows it to where it comes in and seals
--- that (see dry).  Then it goes back over just where it found water (and
--- as far as water spreads either side), tracing it afresh, till that's
--- dry (twice at most), rather than the whole length again.  Only if it's
+-- that (see dry).  Then it goes over the stretch round where it found
+-- water (as far as water spreads either side) more closely: along the
+-- floor of the middle of every three columns, tracing it afresh, till
+-- that's dry (twice at most), rather than the whole length again.  Only if it's
 -- still wet there (it couldn't follow the water to where it gets in:
 -- coming in high up, or by many ways) does it look at every side of the
 -- tunnel there (sweep).  Where it met water and the floor lane's floor
 -- had a hole or a patch (a hole filled before, a bridge), it goes along
 -- the other columns' floor there too.  With
--- lights, the first walk goes along the floor by the lit wall (both, in a
--- tunnel lit from both) instead of that group's middle, and every torch
--- missing there is put back (or put in, where there never was one).
--- Nothing else is looked at again.  `done` picks the lanes dug before
+-- lights, the closer walk goes along the floor by the lit wall (both, in
+-- a tunnel lit from both) instead of that group's middle, and every torch
+-- missing there (the water washes them off) is put back (or put in, where
+-- there never was one).  Nothing else is looked at again.  `done` picks the lanes dug before
 -- (nil: all); `aheadDug`: the tunnel past z2 is dug, and gone over after
 -- (water from there is left to that).  It ends at `home`.
 WET_REACH = 8        -- how far either side of where it found water it looks again
+SPREAD_COLS = 13     -- columns one floor walk covers: water getting in through a wall
+                     -- spreads 7 blocks, to 6 columns either side of the walk's
 function repair(z1, z2, done, aheadDug)
     local lanes = planLanes()
     repairing = true
     repairRange, fromOutside = { z1 = z1, z2 = z2, aheadDug = aheadDug }, false
+    sealedZ = {}
     local marks = {}                       -- z where the floor lane found a hole, or a patch
     local wetZ = {}                        -- z where it waded into water
     local wetAll = {}                      -- (all of them, every walk)
@@ -2923,7 +2938,8 @@ function repair(z1, z2, done, aheadDug)
         for _, z in ipairs(zs) do
             local lo, hi = math.max(z1, z - pad), math.min(z2, z + pad)
             local sp = spans[#spans]
-            if sp and lo <= sp.hi + 1 then sp.hi = math.max(sp.hi, hi) else spans[#spans + 1] = { lo = lo, hi = hi } end
+            if lo > hi then                -- (out of this part's reach)
+            elseif sp and lo <= sp.hi + 1 then sp.hi = math.max(sp.hi, hi) else spans[#spans + 1] = { lo = lo, hi = hi } end
         end
         return spans
     end
@@ -2981,8 +2997,29 @@ function repair(z1, z2, done, aheadDug)
         end
     end
     local function first(lane) return lane.y == Y0 and middle[lane.x] end
+    -- the straight walk: the dug floor column nearest the middle of each
+    -- SPREAD_COLS (the nearer the home's side, of two)
+    local centre, same = {}, true
+    for g = 0, xn - 1, SPREAD_COLS do
+        local hi = math.min(g + SPREAD_COLS, xn) - 1
+        local mid, best = math.floor((g + hi) / 2), nil
+        for c = g, hi do
+            if floorDug[c * xs] and (not best or math.abs(c - mid) < math.abs(best - mid)) then best = c end
+        end
+        if best then centre[best * xs] = true end
+    end
+    for x in pairs(centre) do if not middle[x] then same = false end end
+    for x in pairs(middle) do if not centre[x] then same = false end end
     local before, sealed = stats.wet, stats.sealed
-    walk(first)
+    walk(function(lane) return lane.y == Y0 and centre[lane.x] end)
+    -- it met water: the stretch round it more closely, and round where
+    -- it got in, as far as it spreads (the torches it washed off)
+    if stats.wet > before and not same then
+        local zs = {}
+        for _, z in ipairs(wetZ) do zs[#zs + 1] = z end
+        for _, z in ipairs(sealedZ) do zs[#zs + 1] = z end
+        walk(first, spansOf(zs, WET_REACH))
+    end
     -- found water and sealed where some got in: back over just where it
     -- was, till it's dry, tracing it afresh (what it sealed changes where
     -- the rest comes from).  Sealed nothing: going over it again would
@@ -4031,8 +4068,8 @@ T.withTool(pickaxe, function()
         -- resuming from the start or an earlier home: out to the last home
         -- in one go, the valuables it carries kept on board, taking what's
         -- useful (fuel, torches, chests, wood, the crafting table; bulk
-        -- blocks to patch with) from each home it passes, putting back
-        -- missing torches, and stopping to work only where water gets in
+        -- blocks to patch with) from each home it passes, straight along
+        -- the middle of the floor, stopping to work only where water gets in
         if walkOut then
             local here, last = home, homeAt(job.homes)
             -- the walk out (and back to the start, should it have to) is
@@ -4043,12 +4080,11 @@ T.withTool(pickaxe, function()
                     .. (home.k > 0 and (" Put some in home " .. home.k .. ".") or ""))
             end
             -- on the way, each segment is gone over: water in it is
-            -- followed to where it gets in and sealed, and missing torches
-            -- put back (room left for what that digs)
+            -- followed to where it gets in and sealed, and torches it
+            -- washed off put back (room left for what that digs)
             inTrip = true
             takeSupplies(ROOM + 2)
-            print(string.format("Out to home %d, going over the tunnel for water getting in%s.", last.k,
-                lights and " and lights out" or ""))
+            print(string.format("Out to home %d along the middle of the floor, stopping only where water gets in.", last.k))
             for k = here.k, last.k - 1 do
                 local from = homeAt(k)
                 if k > here.k then
