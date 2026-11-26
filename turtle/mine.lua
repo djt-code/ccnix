@@ -80,6 +80,12 @@
 --    torches, wood, the crafting table) back to the start, for the next
 --    tunnel; one that stopped leaves them there for `--resume`.
 --
+-- A spawner in the way (a dungeon's) doesn't stop it either: it's left
+-- standing (never dug), lit with a torch beside each of its sides that's
+-- in the tunnel and one on top, and the tunnel goes round it.  So do a
+-- chest, barrel or shulker box in the way.  Only a 1x1 tunnel, with no
+-- way round, stops there.
+--
 -- The turtle's own column and row are part of the tunnel: it stands in
 -- the mouth at one bottom (or top, for negative heights) corner, and the
 -- tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3
@@ -240,7 +246,15 @@
 --    board.  Lighting is optional: with no torches it just keeps mining,
 --    and --no-lights turns it off (torches are then just valuables).
 --  * Never digs chests, barrels, shulker boxes, spawners or ComputerCraft
---    blocks (other turtles, computers).  While it runs, the chests of the
+--    blocks (other turtles, computers).  A spawner, chest, barrel or
+--    shulker box in the tunnel is left standing and the tunnel goes round
+--    it (a dungeon's spawner and its chests, say).  A spawner gets a torch
+--    beside each of its sides that opens into the tunnel and one on top, so
+--    no mobs come from it; a torch that would wall the tunnel off is left
+--    out, and a 1x1 tunnel, with no way round, stops there.  What it left
+--    standing, and those torches, are kept (mine.blocked), so later trips
+--    and runs go round them too.  A ComputerCraft block in the way still
+--    stops it.  While it runs, the chests of the
 --    start and of every home are also protected areas (T.protect, named
 --    "mine home K chest" and "mine home K bulk"), so no other program on the
 --    turtle digs them either; they are let go of when it ends, however it
@@ -735,6 +749,7 @@ look, placeDir, moveDir, attackDir, suckDir = T.look, T.placeDir, T.moveDir, T.a
 torchBy, broken = {}, {}
 function digDir(d)
     local n = key(neighbour(d))
+    if blocked[n] then return false end    -- (left standing: see there)
     local ok = T.digDir(d)
     if ok and torchBy[n] then broken[torchBy[n]] = true end
     return ok
@@ -753,7 +768,8 @@ filled = {}          -- blocks it has put back where it dug (floors, seals, ches
 fillerDry = false    -- no filler on board, at its home or behind: don't go looking again till it unloads
 fillerKeep = FILLER_KEEP  -- FILLER_KEEP_WET once water has used it up
 stats = { veins = 0, ore = 0, sealed = 0, filled = 0, torches = 0, relit = 0, homes = 0, fetched = 0, wet = 0,
-          wood = 0, lava = 0, grown = 0, pickedUp = 0, thrown = 0, hauls = 0, waits = 0 }
+          wood = 0, lava = 0, grown = 0, pickedUp = 0, thrown = 0, hauls = 0, waits = 0,
+          standing = 0, spawners = 0, spawnerTorches = 0 }
 -- From the Geo Scanner (see there): the world direction of the tunnel's +z
 -- once lined up, this segment's blocks touching the tunnel ("rock",
 -- "ore", "fluid" or "air"), and its ore further out.
@@ -827,6 +843,7 @@ plugs = {}           -- key -> position: dug tunnel blocks it filled again (see 
 -- move out of the way.
 function go(d)
     local n = neighbour(d)
+    if blocked[key(n)] then return false, blocked[key(n)].name end
     local inside = inBox(n) and not digLimit
     local wet = false
     for _ = 1, 30 do
@@ -848,7 +865,10 @@ function go(d)
             stats.wet = stats.wet + 1
         end
         if ok and not FLUID[data.name] then
-            if protected(data.name) then return false, data.name end
+            if protected(data.name) then
+                standing(n, data.name)
+                return false, data.name
+            end
             if digLimit then
                 if digLimit <= 0 then error({ lost = true }, 0) end
                 digLimit = digLimit - 1
@@ -1165,6 +1185,7 @@ end
 -- and dig out a fluid source.
 function clearCell(d)
     local n = neighbour(d)
+    if blocked[key(n)] then return end
     for _ = 1, 30 do
         room()                     -- first: a trip changes what's there
         local ok, data = look(d)
@@ -1176,7 +1197,10 @@ function clearCell(d)
             ok, data = look(d)
             if not ok or FLUID[data.name] then break end
         end
-        if protected(data.name) then return end
+        if protected(data.name) then
+            standing(n, data.name)
+            return
+        end
         if not digDir(d) then return end
     end
     plugs[key(n)] = nil
@@ -1242,6 +1266,294 @@ function mineVein(d)
 end
 
 --------------------------------------------------------------------------
+-- What it leaves standing in the tunnel
+--------------------------------------------------------------------------
+-- A spawner, chest, barrel or shulker box in the tunnel's way is never
+-- dug (see protected): it's left standing, and the tunnel goes round it.
+-- A spawner gets a torch beside each of its sides and on its top, where
+-- that's in the tunnel (nothing spawns in the rock round it), so no mobs
+-- come from it; a torch that would wall the tunnel off is left out.  What
+-- it left, and the torches round a spawner, are kept in BLOCKED_FILE
+-- ("x y z name" a line; "dark" after a spawner not lit yet), so every
+-- walk, trip and later run goes round them (going through a torch would
+-- dig it).
+BLOCKED_FILE = T.dataPath("mine.blocked")
+SPAWNER = "minecraft:spawner"
+WAY_PAD = 3          -- how far past the ends of a way round it may look
+blocked = {}         -- key -> { x, y, z, name, dark }: what it goes round
+
+-- Is a block called this left standing for the tunnel to go round?  (A
+-- ComputerCraft block may be another turtle passing: that still stops it.)
+function leftStanding(name)
+    return protected(name) and not text.startsWith(name, "computercraft:")
+end
+
+function saveBlocked()
+    local lines = {}
+    for _, k in ipairs(tables.sortedKeys(blocked)) do
+        local b = blocked[k]
+        lines[#lines + 1] = string.format("%d %d %d %s%s", b.x, b.y, b.z, b.name, b.dark and " dark" or "")
+    end
+    if #lines == 0 then clearBlocked() else fileio.write(BLOCKED_FILE, table.concat(lines, "\n") .. "\n") end
+end
+
+function loadBlocked()
+    local out, saved = {}, fileio.read(BLOCKED_FILE)
+    for _, line in ipairs(saved and text.lines(saved) or {}) do
+        local w = text.words(line)
+        if scan.isInteger(w[1] or "") and scan.isInteger(w[2] or "") and scan.isInteger(w[3] or "") and w[4] then
+            local b = { x = tonumber(w[1]), y = tonumber(w[2]), z = tonumber(w[3]), name = w[4] }
+            if w[5] == "dark" then b.dark = true end
+            out[key(b)] = b
+        end
+    end
+    return out
+end
+
+function clearBlocked()
+    if fs.exists(BLOCKED_FILE) then fs.delete(BLOCKED_FILE) end
+end
+
+-- The block at p, called `name`, is one it leaves standing (if p is in
+-- the tunnel): noted, and said.
+function standing(p, name)
+    local k = key(p)
+    if blocked[k] or not (inBox(p) and leftStanding(name)) then return end
+    blocked[k] = { x = p.x, y = p.y, z = p.z, name = name }
+    if name == SPAWNER then
+        blocked[k].dark = true
+        stats.spawners = stats.spawners + 1
+    end
+    opened[k] = nil
+    stats.standing = stats.standing + 1
+    saveBlocked()
+    print(string.format("Leaving the %s at (%s) standing: the tunnel goes round it.", name, k))
+end
+
+-- The way from here to p through the tunnel, round what's left standing
+-- in it: a list of directions, the cheapest (a block not dug yet costing
+-- 3 steps), or nil if there's none.  It keeps to the stretch of tunnel
+-- between here and p and WAY_PAD blocks either side.
+function wayRound(p)
+    local zlo = math.max(1, math.min(T.pos.z, p.z) - WAY_PAD)
+    local zhi = math.max(T.pos.z, p.z) + WAY_PAD
+    local goal = key(p)
+    local function free(c)
+        local k = key(c)
+        if k == goal then return true end
+        return inBox(c) and c.z >= zlo and c.z <= zhi and not blocked[k]
+    end
+    local start = here()
+    local cost, from = { [key(start)] = 0 }, {}
+    local queue, top = { [0] = { start } }, 0      -- the cells to look on from, by what it cost to get there
+    local c = 0
+    while c <= top do
+        local list = queue[c] or {}
+        local i = 1
+        while list[i] do                           -- (one costing as much can join while it's walked)
+            local p0 = list[i]
+            i = i + 1
+            local k0 = key(p0)
+            if cost[k0] == c then
+                if k0 == goal then
+                    local way, k = {}, k0
+                    while from[k] do
+                        table.insert(way, 1, from[k].d)
+                        k = from[k].k
+                    end
+                    return way
+                end
+                for _, d in ipairs({ 0, 2, 1, 3, "up", "down" }) do
+                    local v = DELTA[d]
+                    local n = { x = p0.x + v[1], y = p0.y + v[2], z = p0.z + v[3] }
+                    local kn = key(n)
+                    if free(n) then
+                        local nc = c + (knownAir(n) and 1 or 3)
+                        if not cost[kn] or nc < cost[kn] then
+                            cost[kn], from[kn] = nc, { k = k0, d = d }
+                            queue[nc] = queue[nc] or {}
+                            table.insert(queue[nc], n)
+                            top = math.max(top, nc)
+                        end
+                    end
+                end
+            end
+        end
+        c = c + 1
+    end
+    return nil
+end
+
+-- Go to p round what's left standing (see wayRound), going round any it
+-- finds on the way too.  True once there.
+function goRound(p)
+    for _ = 1, 4 do
+        if T.at(p) then return true end
+        local way = wayRound(p)
+        if not way then return false end
+        for _, d in ipairs(way) do
+            if not go(d) then
+                if not blocked[key(neighbour(d))] then return false end
+                break                              -- (one more found: a new way round)
+            end
+        end
+    end
+    return T.at(p)
+end
+
+-- Past what's left standing next to it in direction d (along `axis`,
+-- toward `target`): round it, to the first block beyond that isn't.
+-- False and "end" if all of it up to `target` is left standing; false
+-- and "no way round" if there isn't one.
+function passBy(d, axis, target)
+    local p = here()
+    lightSpawners()                        -- (its torches are gone round too)
+    local v = DELTA[d]
+    local c = { x = p.x + v[1], y = p.y + v[2], z = p.z + v[3] }
+    while blocked[key(c)] do
+        if c[axis] == target then return false, "end" end
+        c = { x = c.x + v[1], y = c.y + v[2], z = c.z + v[3] }
+    end
+    if goRound(c) then return true end
+    return false, "no way round"
+end
+
+-- One block on along a lane (direction d, toward z = to), or past what's
+-- left standing there, round it, to the first block beyond.  True, short
+-- of `to`, if the rest of the lane is all left standing.
+function onAlong(d, to)
+    local ok, what = go(d)
+    if ok or not blocked[key(neighbour(d))] then return ok, what end
+    local passed, why = passBy(d, "z", to)
+    if passed or why == "end" then return true end
+    return false, tostring(what) .. ": no way round it in a tunnel this size"
+end
+
+-- Would a torch at c still leave a way through the tunnel round the
+-- spawner at s?  (Every block of the tunnel near it, but what it goes
+-- round, still joined up.)
+function stillThrough(s, c)
+    local zlo, zhi = math.max(1, s.z - WAY_PAD), math.min(LENGTH, s.z + WAY_PAD)
+    local kc = key(c)
+    local function free(p)
+        return inBox(p) and p.z >= zlo and p.z <= zhi and not blocked[key(p)] and key(p) ~= kc
+    end
+    local cells, first = 0, nil
+    for z = zlo, zhi do
+        for y = Y0, Y1 do
+            for x = X0, X1 do
+                local p = { x = x, y = y, z = z }
+                if free(p) then
+                    cells = cells + 1
+                    first = first or p
+                end
+            end
+        end
+    end
+    if not first then return false end
+    local seen, queue, head = { [key(first)] = true }, { first }, 1
+    while queue[head] do
+        local p = queue[head]
+        head = head + 1
+        for _, d in ipairs({ 0, 1, 2, 3, "up", "down" }) do
+            local v = DELTA[d]
+            local n = { x = p.x + v[1], y = p.y + v[2], z = p.z + v[3] }
+            if free(n) and not seen[key(n)] then
+                seen[key(n)] = true
+                queue[#queue + 1] = n
+            end
+        end
+    end
+    return #queue == cells
+end
+
+-- A torch at c, beside the spawner at s on its side f: put from the block
+-- beyond c, so it hangs on the spawner (or stands on it, on top), else
+-- from beside c (hanging on what's across it, or standing on what's under
+-- it).  True once there's one there.
+function torchBeside(s, f, c)
+    local function isTorch(n) return TORCHES[n] end
+    local v = DELTA[f]
+    local spots = { { x = c.x + v[1], y = c.y + v[2], z = c.z + v[3] } }
+    for _, e in ipairs({ 0, 1, 2, 3 }) do
+        if e ~= f and e ~= OPP[f] then
+            local u = DELTA[e]
+            spots[#spots + 1] = { x = c.x + u[1], y = c.y, z = c.z + u[3] }
+        end
+    end
+    for _, p in ipairs(spots) do
+        if inBox(p) and not blocked[key(p)] and goRound(p) then
+            local d = dirTo(c)
+            clearCell(d)                   -- (dug out if it isn't yet: ore followed, fluid dried)
+            local ok, data = look(d)
+            if ok and leftStanding(data.name) then
+                standing(c, data.name)
+                return false
+            end
+            local there = ok and TORCH_BLOCKS[data.name]
+            if not ok and T.selectItem(isTorch) and placeDir(d) then
+                there = true
+                stats.spawnerTorches = stats.spawnerTorches + 1
+            end
+            turtle.select(1)
+            if there then
+                blocked[key(c)] = { x = c.x, y = c.y, z = c.z, name = "minecraft:torch" }
+                opened[key(c)] = nil
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Light the spawner at s: a torch beside each of its sides and on top,
+-- where that's in the tunnel and leaves a way through it.
+function lightSpawner(s)
+    local lit, left = 0, 0
+    for _, f in ipairs({ 2, 3, 1, "up", 0 }) do
+        local v = DELTA[f]
+        local c = { x = s.x + v[1], y = s.y + v[2], z = s.z + v[3] }
+        local b = blocked[key(c)]
+        if b and TORCH_BLOCKS[b.name] then lit = lit + 1
+        elseif inBox(c) and not b then
+            if not stillThrough(s, c) then left = left + 1
+            elseif torchBeside(s, f, c) then lit = lit + 1 end
+        end
+    end
+    s.dark = nil
+    saveBlocked()
+    if lit == 0 and left > 0 then
+        print(string.format("No torch can go by the spawner at (%s) without walling the tunnel off.", key(s)))
+    else
+        print(string.format("Lit the spawner at (%s) with %d torches%s.", key(s), lit,
+            left > 0 and string.format(" (%d more would have walled the tunnel off)", left) or ""))
+    end
+end
+
+-- Light the spawners found and not lit yet (on a trip, or going back,
+-- they wait), then back to where it was, unless a torch went there.
+warnedSpawner = false
+function lightSpawners()
+    if inTrip or digLimit then return end
+    local list = {}
+    for _, b in pairs(blocked) do
+        if b.dark then list[#list + 1] = b end
+    end
+    if #list == 0 then return end
+    if T.countItem(function(n) return TORCHES[n] end) == 0 then
+        if not warnedSpawner then
+            warnedSpawner = true
+            print("No torches to light the spawner at (" .. key(list[1]) .. ") with: it's lit once there are.")
+        end
+        return
+    end
+    table.sort(list, function(a, b) return key(a) < key(b) end)
+    local back, facing = here(), T.dir
+    for _, s in ipairs(list) do lightSpawner(s) end
+    if not blocked[key(back)] and goRound(back) then T.face(facing) end
+end
+
+--------------------------------------------------------------------------
 -- Getting around inside the tunnel, through blocks already dug (a trip
 -- home is made with a nearly full inventory): over to `via`, a finished
 -- lane, if the turtle's own lane isn't dug back to the segment's first
@@ -1260,7 +1572,8 @@ function alongAxis(axis, target)
         elseif axis == "y" then d = up and "up" or "down"
         else d = up and 0 or 2 end
         local ok, what = go(d)
-        if not ok then return false, what end
+        -- (past what's left standing in the way, round it)
+        if not ok and not (blocked[key(neighbour(d))] and passBy(d, axis, target)) then return false, what end
     end
     return true
 end
@@ -1277,6 +1590,7 @@ function tunnelHome()
     alongAxis("x", 0)
     alongAxis("y", 0)
     alongAxis("z", home.z)
+    if not T.at(home) then goRound(home) end   -- (a block on the way left standing)
     T.face(home.face)
     return T.at(home)
 end
@@ -1289,6 +1603,7 @@ function tunnelTo(p)
     alongAxis("z", p.z)
     alongAxis("x", p.x)
     alongAxis("y", p.y)
+    if not T.at(p) then goRound(p) end         -- (a block on the way left standing)
 end
 
 --------------------------------------------------------------------------
@@ -2156,6 +2471,7 @@ function relight()
     for _, t in ipairs(list) do
         broken[t] = nil
         alongAxis("y", t.at.y); alongAxis("x", t.at.x); alongAxis("z", t.at.z)
+        if not (T.at(t.at) or blocked[key(t.at)]) then goRound(t.at) end
         local wetFront = wetAhead()
         local ok, data = look(t.d)
         if T.at(t.at) and not (ok and TORCH_BLOCKS[data.name]) then
@@ -2179,6 +2495,7 @@ function relight()
     unlit = {}
     for _, p in ipairs(spots) do
         alongAxis("y", p.y); alongAxis("x", p.x); alongAxis("z", p.z)
+        if not (T.at(p) or blocked[key(p)]) then goRound(p) end
         if T.at(p) then lightHere() end
         local again = unlit[key(p)]
         if again then
@@ -2308,7 +2625,7 @@ function toTunnel(f, e)
 end
 
 function knownAir(p)
-    if filled[key(p)] then return false end
+    if filled[key(p)] or blocked[key(p)] then return false end
     return opened[key(p)] or (inBox(p) and p.z <= home.z)
 end
 
@@ -2459,6 +2776,7 @@ function fetchTargets(which)
     for _, t in ipairs(list) do targets[key(t)] = nil end
     relight()
     alongAxis("y", start.y); alongAxis("x", start.x); alongAxis("z", start.z)
+    if not T.at(start) then goRound(start) end
 end
 
 -- Put a scan in the map (T.mergeScan), so a later run, `--resume` and
@@ -2622,6 +2940,7 @@ function repair(z1, z2, done, aheadDug)
                     alongAxis("z", from); alongAxis("x", lane.x); alongAxis("y", lane.y)
                     local dz = to >= from and 1 or -1
                     for z = from, to, dz do
+                      if T.at({ x = lane.x, y = lane.y, z = z }) then   -- (what it went round skipped)
                         if isFloor(neighbour("down")) then         -- the floor too (no turning)
                             local filled0 = stats.filled
                             local ok, b = look("down")
@@ -2633,12 +2952,13 @@ function repair(z1, z2, done, aheadDug)
                         lightHere()
                         if z ~= to then
                             local wet0 = stats.wet
-                            go(dz > 0 and 0 or 2)
+                            onAlong(dz > 0 and 0 or 2, to)
                             if stats.wet > wet0 then
                                 wetZ[#wetZ + 1] = T.pos.z
                                 wetAll[#wetAll + 1] = T.pos.z
                             end
                         end
+                      end
                     end
                 end
             end
@@ -2744,6 +3064,7 @@ function sweep(lo, hi)
             alongAxis("z", from); alongAxis("x", x); alongAxis("y", y)
             local dz = to >= from and 1 or -1
             for z = from, to, dz do
+              if T.at({ x = x, y = y, z = z }) then           -- (what it went round skipped)
                 for _, e in ipairs({ "up", "down", 0, 1, 2, 3 }) do
                     local m = neighbour(e)
                     if not inBox(m) then
@@ -2755,7 +3076,8 @@ function sweep(lo, hi)
                         end
                     end
                 end
-                if z ~= to then go(dz > 0 and 0 or 2) end
+                if z ~= to then onAlong(dz > 0 and 0 or 2, to) end
+              end
             end
         end
     end
@@ -2803,10 +3125,20 @@ function mineSegment(z1, z2, from)
             local first, to, dz = z1, z2, 1
             if not ahead then first, to, dz = z2, z1, -1 end
             local ok, what = true, nil
-            if i == startLane and from then
+            if i == startLane and from and startZ then first = startZ end
+            -- (a lane that starts at what's left standing starts past it)
+            local function standsAt(z) return blocked[key({ x = lane.x, y = lane.y, z = z })] end
+            local wanted = first
+            while standsAt(first) and first ~= to do first = first + dz end
+            if standsAt(first) then
+                -- all of it is left standing: nothing to dig
+            elseif first ~= wanted then
+                via = i > 1 and lanes[i - 1] or nil
+                ok = goRound({ x = lane.x, y = lane.y, z = first })
+                what = "no way round what's left standing"
+            elseif i == startLane and from then
                 -- back out to where it stopped, through what's dug
                 via = i > 1 and lanes[i - 1] or nil
-                if startZ then first = startZ end
                 tunnelTo({ x = lane.x, y = lane.y, z = first })
             elseif i == 1 then ok, what = alongAxis("z", z1)
             else
@@ -2817,11 +3149,15 @@ function mineSegment(z1, z2, from)
             if ahead then via = nil end    -- this lane is dug back to the segment's start
             for z = first, to, dz do
                 if not ok then break end
-                if hasScanner and fuelLow() then coalScan(z1, z2) end
-                scanHere()
-                lightHere()
-                saveProgress(i, z)
-                if z ~= to then ok, what = go(ahead and 0 or 2) end
+                -- (past what's left standing in the lane, the blocks it went round are skipped)
+                if T.at({ x = lane.x, y = lane.y, z = z }) then
+                    if hasScanner and fuelLow() then coalScan(z1, z2) end
+                    scanHere()
+                    lightSpawners()        -- (one found above or below)
+                    lightHere()
+                    saveProgress(i, z)
+                    if z ~= to then ok, what = onAlong(ahead and 0 or 2, to) end
+                end
             end
             if not ok then stop(string.format("Can't get through at %s (%s).", T.posString(), tostring(what))) end
         end
@@ -3098,6 +3434,7 @@ function walkBackCollecting(keep)
         local h = homeAt(k)
         alongAxis("x", 0); alongAxis("y", 0)
         alongAxis("z", h.z)
+        if not T.at(h) then goRound(h) end
         T.face(h.face)
         leaveBulk(h, k > 1)                -- (home 1: the last of it; none goes to the start)
         if containerOn("front") then
@@ -3118,6 +3455,7 @@ function walkBackCollecting(keep)
     end
     alongAxis("x", 0); alongAxis("y", 0)
     alongAxis("z", 0)
+    if not T.at(homeAt(0)) then goRound(homeAt(0)) end
     T.face(0)
     home = homeAt(0)
     local ok = unload("everything")
@@ -3350,6 +3688,7 @@ end
 function useJob(job)
     WIDTH, HEIGHT, LENGTH, SPACING = job.width, job.height, job.length, job.spacing
     setBox()
+    blocked = loadBlocked()
 end
 
 -- `mine reset` trusts the saved position but checks the heading first:
@@ -3523,6 +3862,7 @@ if doReset then
             alongAxis("z", math.max(1, math.min(LENGTH, T.pos.z)))
         end
         alongAxis("x", 0); alongAxis("y", 0); alongAxis("z", target.z)
+        if not T.at(target) then goRound(target) end
         T.face(target.face)
     end)
     digLimit = nil
@@ -3641,7 +3981,7 @@ elseif job and job.state ~= "done" and not job.stale and job.homes > 0 and not f
 else
     setBox()
 end
-if resume then grown = loadGrown() else clearGrown() end
+if resume then grown = loadGrown() else clearGrown(); clearBlocked() end
 
 home = startingHome(resume)
 if not home then return end
@@ -3800,6 +4140,8 @@ final = string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid bl
     .. (stats.hauls > 0 and string.format(" Hauled to the start %d times.", stats.hauls) or "")
     .. (stats.waits > 0 and string.format(" Waited for supplies %d times.", stats.waits) or "")
     .. (stats.thrown > 0 and string.format(" Threw away %d bulk blocks no chest had room for.", stats.thrown) or "")
+    .. (stats.standing > 0 and string.format(" Went round %d blocks it doesn't dig%s.", stats.standing,
+        stats.spawners > 0 and string.format(" (%d spawners, lit with %d torches)", stats.spawners, stats.spawnerTorches) or "") or "")
 print(final)
 for _, k in ipairs(tables.sortedKeys(leftBehind)) do
     print(string.format("No room to bring back %d items from home %d (z=%d).", leftBehind[k], k, homeAt(k).z))
