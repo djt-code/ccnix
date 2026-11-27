@@ -2,6 +2,26 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.56.0
+-- ADR-0023, from the v7 test pass and report_harness_v8.md.
+T.dimension() says which dimension you're in and how it knows: the setting turtle.dimension ("auto" by default; overworld, nether or end to fix it), else the blocks round you (netherrack, basalt, blackstone, soul sand for the nether; end stone; stone, deepslate, dirt, water). T.darkCells and T.planLights use it: no opts.dimension or T.cfg.dimension needed. If it's ever wrong, set turtle.dimension.
+The map is kept for each dimension now (.map/<dimension>/): your old map moved into the folder of the dimension you were in the first time it was read. A change of dimension switches maps and says so.
+T.refuelFromLava stays within opts.within (64) of where it starts, tries sources it has seen at level 0 before cells a scan only named, and skips a lava fall's column after one flowing find (your C8 run tried 0,27..25,30, one column). In the nether, with no source in reach, it digs straight down to the lava sea, takes it, and climbs back (info.down says how).
+T.placeAt places a mod block the game puts in under another name on the first try (an AE2 cable goes in as ae2:cable_bus) and learns it: how.placedAs names the block, and T.build, T.verify and T.lint know it from then on. T.forgetPlacements("item") forgets those pairs.
+T.placeAt turns round to a cell next to it rather than climbing onto it to place from above. T.moveTo's "blocked by X at ..." ends "; opts.path = true routes round it" when you didn't pass opts.path.
+T.verify takes a wall torch for a plan's torch that asks no state. T.build prints only "lint: N warnings, in the result"; the lines are in info.lintSummary.
+T.dropInto(side, n) drops into a chest and refuses, dropping nothing, when nothing there holds items (your 30 nuggets on the ground). turtle.drop still throws them on the ground.
+T.craftPlan: when every recipe goes round through the item (an ingot with no ingots, nuggets or block in reach), the item itself is short ("iron_ingot 1"), and the why says what it would be made from.
+T.stow{ only = {...} } puts away only what it names, and names the kept ones it left and why (opts.all = true puts them away too).
+A turtle.dig() with nothing there says "Nothing to dig here" and no longer swaps the pickaxe on or the chat box off.
+T.takeInto takes opts.pick(detail), as T.pull and T.fetch do: pick a stack by its displayName (one facade kind of several).
+T.map.set(x, y, z, name, {}) clears a cell's state; a nil state keeps the old one (why your B in C8 stayed level=1).
+In claude.log only harness entries start at column 0 with a time; an entry's later lines (code, results, thinking) are indented with a tab. Search for lines starting "20" to find entries.
+After a reboot, the start line names the options resume.txt gave ("; resuming the goal in resume.txt, with its options: ..."): G1 expected claude.options, which wasn't their source. --confirm is no longer kept in resume.txt.
+The code execution that comes with web_search and web_fetch runs on Anthropic's side: it can't see you, your files or the world. Anything about the turtle goes through lua.
+When the cache has gone cold before a goal and the conversation is over 50k, it is summarized first, so the goal doesn't write the whole conversation to the cache again.
+The skills nudge ignores everyday words (great work, thanks...), and on a resumed goal it matches the goal itself.
+
 == 0.55.0
 Craft rounds make the whole count now: CC's suck went on to the next stack asking for the whole count again, so a cell took more than it needed and the last came up short ("the chest gave 52 (0 still in it)"). T.pull and T.fetch take exactly what you ask.
 T.addRecipe replaces a recipe you added before for the same item with the same cells filled (the second value says so). Your quartz pillar's "No matching recipes" was your first, wrong pillar recipe (from quartz blocks) still there, tried when the cut blocks ran short. A table refusal names what the grid held.
