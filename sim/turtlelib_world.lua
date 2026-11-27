@@ -288,9 +288,9 @@ sprinkle()
 tp(T, 0, 0, 0, 0)
 CLOCK = 1234
 T.scan(5)
-check("a scan writes its cubes in a batch: eight cubes, each once", WRITES == 8 and S.files[".map/0_0_0"] and S.files[".map/-1_0_0"]
-    and S.files[".map/0_-1_-1"] and S.files[".map/-1_-1_-1"], WRITES .. " writes")
-local file = S.files[".map/0_0_0"]
+check("a scan writes its cubes in a batch: eight cubes, each once", WRITES == 8 and S.files[".map/overworld/0_0_0"] and S.files[".map/overworld/-1_0_0"]
+    and S.files[".map/overworld/0_-1_-1"] and S.files[".map/overworld/-1_-1_-1"], WRITES .. " writes")
+local file = S.files[".map/overworld/0_0_0"]
 check("a cube is its header and 4096 bytes", file and #file > 4096 and #file < 4096 + 1000 and file:sub(1, 13) == "ccnix-cube 1\n", #file)
 local lines = {}
 for line in (file:sub(1, #file - 4096)):gmatch("([^\n]*)\n") do lines[#lines + 1] = line end
@@ -302,10 +302,10 @@ for i = 1, tonumber(lines[3]) do pal[i] = lines[3 + i] end
 local code = file:sub(-4096):byte(51)
 check("...the byte for a cell is a code into the palette (read here without the module)", pal[code - 1] == STONE, tostring(code))
 check("...1 for air and 0 for a cell never seen", file:sub(-4096):byte(1) == 1 and file:sub(-4096):byte(4096) == 0, tostring(file:sub(-4096):byte(1)))
-local frameFile = S.files[".map/frame"]
+local frameFile = S.files[".map/overworld/frame"]
 check("the frames are kept beside them", frameFile == "frame 0 0 0 0 1\n", tostring(frameFile))
 local before = {}
-for k, v in pairs(S.files) do if k:sub(1, 5) == ".map/" then before[k] = v end end
+for k, v in pairs(S.files) do if k:sub(1, 15) == ".map/overworld/" then before[k] = v end end
 -- a new start of the computer reads them back
 T = reboot()
 local data, palette = T.map.cube(0, 0, 0)
@@ -317,20 +317,20 @@ T.map.set(2, 0, 3, STONE)
 T.map.flush()
 local same2 = true
 for k, v in pairs(before) do if S.files[k] ~= v then same2 = false end end
-check("writing the cube again with nothing new, the file is the same byte for byte", same2 and S.files[".map/0_0_0"] == file)
+check("writing the cube again with nothing new, the file is the same byte for byte", same2 and S.files[".map/overworld/0_0_0"] == file)
 -- one made by hand
 local hand = table.concat({ "ccnix-cube 1", "777", "2", "minecraft:obsidian", "minecraft:stone", "1", "5 facing=north,half=top,n=3,wet=false" }, "\n") .. "\n"
 local bytes = { }
 for i = 1, 4096 do bytes[i] = 0 end
 bytes[6], bytes[7], bytes[8] = 2, 3, 1
-S.files[".map/3_0_0"] = hand .. string.char(table.unpack(bytes, 1, 200)) .. string.char(table.unpack(bytes, 201, 4096))
+S.files[".map/overworld/3_0_0"] = hand .. string.char(table.unpack(bytes, 1, 200)) .. string.char(table.unpack(bytes, 201, 4096))
 T = reboot()
 local n1, s1, w1 = T.map.get(53, 0, 0)
 check("a cube written by hand: name, state and time", n1 == "minecraft:obsidian" and s1 and s1.facing == "north" and s1.half == "top"
     and s1.n == 3 and s1.wet == false and w1 == 777, tostring(n1) .. " " .. tostring(w1))
 check("...another name, air and a cell never seen", T.map.get(54, 0, 0) == STONE and T.map.get(55, 0, 0) == "minecraft:air"
     and T.map.get(56, 0, 0) == nil)
-S.files[".map/4_0_0"] = "garbage"
+S.files[".map/overworld/4_0_0"] = "garbage"
 T = reboot()
 local g, gwhy = T.map.get(64, 0, 0)
 check("a file that is not a cube is no cube", g == nil and gwhy == "not in the map")
@@ -422,7 +422,7 @@ local f = T.map.frame()
 check("the transform is a quarter turn and a shift", f.turns == 1 and f.dx == 3 and f.dy == 0 and f.dz == 2 and f.aligned, dump(f))
 local mx, my, mz = T.map.toMap(0, 0, 2)
 check("a turtle-frame cell maps to the cell it is in the map's frame", mx == 5 and my == 0 and mz == 2)
-check("the frames are saved", S.files[".map/frame"] == "frame 1 3 0 2 1\n", tostring(S.files[".map/frame"]))
+check("the frames are saved", S.files[".map/overworld/frame"] == "frame 1 3 0 2 1\n", tostring(S.files[".map/overworld/frame"]))
 put(3, 0, 6, SAND)
 cells = T.scan(4)
 check("a scan after it lands in the new frame: the stone two ahead, the sand four to the left", cells and cells["0,0,2"] == STONE
@@ -504,7 +504,7 @@ T = reboot()
 T.startAtHome(false)
 name, why = T.map.get(0, 0, 2)
 check("with the position file gone and a map on disk, the map is unaligned", name == nil and why:find("unaligned", 1, true), tostring(why))
-check("...and the frame file says so", S.files[".map/frame"] == "frame 0 0 0 0 0\n", tostring(S.files[".map/frame"]))
+check("...and the frame file says so", S.files[".map/overworld/frame"] == "frame 0 0 0 0 0\n", tostring(S.files[".map/overworld/frame"]))
 local found
 found, why = T.map.find("*")
 check("...queries answer nil and why", found == nil and why:find("unaligned", 1, true) and T.map.heights() == nil and T.map.slice(0) == nil
@@ -528,7 +528,7 @@ T.startAtHome(false)
 check("unaligned again, a new start of the program", T.map.get(0, 0, 2) == nil and T.map.stats().aligned == false)
 T.map.clear()
 check("T.map.clear throws the cubes away and the map is aligned with this frame", T.map.stats().cubes == 0 and T.map.stats().aligned
-    and S.files[".map/0_0_0"] == nil and T.map.set(1, 1, 1, STONE) == true)
+    and S.files[".map/overworld/0_0_0"] == nil and T.map.set(1, 1, 1, STONE) == true)
 
 --------------------------------------------------------------------------
 -- The world: the origin, from the player, GPS and a scan
@@ -551,7 +551,7 @@ for f0 = 0, 3 do
         check("[" .. label .. "] setOrigin(x, y, z, facing): the origin is the world cell of (0,0,0), facing the mock's +z",
             okSet == true and o and o.x == ox and o.y == oy and o.z == oz and o.facing == COMPASS[f0], o and dump(o) or "nil")
         check("[" .. label .. "] the file holds the compass of the map's +z and the world cell of its (0,0,0)",
-            S.files[".map/frame"] == string.format("frame 0 0 0 0 1\nworld %d %d %d %d\n", f0, ox, oy, oz), tostring(S.files[".map/frame"]))
+            S.files[".map/overworld/frame"] == string.format("frame 0 0 0 0 1\nworld %d %d %d %d\n", f0, ox, oy, oz), tostring(S.files[".map/overworld/frame"]))
         local all = true
         for _, p in ipairs({ { 0, 0, 0 }, { 3, 0, 2 }, { -4, 2, 7 }, { 5, -1, -6 } }) do
             local w = T.toWorld({ x = p[1], y = p[2], z = p[3] })
@@ -672,7 +672,9 @@ local function cubeCells(n) return n * 16, 0, 0 end     -- the cell at the start
 local function cubesOnDisk()
     local n = {}
     for k in pairs(S.files) do
-        if k:sub(1, 5) == ".map/" and k ~= ".map/frame" and k ~= ".map/pins" then n[#n + 1] = k:sub(6) end
+        if k:sub(1, 15) == ".map/overworld/" and k ~= ".map/overworld/frame" and k ~= ".map/overworld/pins" then
+            n[#n + 1] = k:sub(16)
+        end
     end
     table.sort(n)
     return table.concat(n, " ")
@@ -727,8 +729,8 @@ T.protect("vault", 40, 0, 0, 41, 1, 1)                    -- in the third cube a
 CLOCK = 600
 T.map.set(64, 0, 0, "minecraft:air"); T.map.flush()
 check("a protected area's cube is kept though older: the oldest of the rest goes", cubesOnDisk() == "0_0_0 2_0_0 4_0_0", cubesOnDisk())
-check("T.map.pin keeps a box's cubes", T.map.pin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/pins"] == "64 0 0 70 3 3\n",
-    (tostring(S.files[".map/pins"]):gsub("\n", "|")))
+check("T.map.pin keeps a box's cubes", T.map.pin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/overworld/pins"] == "64 0 0 70 3 3\n",
+    (tostring(S.files[".map/overworld/pins"]):gsub("\n", "|")))
 local said = {}
 print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
 CLOCK = 700
@@ -740,7 +742,7 @@ check("...so when only kept cubes are left to drop, the map stays over its cap a
     and over == said[1] and T.map.stats().over == said[1] and T.map.stats().kept == 3 and T.map.stats().pins == 1, dump(said) .. " " .. cubesOnDisk())
 T = reboot()
 check("pins are read again after a restart", T.map.stats().pins == 1)
-check("T.map.unpin lets it go", T.map.unpin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/pins"] == nil and T.map.stats().pins == 0)
+check("T.map.unpin lets it go", T.map.unpin({ 64, 0, 0, 70, 3, 3 }) == true and S.files[".map/overworld/pins"] == nil and T.map.stats().pins == 0)
 CLOCK = 800
 T.map.set(96, 0, 0, "minecraft:air"); T.map.flush()
 check("...then the cap drops the oldest of the rest again (both the pinned one and the next), and stops saying it is over", cubesOnDisk() == "0_0_0 2_0_0 6_0_0"
@@ -961,7 +963,7 @@ local o = T.origin()
 local ox, oy, oz = worldOf(0, 0, 0)
 check("gps: no origin, a first start: the origin from GPS, the facing from a scan",
     ok and o and o.x == ox and o.y == oy and o.z == oz and o.facing == COMPASS[1], o and dump(o) or "nil")
-check("gps: ...saved as from GPS", S.files[".map/frame"]:find("source gps", 1, true), S.files[".map/frame"])
+check("gps: ...saved as from GPS", S.files[".map/overworld/frame"]:find("source gps", 1, true), S.files[".map/overworld/frame"])
 -- ...from a step, with no scanner
 T = fresh(3)
 EQ.left = nil
@@ -1054,7 +1056,7 @@ T.setOrigin(ox, oy, oz, "south")
 gpsOn()
 pos, why = T.checkedPos(true)
 check("gps: a player's origin GPS agrees with: kept, quietly, marked from GPS", why == nil
-    and S.files[".map/frame"]:find("source gps", 1, true))
+    and S.files[".map/overworld/frame"]:find("source gps", 1, true))
 T = fresh(2)
 landmarks()
 gpsOff()

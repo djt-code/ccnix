@@ -12,6 +12,10 @@
 --     flowing lava passed over (known and found out), an unreachable source passed over, no bucket, a lava bucket aboard
 --     burned first, a tank with no room, no lava known, unlimited fuel; stops at the target; giving up says what each
 --     try found and where (info.tries, three of them in the why);
+--   * (ADR-0023 D3) T.refuelFromLava: opts.within (64 by default) leaving the sources farther off, counted in the why;
+--     a source seen at level 0 before a nearer cell known by name only; after a flowing find the rest of its column and
+--     those beside it passed over; in the nether with no lava known, down a shaft it digs (a cavern dropped through) to
+--     the lava sea, a bucket taken there, and back, a protected area beside it left and one in its way stopping it;
 --   * T.fuelFor: a route, a build, scans (free up to radius 8) and a box of scans added up against the tank and the fuel on
 --     board, with the margin and the detour; short, enough, unlimited fuel, a plan it cannot read;
 --   * T.harvest's limits (ADR-0011 D7.8): opts.maxFuel, opts.timeout, opts.exclude.
@@ -495,6 +499,8 @@ end
 
 do
     lavaWorld()
+    T.map.set(3, -1, 3, LAVA, {})                      -- (by name only, as a scan has it: so the nearest goes first)
+    T.map.set(-6, -1, 5, LAVA, {})
     W.set(1, -1, 1, LAVA, { level = 3 })               -- flowing, and the map is not told
     T.map.set(1, -1, 1, LAVA)
     W.set(2, -1, 1, LAVA, { level = 5 })               -- flowing, and the map knows
@@ -520,12 +526,14 @@ end
 do
     -- ADR-0019: giving up says what each try found and where: three flowing cells the map took for sources and one
     -- source walled in, each the nearest to where the turtle is then; the why lists three and how many more, the info
-    -- all of them
+    -- all of them.  (ADR-0023 D3: all by name only, in columns apart, so none is passed over for a column found flowing.)
     lavaWorld()
     W.fill(2, -1, 2, 4, 1, 4, "minecraft:bedrock")
     W.set(3, -1, 3, LAVA, { level = 0 })
     know(-1, -2, -1, 5, 2, 6)
-    for _, c in ipairs({ { 1, 1 }, { 2, 1 }, { -1, 2 } }) do         -- (flowing, and the map is not told)
+    T.map.set(3, -1, 3, LAVA, {})
+    T.map.set(-6, -1, 5, LAVA, {})
+    for _, c in ipairs({ { 1, 1 }, { 1, -2 }, { -1, 2 } }) do        -- (flowing, and the map is not told)
         W.set(c[1], -1, c[2], LAVA, { level = 3 })
         T.map.set(c[1], -1, c[2], LAVA)
     end
@@ -534,9 +542,9 @@ do
     local found = {}
     for i, t in ipairs(tries) do found[i] = T.posKey(t) .. " " .. tostring(t.found) end
     check("giving up after its tries: the why says what three of them found, where, and how many more", ok == false and gained <= 0
-        and why == "gave up after 4 tries: 1,-1,1 flowing, 2,-1,1 flowing, 3,-1,3 out of reach and 1 more (info.tries)", tostring(why) .. " " .. tostring(gained))
+        and why == "gave up after 4 tries: 1,-1,1 flowing, -1,-1,2 flowing, 3,-1,3 out of reach and 1 more (info.tries)", tostring(why) .. " " .. tostring(gained))
     check("...info.tries has every try, in order, the walled-in source out of reach", table.concat(found, "; ") ==
-        "1,-1,1 flowing; 2,-1,1 flowing; 3,-1,3 out of reach; -1,-1,2 flowing", table.concat(found, "; "))
+        "1,-1,1 flowing; -1,-1,2 flowing; 3,-1,3 out of reach; 1,-1,-2 flowing", table.concat(found, "; "))
     check("...and it came home, the far source left", here() and has(-6, -1, 5, LAVA))
 end
 
@@ -560,6 +568,98 @@ do
     local why2
     ok2, why2, gained = T.refuelFromLava(1000)
     check("no lava in the map: false and why", ok2 == false and gained == 0 and why2:find("knows no lava", 1, true) ~= nil, tostring(why2))
+end
+
+--------------------------------------------------------------------------
+-- T.refuelFromLava (ADR-0023 D3): the limit, the sources seen first, the flowing column, and the nether's lava sea
+--------------------------------------------------------------------------
+do
+    -- opts.within: a source farther from where it starts is left, and counted in the why
+    lavaWorld()
+    local ok, why, gained, info = T.refuelFromLava(1000, { within = 5 })
+    check("D3: opts.within leaves the sources farther off (both here) and counts them in the why", ok == false
+        and gained == 0 and why:find("2 beyond opts.within (5)", 1, true) ~= nil and W.S.moves == 0 and has(3, -1, 3, LAVA),
+        tostring(why))
+    lavaWorld()
+    W.set(70, -1, 0, LAVA, { level = 0 })
+    W.set(3, -1, 3, nil); W.set(-6, -1, 5, nil)
+    T.map.set(3, -1, 3, "minecraft:air"); T.map.set(-6, -1, 5, "minecraft:air")
+    T.map.set(70, -1, 0, LAVA, { level = 0 })
+    ok, why, gained, info = T.refuelFromLava(1000)
+    check("...64 by default: a source 70 away is left", ok == false and why:find("1 beyond opts.within (64)", 1, true) ~= nil
+        and W.S.moves == 0, tostring(why))
+end
+
+do
+    -- a source seen at level 0 goes before a nearer cell known by name only (a scan's), which here is flowing
+    lavaWorld()
+    W.set(1, -1, 1, LAVA, { level = 3 })
+    T.map.set(1, -1, 1, LAVA)                           -- (by name only: nearer than the source at 3,-1,3)
+    local ok, gained, info = T.refuelFromLava(1000)
+    check("D3: a source seen at level 0 is tried before a nearer cell known by name only", ok == true and info.tries[1]
+        and T.posKey(info.tries[1]) == "3,-1,3" and info.tries[1].found == "taken" and #info.tries == 1 and has(1, -1, 1, LAVA),
+        tostring(info and info.tries[1] and T.posKey(info.tries[1])))
+end
+
+do
+    -- a lava fall a scan took for sources: three cells down one column, all flowing; after the first, the rest of the
+    -- column (and those beside it) are passed over for the source farther off
+    lavaWorld()
+    T.map.set(3, -1, 3, LAVA, {})
+    T.map.set(-6, -1, 5, LAVA, {})
+    for y = 0, 2 do
+        W.set(1, y, 2, LAVA, { level = 2 + y })
+        T.map.set(1, y, 2, LAVA)
+    end
+    W.set(2, 0, 2, LAVA, { level = 4 })                -- (beside it: passed over too)
+    T.map.set(2, 0, 2, LAVA)
+    local ok, gained, info = T.refuelFromLava(1000)
+    local found = {}
+    for i, t in ipairs(info and info.tries or {}) do found[i] = T.posKey(t) .. " " .. tostring(t.found) end
+    check("D3: after a flowing find the rest of its column, and those beside it, are passed over", ok == true
+        and #found == 2 and found[1]:find(" flowing", 1, true) ~= nil and found[2] == "3,-1,3 taken" and info.columns == 3,
+        table.concat(found, "; ") .. " / " .. tostring(info and info.columns))
+end
+
+do
+    -- the nether: netherrack round the turtle and under it, a cavern, the lava sea; no lava in the map
+    fresh()
+    for x = -2, 2 do for z = -2, 2 do
+        for y = -3, 1 do W.set(x, y, z, "minecraft:netherrack") end
+        for y = -9, -7 do W.set(x, y, z, LAVA, { level = 0 }) end
+    end end
+    W.set(0, 0, 0, nil)
+    for y = -6, -4 do for x = -2, 2 do for z = -2, 2 do W.set(x, y, z, nil) end end end
+    W.give(1, BUCKET, 1)
+    T.protect("vault", 1, -3, 0, 1, -1, 0)              -- (beside the shaft: never dug)
+    local ok, gained, info = T.refuelFromLava(1000)
+    local down = info and info.down or {}
+    check("D3: the nether, no lava known: down to the lava sea, a bucket taken and burned, back where it began",
+        ok == true and FUEL >= 1000 and here() and down.dug == 3 and down.fell == 3 and down.took >= 1 and down.at == -7,
+        tostring(ok) .. " " .. tostring(gained) .. " " .. tostring(FUEL) .. " " .. textutils.serialise(down))
+    check("...the shaft is dug straight down, the protected area beside it left whole", not has(0, -1, 0) and not has(0, -3, 0)
+        and has(1, -1, 0, "minecraft:netherrack") and has(1, -3, 0, "minecraft:netherrack"))
+    -- a protected area in the way: it stops above it, says so, and comes back
+    fresh()
+    for x = -2, 2 do for z = -2, 2 do
+        for y = -3, 1 do W.set(x, y, z, "minecraft:netherrack") end
+        for y = -9, -7 do W.set(x, y, z, LAVA, { level = 0 }) end
+    end end
+    W.set(0, 0, 0, nil)
+    W.give(1, BUCKET, 1)
+    T.protect("cellar", -1, -2, -1, 1, -2, 1)
+    local why
+    ok, why, gained, info = T.refuelFromLava(1000)
+    check("...a protected area in the shaft's way: not dug, it says so and comes back", ok == false
+        and why:find("protected: cellar", 1, true) ~= nil and has(0, -2, 0, "minecraft:netherrack") and here() and gained < 0,
+        tostring(why))
+    -- the overworld: no lava known, no shaft
+    fresh()
+    W.give(1, BUCKET, 1)
+    local moves = W.S.moves
+    ok, why = T.refuelFromLava(1000)
+    check("...in the overworld, no lava known: no shaft, as before", ok == false and why:find("knows no lava", 1, true) ~= nil
+        and W.S.moves == moves, tostring(why))
 end
 
 --------------------------------------------------------------------------

@@ -22,8 +22,8 @@
 --   nether          7 for skeletons, wither skeletons and endermen (monster_spawn_light_level); 11 for zombified
 --                   piglins, piglins, hoglins and blazes (the walk-target check every pathfinding monster passes,
 --                   MC-156004); ghasts and magma cubes whatever the light: only the floor or the room stops them
--- The turtle can't tell which dimension it is in: opts.dimension says, else the setting T.cfg.dimension, else it is
--- the overworld.  In the nether, T.cfg.dimension = "nether" once covers T.darkCells and T.planLights.  Only two cells
+-- The dimension is opts.dimension, else T.dimension()'s (the setting turtle.dimension, or by the blocks round the
+-- turtle: ADR-0023 D1), which T.cfg.dimension follows; a program that sets T.cfg.dimension itself is heard.  Only two cells
 -- of room are asked for (an enderman wants three, a ghast more, a spider a wider space), and the game's chances (sky
 -- light at night, the distance from a player) aren't modelled.  Mods in a pack can change spawning, and a block the
 -- tables don't know is taken as a solid one: check in game, comparing the dark cells with where mobs appeared.
@@ -357,8 +357,8 @@ end
 -- and the end's 0; the nether's 11, in two groups, light 7 or less (skeletons, wither skeletons, endermen) and 11 or
 -- less (zombified piglins, piglins, hoglins, blazes), and the spawnable cells lit over it listed apart in
 -- info.anyLight, since ghasts and magma cubes spawn whatever the light (only a slab or glass floor, or no room, stops
--- them).  opts: dimension ("overworld", "nether", "end"; else the setting T.cfg.dimension, else the overworld: the
--- turtle can't tell), max (the limit, overriding the dimension's), limit (cells listed, default 50), with (as T.light).
+-- them).  opts: dimension ("overworld", "nether", "end"; else T.dimension()'s, the setting turtle.dimension or the
+-- blocks round the turtle), max (the limit, overriding the dimension's), limit (cells listed, default 50), with (as T.light).
 -- Info is { dimension, max, spawnable (cells), dark (cells at or under the limit), more (past the limit), groups (a
 -- list of { max, mobs, count }), anyLight and anyLightCount (the nether), unsure (a list of the cells, { x, y, z },
 -- over a slab or stair whose half the map lacks, taken as a bottom one: inspect them, since a top one is a floor),
@@ -367,7 +367,7 @@ end
 -- T.planLights lights it to that dimension's level.  Mods can change spawning: check in game.
 function T.darkCells(box, opts)
     opts = opts or {}
-    local asked = opts.dimension or T.cfg.dimension or "overworld"
+    local asked = opts.dimension or (T.dimension())
     local dimName = dimensionOf(asked)
     if not dimName then return nil, "no such dimension: " .. tostring(asked) .. " (overworld, nether or end)" end
     local dim = DIMENSIONS[dimName]
@@ -454,8 +454,8 @@ end
 -- overworld and the end what a player calls lit (8: crops grow, and the spawning limit, 0, is far under it)
 local PLAN_MIN = { overworld = 8, ["end"] = 8, nether = 12 }
 
--- The fewest lights, of the places given, that bring every cell to opts.min (8; 12 with T.cfg.dimension = "nether",
--- set once for T.darkCells too): a list of { x, y, z, name } to place, nearest first, and info; nil and why.
+-- The fewest lights, of the places given, that bring every cell to opts.min (8; 12 in the nether, by T.dimension()):
+-- a list of { x, y, z, name } to place, nearest first, and info; nil and why.
 --
 -- `cells` are the cells to light ({ x, y, z }: a walkway's feet cells, T.darkCells' list); `candidates` the cells a
 -- light may go in ({ x, y, z } or { x, y, z, name }: in the wall beside a path, the floor under it).  It reads the map
@@ -463,15 +463,15 @@ local PLAN_MIN = { overworld = 8, ["end"] = 8, nether = 12 }
 -- done; then, again and again, the candidate that brings the most cells still dark to opts.min is taken (a greedy
 -- cover: few lights, not always the fewest), until all are lit or no candidate helps.  The light is opts.item
 -- (default minecraft:lantern, 15; a torch 14, glowstone 15, a soul lantern 10), or a candidate's own name.  opts:
--- min, item, dimension (the default min's; else the one T.darkCells' list says, else T.cfg.dimension, else the
--- overworld).  Info is { lit (already at min), covered (by the lights chosen), left (a list of the cells no candidate
--- reaches), lights, summary }.  Nothing is placed: T.placeAt them (a lantern's opts.hanging, a torch on a wall) and
+-- min, item, dimension (the default min's; else the one T.darkCells' list says, else T.dimension()'s).  Info is
+-- { lit (already at min), covered (by the lights chosen), left (a list of the cells no candidate reaches), lights,
+-- summary }.  Nothing is placed: T.placeAt them (a lantern's opts.hanging, a torch on a wall) and
 -- T.darkCells to check.
 function T.planLights(cells, candidates, opts)
     opts = opts or {}
     if type(cells) ~= "table" or #cells == 0 then return nil, "planLights wants a list of cells { x, y, z } to light" end
     if type(candidates) ~= "table" or #candidates == 0 then return nil, "planLights wants a list of candidate cells { x, y, z } for lights" end
-    local dimName = dimensionOf(opts.dimension or cells.dimension or T.cfg.dimension or "overworld")
+    local dimName = dimensionOf(opts.dimension or cells.dimension or (T.dimension()))
     if not dimName then return nil, "opts.dimension is overworld, nether or end" end
     local min = opts.min or PLAN_MIN[dimName]
     if not (whole(min) and min >= 1 and min <= 15) then return nil, "opts.min is a light level, 1 to 15" end

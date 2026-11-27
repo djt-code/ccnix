@@ -13,18 +13,24 @@
 -- position was deleted) the map is kept but marked unaligned: it answers nothing and takes nothing
 -- new until T.alignMap says how the frames sit, or T.map.clear starts a new map.  The world is one
 -- more transform: T.setOrigin gives the turtle's place in the world and the way it faces (from GPS
--- and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept in the data folder
--- (.map/frame).  With GPS (ADR-0018), T.checkedPos checks the saved position against a fix when a job
+-- and a scan if it isn't told), and T.toWorld and T.toLocal convert.  They are kept beside the map
+-- (.map/<dimension>/frame).  With GPS (ADR-0018), T.checkedPos checks the saved position against a fix when a job
 -- starts: the first fix sets the origin (or anchors a player's to GPS), later ones correct the count
 -- within T.GPS_REACH blocks, and a lost position is found again, so the map stays aligned.
 --
--- The map.  One file per 16 by 16 by 16 cube of space in the data folder's .map: a text header (when it
+-- A map for each dimension (ADR-0023 D2): the data folder's .map/overworld/, .map/nether/ and .map/end/ each hold a
+-- map with its own frames and world origin (GPS is per dimension), and the map is the one of the dimension the turtle
+-- is in (T.dimension; with auto, the look next to the turtle decides it first, the map being in question).  When that
+-- changes the map changes with it, and says so; a re-zero moves every map's frame.  A map from before, its cubes
+-- straight in .map/, is moved into the folder of the dimension found when it is first read, a file at a time.
+--
+-- The map.  One file per 16 by 16 by 16 cube of space in the dimension's folder: a text header (when it
 -- was seen, the names of the blocks the cube holds, and the block states that were inspected) and
 -- then one byte a cell (4096 of them, written in binary mode): 0 for a cell never seen, 1 for air,
 -- 2 and up for a name of the palette.  A cube is loaded when it's used and written when it
 -- changed, in batches (not for every cell).  The map is capped at the smaller of 512 KB (the setting
 -- map.maxBytes) and a quarter of the disk, and the cubes unseen longest are dropped first, except those
--- the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in .map/pins in the map's
+-- the cap keeps: the cubes a protected area or a pinned box (T.map.pin, kept in the folder's pins in the map's
 -- frame) overlaps, and those holding home or the map's own origin; when only those are left the map says
 -- it is over its cap (T.map.stats().over, printed once) rather than growing without a word.  What the
 -- turtle dug, placed and moved through (T.onChange) goes in as it happens; a scan fills in the cells
@@ -164,23 +170,26 @@ local function fromWorldPoint(wx, wy, wz)
     return -fz * a + fx * b, wy - w.oy, fx * a + fz * b
 end
 
--- Write the frames.  True, or nil and why.
-local function saveFrame()
-    local f, w = S.frame, S.world
-    if not fs.exists(S.dir) then fs.makeDir(S.dir) end
-    S.onDisk = true
+-- Make a map's folder, and the data folder's .map it is in.
+local function makeDirs(dir)
+    local parent = fs.getDir(dir)
+    if parent ~= "" and parent ~= ".." and not fs.exists(parent) then fs.makeDir(parent) end
+    if not fs.exists(dir) then fs.makeDir(dir) end
+end
+
+-- The frames as their file has them.
+local function frameText(f, w)
     local lines = { string.format("frame %d %d %d %d %d", f.t, f.dx, f.dy, f.dz, f.aligned and 1 or 0) }
     if w then lines[2] = string.format("world %d %d %d %d", w.s, w.ox, w.oy, w.oz) end
     if w and w.src == "gps" then lines[3] = "source gps" end   -- (from GPS, or anchored to it: ADR-0018 D5)
-    return fileio.write(fs.combine(S.dir, FRAME_FILE), table.concat(lines, "\n") .. "\n")
+    return table.concat(lines, "\n") .. "\n"
 end
 
--- Read the frames (the turtle's own and the map's are the same until they're told otherwise).
-local function loadFrame()
-    S.frame, S.world = { t = 0, dx = 0, dy = 0, dz = 0, aligned = true }, nil
-    local data = fileio.read(fs.combine(S.dir, FRAME_FILE))
-    if not data then return false end
-    for _, line in ipairs(text.lines(data)) do
+-- The frames from their file's text (nil: none): the map's and the world's (nil if none).  The turtle's own and the
+-- map's are the same until they're told otherwise.
+local function parseFrame(data)
+    local frame, world = { t = 0, dx = 0, dy = 0, dz = 0, aligned = true }, nil
+    for _, line in ipairs(data and text.lines(data) or {}) do
         local w = text.words(line)
         local nums = {}
         for i = 2, #w do
@@ -188,14 +197,28 @@ local function loadFrame()
             nums[#nums + 1] = tonumber(w[i])
         end
         if nums and w[1] == "frame" and #nums == 5 then
-            S.frame = { t = nums[1] % 4, dx = nums[2], dy = nums[3], dz = nums[4], aligned = nums[5] == 1 }
+            frame = { t = nums[1] % 4, dx = nums[2], dy = nums[3], dz = nums[4], aligned = nums[5] == 1 }
         elseif nums and w[1] == "world" and #nums == 4 then
-            S.world = { s = nums[1] % 4, ox = nums[2], oy = nums[3], oz = nums[4] }
-        elseif w[1] == "source" and w[2] == "gps" and S.world then
-            S.world.src = "gps"
+            world = { s = nums[1] % 4, ox = nums[2], oy = nums[3], oz = nums[4] }
+        elseif w[1] == "source" and w[2] == "gps" and world then
+            world.src = "gps"
         end
     end
-    return true
+    return frame, world
+end
+
+-- Write the frames.  True, or nil and why.
+local function saveFrame()
+    makeDirs(S.dir)
+    S.onDisk = true
+    return fileio.write(fs.combine(S.dir, FRAME_FILE), frameText(S.frame, S.world))
+end
+
+-- Read the frames.  True if the map has a frame file.
+local function loadFrame()
+    local data = fileio.read(fs.combine(S.dir, FRAME_FILE))
+    S.frame, S.world = parseFrame(data)
+    return data ~= nil
 end
 
 -- Read the pinned boxes (T.map.pin): a list of { x1, y1, z1, x2, y2, z2 } in the map's frame, low corner first.  A
@@ -628,29 +651,137 @@ local function settle(force)
     trim()
 end
 
--- Get ready: find the map's folder (for the program running now), read the frames and the list of
--- cubes.  The clock's reading for this call is taken too.
+-- Open the map in the folder dir (what was open before is written first): read its frames, its pins and the list of
+-- its cubes.
+local function openDir(dir)
+    if S.dir == dir then return end
+    if S.dir then flush() end
+    S.dir, S.cache, S.index, S.bytes, S.count, S.ndirty, S.cells, S.last = dir, {}, {}, 0, 0, 0, 0, nil
+    S.firstDirty, S.over = nil, nil
+    -- (nothing is made on disk until something is written: asking makes no map)
+    S.onDisk = fs.exists(dir)
+    loadFrame()
+    loadPins()
+    for _, name in ipairs(S.onDisk and fs.list(dir) or {}) do
+        local cx, cy, cz = parseName(name)
+        if cx then
+            local size = fs.getSize(fs.combine(dir, name))
+            S.index[name] = { cx = cx, cy = cy, cz = cz, size = size, saved = true }
+            S.bytes = S.bytes + size
+            S.count = S.count + 1
+        end
+    end
+end
+
+-- A map for each dimension (ADR-0023 D2): .map/<dimension>/ holds its cubes, frames and pins, and .map/dimension
+-- names the one in use last: "nether", or "overworld unsure" when that map was filed under its dimension while the
+-- turtle wasn't sure of it (moved from the old .map/, or begun then), so a sure answer later can move it.
+local DIMENSION_FILE = "dimension"
+local MAP_DIMENSIONS = { "overworld", "nether", "end" }
+local mapDimension, switchedTo, holderDimension   -- (with the dimension, below)
+
+-- The dimension .map/dimension names (the map in use last), or nil; and true if it was filed there unsure.
+local function lastDimension(base)
+    local w = text.words(fileio.read(fs.combine(base, DIMENSION_FILE)) or "")
+    local name = w[1]
+    if not (name == "overworld" or name == "nether" or name == "end") then return nil, false end
+    return name, w[2] == "unsure"
+end
+
+-- Write .map/dimension: the map in use, and whether it was filed under it unsure.
+local function recordDimension(base, dim, unsure)
+    fileio.write(fs.combine(base, DIMENSION_FILE), dim .. (unsure and " unsure" or "") .. "\n")
+end
+
+-- The map from before there was one a dimension (its cubes, frames and pins straight in .map/) moved into
+-- .map/<dim>/: the dimension .map/dimension names if a move was under way, else `dim`.  True if there was one.
+--
+-- .map/dimension is written first (with "unsure" when `unsure`: the dimension isn't sure, so a sure answer later moves
+-- the map again), and each file is moved on its own, the frames last: a stop part way loses nothing, and the next start
+-- moves the rest to the same place.  A file the dimension's folder already has is kept, and the old one deleted.
+local function migrate(base, dim, unsure)
+    local listed, names = pcall(fs.list, base)
+    if not listed then return false end
+    local files = {}
+    for _, name in ipairs(names) do
+        if parseName(name) or name == FRAME_FILE or name == PINS_FILE then files[#files + 1] = name end
+    end
+    if #files == 0 then return false end
+    local last, lastUnsure = lastDimension(base)
+    local into = last or dim
+    if last then unsure = lastUnsure end
+    recordDimension(base, into, unsure)
+    local dir = fs.combine(base, into)
+    makeDirs(dir)
+    table.sort(files, function(a, b) return a ~= FRAME_FILE and (b == FRAME_FILE or a < b) end)
+    for _, name in ipairs(files) do
+        local from, to = fs.combine(base, name), fs.combine(dir, name)
+        if fs.exists(to) then fs.delete(from) else fs.move(from, to) end
+        breathe()
+    end
+    print("The map is the " .. into .. "'s now, in " .. dir .. " (a map for each dimension: ADR-0023).")
+    return true
+end
+
+-- Get ready: find the map's folder (for the program running now, and the dimension the turtle is in), read the frames
+-- and the list of cubes.  The clock's reading for this call is taken too.
+--
+-- When the dimension changes (the setting, or a decision it wasn't sure of made again), the map changes with it, and it
+-- says so.
 local function ensure()
     S.now = clock()
+    if S.choosing then return end              -- (deciding which map: the one open is read as it is)
     local prog = shell and shell.getRunningProgram and shell.getRunningProgram() or ""
-    if S.dir and S.prog == prog then return end
-    local dir = T.dataPath(T.MAP_DIR)
-    if S.dir and S.dir ~= dir then flush() end
-    if S.dir ~= dir then
-        S.dir, S.cache, S.index, S.bytes, S.count, S.ndirty, S.cells, S.last = dir, {}, {}, 0, 0, 0, 0, nil
-        -- (nothing is made on disk until something is written: asking makes no map)
-        S.onDisk = fs.exists(dir)
-        loadFrame()
-        loadPins()
-        for _, name in ipairs(S.onDisk and fs.list(dir) or {}) do
-            local cx, cy, cz = parseName(name)
-            if cx then
-                local size = fs.getSize(fs.combine(dir, name))
-                S.index[name] = { cx = cx, cy = cy, cz = cz, size = size, saved = true }
-                S.bytes = S.bytes + size
-                S.count = S.count + 1
-            end
+    local same = S.dir and S.prog == prog and S.dim
+    local base = same and S.base or T.dataPath(T.MAP_DIR)
+    if S.base ~= base then                     -- (another program's data folder)
+        if S.dir then flush() end
+        S.dir, S.dim, S.base = nil, nil, base
+    end
+    local was = S.dim or lastDimension(base)
+    S.choosing = true
+    local ok, dim, sure = pcall(mapDimension, base)
+    S.choosing = false
+    if not ok then error(dim, 0) end
+    if same and dim == S.dim then
+        if sure and S.unsure then                -- (a sure answer agrees: the map is that dimension's for good)
+            S.unsure = nil
+            recordDimension(base, dim, false)
         end
+        return
+    end
+    if S.dim ~= dim or S.dir ~= fs.combine(base, dim) then
+        local dir = fs.combine(base, dim)
+        -- (a map filed under a dimension while it wasn't sure of it, this boot or before, holds the blocks that now say
+        -- otherwise: it is the new dimension's, unless that one has a map of its own)
+        local last, lastUnsure = lastDimension(base)
+        local from = S.dim or last
+        local fromUnsure = S.dim and S.unsure == S.dim or (not S.dim and lastUnsure)
+        local fromDir = from and fs.combine(base, from)
+        if sure and from and from ~= dim and fromUnsure and not fs.exists(dir) then
+            if S.dir then flush() end
+            if fs.exists(fromDir) then
+                makeDirs(dir)
+                for _, name in ipairs(fs.list(fromDir)) do fs.move(fs.combine(fromDir, name), fs.combine(dir, name)) end
+                fs.delete(fromDir)
+                print("The map was taken for the " .. from .. "'s (it wasn't sure of the dimension); the blocks "
+                    .. "say the " .. dim .. ": it is the " .. dim .. "'s now.")
+            end
+            S.dir, S.dim, S.unsure, was = nil, nil, nil, nil
+            if fs.exists(base) then recordDimension(base, dim, false) end
+        end
+        local moved = migrate(base, dim, not sure)
+        local existed = fs.exists(dir)
+        openDir(dir)
+        S.dim = dim
+        last, lastUnsure = lastDimension(base)
+        if sure then S.unsure = nil
+        elseif moved or not existed then S.unsure = dim
+        else S.unsure = last == dim and lastUnsure and dim or nil end
+        if fs.exists(base) and (last ~= dim or lastUnsure ~= (S.unsure ~= nil)) then
+            recordDimension(base, dim, S.unsure ~= nil)
+        end
+        if was and was ~= dim then switchedTo(was, dim) end
     end
     S.prog = prog
 end
@@ -706,22 +837,8 @@ local function pointOf(a, b, c)
     return a, b, c
 end
 
--- Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0).
--- turtlelib calls it; returns true, or false and why.
---
--- turtlelib calls it when a program re-zeroes (T.setHomeHere, --here, T.clearPos then a start) or corrects the
--- heading (T.setDir), so what the map holds stays where it is.  With old nil, nobody knows where the spot was: a
--- map holding cubes is marked unaligned.  False and why if the map is unaligned now or was already.
-function T.frameChanged(old, new)
-    ensure()
-    local f = S.frame
-    if not f.aligned then return false, UNALIGNED end
-    if not old then
-        if S.count == 0 then return true end
-        f.aligned = false
-        saveFrame()
-        return false, UNALIGNED
-    end
+-- Move a map's frame f so that what it holds stays put when the turtle's spot `old` becomes `new`.
+local function moveFrame(f, old, new)
     new = new or { x = 0, y = 0, z = 0, dir = 0 }
     local turns = (old.dir - new.dir) % 4
     local t2 = (f.t + turns) % 4
@@ -730,6 +847,51 @@ function T.frameChanged(old, new)
     local px, pz = rot(t2, new.x, new.z)
     f.dx, f.dy, f.dz = f.dx + ox - px, f.dy + old.y - new.y, f.dz + oz - pz
     f.t = t2
+end
+
+-- The other dimensions' maps on disk: fn(frame, hasCubes) for each, its frame written again when fn says true.  (Each
+-- map's frame is how the turtle's frame sits in it, so a re-zero moves every one of them.)
+local function reframeOthers(fn)
+    if not S.base then return end
+    for _, d in ipairs(MAP_DIMENSIONS) do
+        local dir = fs.combine(S.base, d)
+        if d ~= S.dim and fs.exists(dir) then
+            local path = fs.combine(dir, FRAME_FILE)
+            local frame, world = parseFrame(fileio.read(path))
+            local cubes = false
+            for _, name in ipairs(fs.list(dir)) do
+                if parseName(name) then cubes = true; break end
+            end
+            if fn(frame, cubes) then fileio.write(path, frameText(frame, world)) end
+        end
+    end
+end
+
+-- Tell the map the turtle's frame changed: the spot that was `old` ({x, y, z, dir}) is now `new` (default 0,0,0 facing 0).
+-- turtlelib calls it; returns true, or false and why.
+--
+-- turtlelib calls it when a program re-zeroes (T.setHomeHere, --here, T.clearPos then a start) or corrects the
+-- heading (T.setDir), so what the map holds stays where it is.  With old nil, nobody knows where the spot was: a
+-- map holding cubes is marked unaligned.  False and why if the map is unaligned now or was already.  The other
+-- dimensions' maps move (or are marked unaligned) with it.
+function T.frameChanged(old, new)
+    ensure()
+    reframeOthers(function(of, cubes)
+        if not of.aligned then return false end
+        if old then moveFrame(of, old, new); return true end
+        if not cubes then return false end
+        of.aligned = false
+        return true
+    end)
+    local f = S.frame
+    if not f.aligned then return false, UNALIGNED end
+    if not old then
+        if S.count == 0 then return true end
+        f.aligned = false
+        saveFrame()
+        return false, UNALIGNED
+    end
+    moveFrame(f, old, new)
     saveFrame()
     return true
 end
@@ -929,8 +1091,9 @@ end
 -- when it's needed, comes from a scan, else a step.
 --------------------------------------------------------------------------
 
--- How far (blocks) a correction may move the saved position (D3): farther, the turtle was carried off or is in
--- another dimension (GPS is per dimension, and it can't tell), and nothing is corrected.
+-- How far (blocks) a correction may move the saved position (D3): farther, the turtle was carried off, and nothing is
+-- corrected.  GPS is per dimension, and so are the map and its world origin (ADR-0023 D2): a fix is read against the
+-- origin of the dimension the turtle is in (T.dimension), and the first fix in a dimension sets that dimension's.
 T.GPS_REACH = 16
 
 local function cellText(x, y, z)
@@ -1036,8 +1199,9 @@ function T.gpsCheck(saved)
     local blocks = d == math.floor(d) and string.format("%d", d) or string.format("%.1f", d)
     if d > T.GPS_REACH then
         return saved, string.format("GPS puts the turtle at %s (%s in its frame), %s blocks from where it was saved (%s):"
-            .. " carried off, or in another dimension. Not corrected: put it back, or start it with --here.", cellText(x, y, z),
-            cellText(loc), blocks, cellText(here)), true
+            .. " carried off, or in another dimension than its map, the %s's (T.dimension says how it knows). Not corrected:"
+            .. " put it back, or start it with --here.", cellText(x, y, z), cellText(loc), blocks, cellText(here),
+            S.dim or "overworld"), true
     end
     T.pos.x, T.pos.y, T.pos.z, T.dir = loc.x, loc.y, loc.z, here.dir
     local c, how, fx, fy, fz = compassNow(x, y, z)
@@ -1418,23 +1582,24 @@ function T.map.flush()
     return ok, why
 end
 
--- What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over }: how many cubes, how many bytes they take
--- on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
+-- What the map takes: { cubes, bytes, cap, unsaved, aligned, kept, pins, over, dimension }: how many cubes, how many bytes
+-- they take on disk, the most it may take, how many cubes have changes not written, and whether it is aligned.
 --
 -- kept is how many cubes the cap never drops (protected areas, pinned boxes, home), pins how many boxes are pinned, and
--- over, when the map is over its cap with only kept cubes left to drop, says so (nil otherwise).
+-- over, when the map is over its cap with only kept cubes left to drop, says so (nil otherwise).  dimension is the
+-- dimension whose map it is (each has its own, in .map/<dimension>/, capped on its own).
 function T.map.stats()
     ensure()
     local _, kept = keptCubes()
     return { cubes = S.count, bytes = S.bytes, cap = capBytes(), unsaved = S.ndirty, aligned = S.frame.aligned, kept = kept,
-             pins = #S.pins, over = S.over }
+             pins = #S.pins, over = S.over, dimension = S.dim }
 end
 
 -- Keep the cubes of a box (six numbers in the turtle's frame, or x1 to z2 fields) when the map is over its cap.  True,
 -- or nil and why.
 --
 -- The cap drops the cubes unseen longest; it never drops a pinned box's, a protected area's or home's.  Pins are kept
--- beside the map (.map/pins) in its own frame, so a re-zero doesn't move them; T.map.unpin lets one go.
+-- beside the map (.map/<dimension>/pins) in its own frame, so a re-zero doesn't move them; T.map.unpin lets one go.
 function T.map.pin(box)
     local ok, why = ready()
     if not ok then return nil, why end
@@ -1475,7 +1640,7 @@ function T.map.unpin(box)
     return false, "no pinned box " .. table.concat({ x1, y1, z1, x2, y2, z2 }, ",")
 end
 
--- Throw the map away: every cube (and every pin) is deleted.  An unaligned map becomes aligned again, with the turtle's
+-- Throw the map away (the dimension's the turtle is in): every cube (and every pin) is deleted.  An unaligned map becomes aligned again, with the turtle's
 -- frame as its own (and the world origin is forgotten, as it was set against the old frame).
 function T.map.clear()
     ensure()
@@ -1523,6 +1688,260 @@ function T.map.cube(cx, cy, cz)
     local pal = {}
     for i, n in ipairs(c.pal) do pal[i] = n end
     return c.data, pal
+end
+
+--------------------------------------------------------------------------
+-- The dimension (ADR-0023 D1)
+--
+-- The setting turtle.dimension names it ("overworld", "nether", "end"), or
+-- is "auto" (the default): then the mod says, when ccnix-mod gives Lua the
+-- dimension (a global ccnixmod with a dimension function), else the blocks
+-- round the turtle do.  Blocks that occur naturally in one dimension only
+-- count for it: what the turtle sees next to it (up, down and ahead: no
+-- fuel, no turning) and, when that isn't enough, what the map has within
+-- 16 blocks.  A clear majority decides; too few, or a near tie, is the
+-- overworld, not sure.  A decision is kept for the boot (the turtle can't
+-- change dimension without being carried, which restarts it); one it isn't
+-- sure of is made again once the turtle is 16 blocks from where it was.
+--------------------------------------------------------------------------
+
+local DIMENSION_SETTING = "turtle.dimension"
+-- The dimensions by the names given for them (the game's too)
+local DIMENSION_OF = { overworld = "overworld", nether = "nether", the_nether = "nether", ["end"] = "end", the_end = "end" }
+-- ...and by the mod's resource names
+local MOD_DIMENSION = { ["minecraft:overworld"] = "overworld", ["minecraft:the_nether"] = "nether", ["minecraft:the_end"] = "end" }
+-- Blocks that occur naturally in one dimension only, and that dimension (water can't be placed in the nether)
+local NATURAL = {}
+for _, n in ipairs({ "netherrack", "basalt", "blackstone", "soul_sand", "soul_soil", "crimson_nylium", "warped_nylium",
+                     "nether_quartz_ore", "nether_gold_ore" }) do
+    NATURAL["minecraft:" .. n] = "nether"
+end
+NATURAL["minecraft:end_stone"] = "end"
+for _, n in ipairs({ "stone", "deepslate", "tuff", "dirt", "grass_block", "granite", "diorite", "andesite", "water" }) do
+    NATURAL["minecraft:" .. n] = "overworld"
+end
+local DIMENSION_ORDER = { "overworld", "nether", "end" }
+local NEAR = 16                               -- how far round the turtle the map's blocks count, and how far it goes before
+                                              -- a decision it wasn't sure of is made again
+local LOOK_DECIDES = 2                        -- the look alone decides with this many for one dimension and none for another
+local FEWEST, MAJORITY = 4, 2                 -- else: at least this many for one, and this many times the next
+
+local wroteCfg                                -- the T.cfg.dimension this copy wrote (one a program set differs)
+
+-- The dimension's name ("nether" for "minecraft:the_nether" too), or nil.
+local function dimensionName(name)
+    if type(name) ~= "string" then return nil end
+    local _, after = text.cut(name, ":")
+    return DIMENSION_OF[after or name]
+end
+
+-- The look next to the turtle: the counts by dimension and the names seen ({ up, down, ahead }).  Raw inspects: nothing
+-- turns, nothing goes in the map.
+local function lookNear()
+    local counts, names = {}, {}
+    for _, fn in ipairs({ "inspectUp", "inspectDown", "inspect" }) do
+        local f = turtle and turtle[fn]
+        local ok, seen, data = false, false, nil
+        if type(f) == "function" then ok, seen, data = pcall(f) end
+        local name = ok and seen and type(data) == "table" and data.name or nil
+        names[#names + 1] = name or AIR
+        local d = name and NATURAL[name]
+        if d then counts[d] = (counts[d] or 0) + 1 end
+    end
+    return counts, names
+end
+
+-- The map's blocks within NEAR of the turtle that count for a dimension: the counts by dimension, or nil if the map
+-- has none to give (unaligned, or no cubes).  The map loaded now is the one read: the caller has it ready.
+local function mapNear()
+    if not (S.frame and S.frame.aligned) or S.count == 0 then return nil end
+    local p = T.pos
+    local mb = mapBox(p.x - NEAR, p.y - NEAR, p.z - NEAR, p.x + NEAR, p.y + NEAR, p.z + NEAR)
+    local counts = {}
+    eachCube(mb, function(c)
+        local want = {}
+        for i, name in ipairs(c.pal) do
+            if NATURAL[name] then want[i + 1] = NATURAL[name] end
+        end
+        if next(want) == nil then return end
+        eachCell(c, mb, function(code)
+            local d = want[code]
+            if d then counts[d] = (counts[d] or 0) + 1 end
+        end)
+    end)
+    return counts
+end
+
+-- The counts as text: "nether 5, overworld 1" (most first), or "none".
+local function countsText(counts)
+    local list = {}
+    for _, d in ipairs(DIMENSION_ORDER) do
+        if (counts[d] or 0) > 0 then list[#list + 1] = d end
+    end
+    table.sort(list, function(a, b) return counts[a] > counts[b] end)
+    for i, d in ipairs(list) do list[i] = d .. " " .. counts[d] end
+    return #list > 0 and table.concat(list, ", ") or "none"
+end
+
+-- The dimension the counts give: the most counted (nil: none), and whether that's sure.  `alone` is for the look's
+-- three cells, which decide only when two or more agree and none disagrees.
+local function byCounts(counts, alone)
+    local best, top, second = nil, 0, 0
+    for _, d in ipairs(DIMENSION_ORDER) do
+        local n = counts[d] or 0
+        if n > top then best, top, second = d, n, top
+        elseif n > second then second = n end
+    end
+    if not best then return nil, false end
+    if alone then return best, top >= LOOK_DECIDES and second == 0 end
+    return best, top >= FEWEST and top >= MAJORITY * second
+end
+
+-- Decide the dimension by the mod or the blocks: dim and info (as T.dimension gives).  mapCounts() gives the map's
+-- counts near the turtle (nil: none), asked only when the look doesn't decide; `fallback` is the dimension when it
+-- isn't sure (the overworld unless told).
+local function decideDimension(mapCounts, fallback)
+    local api = rawget(_G, "ccnixmod")
+    local info = {}
+    if type(api) == "table" and type(api.dimension) == "function" then
+        local ok, res = pcall(api.dimension)
+        if ok and MOD_DIMENSION[res] then
+            info.from, info.mod, info.sure = "the mod", res, true
+            info.said = "in the " .. MOD_DIMENSION[res] .. ", from the mod"
+            return MOD_DIMENSION[res], info
+        end
+        info.mod = ok and res or nil
+        info.modWhy = ok and ("the mod says " .. tostring(res) .. ", which isn't the overworld, the nether or the end: "
+            .. "going by the blocks") or ("the mod's dimension failed (" .. tostring(res) .. "): going by the blocks")
+    end
+    local look, names = lookNear()
+    info.look, info.counts = names, look
+    local dim, sure = byCounts(look, true)
+    if sure then
+        info.from, info.sure = "the blocks next to it", true
+        info.said = "in the " .. dim .. ", from the blocks round it"
+        return dim, info
+    end
+    local near = mapCounts and mapCounts() or nil
+    local counts = {}
+    for _, d in ipairs(DIMENSION_ORDER) do
+        local n = (look[d] or 0) + (near and near[d] or 0)
+        if n > 0 then counts[d] = n end
+    end
+    info.near, info.counts = near, counts
+    dim, sure = byCounts(counts, false)
+    if sure then
+        info.from, info.sure = near and "the blocks round it and the map's near it" or "the blocks next to it", true
+        info.said = "in the " .. dim .. ", from the blocks round it"
+        return dim, info
+    end
+    fallback = fallback or "overworld"
+    local why = (dim == nil or counts[dim] < FEWEST) and "too few blocks round it to tell" or "a near tie"
+    info.sure, info.from = false, "the blocks round it"
+    info.why = why .. " (" .. countsText(counts) .. "): taken as the " .. fallback .. "; the setting " .. DIMENSION_SETTING
+        .. " names it"
+    info.said = "in the " .. fallback .. "? not sure: " .. why .. " (" .. DIMENSION_SETTING .. " names it)"
+    return fallback, info
+end
+
+-- The setting's dimension: the name, or nil for auto; and a note when it's neither a dimension nor auto.
+local function settingDimension()
+    local v = T.setting(DIMENSION_SETTING, "auto",
+        "The dimension the turtle is in: overworld, nether, end, or auto (the mod says, else the blocks round it)")
+    if v == nil or v == "auto" then return nil end
+    local d = dimensionName(v)
+    if d then return d end
+    return nil, DIMENSION_SETTING .. " is " .. tostring(v) .. ", not overworld, nether, end or auto: going by the blocks"
+end
+
+-- The decision kept on the turtle table (for every copy of the library), or nil.
+function holderDimension()
+    return (turtle or _G)._ccnixDimension
+end
+
+-- The dimension now: dim, how ("set", "cfg" or "auto") and info.  The decision kept (on the turtle table, for every copy
+-- of the library) is used unless `again`, or it wasn't sure and the turtle has gone NEAR blocks since.  A T.cfg.dimension
+-- the program set itself is the answer, but not `forMap`: the map goes by the setting or the blocks, and the
+-- program's T.cfg.dimension is left as it is.
+local function dimensionNow(again, mapCounts, fallback, forMap)
+    local named, bad = settingDimension()
+    local own = T.cfg.dimension ~= nil and T.cfg.dimension ~= wroteCfg and dimensionName(T.cfg.dimension) or nil
+    local dim, how, info
+    if named then
+        dim, how, info = named, "set", { said = "in the " .. named .. " (" .. DIMENSION_SETTING .. ")", sure = true }
+    elseif own and not forMap then
+        dim, how, info = own, "cfg", { said = "in the " .. own .. " (T.cfg.dimension)", sure = true }
+    else
+        local keeper = turtle or _G
+        local kept = holderDimension()
+        local p = T.pos
+        local moved = kept and math.max(math.abs(p.x - kept.at.x), math.abs(p.y - kept.at.y), math.abs(p.z - kept.at.z))
+        if kept and not again and (kept.info.sure or moved < NEAR) then
+            dim, info = kept.dim, kept.info
+        else
+            dim, info = decideDimension(mapCounts, fallback)
+            keeper._ccnixDimension = { dim = dim, info = info, at = { x = p.x, y = p.y, z = p.z } }
+        end
+        how = "auto"
+        if bad then info.setting = bad end
+    end
+    if not own then
+        wroteCfg = dim
+        rawset(T.cfg, "dimension", dim)
+    end
+    return dim, how, info
+end
+
+-- The dimension whose map to open (ensure's): the dimension now.  When the look doesn't decide, the map in use is read
+-- for the blocks near the turtle: the one open, else the one .map/dimension names, else the old one straight in .map/
+-- (moved into its dimension's folder once that is decided).  Not sure, it is the dimension of the map in use, if any.
+function mapDimension(base)
+    local function evidence()
+        if not S.dir then
+            local last, lastUnsure = lastDimension(base)
+            openDir(last and fs.combine(base, last) or base)
+            S.dim, S.unsure = last, lastUnsure and last or nil
+        end
+        return mapNear()
+    end
+    local dim, _, info = dimensionNow(false, evidence, S.dim or lastDimension(base), true)
+    return dim, info.sure ~= false
+end
+
+-- Say that the map changed with the dimension.
+function switchedTo(from, to)
+    local kept = holderDimension()
+    local said = kept and kept.info and kept.info.said or ("in the " .. to)
+    S.switched = "The turtle is " .. said .. ": the map is the " .. to .. "'s now (the " .. from .. "'s is kept)."
+    print(S.switched)
+end
+
+-- The dimension the turtle is in: "overworld", "nether" or "end", how it was decided ("set": the setting turtle.dimension;
+-- "auto": by the mod or the blocks round it; "cfg": T.cfg.dimension set by the program), and info.
+--
+-- The setting turtle.dimension (`sysctl turtle.dimension=nether`) names it; "auto" (the default) asks the mod when it
+-- gives Lua the dimension, else goes by blocks that occur naturally in one dimension only: netherrack, basalt,
+-- blackstone, soul sand and soil, the nylium and the nether ores for the nether; end stone for the end; stone,
+-- deepslate, tuff, dirt, grass, granite, diorite, andesite and water for the overworld.  What the turtle sees next to it
+-- (up, down, ahead: no fuel, no turning) decides when two or three agree; else the map's blocks within 16 count too, and
+-- a clear majority decides.  Too few, or a near tie, is the overworld (or the dimension of the map in use), not sure
+-- (info.sure false, info.why says).  Info is { said (a line: "in the nether, from the blocks round it"), sure, from,
+-- counts, look (the names seen), near (the map's counts), why, map (the dimension whose map is in use) }.
+-- T.cfg.dimension follows it, so T.darkCells and T.planLights use it.  A sure decision is kept for the boot; one it
+-- wasn't sure of is made again at the next call, and 16 blocks on.  opts.again decides again.  The map is the
+-- dimension's own (ADR-0023 D2): when the answer changes, the map changes with it, and it says so.  A build of nether
+-- blocks in the overworld is what auto can get wrong: the setting is there for it.
+function T.dimension(opts)
+    opts = opts or {}
+    ensure()
+    local kept = holderDimension()
+    if opts.again or (kept and kept.info.sure == false) then
+        dimensionNow(true, mapNear, S.dim)
+        ensure()                                 -- (the map follows a new answer)
+    end
+    local dim, how, info = dimensionNow(false, mapNear, S.dim)
+    info.map = S.dim
+    return dim, how, info
 end
 
 --------------------------------------------------------------------------
