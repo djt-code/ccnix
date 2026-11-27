@@ -32,7 +32,10 @@
 --     floor dug sideways, both put back as they were (blocks that drop themselves, and carried stone), both digs in the
 --     undo journal; refused before digging with no neighbour with air above, the only one protected (unless
 --     opts.inside) or with lava beside it, and with the blocks for both missing (named at once);
---   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell.
+--   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell;
+--   * (ADR-0023 1) a mod's item that places a block of another name (an AE2 cable, ae2:cable_bus): placed on the
+--     first try, how.placedAs, the pair learnt (kept after a restart, forgotten with T.forgetPlacements("item")); a
+--     vanilla item that comes out as another block still fails.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -40,6 +43,7 @@ local B = require("buildworld")
 local realCheck = M.check
 -- (a check's detail is only shown when it fails)
 local function check(label, ok, detail) realCheck(label, ok, (not ok) and detail or nil) end
+local text = require("text")
 
 os.epoch = function() return 1000 * 1000 end
 local CLK = 0
@@ -1211,4 +1215,40 @@ do
         and learnedText() == "stairs down beyond facing=back\n", tostring(learnedText()))
     check("...an unknown family is refused", select(1, T.forgetPlacements("nonsense")) == false)
     check("...and with no family, all of them", T.forgetPlacements() == true and learnedText() == nil)
+end
+
+--------------------------------------------------------------------------
+-- ADR-0023 1: a mod's item that places a block of another name (AE2 puts every cable and part in as ae2:cable_bus)
+-- is placed on the first try, the pair learnt; a vanilla item that comes out as another block is still wrong
+--------------------------------------------------------------------------
+do
+    local CABLE, BUS = "ae2:black_smart_cable", "ae2:cable_bus"
+    fresh("north", { stone(0, -1, 3), stone(1, -1, 3) })
+    knowAll()
+    W.placesAs[CABLE] = BUS
+    W.give(1, CABLE, 8)
+    local name, state, how = T.placeAt(0, 0, 3, CABLE)
+    local b = W.get(0, 0, 3)
+    check("a mod cable that goes in as ae2:cable_bus is placed on the first try, nothing dug back",
+        name == BUS and b and b.name == BUS and type(how) == "table" and how.tries == 1 and W.carrying(CABLE) == 7 and (W.dug or 0) == 0,
+        tostring(name) .. " " .. tostring(state) .. " " .. W.show(0, 0, 3))
+    check("...how.placedAs names the block", type(how) == "table" and how.placedAs == BUS, type(how) == "table" and tostring(how.placedAs) or "")
+    check("...the pair is learnt in .placements, and T.blockOfItem gives it", text.contains(learnedText() or "", "item " .. CABLE .. " placed block=" .. BUS)
+        and T.blockOfItem(CABLE) == BUS, tostring(learnedText()))
+    restart()
+    name, state, how = T.placeAt(0, 0, 3, CABLE)
+    check("...after a restart, the cable bus there is the cable already there", name == BUS and type(how) == "table" and how.approach == "already there"
+        and how.placedAs == BUS, tostring(state))
+    name, state, how = T.placeAt(1, 0, 3, CABLE)
+    check("...and the next goes in as learnt", name == BUS and W.get(1, 0, 3) and W.get(1, 0, 3).name == BUS and W.carrying(CABLE) == 6, tostring(state))
+    check("...T.forgetPlacements(\"item\") forgets the learnt blocks", T.forgetPlacements("item") == true and T.blockOfItem(CABLE) == CABLE
+        and learnedText() == nil, tostring(learnedText()))
+    -- a vanilla item has its block in the tables: another name is a wrong placement, dug back, nothing learnt
+    fresh("north", { stone(0, -1, 3) })
+    knowAll()
+    W.placesAs["minecraft:moss_block"] = "minecraft:dirt"
+    W.give(1, "minecraft:moss_block", 8)
+    name, state = T.placeAt(0, 0, 3, "minecraft:moss_block")
+    check("a vanilla item that comes out as another block still fails, dug back, nothing learnt", name == nil and W.get(0, 0, 3) == nil
+        and (W.dug or 0) > 0 and learnedText() == nil and text.contains(tostring(state), "got dirt"), tostring(state))
 end

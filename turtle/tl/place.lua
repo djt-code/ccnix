@@ -343,6 +343,30 @@ local PLACE_OPTS = { facing = true, half = true, axis = true, face = true, type 
 -- A row's id in the data file: family, approach and what it looks for
 local function rowId(famName, kind, row) return famName .. " " .. kind .. " " .. row.when end
 
+-- The blocks learnt for items that place a block of another name and aren't in the tables above (a mod's: AE2 puts
+-- every cable and part in as ae2:cable_bus): { [item] = block }.  They are kept in .placements too, a line an item
+-- ("item ae2:fluix_smart_cable placed block=ae2:cable_bus"), and this copy is brought up to date whenever the file is
+-- read or written.  Nil until it is first needed.
+local learntBlocks
+
+-- The id of an item's learnt block in the data file, and the item an id is of (nil for a row of the table)
+local LEARNT_ITEM = "item"
+local function itemId(item) return LEARNT_ITEM .. " " .. item .. " placed" end
+local function itemOfId(id)
+    local words = text.words(id)
+    if words[1] == LEARNT_ITEM and words[3] == "placed" then return words[2] end
+    return nil
+end
+
+-- Keep learntBlocks up with the rules read or written.
+local function noteBlocks(learned)
+    learntBlocks = {}
+    for id, set in pairs(learned) do
+        local item = itemOfId(id)
+        if item and set.block then learntBlocks[item] = set.block end
+    end
+end
+
 -- The learned rules: { [rowId] = { key = rule } }, read from the file (it is small; other programs may have added to it).
 local function loadLearned()
     local learned = {}
@@ -358,11 +382,13 @@ local function loadLearned()
             learned[words[1] .. " " .. words[2] .. " " .. words[3]] = set
         end
     end
+    noteBlocks(learned)
     return learned
 end
 
 -- Write the learned rules back (or delete the file when there are none).
 local function saveLearned(learned)
+    noteBlocks(learned)
     local path = T.dataPath(LEARN_FILE)
     local lines = {}
     for id, set in pairs(learned) do
@@ -790,9 +816,28 @@ local function lookAtTarget(kind, h)
     return nil
 end
 
--- Is the block the item's: its own name, or one the item places or the block becomes (a wall torch, redstone dust)?
+-- Is the block the item's: its own name, or one the item places or the block becomes (a wall torch, redstone dust),
+-- or the block placeAt has learnt the item places (a mod's cable as ae2:cable_bus)?
 local function isItem(item, name)
-    return name ~= nil and (name == item or T.itemOfBlock(name) == item)
+    return name ~= nil and (name == item or T.itemOfBlock(name) == item or T.blockOfItem(item) == name)
+end
+
+-- Is the item one whose block placeAt could learn: a mod's (a vanilla item's block is in the tables, so another name
+-- is a wrong placement), with no block known for it yet?
+local function learnable(item)
+    local space = text.cut(item, ":")
+    return space ~= "minecraft" and T.blockOfItem(item) == item
+end
+
+-- The block's name for how.placedAs when it is one placeAt learnt the item places (nil otherwise).
+local function placedAs(item, name)
+    if name ~= item and learntBlocks and learntBlocks[item] == name then return name end
+    return nil
+end
+
+-- Learn that the item places the block `name` (into `learned`, which the caller saves).
+local function learnBlock(learned, item, name)
+    learned[itemId(item)] = { block = name }
 end
 
 -- Does the block at the target have the item's name (or the wall version of it) and every state wanted?
@@ -837,7 +882,7 @@ local function learnFrom(learned, famName, kind, row, h, base, item, name, state
 end
 
 -- Forget what T.placeAt has learnt (the data file .placements), for one family ("stairs", "slab", "torch", ... as
--- T.placeInfo names them) or for all.  True, or false and why.
+-- T.placeInfo names them) or for all.  True, or false and why.  "item" forgets the blocks it learnt mod items place.
 --
 -- A wrong row learnt (say from a block the map had wrong) is laid over the table from then on; this puts the table's
 -- rows back.
@@ -846,7 +891,7 @@ function T.forgetPlacements(family)
     if family == nil then
         learned = {}
     else
-        if not FAMILIES[family] then return false, "no family called " .. tostring(family) end
+        if not FAMILIES[family] and family ~= LEARNT_ITEM then return false, "no family called " .. tostring(family) end
         for id in pairs(learned) do
             if text.startsWith(id, family .. " ") then learned[id] = nil end
         end
@@ -1330,14 +1375,18 @@ end
 -- with form "wall" the one it makes hung on a block's side (a wall_torch for a torch), nil if none.
 --
 -- The other way round from T.itemOfBlock.  The wall forms are those of torches, signs, hanging signs, banners, heads
--- and skulls, and coral fans ("minecraft:oak_wall_sign" for an oak_sign).
+-- and skulls, and coral fans ("minecraft:oak_wall_sign" for an oak_sign).  A mod item that T.placeAt has seen place a
+-- block of another name gives that block ("ae2:cable_bus" for an AE2 cable, once one has been placed).
 function T.blockOfItem(item, form)
     if type(item) ~= "string" then return nil end
     local prefix, short = namespaced(item)
     form = form or "placed"
     local own = BLOCK_OF_ITEM[short]
     if own and own[form] then return prefix .. own[form] end
-    if form ~= "wall" then return item end
+    if form ~= "wall" then
+        if learntBlocks == nil then loadLearned() end
+        return learntBlocks[item] or item
+    end
     for _, row in ipairs(BLOCK_ITEM_ENDING) do
         local stem = text.stripSuffix(short, row[2])
         if stem then return prefix .. stem .. row[1] end
@@ -1397,7 +1446,13 @@ end
 -- state, and { approach, from, heading, tries, lines, support } (approach is front, down or up; from the cell the
 -- turtle stood in; lines a sign's text; support { temp, floor, exit }: the names of the block put above and the floor
 -- dug, and the neighbour dug too ({ x, y, z, name });
--- toward, with opts.toward: { form = "wall", facing, behind } or { form = "standing", rotation, wanted, off, note }).  A failure's why
+-- toward, with opts.toward: { form = "wall", facing, behind } or { form = "standing", rotation, wanted, off, note };
+-- placedAs, the block's name when it isn't the item's and was learnt, below).  A mod item that goes into an empty cell
+-- as a block of another name (AE2 puts every cable and part in as ae2:cable_bus), with no state asked and one of it
+-- used, is taken as placed and the pair learnt in .placements: T.blockOfItem gives the block from then on, and
+-- T.build, T.verify and T.lint take it as the item's (T.forgetPlacements("item") forgets them).  The limit: the block
+-- doesn't say which item made it, so another item that places the same block passes for it too (a cable bus doesn't
+-- say which cable).  A failure's why
 -- names the approaches tried and what each got, and what the others lack ("from below from 0,0,3: needs a block above
 -- the target, and the map has minecraft:air at 0,2,3"; "...: the map has minecraft:stone there": the stand is taken).
 -- An option it doesn't take is refused, named.
@@ -1486,7 +1541,7 @@ function T.placeAt(x, y, z, item, opts)
                 T.face(app.h)
                 local was, wasState = lookAtTarget(app.kind, app.h)
                 if was and accepted(item, want, was, wasState) then
-                    return was, wasState, { approach = "already there", tries = attempt - 1 }
+                    return was, wasState, { approach = "already there", tries = attempt - 1, placedAs = placedAs(item, was) }
                 end
                 if was and clickable(was) then
                     return nil, was .. " is in the way at " .. x .. "," .. y .. "," .. z
@@ -1501,6 +1556,7 @@ function T.placeAt(x, y, z, item, opts)
                     attempts[#attempts + 1] = words .. ": it would close the turtle in"
                 else
                     T.selectItem(item)
+                    local before = T.countItem(item)
                     local placed, placeWhy = T.placeDir(dirOf(app.kind, app.h), message)
                     if not placed then
                         lastWhy = "the game would not place " .. shortName(item) .. " from " .. app.sx .. "," .. app.sy .. "," ..
@@ -1513,12 +1569,19 @@ function T.placeAt(x, y, z, item, opts)
                             attempts[#attempts + 1] = words .. ": nothing there after"
                         else
                             noteInMap(x, y, z, name, state)
+                            -- A mod item that went into an empty cell as a block of another name (an AE2 cable is a
+                            -- cable bus), one of it used and no state asked: that is the item's block, learnt for next time.
+                            if not isItem(item, name) and was == nil and next(want) == nil and learnable(item)
+                                and T.countItem(item) == before - 1 then
+                                learnBlock(learned, item, name)
+                                saveLearned(learned)
+                            end
                             if app.certain and learnFrom(learned, famName, app.kind, app.row, app.h, base, item, name, state) then
                                 saveLearned(learned)
                             end
                             if accepted(item, want, name, state) then
                                 return name, state, { approach = app.kind, from = { x = app.sx, y = app.sy, z = app.sz },
-                                                      heading = app.h, tries = attempt, lines = lines,
+                                                      heading = app.h, tries = attempt, lines = lines, placedAs = placedAs(item, name),
                                                       warning = sealed and ("warning: placed " .. shortName(item) .. " at " .. x .. ","
                                                           .. y .. "," .. z .. ", but " .. sealed) or nil }
                             end

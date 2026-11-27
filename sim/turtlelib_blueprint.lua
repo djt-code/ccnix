@@ -28,7 +28,9 @@
 --     legend's after = { dx, dy, dz } in both orders, written in the text form and read back, hints in a circle or
 --     at a cell not built let be, a hint that isn't three whole numbers refused; a step on a floor: the slab fails
 --     without opts.digBelow (the floor untouched), and goes in when the build carries on with it; on solid ground (no
---     free cell beside the floor) a floor cell beside it dug and put back too, and walled in, refused naming each.
+--     free cell beside the floor) a floor cell beside it dug and put back too, and walled in, refused naming each;
+--   * (ADR-0023 1) a plan of AE2 cables (each placed as ae2:cable_bus): built, verified clean, counted there when
+--     built again; a plan of stone over them still differs.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -1001,4 +1003,29 @@ do
     check("...walled in: the slab fails, nothing dug, the reason naming each floor cell beside it", ok == false and W.get(0, 0, 3) == nil
         and W.dug == nil and floorAsItWas() and info.failed[1] and tostring(info.failed[1].why):find("no free cell beside the floor", 1, true) ~= nil
         and tostring(info.failed[1].why):find("0,-1,2: the map has minecraft:stone above it", 1, true) ~= nil, tostring(info.failed[1] and info.failed[1].why))
+end
+
+--------------------------------------------------------------------------
+-- ADR-0023 1: a mod's item that places a block of another name (an AE2 cable is ae2:cable_bus): built, counted done
+-- over its block, verified clean; a plan of another item over that block still differs
+--------------------------------------------------------------------------
+do
+    local CABLE, BUS = "ae2:black_smart_cable", "ae2:cable_bus"
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE)
+    know(-4, -3, -4, 4, 4, 6)
+    W.placesAs[CABLE] = BUS
+    W.give(1, CABLE, 8)
+    local plan = assert(T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { c = CABLE }, layers = { "cc" } }))
+    local ok, why, info = build(plan)
+    check("a plan of AE2 cables builds, each a cable bus, nothing dug back", ok == true and W.get(0, 0, 3) and W.get(0, 0, 3).name == BUS
+        and W.get(1, 0, 3) and W.get(1, 0, 3).name == BUS and (W.dug or 0) == 0 and W.carrying(CABLE) == 6, tostring(why))
+    local diffs = T.verify(plan, { inspect = "all" })
+    check("...and verifies clean: a cable bus is the cable the plan asked for", diffs and #diffs == 0, diffs and diffs[1] and diffs[1].why or "nil")
+    ok, why, info = build(plan, { restart = true })
+    check("...built again over them: both counted there, none placed", ok == true and info and info.there == 2 and info.placed == 0
+        and W.carrying(CABLE) == 6, tostring(why) .. " " .. tostring(info and info.there))
+    local other = assert(T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { s = "minecraft:stone" }, layers = { "ss" } }))
+    diffs = T.verify(other, { inspect = "all" })
+    check("...a plan of stone over the cable buses still differs", diffs and #diffs == 2, diffs and tostring(#diffs) or "nil")
 end

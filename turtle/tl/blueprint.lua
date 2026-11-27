@@ -189,11 +189,20 @@ local function infoOf(entry)
 end
 
 -- Is the block found the one a plan's entry asks for: the same name, or a block of its item (redstone_wire for
--- redstone), the wall form only when it has a facing (a torch with none stands)?
+-- redstone, or the block T.placeAt learnt a mod item places: ae2:cable_bus for an AE2 cable), the wall form only when
+-- it has a facing (a torch with none stands)?
 local function isBlockOf(found, entry)
     if found == entry.name then return true end
-    if found == nil or T.itemOfBlock(found) ~= entry.name then return false end
+    if found == nil then return false end
+    if T.blockOfItem(entry.name) == found then return true end
+    if T.itemOfBlock(found) ~= entry.name then return false end
     return found ~= T.blockOfItem(entry.name, "wall") or (entry.state ~= nil and entry.state.facing ~= nil)
+end
+
+-- Is the item a mod's whose block isn't known (no table has it, and T.placeAt hasn't learnt it)?  Such a cell goes
+-- through T.placeAt, which learns the block if it has another name (an AE2 cable goes in as ae2:cable_bus).
+local function unlearnt(item)
+    return not text.startsWith(item, "minecraft:") and T.blockOfItem(item) == item
 end
 
 -- Is the entry a double slab (two slab items in one cell)?
@@ -868,7 +877,7 @@ local function putCell(cell, move, look, support)
         if found and type(data) == "table" and data.state and data.state.type == "double" then return true end
         return false, "the second half didn't go onto the slab at " .. cell.x .. "," .. cell.y .. "," .. cell.z
     end
-    local plain = asked == 0 and PLAIN_FAMILIES[infoOf(cell.entry).family]
+    local plain = asked == 0 and PLAIN_FAMILIES[infoOf(cell.entry).family] and not unlearnt(cell.name)
     -- (the map says it is there: a cell done before a crash, or a plan built over itself; opts.look goes to see)
     if not look and mapHolds(cell, want) then return true, true end
     if T.countItem(cell.name) == 0 then return false, "no " .. cell.name .. " on board" end
@@ -877,7 +886,7 @@ local function putCell(cell, move, look, support)
         if ok then
             local found, data = T.look("down")
             local here = found and type(data) == "table" and data.name or nil
-            if here == cell.name then return true, true end
+            if isBlockOf(here, cell.entry) then return true, true end
             T.selectItem(cell.name)
             if T.placeDir("down") then return true end
             if here then return false, here .. " is in the way at " .. cell.x .. "," .. cell.y .. "," .. cell.z end
