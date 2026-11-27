@@ -686,8 +686,16 @@ do
     plan = T.craftPlan({ ["minecraft:torch"] = 32 }, { stock = { coal_block = 1, stick = 8 } })
     check("coal from a coal block when that is what there is (9 coal, 1 spare)", plan.ok and stepsLine(plan) == "coal 9 (1), torch 32 (8)", stepsLine(plan))
     -- a loop in the tree (a coal block is nine coal, coal is a ninth of a block) ends
-    plan = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
-    check("a loop in the recipes ends: a coal block with no coal is short of 9 coal", plan.ok == false and countsLine(plan.short) == "coal 9", countsLine(plan.short))
+    -- (ADR-0023 D4) every recipe goes round through the item asked for: the item itself is short, and the why says what
+    -- the recipe would have taken
+    local why
+    plan, why = T.craftPlan({ ["minecraft:coal_block"] = 1 }, { stock = {} })
+    check("a loop in the recipes ends: a coal block with no coal is short of the coal block, and the why says from 9 coal", plan.ok == false
+        and countsLine(plan.short) == "coal_block 1" and why:find("coal_block would be made from 9 coal", 1, true), countsLine(plan.short) .. " / " .. tostring(why))
+    plan, why = T.craftPlan({ ["minecraft:iron_ingot"] = 1 }, { stock = {} })
+    check("an ingot with none there is short of the ingot, not of a block to make 9 from (and the why names the block)", plan.ok == false
+        and countsLine(plan.short) == "iron_ingot 1" and stepsLine(plan) == "" and why:find("iron_ingot would be made from 1 iron_block", 1, true),
+        countsLine(plan.short) .. " / " .. stepsLine(plan) .. " / " .. tostring(why))
     -- (#346) an ingot with ingots there: a block from 9 of them and 9 back from the block is a loop, not a plan
     plan = T.craftPlan({ ["minecraft:iron_ingot"] = 1 }, { stock = { iron_ingot = 21 } })
     check("an ingot with 21 ingots there: no loop through a block, it is taken from what there is", plan.ok and stepsLine(plan) == ""
