@@ -981,6 +981,13 @@ end
 -- Is there any of the item name aboard?
 local function aboard(name) return T.countItem(name) > 0 end
 
+-- Why an item opts.only names stays aboard by default (stowable says no): what keeps it, and what would put it away.
+local function keptWords(name, opts, keep)
+    if keep and keep(name) then return "opts.keep names it" end
+    if T.isEssential(name) then return "a tool, fuel, a bucket or a peripheral: T.stow never puts it away" end
+    return "the job keeps it (T.keep, or crafted this job): opts.all = true puts it away"
+end
+
 -- Where an item goes, in order: a chest for it (its holds match), a chest that holds some already and isn't for other
 -- things, the bulk chest.  Each is a test of the chest c for the item name.
 local PLACES = {
@@ -1014,14 +1021,16 @@ end
 
 -- Why each item left aboard stayed, from the notes T.stow made at the chests it was tried at: { name = reason }, and
 -- the sentence that says them, the items with the same reason together ("64 cobblestone, 5 dirt (bulk chest at
--- 0,0,-3 full)").
-local function leftWords(left, notes, list)
+-- 0,0,-3 full)").  The notes of the names in `kept` (what opts.only named and the job keeps) say it all themselves.
+local function leftWords(left, notes, list, kept)
     local hasBulk = false
     for _, c in ipairs(list) do hasBulk = hasBulk or c.bulk == true end
     local reasons, groups, order = {}, {}, {}
     for _, name in ipairs(tables.sortedKeys(left)) do
         local why
-        if notes[name] then
+        if kept and kept[name] then
+            why = notes[name][1]
+        elseif notes[name] then
             why = table.concat(notes[name], ", ") .. (hasBulk and "" or "; no bulk chest")
         else
             why = "no chest holds it and no bulk chest"
@@ -1134,8 +1143,9 @@ end
 -- else the bulk chest) and how far (two bases: the other one's chests aren't a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it.  A chest for other
 -- things never takes an item, and a full chest for it sends it on to the next place.  What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard.  Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left
 -- aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it
--- and no bulk chest"), and the why returned says them all.  opts: move (T.moveTo's), keep (names, a list or set, globs
--- too, that stay aboard whatever), stay (stay at the last chest), maxDistance, far, near, box.
+-- and no bulk chest"), and the why returned says them all.  opts: only (names, a list or set, globs too: only those
+-- go; of them, what the job keeps stays aboard as above, and the why names each and what keeps it), move (T.moveTo's),
+-- keep (names that stay aboard whatever), stay (stay at the last chest), maxDistance, far, near, box.
 function T.stow(opts)
     opts = opts or {}
     local move = opts.move or MOVE
@@ -1148,14 +1158,22 @@ function T.stow(opts)
     local inScopeSet = {}
     for _, c in ipairs(scoped) do inScopeSet[c] = true end
     local keep = opts.keep and T.nameTest(opts.keep)
-    local names = {}
+    local only = opts.only ~= nil and T.nameTest(opts.only)
+    local names, notes, skipped = {}, {}, {}
     for slot = 1, 16 do
         local it = turtle.getItemDetail(slot)
-        if it and stowable(it.name, opts, keep) then names[it.name] = true end
+        if it and only and not only(it.name) then
+            -- (not one opts.only names: it stays, unsaid)
+        elseif it and stowable(it.name, opts, keep) then
+            names[it.name] = true
+        elseif it and only then                       -- (named, but kept: said, so a stow of kept items isn't silent)
+            skipped[it.name] = true
+            notes[it.name] = { keptWords(it.name, opts, keep) }
+        end
     end
     local info = { stowed = 0, chests = 0, left = {}, reasons = {} }
-    if next(names) == nil then return true, info end
-    local want, notes = {}, {}
+    if next(names) == nil and next(skipped) == nil then return true, info end
+    local want = {}
     for name in pairs(names) do want[name] = math.huge end
     -- the chests for an item now: in scope, within reach, the nearest and those as near, the first place of those
     local function targets(l, name, tried)
@@ -1201,17 +1219,18 @@ function T.stow(opts)
             end
         end
     end
-    round(move, function() deliver(list, want, move, targets, info, notes, {}) end, opts.stay)
+    if next(names) then round(move, function() deliver(list, want, move, targets, info, notes, {}) end, opts.stay) end
     for name in pairs(names) do
         local n = T.countItem(name)
         if n > 0 then info.left[name] = n end
     end
+    for name in pairs(skipped) do info.left[name] = T.countItem(name) end
     if next(info.left) then
         local reach = {}                              -- (a bulk chest out of reach is no bulk chest for this)
         for _, c in ipairs(list) do
             if inScopeSet[c] and within(r, c) then reach[#reach + 1] = c end
         end
-        local reasons, why = leftWords(info.left, notes, reach)
+        local reasons, why = leftWords(info.left, notes, reach, skipped)
         info.reasons = reasons
         return false, why, info
     end

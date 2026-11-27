@@ -20,7 +20,8 @@
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
 --     the why; nothing is ever dropped in the world;
---   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
+--   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep; (ADR-0023) T.stow's opts.only puts away
+--     only what it names, and says what of that the job keeps;
 --   * T.cfg.tools (ADR-0013 D5): T.stow and opts.all put away the looted tools it doesn't list, never the one
 --     equipped, nor the pickaxe parked in the inventory while a crafting table or a hoe is on its side;
 --   * T.recount: the known chest on a side read again into the list, with the time; no known chest there, a bad side;
@@ -562,6 +563,30 @@ do
     check("...the crafted stone went to the chest that holds stone", chestHas(-3, 0, 1, STONE) == 14)
     T.keep[DIRT] = nil
     T.clearCrafted()
+end
+
+do
+    -- (ADR-0023 Phase 1 item 6) opts.only: only the items it names go, and what the job keeps of them is said, not silent
+    setUp()
+    T.catalogue()
+    T.keep[DIRT] = true
+    W.give(1, DIRT, 20)
+    W.give(2, COBBLE, 10)
+    W.give(3, PLANKS, 6)
+    W.give(4, "minecraft:coal", 3)
+    local moves = W.S.moves
+    local ok, why, info = T.stow({ only = { DIRT } })
+    check("T.stow{ only = { kept dirt } }: nothing moves, and the why names the dirt and what keeps it", ok == false and W.S.moves == moves
+        and carrying(DIRT) == 20 and carrying(COBBLE) == 10 and info and info.left[DIRT] == 20 and info.stowed == 0
+        and tostring(why):find("20 dirt (the job keeps it (T.keep, or crafted this job): opts.all = true puts it away)", 1, true),
+        tostring(ok) .. " " .. tostring(why))
+    ok, why, info = T.stow({ only = { DIRT, "*_planks", "coal" } })
+    check("...with the planks and coal named too: the planks go (not the cobblestone it didn't name), the dirt and coal said",
+        ok == false and carrying(PLANKS) == 0 and carrying(COBBLE) == 10 and carrying(DIRT) == 20 and info.stowed == 6
+        and info.reasons["minecraft:coal"]:find("T.stow never puts it away", 1, true) and tostring(why):find("20 dirt", 1, true), tostring(why))
+    ok, info = T.stow({ only = "cobblestone" })
+    check("...and an item it names that isn't kept: true, as T.stow alone", ok == true and carrying(COBBLE) == 0 and info.stowed == 10, tostring(info))
+    T.keep[DIRT] = nil
 end
 
 do
