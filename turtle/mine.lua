@@ -86,6 +86,17 @@
 -- chest, barrel or shulker box in the way.  Only a 1x1 tunnel, with no
 -- way round, stops there.
 --
+-- Through open water (an ocean, a lake, an aquifer, a lava lake), where
+-- nearly every block is wet, it works another way: from the home, a
+-- chunk at a time, it puts a shell of bulk blocks round the tunnel first
+-- (on the floor, walls and ceiling where water or lava may touch them:
+-- a scan says, else what it has seen), then fills the water inside in
+-- and digs it out dry, the blocks coming back.  Meanwhile a bulkhead
+-- across the tunnel behind the home keeps the tunnel behind it dry, and
+-- a segment that ends in water gets an end cap, which the next one
+-- starts from.  It needs bulk blocks for that (cobblestone, from the
+-- homes behind, then the start's bottom chest).
+--
 -- The turtle's own column and row are part of the tunnel: it stands in
 -- the mouth at one bottom (or top, for negative heights) corner, and the
 -- tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3
@@ -772,7 +783,7 @@ fillerDry = false    -- no filler on board, at its home or behind: don't go look
 fillerKeep = FILLER_KEEP  -- FILLER_KEEP_WET once water has used it up
 stats = { veins = 0, ore = 0, sealed = 0, filled = 0, torches = 0, relit = 0, homes = 0, fetched = 0, wet = 0,
           wood = 0, lava = 0, grown = 0, pickedUp = 0, thrown = 0, hauls = 0, waits = 0,
-          standing = 0, spawners = 0, spawnerTorches = 0 }
+          standing = 0, spawners = 0, spawnerTorches = 0, shell = 0, fill = 0, cap = 0, bulkhead = 0 }
 -- From the Geo Scanner (see there): the world direction of the tunnel's +z
 -- once lined up, this segment's blocks touching the tunnel ("rock",
 -- "ore", "fluid" or "air"), and its ore further out.
@@ -885,6 +896,11 @@ function go(d)
         end
         local into = wet or (ok and FLUID[data.name] and data)
         if moveDir(d) then
+            -- through the bulkhead (see openWater): closed again behind it
+            if bulkheadZ and n.z ~= bulkheadZ and n.z - DELTA[d][3] == bulkheadZ and d ~= "up" and d ~= "down"
+                    and inBox({ x = n.x, y = n.y, z = bulkheadZ }) then
+                putFiller(OPP[d])
+            end
             wetAt, wetLevel = nil, nil
             if into then
                 wetAt = key(T.pos)
@@ -1001,6 +1017,7 @@ function cutOff(e)
     local ok, data = look(e)
     if not (ok and leaky(data) and (isSource(data) or not inBox(m))) then return false, ok and data end
     local was = opened[key(m)]
+    if isSource(data) then noteSource(m) end
     if not seal(e) then return false end
     if inBox(m) and (was or repairing) then plugs[key(m)] = m end
     return true
@@ -1121,6 +1138,7 @@ function dry(d)
         end
         turtle.select(1)
         if isSource(data) then
+            noteSource(neighbour(d))
             if not seal(d) then break end
             digDir(d)
             ok, data = look(d)
@@ -1703,16 +1721,18 @@ end
 -- Take a load from the homes behind, the nearest first, and come back.
 -- Found none anywhere: fillerDry, so filling the floor doesn't send it
 -- looking again for every hole (till it next unloads).
+fillerWant = nil     -- (open water) how many it needs: fetched from behind if the home is short
 function fillerFromBehind()
     local function isFiller(n) return FILLER[n] end
-    if T.countItem(isFiller) > 0 then return end
+    local want = fillerWant or 1
+    if T.countItem(isFiller) >= want then return end
     local working = home
     for k = working.k - 1, 0, -1 do
         if not fuelToGoOn(2 * (working.z - homeAt(k).z)) then break end
         home = homeAt(k)
         if not tunnelHome() then break end
         restockSet(home.bulk, FILLER, fillerKeep)
-        if T.countItem(isFiller) > 0 then
+        if T.countItem(isFiller) >= want then
             print(string.format("Took %d bulk blocks from home %d.", T.countItem(isFiller), k))
             break
         end
@@ -2294,14 +2314,15 @@ end
 
 -- The side columns: a lane in every row, to look at each wall block from
 -- beside it; with a Geo Scanner every third row, as the middle (the walls
--- are seen by the survey's scans once the segment is dug).
-function planLanes()
+-- are seen by the survey's scans once the segment is dug), or `cover`
+-- (open water: the walls are shelled already).
+function planLanes(cover)
     local xs, xn = T.sgn(WIDTH)
     local ys, yn = T.sgn(HEIGHT)
     local lanes = {}
     for c = 0, xn - 1 do
         local rows
-        if (c == 0 or c == xn - 1) and not hasScanner then
+        if (c == 0 or c == xn - 1) and not hasScanner and not cover then
             rows = {}
             for r = 0, yn - 1 do rows[#rows + 1] = r end
         else
@@ -2338,7 +2359,8 @@ function scanHere()
     -- survey once the segment is dug; without, turned to and looked at
     if hasScanner then return end
     for _, d in ipairs({ 1, 3, 0 }) do
-        if not inBox(neighbour(d)) then examine(d) end
+        local n = neighbour(d)
+        if not inBox(n) and not (waterMode and filled[key(n)]) then examine(d) end
     end
 end
 
@@ -3128,34 +3150,433 @@ function repairSegment(z1, z2, aheadDug)
     reportHoles()
 end
 
--- Mine the segment from z1 to z2, starting and ending at the home.
--- `from`: how far it got before (resuming): its finished lanes are gone
--- over only for water getting in, and it carries on from there.
-laneCount = 0        -- lanes in this segment's plan (saved with the progress)
-function mineSegment(z1, z2, from)
-    local lanes = planLanes()
-    laneCount = #lanes
-    laneAt = {}
-    for _, lane in ipairs(lanes) do laneAt[lane.x .. "," .. lane.y] = true end
-    print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
-        tostring(turtle.getFuelLevel())))
-    known, targets, scanFrom, scanned = {}, {}, {}, {}
-    local wet0 = stats.wet
-    local startLane, startZ = 1, nil
-    if from then
-        startLane, startZ = from.lane, from.z
-        -- what it finished: dug (open), and gone over only for water
-        for i, lane in ipairs(lanes) do
-            local ahead = i % 2 == 1
-            for z = z1, z2 do
-                if i < startLane or (i == startLane and (ahead and z <= startZ or not ahead and z >= startZ)) then
-                    opened[key({ x = lane.x, y = lane.y, z = z })] = true
+--------------------------------------------------------------------------
+-- Open water (ADR-0022)
+--------------------------------------------------------------------------
+-- Dug a block at a time (dry, stopFlow), wet ground lets water in only in
+-- small packets, but in a body of it (an ocean, a lake, an aquifer, a
+-- segment that flooded) nearly every block is wet, and the turtle spends
+-- its time turning to look round each one.  There it works another way,
+-- from the open side of the stretch (the home, or the part it has dug
+-- dry), a chunk of it at a time (as long as the bulk blocks it carries
+-- will fill):
+--  1. the shell: up and down each wall's column, facing the wall, a bulk
+--     block put into every row of the wall that water may touch (two
+--     turns a block along the tunnel, whatever its height);
+--  2. the fill: lanes along the tunnel, one row in three, from the open
+--     side to the chunk's end and back.  Going, it puts a block under the
+--     bottom row (the floor) and over the top one (the ceiling); coming
+--     back (backing up, so no turning), a block above, below and ahead of
+--     it, so the chunk ends up solid, and the slice past it too: the cap
+--     that keeps the water off what it digs.  At the end of the segment,
+--     the cap goes past it, where there's water there: the end cap,
+--     which the next segment starts from (in this mode);
+--  3. the dig: the chunk's lanes dug out as ever, dry, the blocks it put
+--     coming back to it.
+-- Nothing is looked at first: a block put against rock just isn't put.
+-- Only the rows and sides that may have water are shelled and filled: a
+-- scan says, or a look; what neither has seen counts as wet.  It starts
+-- once WATER_SOURCES water or lava sources turn up in the tunnel within
+-- WATER_SPAN blocks, or a scan from the home shows a third of the
+-- segment's sides in it, or the segment before left an end cap.  While a
+-- segment is worked so, a bulkhead (a wall across the tunnel just behind
+-- the home) keeps what water gets past off the tunnel behind: what goes
+-- through it closes it again behind itself (see go), and it comes down
+-- once the segment is dry.
+WATER_SOURCES = 6    -- sources met within...
+WATER_SPAN = 4       -- ...this many blocks of each other: open water
+WATER_SHARE = 1 / 3  -- (a scan from the home) share of the segment's sides in fluid: open water
+FILLER_KEEP_WATER = 6 * 64   -- bulk blocks carried while it works in open water
+WATER_FILE = T.dataPath("mine.water")
+sourcesMet = {}      -- z of the sources it has met in the tunnel this segment
+seenOut = {}         -- key -> true (wet) or false: blocks outside the tunnel looked at this segment
+waterMode = false    -- working a stretch in open water
+wetTo = nil          -- (a chunk's fill) the furthest z it went into water
+bulkheadZ = nil      -- z of the bulkhead across the tunnel, while there is one
+capZ = nil           -- z of the end cap the last segment left, while it's there
+
+-- "bulkhead z" and "cap z", a line each, so --resume knows them.
+function saveWater()
+    local lines = {}
+    if bulkheadZ then lines[#lines + 1] = "bulkhead " .. bulkheadZ end
+    if capZ then lines[#lines + 1] = "cap " .. capZ end
+    if #lines == 0 then
+        if fs.exists(WATER_FILE) then fs.delete(WATER_FILE) end
+    else
+        fileio.write(WATER_FILE, table.concat(lines, "\n") .. "\n")
+    end
+end
+
+function loadWater()
+    bulkheadZ, capZ = nil, nil
+    local saved = fileio.read(WATER_FILE)
+    for _, line in ipairs(saved and text.lines(saved) or {}) do
+        local w = text.words(line)
+        if scan.isInteger(w[2] or "") then
+            if w[1] == "bulkhead" then bulkheadZ = tonumber(w[2])
+            elseif w[1] == "cap" then capZ = tonumber(w[2]) end
+        end
+    end
+end
+
+-- Every look outside the tunnel is noted: is water there?
+rawLook = look
+function look(d)
+    local ok, data = rawLook(d)
+    local n = neighbour(d)
+    if not inBox(n) then seenOut[key(n)] = (ok and (FLUID[data.name] or waterIn(data))) and true or false end
+    return ok, data
+end
+
+-- A source of water or lava met at p (filled, or cut off).
+function noteSource(p)
+    if inBox(p) then sourcesMet[#sourcesMet + 1] = p.z end
+end
+
+-- Has it met enough sources round z to call it open water?
+function openWaterAt(z)
+    if waterMode then return false end
+    local n = 0
+    for _, s in ipairs(sourcesMet) do
+        if math.abs(s - z) <= WATER_SPAN then n = n + 1 end
+    end
+    return n >= WATER_SOURCES
+end
+
+-- May there be water or lava at p, as far as it knows?  (A scan or a
+-- look says; a block of the tunnel it has dug, no; one neither has seen,
+-- yes.)
+function mayBeWet(p)
+    local s = scanSays(p)
+    if s then return s == "fluid" end
+    if inBox(p) then return not opened[key(p)] end
+    local seen = seenOut[key(p)]
+    if seen ~= nil then return seen end
+    return true
+end
+
+-- The direction from column x (X0 or X1) out through the wall beside it.
+function wallDir(x)
+    local want = x == X0 and -1 or 1
+    for _, d in ipairs({ 1, 3 }) do
+        if DELTA[d][1] == want then return d end
+    end
+end
+
+-- What of a..b may have water: { floor, ceiling, lo, hi (the tunnel's
+-- rows to fill), walls = { { x, d, lo, hi } } (the rows of each wall to
+-- shell) }, a row either side of what's wet; nil if none of it.  allWet:
+-- all of it (a flooded stretch dug before).
+function waterPlan(a, b, allWet)
+    local function wet(p) return allWet or mayBeWet(p) end
+    local plan, walls = { floor = false, ceiling = false, walls = {} }, {}
+    local function row(y) plan.lo, plan.hi = math.min(plan.lo or y, y), math.max(plan.hi or y, y) end
+    for z = a, b do
+        for x = X0, X1 do
+            if wet({ x = x, y = Y0 - 1, z = z }) then plan.floor = true; row(Y0) end
+            if wet({ x = x, y = Y1 + 1, z = z }) then plan.ceiling = true; row(Y1) end
+            for y = Y0, Y1 do
+                if wet({ x = x, y = y, z = z }) then row(y) end
+            end
+        end
+        for _, x in ipairs(X0 == X1 and { X0 } or { X0, X1 }) do
+            for _, d in ipairs(X0 == X1 and { 1, 3 } or { wallDir(x) }) do
+                for y = Y0, Y1 do
+                    if wet({ x = x + DELTA[d][1], y = y, z = z }) then
+                        local k = x .. "," .. d
+                        walls[k] = walls[k] or { x = x, d = d }
+                        walls[k].lo, walls[k].hi = math.min(walls[k].lo or y, y), math.max(walls[k].hi or y, y)
+                        row(y)
+                    end
                 end
             end
         end
-        print(string.format("Carrying on with lane %d of %d at z=%d.", math.min(startLane, #lanes), #lanes, startZ))
-        repair(z1, z2, function(i) return i < startLane end)
     end
+    if not plan.lo then return nil end
+    plan.lo, plan.hi = math.max(Y0, plan.lo - 1), math.min(Y1, plan.hi + 1)
+    for _, k in ipairs(tables.sortedKeys(walls)) do
+        local w = walls[k]
+        w.lo, w.hi = math.max(Y0, w.lo - 1), math.min(Y1, w.hi + 1)
+        plan.walls[#plan.walls + 1] = w
+    end
+    return plan
+end
+
+-- The rows the fill's lanes go along: one in three over lo..hi, the
+-- bottom row if the floor's wet, the top if the ceiling is (it shells
+-- them from there).
+function fillRows(plan)
+    local b = plan.floor and Y0 or math.min(plan.lo + 1, plan.hi)
+    local t = plan.ceiling and Y1 or math.max(plan.hi - 1, b)
+    local rows = { b }
+    while t - rows[#rows] > 3 do rows[#rows + 1] = rows[#rows] + 3 end
+    if t ~= rows[#rows] then rows[#rows + 1] = t end
+    return rows
+end
+
+-- One block on in direction d, digging what's there first (not what it
+-- leaves standing); water and lava it just goes into.  False if it can't;
+-- true and whether it dug its way (rock) or went into fluid (or open
+-- tunnel) if it did.
+function push(d)
+    local n = neighbour(d)
+    if blocked[key(n)] then return false end
+    local dug = false
+    for _ = 1, 10 do
+        if moveDir(d) then
+            opened[key(T.pos)] = true
+            return true, dug
+        end
+        local ok, data = look(d)
+        if ok and not FLUID[data.name] then
+            if protected(data.name) then
+                standing(n, data.name)
+                return false
+            end
+            digDir(d)
+            dug = true
+        elseif not ok then
+            T.attackDir(d)                 -- (something in the way: a mob)
+        end
+    end
+    return false
+end
+
+-- To p, along z first (out of a lane), then y, then x.
+function pushTo(p)
+    for _, axis in ipairs({ "z", "y", "x" }) do
+        while T.pos[axis] ~= p[axis] do
+            local d
+            if axis == "y" then d = p.y > T.pos.y and "up" or "down"
+            else
+                for _, e in ipairs({ 0, 1, 2, 3 }) do
+                    local v = DELTA[e][axis == "x" and 1 or 3]
+                    if v ~= 0 and (v > 0) == (p[axis] > T.pos[axis]) then d = e end
+                end
+            end
+            if not push(d) then return false end
+        end
+    end
+    return true
+end
+
+-- A bulk block put in direction d without looking: true if it went in
+-- (into water, lava or air), counted.
+function put(d, what)
+    if putFiller(d) then
+        stats[what] = stats[what] + 1
+        return true
+    end
+    return false
+end
+
+-- Before a stretch of work: the fuel, room and bulk blocks for it, a trip
+-- home first if they're short.  No bulk blocks anywhere: it stops.
+function readyFor(moves, blocks)
+    local function isFiller(n) return FILLER[n] end
+    if not T.hasFuel(T.homeCost() + T.cfg.fuelMargin + moves + 10) then trip("Low on fuel")
+    elseif T.freeSlots() < 2 then trip("Inventory nearly full") end
+    if T.countItem(isFiller) < blocks then
+        fillerWant = blocks
+        trip("Out of blocks for the shell")
+        fillerWant = nil
+        if T.countItem(isFiller) < blocks then
+            stop(string.format("Out of bulk blocks for the shell at z=%d (needs %d): put cobblestone (or any bulk"
+                .. " block) in the start's bottom chest, then `mine --resume`.", T.pos.z, blocks))
+        end
+    end
+end
+
+-- The bulkhead: a wall across the tunnel just behind the home, from the
+-- home's slice, column by column.
+function bulkheadUp()
+    local z = home.z - 1
+    readyFor(4 * math.abs(WIDTH * HEIGHT), math.abs(WIDTH * HEIGHT))
+    local up = true
+    for x = X0, X1 do
+        if not pushTo({ x = x, y = up and Y0 or Y1, z = home.z }) then return end
+        T.face(2)
+        for y = up and Y0 or Y1, up and Y1 or Y0, up and 1 or -1 do
+            if y ~= (up and Y0 or Y1) and not push(up and "up" or "down") then return end
+            put(2, "bulkhead")
+        end
+        up = not up
+    end
+    bulkheadZ = z
+    saveWater()
+    print(string.format("Bulkhead across the tunnel at z=%d: the tunnel behind home %d stays dry.", z, home.k))
+end
+
+function bulkheadDown()
+    if not bulkheadZ then return end
+    local up = true
+    for x = X0, X1 do
+        if not pushTo({ x = x, y = up and Y0 or Y1, z = bulkheadZ + 1 }) then return end
+        for y = up and Y0 or Y1, up and Y1 or Y0, up and 1 or -1 do
+            if y ~= (up and Y0 or Y1) and not push(up and "up" or "down") then return end
+            local ok, data = look(2)
+            if ok and FILLER[data.name] then digDir(2) end
+        end
+        up = not up
+    end
+    print(string.format("Bulkhead at z=%d taken down: the segment is dry.", bulkheadZ))
+    bulkheadZ = nil
+    saveWater()
+    pushTo({ x = 0, y = 0, z = home.z })
+end
+
+-- 1. The walls' shell from a to b: each wall's column, up and down.
+function shellWalls(a, b, plan)
+    for _, w in ipairs(plan.walls) do
+        local rows = w.hi - w.lo + 1
+        readyFor(2 * (b - a + 2) * rows, (b - a + 1) * rows)
+        if not pushTo({ x = w.x, y = w.lo, z = a - 1 }) then return false end
+        local up, dry = true, nil     -- (slices running with rock behind the wall, once it's met water)
+        for z = a, b do
+            T.face(0)
+            if not push(0) then return false end
+            T.face(w.d)
+            local shelled = false
+            for y = up and w.lo or w.hi, up and w.hi or w.lo, up and 1 or -1 do
+                if y ~= (up and w.lo or w.hi) and not push(up and "up" or "down") then return false end
+                if put(w.d, "shell") then shelled = true end
+            end
+            up = not up
+            -- (rock behind the wall two slices running: the water's ended)
+            if shelled then dry = 0 elseif dry then dry = dry + 1 end
+            if dry and dry >= 2 then break end
+        end
+        if not pushTo({ x = w.x, y = T.pos.y, z = a - 1 }) then return false end
+    end
+    return true
+end
+
+-- 2. The fill of a..b (and the slice past it: the cap), lane by lane from
+-- the outside in.  last: b is the segment's end, and the end cap goes
+-- past it, where there's water.
+function fillChunk(a, b, last, plan)
+    local rows = fillRows(plan)
+    local isRow = {}
+    for _, r in ipairs(rows) do isRow[r] = true end
+    local lanes = {}
+    for x = X0, X1 do
+        for _, r in ipairs(rows) do lanes[#lanes + 1] = { x = x, y = r } end
+    end
+    local function ring(p) return math.min(p.x - X0, X1 - p.x, p.y - Y0, Y1 - p.y) end
+    table.sort(lanes, function(p, q)
+        if ring(p) ~= ring(q) then return ring(p) < ring(q) end
+        if p.x ~= q.x then return p.x < q.x end
+        return p.y < q.y
+    end)
+    local far = last and b or b + 1
+    local function capAhead()                  -- (facing along: no turn to look)
+        local ok, data = look(0)
+        if ok and (FLUID[data.name] or waterIn(data)) then put(0, "cap") end
+    end
+    for _, l in ipairs(lanes) do
+        local up = l.y < Y1 and not isRow[l.y + 1]
+        local down = l.y > Y0 and not isRow[l.y - 1]
+        readyFor(2 * (far - a + 4), 3 * (far - a + 2))
+        if not pushTo({ x = l.x, y = l.y, z = a - 1 }) then return false end
+        wetTo = wetTo or a - 1
+        T.face(0)
+        -- going: along the lane, the floor or ceiling shelled, as far as
+        -- there's water (two blocks of rock running: the water's ended,
+        -- and the rock past is as good as a fill)
+        local rock, stop = nil, far      -- (blocks of rock running, once it's met water)
+        for z = a, far do
+            local ok, dug = push(0)
+            if not ok then return false end
+            if l.y == Y0 and plan.floor then put("down", "shell") end
+            if l.y == Y1 and plan.ceiling then put("up", "shell") end
+            if not dug then rock = 0; wetTo = math.max(wetTo, z) elseif rock then rock = rock + 1 end
+            if rock and rock >= 2 then stop = z; break end
+        end
+        if last and stop == far then               -- the end cap, past the end
+            capAhead()
+            if up and l.y + 1 <= plan.hi and push("up") then capAhead(); push("down") end
+            if down and l.y - 1 >= plan.lo and push("down") then capAhead(); push("up") end
+        end
+        -- coming back, backing up: above, below and ahead filled
+        for _ = stop, a, -1 do
+            if up then put("up", "fill") end
+            if down then put("down", "fill") end
+            if not T.back() then
+                if not push(2) then return false end
+                T.face(0)
+            end
+            put(0, "fill")
+        end
+    end
+    return true
+end
+
+-- A stretch z1..z2 in open water (see above): from its open side (z1 - 1,
+-- the home's slice or dug tunnel), chunk by chunk.  opts.allWet: it's all
+-- water (a flooded stretch dug before); opts.bulkhead: a bulkhead behind
+-- the home meanwhile; opts.seg: the segment's ends (for scans).  Returns
+-- the last z it has dug (short of z2 where the water ended: the rest is
+-- dug the usual way), or nil if it couldn't (something in the way it
+-- leaves standing).
+function openWater(z1, z2, opts)
+    opts = opts or {}
+    local keep, wasMode = fillerKeep, waterMode
+    waterMode = true
+    fillerKeep = math.max(fillerKeep, FILLER_KEEP_WATER)
+    local seg = opts.seg or { z1, z2 }
+    if opts.bulkhead and home.k > 0 and not bulkheadZ then bulkheadUp() end
+    if capZ and capZ >= z1 and capZ <= z2 then capZ = nil; saveWater() end
+    local a, done = z1, true
+    local upTo = z1 - 1
+    while a <= z2 and done do
+        if not pushTo({ x = 0, y = 0, z = a - 1 }) then done = false; break end
+        if hasScanner then takeScan(seg[1], seg[2]) end
+        local reach = hasScanner and math.min(z2, a + SCAN_RADIUS - 1) or z2
+        -- (with a scanner, as far as the scan from here sees: past it, all
+        -- would count as wet)
+        local plan = waterPlan(a, hasScanner and reach or math.min(z2 + 1, LENGTH), opts.allWet)
+        if not plan then break end                 -- (dry from here: dug as ever)
+        -- as long a chunk as the blocks it can carry fill: a slice takes
+        -- its wet rows, the walls' and the floor and ceiling
+        local slice = (plan.hi - plan.lo + 1) * math.abs(WIDTH)
+            + (plan.floor and math.abs(WIDTH) or 0) + (plan.ceiling and math.abs(WIDTH) or 0)
+        for _, w in ipairs(plan.walls) do slice = slice + w.hi - w.lo + 1 end
+        readyFor(0, math.min(math.floor(fillerKeep / 2), slice * (z2 - a + 2)))
+        local function isFiller(n) return FILLER[n] end
+        local k = math.max(1, math.floor(T.countItem(isFiller) / slice) - 1)
+        local b = math.min(a + k - 1, reach)
+        local last = b == z2
+        print(string.format("Open water at z=%d..%d: rows %d to %d%s%s.", a, b, plan.lo - Y0, plan.hi - Y0,
+            plan.floor and ", the floor" or "", plan.ceiling and ", the ceiling" or ""))
+        local cap0 = stats.cap
+        wetTo = nil
+        done = shellWalls(a, b, plan) and fillChunk(a, b, last and b == seg[2], plan)
+        if stats.cap > cap0 then capZ = b + 1; saveWater() end
+        -- 3. the dig: as ever, dry
+        if done then
+            local lanes, was = planLanes(true), laneAt
+            laneAt = {}
+            for _, lane in ipairs(lanes) do laneAt[lane.x .. "," .. lane.y] = true end
+            pushTo({ x = lanes[1].x, y = lanes[1].y, z = a - 1 })
+            digLanes(lanes, a, b, { seg = seg })
+            laneAt = was
+            upTo = b
+        end
+        a = b + 1
+        -- (no water met in the chunk's last slice: it's ended)
+        if done and (wetTo or 0) < b then break end
+    end
+    waterMode, fillerKeep = wasMode, keep
+    return done and upTo or nil
+end
+
+-- The lanes from z1 to z2 (dug, from the open side behind z1).
+-- opts.from: how far it got before (resuming); opts.save: progress saved
+-- as it goes; opts.watch: open water met (see openWaterAt) stops it, with
+-- "water"; opts.seg: the segment's ends (z1, z2 if not given).
+function digLanes(lanes, z1, z2, opts)
+    local from, seg = opts.from, opts.seg or { z1, z2 }
+    local startLane, startZ = from and from.lane or 1, from and from.z
     for i, lane in ipairs(lanes) do
         if i >= startLane then
             local ahead = i % 2 == 1
@@ -3188,16 +3609,98 @@ function mineSegment(z1, z2, from)
                 if not ok then break end
                 -- (past what's left standing in the lane, the blocks it went round are skipped)
                 if T.at({ x = lane.x, y = lane.y, z = z }) then
-                    if hasScanner and fuelLow() then coalScan(z1, z2) end
+                    if hasScanner and fuelLow() then coalScan(seg[1], seg[2]) end
                     scanHere()
+                    if opts.watch and openWaterAt(z) then
+                        via = nil
+                        return "water"
+                    end
                     lightSpawners()        -- (one found above or below)
                     lightHere()
-                    saveProgress(i, z)
+                    if opts.save then saveProgress(i, z) end
                     if z ~= to then ok, what = onAlong(ahead and 0 or 2, to) end
                 end
             end
             if not ok then stop(string.format("Can't get through at %s (%s).", T.posString(), tostring(what))) end
         end
+    end
+    via = nil
+    return true
+end
+
+-- Do the scans show a share of z1..z2's sides in fluid (WATER_SHARE)?
+-- (Only the sides a scan saw count.)
+function scansSayWater(z1, z2)
+    local seen, wet = 0, 0
+    local function side(p)
+        local s = scanSays(p)
+        if s then
+            seen = seen + 1
+            if s == "fluid" then wet = wet + 1 end
+        end
+    end
+    for z = z1, z2 do
+        for x = X0, X1 do side({ x = x, y = Y0 - 1, z = z }); side({ x = x, y = Y1 + 1, z = z }) end
+        for y = Y0, Y1 do side({ x = X0 - 1, y = y, z = z }); side({ x = X1 + 1, y = y, z = z }) end
+    end
+    return seen >= 8 and wet / seen >= WATER_SHARE
+end
+
+-- Mine the segment from z1 to z2, starting and ending at the home.
+-- `from`: how far it got before (resuming): its finished lanes are gone
+-- over only for water getting in, and it carries on from there.  In open
+-- water (see openWater), from the home, a chunk at a time.
+laneCount = 0        -- lanes in this segment's plan (saved with the progress)
+function mineSegment(z1, z2, from)
+    local lanes = planLanes()
+    laneCount = #lanes
+    laneAt = {}
+    for _, lane in ipairs(lanes) do laneAt[lane.x .. "," .. lane.y] = true end
+    print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
+        tostring(turtle.getFuelLevel())))
+    known, targets, scanFrom, scanned = {}, {}, {}, {}
+    sourcesMet, seenOut = {}, {}
+    local wet0 = stats.wet
+    local startLane, startZ = 1, nil
+    if from then
+        startLane, startZ = from.lane, from.z
+        -- what it finished: dug (open), and gone over only for water
+        for i, lane in ipairs(lanes) do
+            local ahead = i % 2 == 1
+            for z = z1, z2 do
+                if i < startLane or (i == startLane and (ahead and z <= startZ or not ahead and z >= startZ)) then
+                    opened[key({ x = lane.x, y = lane.y, z = z })] = true
+                end
+            end
+        end
+        print(string.format("Carrying on with lane %d of %d at z=%d.", math.min(startLane, #lanes), #lanes, startZ))
+        repair(z1, z2, function(i) return i < startLane end)
+    end
+    -- open water from the start (the segment before left an end cap, or
+    -- the scans from the home say so), or met on the way: worked from the
+    -- home, the other way.  (Not from the start: no open side to work from.)
+    local water = false
+    if home.k > 0 and not from then
+        water = capZ == z1 or (hasScanner and takeScan(z1, z2) and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
+    end
+    local za = z1
+    while true do
+        if not water then
+            if za > z1 then tunnelTo({ x = lanes[1].x, y = lanes[1].y, z = za - 1 }) end
+            water = digLanes(lanes, za, z2, { from = za == z1 and from or nil, save = true, watch = home.k > 0 }) == "water"
+        end
+        if not water then break end
+        -- open water: from the home (or the end of what it has dug dry)
+        saveProgress(1, za)
+        if za == z1 then tunnelHome() end
+        local upTo = openWater(za, z2, { bulkhead = true, seg = { z1, z2 } })
+        if not upTo then                       -- (something in the way: the rest as ever)
+            tunnelHome()
+            digLanes(lanes, za, z2, {})
+            break
+        end
+        if upTo >= z2 then break end
+        za, water, sourcesMet = upTo + 1, false, {}
     end
     via = nil
     saveProgress(#lanes + 1, z2)
@@ -3210,6 +3713,7 @@ function mineSegment(z1, z2, from)
     if hasScanner and stats.wet > wet0 then repair(z1, z2) end
     reportHoles()
     tunnelHome()
+    bulkheadDown()                         -- (dry now: the tunnel's open again)
 end
 
 --------------------------------------------------------------------------
@@ -3726,6 +4230,7 @@ function useJob(job)
     WIDTH, HEIGHT, LENGTH, SPACING = job.width, job.height, job.length, job.spacing
     setBox()
     blocked = loadBlocked()
+    loadWater()
 end
 
 -- `mine reset` trusts the saved position but checks the heading first:
@@ -4018,7 +4523,7 @@ elseif job and job.state ~= "done" and not job.stale and job.homes > 0 and not f
 else
     setBox()
 end
-if resume then grown = loadGrown() else clearGrown(); clearBlocked() end
+if resume then grown = loadGrown() else clearGrown(); clearBlocked(); bulkheadZ, capZ = nil, nil; saveWater() end
 
 home = startingHome(resume)
 if not home then return end
@@ -4176,6 +4681,8 @@ final = string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid bl
     .. (stats.hauls > 0 and string.format(" Hauled to the start %d times.", stats.hauls) or "")
     .. (stats.waits > 0 and string.format(" Waited for supplies %d times.", stats.waits) or "")
     .. (stats.thrown > 0 and string.format(" Threw away %d bulk blocks no chest had room for.", stats.thrown) or "")
+    .. (stats.shell + stats.fill > 0 and string.format(" Through open water: %d blocks of shell, %d filled in and dug"
+        .. " out again%s.", stats.shell, stats.fill, stats.cap > 0 and string.format(", an end cap of %d", stats.cap) or "") or "")
     .. (stats.standing > 0 and string.format(" Went round %d blocks it doesn't dig%s.", stats.standing,
         stats.spawners > 0 and string.format(" (%d spawners, lit with %d torches)", stats.spawners, stats.spawnerTorches) or "") or "")
 print(final)
