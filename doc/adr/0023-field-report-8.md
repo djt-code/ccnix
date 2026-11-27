@@ -124,21 +124,30 @@ Three read-only reviewers checked the findings against the field log, the librar
 
 ### Decisions (the owner's)
 
-- **D1. The dimension.**
-  - **A (recommended):** a turtlelib setting, `turtle.dimension` (`overworld`, `nether`, `end`), read into
-    `T.cfg.dimension` when turtlelib loads, so everything that asks (lighting, D3's lava) has it. `sysctl
-    turtle.dimension=nether` sets it; the claude harness says it on the start line and in the prompt ("in the
-    nether"), and tells the model to set it when it goes through a portal.
+- **D1. The dimension.** The owner (2026-11-27): the turtle can tell from the blocks it sees, so the default
+  is `auto`.
+  - **A (recommended):** a turtlelib setting, `turtle.dimension`: `auto` (the default), `overworld`,
+    `nether` or `end`. A named dimension is used as it is. `auto` goes by the blocks round the turtle: what it
+    sees next to it (a look up, down and ahead, no fuel) and what the map has near its position. Blocks that
+    occur naturally in one dimension only count for it: netherrack, basalt, blackstone, soul sand and soul
+    soil, the nylium, nether ores for the nether; end stone for the end; stone, deepslate, tuff, dirt, grass
+    and water (which can't be placed in the nether) for the overworld. A clear majority decides; with too
+    few, or a near tie, it is the overworld, and it says it isn't sure. `T.dimension()` gives the dimension and
+    how it was decided (`"set"`, or `"auto"` with the counts); `T.cfg.dimension` follows it, so everything
+    that asks (lighting, D3's lava) has it. The claude harness says it on the start line and in the prompt
+    ("in the nether, from the blocks round it"). A build of nether blocks in the overworld is the case `auto`
+    can get wrong: the setting is there for it.
   - **B:** A, plus the mod tells it: ccnix-mod gives the computer's dimension to Lua (needs checking: a Lua
-    API from the mod, through CC: Tweaked's API factory and the computer's level). The setting stays for a
-    turtle without the mod; where they disagree, the mod wins, with a warning, as GPS does for the saved
-    position. A lockstep change.
+    API from the mod, through CC: Tweaked's API factory and the computer's level). Under `auto`, the mod's
+    answer comes before the blocks; `auto` by the blocks stays for a turtle without the mod; a named setting
+    that disagrees with the mod gets a warning, as GPS does for the saved position. A lockstep change.
   - **C:** A, plus an Advanced Peripherals Environment Detector when one is attached (needs checking: its
     dimension method's name and value).
   - Recommendation: A now, B next (the mod is on every server ccnix runs on, and it can't be wrong).
 - **D2. The map per dimension.** Today one map holds every dimension, so a portal trip mixes them. Recommended:
   once D1 says which, the map and the saved position are kept per dimension (`.map/<dimension>/`); the map
-  there now becomes the dimension the setting names when it is first read.
+  there now becomes the dimension D1 gives when it is first read. With `auto`, the look next to the turtle
+  comes first (the map it would read is the question), and a change of dimension switches maps.
 - **D3. `T.refuelFromLava` (C8).**
   - **A (recommended):** a distance limit, `opts.within` (default 64 from where it starts; a new limit, so
     yours); sources it has seen at level 0 before cells known by name only; after a "flowing" find, the rest
