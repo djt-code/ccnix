@@ -2076,7 +2076,7 @@ end
 -- eight calls, each result 400 of its own letter: a to h
 local function logRun(map)
     fresh({ "" })
-    if map then Mine.files[".map/0_0_0"] = string.rep("m", map) end
+    if map then Mine.files[".map/overworld/0_0_0"] = string.rep("m", map) end
     HTTP.queue = {}
     for i = 1, 8 do
         HTTP.queue[i] = reply({ toolUse("lua", { code = "return string.rep('" .. string.char(96 + i) .. "', 400)" }) }, "tool_use")
@@ -2115,7 +2115,7 @@ check("a small disk: fewer old logs, so a quarter stays free beside the map",
 logRun(5000)
 local n4 = olds()
 check("the map alone leaves less than a quarter free: every old log goes, the current one stays",
-    n4 == 0 and Mine.files["claude.log"] ~= nil and Mine.files[".map/0_0_0"] ~= nil, n4)
+    n4 == 0 and Mine.files["claude.log"] ~= nil and Mine.files[".map/overworld/0_0_0"] ~= nil, n4)
 fs.getCapacity, fs.getFreeSpace = nil, nil
 settings = nil
 end
