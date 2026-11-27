@@ -137,6 +137,38 @@ local function isOreBlock(b)
     return b and (b.name:find("_ore$") or (b.tags and b.tags["c:ores"])) and true or false
 end
 Mine.isOreBlock = isOreBlock
+-- Real terrain over the box a fixture covers (sim/terrain.py writes them:
+-- a box of a Minecraft world in the tunnel's coordinates), after
+-- Mine.setup.  Returns how many blocks of water and lava, and of ore, it
+-- holds.
+function Mine.terrain(path)
+    local t = dofile(path)
+    local x0, _, y0, _, z0 = table.unpack(t.box)
+    local blocks = {}
+    for i, entry in pairs(t.palette) do
+        local parts = {}
+        for part in entry:gmatch("[^:]+") do parts[#parts + 1] = part end
+        local b = { name = parts[1] .. ":" .. parts[2] }
+        if parts[3] == "w" then b.waterlogged = true
+        elseif parts[3] then b.level = tonumber(parts[3]) end
+        blocks[i] = b
+    end
+    local wet, ores = 0, 0
+    for iy, rows in ipairs(t.cells) do
+        for iz, row in ipairs(rows) do
+            for ix = 1, #row do
+                local i = t.codes:find(row:sub(ix, ix), 1, true) - 1
+                local b = blocks[i]
+                local copy = b and { name = b.name, level = b.level, waterlogged = b.waterlogged } or nil
+                set(x0 + ix - 1, y0 + iy - 1, z0 + iz - 1, copy)
+                if b and (b.name == WATER_NAME or b.name == "minecraft:lava") then wet = wet + 1 end
+                if b and isOreBlock(b) then ores = ores + 1 end
+            end
+        end
+    end
+    return wet, ores
+end
+
 function Mine.remember()
     ORES = {}
     for key, b in pairs(W) do
