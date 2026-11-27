@@ -243,3 +243,24 @@ only when the tunnel ahead is more than half water (source blocks). It shouldn't
 | W1: the lake | 1702 + 602 + 904 + 713, no bulkhead, 30 blocks of water behind home 1 | 1890 + 738 + 1030 + 839 = 4497, probe 98%, bulkhead, dry behind (main, before the amendment: 4065) |
 | W4: water under the bottom half | 1594 + 656 + 1059 + 467 = 3776, open water | 1012 + 1174 + 825 + 233 = 3244, three probes at 6%, careful mode |
 | W5: sporadic sources (7 lone ones, 6 of them two each in 3 columns) | 1856 + 882 + 1261 + 467 = 4466, open water and a bulkhead | 738 + 704 + 803 + 9 = 2254, no probe |
+
+## Amendment (2026-11-27): water from above, traced to its source or caught in a bowl
+
+The owner: for sources flowing in from above, tracing the flowing water back to its source block and filling
+that source is almost always the most efficient way to get rid of it. Where that can't be done, build a "bowl"
+directly above where the water would flood the tunnel, to catch it: four sides and a bottom, 5 blocks for a single
+source above. Several sources get closed channels. Minecraft water doesn't overflow: it always runs downhill.
+
+Before this, `stopFlow` followed water upstream only inside the tunnel. Where the water came in from outside, it
+plugged that one cell. Water from above then landed on the plug, spread along the top of the ceiling and came
+in somewhere else, and the turtle chased it.
+
+1. **Trace and fill (first):** water coming into the tunnel from outside (falling, or flowing in through the
+   ceiling or a wall) is followed out of the tunnel, upstream. It goes up a falling column, then along to stronger
+   water, to its source, which is filled. It goes no further than `TRACE_REACH` moves, and never into a protected
+   area. It comes back the way it went. Water still coming after the fill means a body of water, not one source:
+   then 2.
+2. **The bowl (else):** water falling into the tunnel through its ceiling is caught right above it. The cell above
+   the hole gets four sides, and the hole below it is filled as the bottom: 5 blocks for one falling column. The
+   water lands in the bowl and stays there. Falling columns side by side get one closed trough round all of them.
+   Water coming in through a wall is sealed as before.
