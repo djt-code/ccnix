@@ -2,6 +2,10 @@ claude-news: what changed for claude (the model driving a turtle), by version, n
 
 When a turtle's ccnix is updated, claude tells the model, with its first goal, the lines under each version since the one it last ran with (kept in /claude/.version).  Each version has a "== 0.51.0" heading; the short lines under it are written to the model, in its terms.  Lines starting "--" are notes for people, not shown to it.
 
+== 0.57.0
+-- The ADR-0022 amendment (water from above), #432. Nothing in turtlelib or the harness changed.
+The mine program now follows water that comes into its tunnel from outside to its source and fills it; when it can't, it builds a bowl over the hole in the ceiling. Nothing changed in T or in the harness.
+
 == 0.56.0
 -- ADR-0023, from the v7 test pass and report_harness_v8.md.
 T.dimension() says which dimension you're in and how it knows: the setting turtle.dimension ("auto" by default; overworld, nether or end to fix it), else the blocks round you (netherrack, basalt, blackstone, soul sand for the nether; end stone; stone, deepslate, dirt, water). T.darkCells and T.planLights use it: no opts.dimension or T.cfg.dimension needed. If it's ever wrong, set turtle.dimension.
