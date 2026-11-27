@@ -129,10 +129,13 @@
 -- long its run took, and in a long one how long the chat went unheard.
 -- claude.listen = false turns it off.
 --
--- The log, claude.log beside the program: each entry with its time (UTC);
--- the options a session started with, the goals, the code and what it
--- did, the thinking, each call's tokens and how long it took, retries,
--- clears, and each goal's tokens in all.  A call that writes many tokens
+-- The log, claude.log beside the program: each entry with its time (UTC).
+-- Harness entries start at column 0 with the time; later lines of an entry
+-- (code, results, thinking) are indented with a tab, so a search for lines
+-- starting with a time finds the harness's entries alone.  It has the
+-- options a session started with, the goals, the code and what it did,
+-- the thinking, each call's tokens and how long it took, retries, clears,
+-- and each goal's tokens in all.  A call that writes many tokens
 -- to the cache after a long gap is the cache having run out (--cache 1h).
 -- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
 -- the older copies moving up to claude.log.3 (the setting claude.logKeep:
@@ -797,11 +800,13 @@ function LOG.rotate()
     end
 end
 
--- Each entry in the log starts with when it was written (UTC).
+-- Each entry in the log starts with when it was written (UTC), and its later lines (code, results, thinking) are
+-- indented with a tab (ADR-0023): only the harness's entries start at column 0 with a time, so a result that prints
+-- an old start line doesn't read as one.
 local function log(line)
     LOG.rotate()
     local f = fs.open(LOG.file, "a")
-    if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
+    if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. text.replace(line, "\n", "\n\t")); f.close() end
 end
 
 -- A tool's output cut to MAX_OUTPUT: its start and its end, and how much went between.  (A little over is sent as it

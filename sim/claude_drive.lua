@@ -161,6 +161,25 @@ check("claude.log: each call's tokens (from the cache, written, new, out) and ho
 check("claude.log: the goal's tokens in all when it's done",
     logText:find("\n" .. STAMP .. "goal done: %[525 tokens in: 150 from the cache, 75 written to it, 300 new; 60 out; 585 in all%]\n"))
 
+-- 1b. an entry's later lines indented with a tab (ADR-0023 Phase 1 item 5), so only the harness's entries start at
+--     column 0 with a time: a result that prints an old start line, or thinking over lines, doesn't read as an entry
+fresh({ "" })
+HTTP.queue = {
+    reply({ { type = "thinking", thinking = "First the log.\nstart: is a word here", signature = "sig" },
+            toolUse("lua", { code = "print('2026-01-01 00:00:00 start: fake')\nreturn 1" }) }, "tool_use"),
+    reply({ text("Done.\nTwo lines.") }, "end_turn"),
+}
+run("print an old start line")
+local log1b = Mine.files["claude.log"] or ""
+local atZero = true
+for line in log1b:gmatch("[^\n]+") do
+    if not (line:find("^" .. STAMP) or line:find("^\t")) then atZero = false end
+end
+check("claude.log: an entry's later lines are indented with a tab, so an old start line printed is never at column 0",
+    log1b:find("\n\t2026-01-01 00:00:00 start: fake\n", 1, true) and not log1b:find("\n2026-01-01 00:00:00 start: fake", 1, true)
+        and log1b:find("\n\treturn 1\n", 1, true) and log1b:find(" thinking: First the log.\n\tstart: is a word here\n", 1, true)
+        and log1b:find(" claude: Done.\n\tTwo lines.\n", 1, true) and atZero, log1b)
+
 -- 2. the sandbox: fs is out of reach, a syntax error and a runtime error
 --    come back as error results, tables are serialised, definitions
 --    persist between calls
@@ -1226,7 +1245,7 @@ local f30 = resultsIn(4).toolu_3
 check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
     f30 and tostring(f30.status))
 check("...the line is logged with the result, not shown on the screen",
-    (Mine.files["claude.log"] or ""):find("result:\n-> two\n[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
+    (Mine.files["claude.log"] or ""):find("result:\n\t-> two\n\t[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
 fresh({ "" })
 Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
 Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
