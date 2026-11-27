@@ -1006,12 +1006,13 @@ end
 -- false only warns, in info.sealed).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
--- warnings, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
+-- warnings, lintSummary, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
 -- opts.exit refuses those instead, each cell failing with why) }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
--- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
--- at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and those round it
--- (terrain, other buildings) as one count ("player: 4 more round it"); they never change the result.
+-- info.warnings (each tagged where = "plan" or "around"); info.lintSummary says them in lines: the plan's own a line a
+-- rule ("headroom at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and
+-- those round it (terrain, other buildings) as one count ("4 more round it").  Only how many is printed, for the
+-- player's chat ("lint: 24 warnings, in the result (info.lintSummary, info.warnings)"); they never change the result.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
@@ -1168,8 +1169,14 @@ function T.build(plan, opts)
         if not ok and warnings == "Terminated" then error(warnings, 0) end
         if ok and warnings then
             info.warnings, info.topDrops = warnings, lint.topDrops
-            for _, line in ipairs(lint.planSummary or lint.summary) do print("player: " .. line) end
-            if (lint.around or 0) > 0 then print("player: " .. lint.around .. " more round it (T.lint(box) lists them)") end
+            -- (ADR-0023 D8) the lines go in the result; the player's chat gets only how many
+            local lines = {}
+            for _, line in ipairs(lint.planSummary or lint.summary) do lines[#lines + 1] = line end
+            if (lint.around or 0) > 0 then lines[#lines + 1] = lint.around .. " more round it (T.lint(box) lists them)" end
+            info.lintSummary = lines
+            if #lines > 0 then
+                print("lint: " .. #warnings .. (#warnings == 1 and " warning" or " warnings") .. ", in the result (info.lintSummary, info.warnings)")
+            end
         end
     end
     if info.finished then return true, info end

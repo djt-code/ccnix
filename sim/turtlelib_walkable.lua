@@ -12,11 +12,11 @@
 --   * T.lint of a plan: the plan's cells and states, the map round it; stairs with no facing counted as unchecked;
 --     (ADR-0019) a torch with a facing is its wall torch, so the light rule fires (in T.lint and T.build's lint), and
 --     a torch with none stands;
---   * T.build reports the lint's warnings when every cell is tried (in info.warnings and printed, a line a rule) without
---     changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
+--   * T.build reports the lint's warnings when every cell is tried (in info.warnings, and info.lintSummary a line a
+--     rule; ADR-0023 D8: only how many printed, for the player's chat) without changing its success, and opts.player = false leaves them out; T.verify(plan, { player = true }) reports them in
 --     info.warnings, and without it doesn't;
---   * (ADR-0013) a plan's warnings tagged in the plan or round it (counted in info, the plan's first); T.build prints
---     the plan's and one line counting those round it; a box's lint has no tags; (ADR-0019 D5) the drops round a
+--   * (ADR-0013) a plan's warnings tagged in the plan or round it (counted in info, the plan's first); T.build's
+--     info.lintSummary has the plan's and one line counting those round it; a box's lint has no tags; (ADR-0019 D5) the drops round a
 --     wall's top cells are one line, "N drops on the plan's top", their cells in info.topDrops.
 --   * T.walkable: a path for a 1x2 player up the good staircase; none past a ceiling over the first stair; a step up
 --     in a 2-high corridor refused for headroom (3 air needed where the step starts), allowed once the ceiling is
@@ -336,7 +336,9 @@ do
         ok == true and info.finished and at(drop, 2, 5, 2) ~= nil and drop[1].text:find("drop of 5", 1, true) ~= nil,
         tostring(ok) .. " " .. tostring(info) .. " " .. texts(info and info.warnings))
     local said = table.concat(PRINTED, " | ")
-    check("...and prints them, a line a rule", #PRINTED == 1 and said:find("drop at 2,5,2", 1, true) ~= nil, said)
+    check("...in info.lintSummary, a line a rule, and prints only how many (ADR-0023 D8)", #PRINTED == 1
+        and said == "lint: 1 warning, in the result (info.lintSummary, info.warnings)" and info.lintSummary and #info.lintSummary == 1
+        and info.lintSummary[1]:find("drop at 2,5,2", 1, true) == 1, said)
     local diffs, vinfo = T.verify(plan, { player = true })
     check("T.verify(plan, { player = true }): the build as planned, and the warnings", diffs and #diffs == 0 and at(ofRule(vinfo.warnings, "drop"), 2, 5, 2) ~= nil,
         texts(vinfo and vinfo.warnings))
@@ -365,10 +367,12 @@ do
     check("...its info counts them, and lists the plan's own first", lint and lint.inPlan == 1 and lint.around == 1 and warnings[1] == mine,
         tostring(lint and lint.inPlan) .. " " .. tostring(lint and lint.around))
     ok, info = T.build(plan, { name = "pillars" })
-    local said = table.concat(PRINTED, " | ")
-    check("T.build prints the plan's warnings and one line for those round it; info.warnings keeps them all",
-        ok == true and #PRINTED == 2 and said:find("player: drop at 4,5,2", 1, true) ~= nil and not said:find("0,5,2", 1, true)
-        and said:find("player: 1 more round it (T.lint(box) lists them)", 1, true) ~= nil and #info.warnings == 2, said)
+    local said = table.concat(info and info.lintSummary or {}, " | ")
+    check("T.build's info.lintSummary has the plan's warnings and one line for those round it; info.warnings keeps them all",
+        ok == true and #info.lintSummary == 2 and said:find("drop at 4,5,2", 1, true) == 1 and not said:find("0,5,2", 1, true)
+        and info.lintSummary[2] == "1 more round it (T.lint(box) lists them)" and #info.warnings == 2, said)
+    check("...and prints only how many, all of them", #PRINTED == 1 and PRINTED[1] == "lint: 2 warnings, in the result (info.lintSummary, info.warnings)",
+        table.concat(PRINTED, " | "))
     warnings = T.lint({ -1, 0, 1, 5, 4, 3 })
     check("...a box's lint has no tags", warnings and #warnings == 2 and warnings[1].where == nil, texts(warnings))
 
@@ -381,9 +385,9 @@ do
     plan = T.blueprint.new({ anchor = { 1, 1, 2 }, legend = { B = STONE, t = "minecraft:wall_torch[facing=south]" },
         layers = { { "B", "." }, { "B", "t" }, { "B" } } })
     ok, info = T.build(plan, { name = "torch" })
-    said = table.concat(PRINTED, " | ")
-    check("T.build prints the light rule's line for a plan's wall torch over a walk cell",
-        ok == true and at(ofRule(info.warnings, "light"), 1, 1, 1) ~= nil and said:find("player: light at 1,1,1", 1, true) ~= nil, said)
+    said = table.concat(info and info.lintSummary or {}, " | ")
+    check("T.build has the light rule's line for a plan's wall torch over a walk cell",
+        ok == true and at(ofRule(info.warnings, "light"), 1, 1, 1) ~= nil and said:find("light at 1,1,1", 1, true) ~= nil, said)
 
     -- (ADR-0019 D5) a wall 5 long and 5 high: a drop round each of its top cells, one line for them all
     fresh(cube(-3, -1, -3, 7, -1, 5, STONE))
@@ -397,10 +401,12 @@ do
             .. "(their cells: info.topDrops)" and #lint.topDrops == 5 and #ofRule(warnings, "drop") == 5,
         lint and table.concat(lint.planSummary, " | "))
     ok, info = T.build(plan, { name = "wall" })
-    said = table.concat(PRINTED, " | ")
-    check("...T.build prints that one line, and info.topDrops has the cells",
-        ok == true and #PRINTED == 1 and said:find("player: 5 drops on the plan's top", 1, true) == 1 and #info.topDrops == 5
+    said = table.concat(info and info.lintSummary or {}, " | ")
+    check("...T.build's info.lintSummary has that one line, and info.topDrops has the cells",
+        ok == true and #info.lintSummary == 1 and said:find("5 drops on the plan's top", 1, true) == 1 and #info.topDrops == 5
             and at(ofRule(info.warnings, "drop"), 2, 5, 2) ~= nil, said)
+    check("...the print counts every warning, not the lines", #PRINTED == 1 and PRINTED[1] == "lint: 5 warnings, in the result (info.lintSummary, info.warnings)",
+        table.concat(PRINTED, " | "))
 
     -- (#348) the same wall, the map knowing all round but the cells over its top (as in the field: built where it hadn't
     -- looked yet): those are taken as air, its tops walked on unless something is there, and the unseen cells are said

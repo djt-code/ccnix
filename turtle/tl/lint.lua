@@ -437,7 +437,8 @@ local function belowTop(w) return w.where == "plan" and not w.top end
 -- so on, so one rule with many can't crowd out the others.
 -- For a plan, each warning is tagged where = "plan" when its cell, the floor under its walk cell or a cell it names is
 -- one of the plan's, else "around" (terrain and buildings round it); the plan's come first, and info adds inPlan and
--- around (the counts) and planSummary (the summary of the plan's own).  T.build prints only those, and a count of the rest.
+-- around (the counts) and planSummary (the summary of the plan's own).  T.build keeps only those, and a count of the rest, in
+-- its info.lintSummary.
 -- Two or more drops on the plan's top (walk cells in the layer over it: the tops of walls, mostly) are one line of the
 -- plan's summary, "N drops on the plan's top", their cells info.topDrops ({ x, y, z } each); the warnings keep them all.
 function T.lint(what, opts)
