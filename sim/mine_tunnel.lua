@@ -1613,8 +1613,14 @@ check("chests enough for many more homes: no wood sought",
 --     along 24 blocks, reaching 5 past both walls, the floor and the
 --     ceiling; lava behind a wall block in a row with no lane is sealed,
 --     waterlogged lichen in another is replaced.  A tunnel 24 wide takes
---     two scans across, their spare reach out past the walls
-local function surveyWorld(w, h, len, extra)
+--     two scans across, their spare reach out past the walls.  A 10x10
+--     (wider and taller than a scan's radius + 1) scans from its four
+--     corners, in a serpentine, and the next segment from its home first:
+--     ore 6 out past each wall, the floor and the ceiling, beside the
+--     corner furthest from it, is fetched (from the middle, a scan reaches
+--     4 out of the left wall and the floor, 3 out of the right wall and the
+--     ceiling)
+local function surveyWorld(w, h, len, extra, ...)
     local st = stock(8, 128, 32)
     st[#st + 1] = { name = SCANNER, count = 1 }
     setup(st)
@@ -1622,7 +1628,7 @@ local function surveyWorld(w, h, len, extra)
     startAt(); Mine.inv, Mine.files = {}, {}
     EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
     FUEL, DRY, SCANS = 6000, 0, 0
-    run(tostring(w), tostring(h), tostring(len))
+    run(tostring(w), tostring(h), tostring(len), ...)
 end
 surveyWorld(6, 6, 24, function()
     set(-5, 2, 12, ore("minecraft:iron_ore"))                  -- 5 out of the left wall
@@ -1653,6 +1659,25 @@ check("24 wide: two scans across it", SCANS == 2, SCANS .. " scans")
 check("their spare reach past the walls: ore 5 out of each fetched, and under the middle",
     oreGone(-5, 1, 8) and oreGone(28, 1, 8) and oreGone(11, -4, 8))
 checkFloor(0, 23, -1, 1, 16)
+check("back at the start", atStart())
+
+SCAN_AT = {}
+surveyWorld(10, 10, 32, function()
+    set(-6, 9, 8, ore("minecraft:iron_ore"))                   -- 6 out of the left wall, the top row
+    set(15, 0, 8, ore("minecraft:iron_ore"))                   -- 6 out of the right wall, the bottom row
+    set(4, -6, 4, ore("minecraft:iron_ore"))                   -- 6 under the floor
+    set(5, 15, 12, ore("minecraft:iron_ore"))                  -- 6 over the ceiling
+    set(-6, 0, 24, ore("minecraft:iron_ore"))                  -- the second segment: 6 out, the bottom row
+    set(15, 9, 24, ore("minecraft:iron_ore"))                  -- 6 out of the right wall, the top row
+end, "--spacing", "16")
+local at = table.concat(SCAN_AT, " ")
+SCAN_AT = nil
+check("10x10: the four corners, in a serpentine; the second segment (the last: its middle a block on, for the end) from its home first, then its corners",
+    at == "0,0,8 9,0,8 9,9,8 0,9,8 0,0,16 0,0,25 9,0,25 9,9,25 0,9,25", at)
+check("ore 6 out past both walls, the floor and the ceiling, by the far corners, fetched",
+    oreGone(-6, 9, 8) and oreGone(15, 0, 8) and oreGone(4, -6, 4) and oreGone(5, 15, 12)
+    and oreGone(-6, 0, 24) and oreGone(15, 9, 24))
+check("10x10 tunnel clear", leftIn(0, 9, 0, 9, 1, 32) == 0, leftIn(0, 9, 0, 9, 1, 32) .. " blocks left")
 check("back at the start", atStart())
 
 -- 18. entities in the way, as in game (a move into one fails, "Movement

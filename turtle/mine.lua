@@ -196,10 +196,11 @@
 --    walls.  It digs a segment out first (fewer lanes, no turning to the
 --    walls), then surveys it: it swaps the scanner in for its pickaxe (a
 --    chunk controller on the other side stays put), scans (radius 8, no
---    fuel) from as few spots as cover the segment's walls, floor and
---    ceiling (the tunnel's middle when one reaches all round, spots
---    round its sides when it's wider or taller, their spare reach out
---    past the walls), and swaps back.  Then it seals the lava, water and
+--    fuel) from spots that cover the segment's walls, floor and ceiling
+--    (the tunnel's middle when it's no more than 9 across and up; spots
+--    round its sides, at its corners, when it's wider or taller, so they
+--    see less of the dug-out air and more of the rock past the walls: a
+--    10x10 scans from its four corners), and swaps back.  Then it seals the lava, water and
 --    waterlogged or thin blocks the scans show in the walls, looks by hand
 --    at any wall block no scan covered, and tunnels out to the ore they
 --    found, up to SCAN_REACH (6) from the tunnel, and diamonds and coal
@@ -3725,9 +3726,14 @@ end
 -- half each side, so they see as far past the walls as they can (side
 -- to side, up and down); else it stays inside (along the tunnel: past a
 -- segment's ends is the next segment's, or the last one's, to scan).
+-- Outward across a tunnel wider (or taller) than SCAN_RADIUS + 1, at
+-- least two, at its edges: one in the middle would see the whole width
+-- of dug-out air, where one at an edge leaves some out and sees that
+-- much more rock past its own wall.
 function scanSpots(lo, hi, a, b, outward)
     local R, w = SCAN_RADIUS, 2 * SCAN_RADIUS + 1
     local n = math.max(1, math.ceil((hi - lo + 1) / w))
+    if outward and b - a + 1 > R + 1 then n = math.max(n, 2) end
     local spare = n * w - (hi - lo + 1)
     local out = {}
     for i = 0, n - 1 do
@@ -3741,11 +3747,12 @@ function scanSpots(lo, hi, a, b, outward)
 end
 
 -- The walls aren't looked at while a segment is dug with a scanner.
--- Once it's dug, scans from as few spots in it as cover its walls, floor
--- and ceiling (and the tunnel's end): from the middle of the tunnel while
--- one reaches both walls and both the floor and the ceiling, from spots
--- across it (round its sides; none in the middle, that would reach
--- neither) when it's wider or taller.  What they show as lava or water,
+-- Once it's dug, scans that cover its walls, floor and ceiling (and the
+-- tunnel's end): from the middle of the tunnel while it's no more than
+-- SCAN_RADIUS + 1 across and up (anywhere, a scan would hold all of its
+-- dug air), from spots round its sides when it's wider or taller (at
+-- its corners: a 10x10 scans from all four; none in the middle, that
+-- would reach no wall), gone round in a serpentine.  What they show as lava or water,
 -- or a waterlogged or thin block, in a wall is sealed or replaced from
 -- beside it; a wall block no scan covered (one that failed) is looked at
 -- by hand; ore they found is fetched after (fetchTargets).  The floor and
@@ -3756,10 +3763,14 @@ function survey(z1, z2)
     local R, last = SCAN_RADIUS, z2 == LENGTH
     local zEnd = last and z2 + 1 or z2
     local xs, ys = scanSpots(X0 - 1, X1 + 1, X0, X1, true), scanSpots(Y0 - 1, Y1 + 1, Y0, Y1, true)
-    local spots = {}
+    local spots, rows = {}, 0
     for _, z in ipairs(scanSpots(z1, zEnd, z1, z2)) do
         for _, y in ipairs(ys) do
-            for _, x in ipairs(xs) do
+            -- (back and forth across: each row the way the last one ended)
+            local row = {}
+            rows = rows + 1
+            for i = 1, #xs do row[i] = xs[rows % 2 == 0 and #xs + 1 - i or i] end
+            for _, x in ipairs(row) do
                 if x - R <= X0 - 1 or x + R >= X1 + 1 or y - R <= Y0 - 1 or y + R >= Y1 + 1
                         or (last and z + R >= zEnd) then
                     spots[#spots + 1] = { x = x, y = y, z = z }

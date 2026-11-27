@@ -815,6 +815,7 @@ local function geoScanner()
             end
             LAST_SCAN_AT = SLEPT or 0
             SCANS = SCANS + 1
+            if SCAN_AT then SCAN_AT[#SCAN_AT + 1] = P.x .. "," .. P.y .. "," .. P.z end   -- (where from, if asked)
             local out = {}
             for tx = -r, r do for ty = -r, r do for tz = -r, r do
                 local b = (tx == 0 and ty == 0 and tz == 0) and { name = "computercraft:turtle_normal" }
