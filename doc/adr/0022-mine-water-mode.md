@@ -190,3 +190,56 @@ here.
 4. [x] The trigger (D1) in `mineSegment` (`repair` keeps the careful mode for now).
 5. [x] Blocks from behind and the start (D4).
 6. [x] The header and help text, and the in-game checks.
+
+## Amendment (2026-11-27): the bulkhead only where the tunnel is mostly water
+
+The owner, from the field (turtle 23, a 10x10 with a Geo Scanner, building a bulkhead for a segment that wasn't
+fully under water): if the next stretch isn't fully submerged, the bulkhead is a waste of time. It should go up
+only when the tunnel ahead is more than half water (source blocks). It shouldn't go up for sporadic water.
+
+- **With a scanner:** open-water mode starts as before (D1). The bulkhead goes up only when more than half of the
+  tunnel cells the scans cover in the first `SCAN_RADIUS` slices ahead hold fluid (`BULKHEAD_SHARE`). Otherwise
+  it says `No bulkhead: N of the M cells ahead a scan saw are water or lava (P%: it takes more than half).`, and
+  the shell and fill do the work.
+- **Without a scanner** (the owner's design):
+  1. **Counting:** it counts the water it is next to, by column of the tunnel's cross-section (x, y). A source
+     counts 1 and flowing water 0.25. One lane running along a wet floor meets water in few columns, so
+     sporadic water and a wet floor stay under the threshold.
+  2. **Probing:** past the threshold (`WATER_COLUMNS`, within `WATER_SPAN` slices), it digs a few blocks
+     (`PROBE_LEN`) along the outside of the tunnel ahead: the top row and the two side columns. Those cells are
+     the tunnel's own, so the digging isn't wasted. It counts what it meets there, by the same weights.
+  3. **The decision:** more than half water, and it switches to open-water mode with the bulkhead (shell, fill,
+     dig). Otherwise it carries on tunnelling as before, sealing as it goes.
+- A segment that starts at an end cap (the one before ended under water) is open water with a bulkhead, as
+  before.
+
+### As built (the amendment)
+
+- **With a scanner:** as above; `waterAhead` in `turtle/mine.lua`. The trigger is D1's, unchanged.
+- **Counting (no scanner):** every look goes through `noteWater`: a source (or a waterlogged block) weighs 1,
+  flowing water a quarter (`FLOWING_WEIGHT`), filed by the cell's column (x, y) across the tunnel, walls and
+  floor included. A column counts its heaviest once. Not counted: looks on a trip, going over dug tunnel, or in
+  open-water mode. `WATER_COLUMNS = 4` within `WATER_SPAN` (4) slices starts a probe. A lone source the turtle
+  fills is one column. A fed source has it step in and seal round it: the source's own column and the four
+  round it, so a body of water passes 4 at its first wet block.
+- **The probe:** from the first source of that water (`columnsAt`), `PROBE_LEN = 4` blocks of up to five
+  lanes of the box: the top row's corners and middle, and the side columns half way up. They're dug as the
+  lanes dig them (`go`, then `scanHere`: water dried, filled or sealed, walls looked at). Every block it looks
+  at in that stretch counts, and the share is their weight over their number.
+  - **Getting there and back:** it goes out and back the way it went (in `trail`, as for a vein), so a trip
+    home meanwhile retraces its steps. It digs no new way from the water to the tunnel behind (the first
+    build dug one, and W1 flooded behind the home).
+  - **Bulk blocks first:** it carries enough to seal round every block (5 a block), or goes for them first, so
+    it isn't short with water left unsealed behind it.
+- **The decision:** over half, it prints `Water at z=N: the probe met P% (over half): working it as open
+  water.` and it's open water from the home, with the bulkhead (`No bulkhead: the probe met P% water ...` can't
+  follow a probe like that). Under half, it prints `... (under half): tunnelling on, sealing as it goes.`,
+  carries on with the lane it was on, and doesn't count again the water in the stretch it probed.
+- **--resume:** a stop mid-probe resumes the lane from its last saved block, which is before the probe. It
+  counts afresh, and probes again if it meets the water again.
+
+| scenario (no scanner) | before (49f7b6d) | now |
+|---|---|---|
+| W1: the lake | 1702 + 602 + 904 + 713, no bulkhead, 30 blocks of water behind home 1 | 1890 + 738 + 1030 + 839 = 4497, probe 98%, bulkhead, dry behind (main, before the amendment: 4065) |
+| W4: water under the bottom half | 1594 + 656 + 1059 + 467 = 3776, open water | 1012 + 1174 + 825 + 233 = 3244, three probes at 6%, careful mode |
+| W5: sporadic sources (7 lone ones, 6 of them two each in 3 columns) | 1856 + 882 + 1261 + 467 = 4466, open water and a bulkhead | 738 + 704 + 803 + 9 = 2254, no probe |

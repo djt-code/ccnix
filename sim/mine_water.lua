@@ -4,10 +4,12 @@
 -- runs into a lake (water all round it, on past where the tunnel ends):
 -- the shell first, then the water inside filled and dug out dry, an end
 -- cap left where the segment ends under water, and a bulkhead keeping the
--- tunnel behind the home dry meanwhile.  Then the same tunnel carried on
--- through the end cap; and a tunnel with water under its bottom half only
--- (a scanner on board), shelled only there.  Each prints its moves, turns
--- and blocks placed.
+-- tunnel behind the home dry meanwhile (no scanner: a probe says the
+-- tunnel's under water there).  Then the same tunnel carried on through
+-- the end cap; a tunnel with water under its bottom half only (a scanner
+-- on board), shelled only there, and the same without a scanner (the
+-- probe says under half: dug as ever); and sporadic water (no probe, dug
+-- as ever).  Each prints its moves, turns and blocks placed.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local Mine = require("mineworld")
@@ -98,6 +100,8 @@ for x = 0, W - 1 do for y = 0, H - 1 do
 end end
 check("W1: an end cap across the tunnel past its end (z=33)", capped == W * H, capped .. " of " .. W * H .. " blocks")
 check("W1: the tunnel behind home 1 never got water in it", most == 0, most .. " blocks at most")
+check("W1: the probe from the water's edge met more than half water", logHas("^Water at z=20: the probe met %d+%% %(over half%): working it as open water%."))
+check("W1: a bulkhead (the lake fills the tunnel ahead, more than half of it)", logHas("^Bulkhead across the tunnel at z=15"))
 check("W1: no more than 6000 moves and 3000 turns", Mine.moves < 6000 and Mine.turns < 3000, summary())
 check("W1: back at the start", atStart())
 
@@ -133,7 +137,53 @@ run(tostring(W), tostring(H), "32", "--spacing", "16", "--no-lights")
 WATERY = false
 check("W3: finished", logHas("^Done"))
 check("W3: shelled only the bottom of the tunnel", logHas("Open water at z=%d+%.%.%d+: rows 0 to 2"), summary())
+check("W3: no bulkhead (the tunnel ahead is under half water), and it says why",
+    not logHas("^Bulkhead across") and logHas("^No bulkhead: %d+ of the %d+ cells ahead a scan saw are water or lava %(%d+%%: it takes more than half%)"))
 check("W3: the tunnel is dry", wetIn(1, 32) == 0, wetIn(1, 32) .. " blocks of water")
 check("W3: no water touching open space (sealed off)", wetOpen(32) == 0, wetOpen(32) .. " open faces")
 check("W3: dug to the end", leftIn(0, W - 1, 0, H - 1, 1, 32) == 0, leftIn(0, W - 1, 0, H - 1, 1, 32) .. " blocks left")
 check("W3: back at the start", atStart())
+
+-- W4. W3's water with no scanner: the probe (the top row and the sides
+--     half way up) meets little of it: no open-water mode, no bulkhead
+setup({ { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 128 } })
+bulkAtStart(20)
+lake(-2, W + 1, -3, 1, 20, 30)
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, PLACED = 20000, 0, 0
+WATERY = true
+settleWater()
+run(tostring(W), tostring(H), "32", "--spacing", "16", "--no-lights")
+WATERY = false
+check("W4: finished", logHas("^Done"))
+check("W4: the probe met under half water: tunnelling on, no open water, no bulkhead",
+    logHas("^Water at z=20: the probe met %d+%% %(under half%): tunnelling on, sealing as it goes%.")
+    and not logHas("^Open water at") and not logHas("^Bulkhead across"), summary())
+check("W4: no water touching open space (sealed off)", wetOpen(32) == 0, wetOpen(32) .. " open faces")
+check("W4: the tunnel is dry", wetIn(1, 32) == 0, wetIn(1, 32) .. " blocks of water")
+check("W4: dug to the end", leftIn(0, W - 1, 0, H - 1, 1, 32) == 0, leftIn(0, W - 1, 0, H - 1, 1, 32) .. " blocks left")
+check("W4: back at the start", atStart())
+
+-- W5. sporadic water, no scanner: single sources in rock, two each in
+--     three columns at z=20..24 (six within four blocks: open water by the
+--     count before ADR-0022's amendment), and one more at the end; three
+--     columns is under WATER_COLUMNS: no probe, no open water, no bulkhead
+setup({ { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 128 } })
+bulkAtStart(20)
+for _, s in ipairs({ { 0, 2, 20 }, { 0, 2, 22 }, { 2, 4, 21 }, { 2, 4, 23 }, { 4, 1, 22 }, { 4, 1, 24 }, { 1, 0, 32 } }) do
+    set(s[1], s[2], s[3], { name = "minecraft:water", level = 0 })
+end
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, PLACED = 20000, 0, 0
+WATERY = true
+settleWater()
+run(tostring(W), tostring(H), "32", "--spacing", "16", "--no-lights")
+WATERY = false
+check("W5: finished", logHas("^Done"))
+check("W5: no probe, no open water, no bulkhead",
+    not logHas("the probe met") and not logHas("^Open water at") and not logHas("^Bulkhead across"), summary())
+check("W5: the tunnel is dry", wetIn(1, 32) == 0, wetIn(1, 32) .. " blocks of water")
+check("W5: dug to the end", leftIn(0, W - 1, 0, H - 1, 1, 32) == 0, leftIn(0, W - 1, 0, H - 1, 1, 32) .. " blocks left")
+check("W5: back at the start", atStart())

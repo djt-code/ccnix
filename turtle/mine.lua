@@ -91,11 +91,20 @@
 -- chunk at a time, it puts a shell of bulk blocks round the tunnel first
 -- (on the floor, walls and ceiling where water or lava may touch them:
 -- a scan says, else what it has seen), then fills the water inside in
--- and digs it out dry, the blocks coming back.  Meanwhile a bulkhead
--- across the tunnel behind the home keeps the tunnel behind it dry, and
--- a segment that ends in water gets an end cap, which the next one
--- starts from.  It needs bulk blocks for that (cobblestone, from the
--- homes behind, then the start's bottom chest).
+-- and digs it out dry, the blocks coming back.  Meanwhile, when more
+-- than half of the tunnel ahead is water, a bulkhead across the tunnel
+-- behind the home keeps the tunnel behind it dry, and a segment that
+-- ends in water gets an end cap, which the next one starts from.  It
+-- needs bulk blocks for that (cobblestone, from the homes behind, then
+-- the start's bottom chest).  With a Geo Scanner, the scans say where
+-- that is and how much of it is water.  Without one, it counts the water
+-- it digs next to, by where it is across the tunnel (a source counts
+-- far more than flowing water), so that a few stray sources don't count
+-- for much; once there's enough of it close together, it digs the next
+-- few blocks of the tunnel's top row and sides first (they're dug
+-- anyway), to see how full of water the tunnel is there.  More than
+-- half, and it goes on in open water; less, and it tunnels on as ever,
+-- sealing the water as it meets it.
 --
 -- The turtle's own column and row are part of the tunnel: it stands in
 -- the mouth at one bottom (or top, for negative heights) corner, and the
@@ -3177,19 +3186,47 @@ end
 -- Nothing is looked at first: a block put against rock just isn't put.
 -- Only the rows and sides that may have water are shelled and filled: a
 -- scan says, or a look; what neither has seen counts as wet.  It starts
--- once WATER_SOURCES water or lava sources turn up in the tunnel within
--- WATER_SPAN blocks, or a scan from the home shows a third of the
--- segment's sides in it, or the segment before left an end cap.  While a
--- segment is worked so, a bulkhead (a wall across the tunnel just behind
--- the home) keeps what water gets past off the tunnel behind: what goes
--- through it closes it again behind itself (see go), and it comes down
--- once the segment is dry.
-WATER_SOURCES = 6    -- sources met within...
+-- where the segment before left an end cap, and:
+--  - with a Geo Scanner: where a scan from the home shows a third of the
+--    segment's sides in fluid, or WATER_SOURCES water or lava sources
+--    turn up in the tunnel within WATER_SPAN blocks;
+--  - without one: where the water it has been next to, counted by
+--    column of the tunnel's cross-section (see noteWater), reaches
+--    WATER_COLUMNS within WATER_SPAN blocks.  It probes first (see
+--    probeWater): PROBE_LEN blocks of the top row and the side columns
+--    from the water's edge on, dug as ever, counting the water it meets
+--    there.  More than half water (BULKHEAD_SHARE), and it's open water;
+--    else it tunnels on as ever, sealing as it goes.
+-- While a segment is worked so, and the tunnel ahead is more than half
+-- water (BULKHEAD_SHARE: a scan or the probe says, see waterAhead), a
+-- bulkhead (a wall across the tunnel just behind the home) keeps what
+-- water gets past off the tunnel behind: what goes through it closes it
+-- again behind itself (see go), and it comes down once the segment is
+-- dry.  Where less of it is water (a lake bed along one side), the shell
+-- and the fill keep it out, and a bulkhead would be time spent for
+-- nothing.
+WATER_SOURCES = 6    -- (with a scanner) sources met within...
 WATER_SPAN = 4       -- ...this many blocks of each other: open water
+-- (without one) the water it has been next to, by column: a source 1,
+-- flowing water a quarter; within WATER_SPAN blocks, this much and it
+-- probes.  A lone source it fills is one column, and a lane along a wet
+-- floor or wall meets one or two; a source with water beside it (a body
+-- of water) has the turtle step in and seal round it, which shows it
+-- the source's own column and the four round it: 5 at its first wet
+-- block.  4 takes a body of water, or four sources in four columns close
+-- together.
+WATER_COLUMNS = 4
+FLOWING_WEIGHT = 1 / 4
+PROBE_LEN = 4        -- blocks of each probe lane, from the water's edge on
 WATER_SHARE = 1 / 3  -- (a scan from the home) share of the segment's sides in fluid: open water
+BULKHEAD_SHARE = 1 / 2   -- more than this share of the tunnel ahead water: a bulkhead behind the home
 FILLER_KEEP_WATER = 6 * 64   -- bulk blocks carried while it works in open water
 WATER_FILE = T.dataPath("mine.water")
 sourcesMet = {}      -- z of the sources it has met in the tunnel this segment
+waterCols = {}       -- "x,y" -> { [z] = weight }: the water it has been next to this segment, by column
+probing = nil        -- while it probes: { a, b (the stretch), cells = { key -> weight } }
+probed = nil         -- the last probe this segment: { a, b (the stretch), share, met (blocks) }
+probedZ = {}         -- { a, b } of each stretch probed this segment (the water there is counted)
 seenOut = {}         -- key -> true (wet) or false: blocks outside the tunnel looked at this segment
 waterMode = false    -- working a stretch in open water
 wetTo = nil          -- (a chunk's fill) the furthest z it went into water
@@ -3220,13 +3257,53 @@ function loadWater()
     end
 end
 
--- Every look outside the tunnel is noted: is water there?
+-- Every look is noted: is water there?  (Outside the tunnel, in seenOut;
+-- and how wet, by column, see noteWater.)
 rawLook = look
 function look(d)
     local ok, data = rawLook(d)
     local n = neighbour(d)
-    if not inBox(n) then seenOut[key(n)] = (ok and (FLUID[data.name] or waterIn(data))) and true or false end
+    local wet = ok and (FLUID[data.name] or waterIn(data)) and true or false
+    if not inBox(n) then seenOut[key(n)] = wet end
+    noteWater(n, wet and (isSource(data) and 1 or FLOWING_WEIGHT) or 0)
     return ok, data
+end
+
+-- A look at p found water or lava of weight w there (1 a source, a
+-- quarter flowing, 0 none).  Probing, every block it looks at in the
+-- stretch counts (see probeWater).  Else, digging the segment (not on a
+-- trip, nor going over tunnel dug before), water goes in waterCols under
+-- its column: one column counts its most, however often it's met there.
+-- What it meets in a stretch it has probed is counted already.
+function noteWater(p, w)
+    if probing and p.z >= probing.a and p.z <= probing.b then
+        probing.cells[key(p)] = math.max(probing.cells[key(p)] or 0, w)
+    end
+    if w == 0 or probing or waterMode or inTrip or repairing then return end
+    for _, s in ipairs(probedZ) do
+        if p.z >= s[1] and p.z <= s[2] then return end
+    end
+    local c = p.x .. "," .. p.y
+    waterCols[c] = waterCols[c] or {}
+    waterCols[c][p.z] = math.max(waterCols[c][p.z] or 0, w)
+end
+
+-- The water by column within WATER_SPAN blocks of z (see noteWater), and
+-- where it starts: the first z of a source there (what flows out of it
+-- may come back a block or two), else of any of it.
+function columnsAt(z)
+    local sum, edge, flows = 0, nil, nil
+    for _, c in pairs(waterCols) do
+        local most = 0
+        for wz, w in pairs(c) do
+            if math.abs(wz - z) <= WATER_SPAN then
+                most = math.max(most, w)
+                if w >= 1 then edge = math.min(edge or wz, wz) else flows = math.min(flows or wz, wz) end
+            end
+        end
+        sum = sum + most
+    end
+    return sum, edge or flows
 end
 
 -- A source of water or lava met at p (filled, or cut off).
@@ -3234,14 +3311,133 @@ function noteSource(p)
     if inBox(p) then sourcesMet[#sourcesMet + 1] = p.z end
 end
 
--- Has it met enough sources round z to call it open water?
+-- Has it met enough water round z to call it open water (or, without a
+-- scanner, to probe)?
 function openWaterAt(z)
     if waterMode then return false end
+    if not hasScanner then return columnsAt(z) >= WATER_COLUMNS end
     local n = 0
     for _, s in ipairs(sourcesMet) do
         if math.abs(s - z) <= WATER_SPAN then n = n + 1 end
     end
     return n >= WATER_SOURCES
+end
+
+-- The probe (no scanner), once water's met round z: how much of the
+-- tunnel there is water?  From the water's edge, PROBE_LEN blocks along
+-- the tunnel's top row (its middle and corners) and its side columns
+-- (half way up), dug as the lanes dig them (water dried, filled or
+-- sealed as it's met, the walls looked at), so the blocks it digs are
+-- the tunnel's own, and the lanes go through them later.  It counts the
+-- blocks it looks at there, in the tunnel and round it, by noteWater's
+-- weights: the share is their water over how many there are.  It goes
+-- and comes back the way it went (in trail, as in a vein: a trip home
+-- meanwhile goes that way too), so the only way from the water to the
+-- tunnel behind is the one it has sealed as it went; and back in lane i
+-- (of lanes), where it met the water, it prints what it found and
+-- whether it's open water: true if it is (more than half).  A stop
+-- meanwhile is safe: the lane's progress is as saved before, and a
+-- --resume counts and probes again from there.
+function probeWater(z, za, z2, lanes, i)
+    local _, edge = columnsAt(z)
+    local a = math.max(za, math.min(edge or z, z2))
+    local b = math.min(a + PROBE_LEN - 1, z2)
+    local ymid = Y0 + math.floor((Y1 - Y0) / 2)
+    local xmid = X0 + math.floor((X1 - X0) / 2)
+    local want, seen = {}, {}
+    for _, p in ipairs({ { X0, ymid }, { X0, Y1 }, { xmid, Y1 }, { X1, Y1 }, { X1, ymid } }) do
+        local c = p[1] .. "," .. p[2]
+        if laneAt[c] and not seen[c] then
+            seen[c] = true
+            want[#want + 1] = { x = p[1], y = p[2] }
+        end
+    end
+    via = i % 2 == 0 and lanes[i - 1] or nil   -- (the way home from lane i, as digLanes has it)
+    -- the bulk blocks to seal round every block of it first (wet ground:
+    -- it carries more from now on, as dry does), so it isn't short half
+    -- way, with water it can't seal behind it
+    local function isFiller(n) return FILLER[n] end
+    local need = 5 * PROBE_LEN * #want
+    fillerKeep = math.max(fillerKeep, FILLER_KEEP_WET, need)
+    if T.countItem(isFiller) < need then
+        fillerWant = need
+        trip("Short of bulk blocks to probe the water")
+        fillerWant = nil
+    end
+    probing = { a = a, b = b, cells = {} }
+    local base = #trail
+    local function step(d)
+        if not go(d) then return false end
+        trail[#trail + 1] = d
+        return true
+    end
+    local function to(axis, v)                 -- (as alongAxis, a step at a time)
+        while T.pos[axis] ~= v do
+            local up = T.pos[axis] < v
+            local d = axis == "y" and (up and "up" or "down") or axis == "x" and (up and 1 or 3) or (up and 0 or 2)
+            if not step(d) then return false end
+        end
+        return true
+    end
+    for j, lane in ipairs(want) do
+        local ahead = j % 2 == 1
+        local first, last = ahead and a or b, ahead and b or a
+        if to("y", lane.y) and to("x", lane.x) and to("z", first) then
+            scanHere()
+            while T.pos.z ~= last and to("z", T.pos.z + (ahead and 1 or -1)) do scanHere() end
+        end
+    end
+    for k = #trail, base + 1, -1 do            -- back the way it came, to lane i
+        retreat(trail[k])
+        trail[k] = nil
+    end
+    local wet, met = 0, 0
+    for _, w in pairs(probing.cells) do
+        wet, met = wet + w, met + 1
+    end
+    probing = nil
+    probedZ[#probedZ + 1] = { a, b }
+    waterCols = {}                         -- (counted afresh from here)
+    local share = met > 0 and wet / met or 0
+    probed = { a = a, b = b, share = share, met = met }
+    local pct = math.floor(share * 100 + 0.5)
+    if share > BULKHEAD_SHARE then
+        print(string.format("Water at z=%d: the probe met %d%% (over half): working it as open water.", a, pct))
+        return true
+    end
+    print(string.format("Water at z=%d: the probe met %d%% (under half): tunnelling on, sealing as it goes.", a, pct))
+    return false
+end
+
+-- How much of the tunnel ahead, from z = a on, is water: a share (0 to 1)
+-- and how it knows, or nil and why.  With scans covering at least half of
+-- its first SCAN_RADIUS slices: the share of the cells they cover that
+-- hold fluid.  Without them, the probe's share (see probeWater).  A
+-- segment that starts at an end cap is taken as under water (the one
+-- before ended so).
+function waterAhead(a, b)
+    local fluid, seen, cells = 0, 0, 0
+    for z = a, math.min(b, a + SCAN_RADIUS - 1) do
+        for x = X0, X1 do
+            for y = Y0, Y1 do
+                cells = cells + 1
+                local said = scanSays({ x = x, y = y, z = z })
+                if said then
+                    seen = seen + 1
+                    if said == "fluid" then fluid = fluid + 1 end
+                end
+            end
+        end
+    end
+    if seen > 0 and seen * 2 >= cells then
+        return fluid / seen, string.format("%d of the %d cells ahead a scan saw are water or lava", fluid, seen)
+    end
+    if capZ == a then return 1, "the segment before ended under water (its end cap)" end
+    if probed then
+        return probed.share, string.format("the probe met %d%% water (in the %d blocks it looked at, z=%d..%d)",
+            math.floor(probed.share * 100 + 0.5), probed.met, probed.a, probed.b)
+    end
+    return nil, "nothing says how much of it is water"
 end
 
 -- May there be water or lava at p, as far as it knows?  (A scan or a
@@ -3525,7 +3721,15 @@ function openWater(z1, z2, opts)
     waterMode = true
     fillerKeep = math.max(fillerKeep, FILLER_KEEP_WATER)
     local seg = opts.seg or { z1, z2 }
-    if opts.bulkhead and home.k > 0 and not bulkheadZ then bulkheadUp() end
+    if opts.bulkhead and home.k > 0 and not bulkheadZ then
+        local share, how = waterAhead(z1, z2)
+        if share and share > BULKHEAD_SHARE then
+            bulkheadUp()
+        else
+            print(string.format("No bulkhead: %s%s.", how,
+                share and string.format(" (%d%%: it takes more than half)", math.floor(share * 100 + 0.5)) or ""))
+        end
+    end
     if capZ and capZ >= z1 and capZ <= z2 then capZ = nil; saveWater() end
     local a, done = z1, true
     local upTo = z1 - 1
@@ -3574,7 +3778,8 @@ end
 -- The lanes from z1 to z2 (dug, from the open side behind z1).
 -- opts.from: how far it got before (resuming); opts.save: progress saved
 -- as it goes; opts.watch: open water met (see openWaterAt) stops it, with
--- "water"; opts.seg: the segment's ends (z1, z2 if not given).
+-- "water" and the lane and z it got to; opts.seg: the segment's ends (z1,
+-- z2 if not given).
 function digLanes(lanes, z1, z2, opts)
     local from, seg = opts.from, opts.seg or { z1, z2 }
     local startLane, startZ = from and from.lane or 1, from and from.z
@@ -3614,7 +3819,7 @@ function digLanes(lanes, z1, z2, opts)
                     scanHere()
                     if opts.watch and openWaterAt(z) then
                         via = nil
-                        return "water"
+                        return "water", i, z
                     end
                     lightSpawners()        -- (one found above or below)
                     lightHere()
@@ -3660,7 +3865,7 @@ function mineSegment(z1, z2, from)
     print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
         tostring(turtle.getFuelLevel())))
     known, targets, scanFrom, scanned = {}, {}, {}, {}
-    sourcesMet, seenOut = {}, {}
+    sourcesMet, waterCols, probed, probedZ, seenOut = {}, {}, nil, {}, {}
     local wet0 = stats.wet
     local startLane, startZ = 1, nil
     if from then
@@ -3688,12 +3893,22 @@ function mineSegment(z1, z2, from)
     while true do
         if not water then
             if za > z1 then tunnelTo({ x = lanes[1].x, y = lanes[1].y, z = za - 1 }) end
-            water = digLanes(lanes, za, z2, { from = za == z1 and from or nil, save = true, watch = home.k > 0 }) == "water"
+            -- (without a scanner, water met is probed first: under half
+            -- water, it carries on from where it was)
+            local at = za == z1 and from or nil
+            repeat
+                local how, i, z = digLanes(lanes, za, z2, { from = at, save = true, watch = home.k > 0 })
+                water, at = how == "water", nil
+                if water and not hasScanner and not probeWater(z, za, z2, lanes, i) then
+                    water, at = false, { lane = i, z = z }
+                end
+            until not at
         end
         if not water then break end
         -- open water: from the home (or the end of what it has dug dry)
         saveProgress(1, za)
         if za == z1 then tunnelHome() end
+        via = nil
         local upTo = openWater(za, z2, { bulkhead = true, seg = { z1, z2 } })
         if not upTo then                       -- (something in the way: the rest as ever)
             tunnelHome()
@@ -3701,7 +3916,7 @@ function mineSegment(z1, z2, from)
             break
         end
         if upTo >= z2 then break end
-        za, water, sourcesMet = upTo + 1, false, {}
+        za, water, sourcesMet, waterCols = upTo + 1, false, {}, {}
     end
     via = nil
     saveProgress(#lanes + 1, z2)
