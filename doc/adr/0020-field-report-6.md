@@ -1,6 +1,6 @@
 # ADR-0020: What the turtle's v6 test pass found: craft rounds, recipes, bulk chests per base, seals, unseen cells, the clock, and the prompt (sixth pass)
 
-**Status:** Accepted (2026-11-20): D1 to D4 decided; the release waits for the owner's ok
+**Status:** Accepted (2026-11-20): D1 to D4 decided; released as ccnix 0.55.0 (2026-11-27)
 **Date:** 2026-11-20
 **Deciders:** Dan Theisen
 
@@ -188,5 +188,5 @@ the replaced record was a finished build (4 of 4 cells).
 
 ### Phase 4: release (on the owner's ok) and hand back
 1. [x] The in-game checks: #358, a sub-issue a check (#359 to #379).
-2. [ ] Version bump and release: 0.55.0.
+2. [x] Version bump and release: 0.55.0 (2026-11-27).
 3. [ ] The v7 test plan (`/turtle-test-pass`), with #200, #210 and #217 set up again.
