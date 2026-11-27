@@ -161,6 +161,25 @@ check("claude.log: each call's tokens (from the cache, written, new, out) and ho
 check("claude.log: the goal's tokens in all when it's done",
     logText:find("\n" .. STAMP .. "goal done: %[525 tokens in: 150 from the cache, 75 written to it, 300 new; 60 out; 585 in all%]\n"))
 
+-- 1b. an entry's later lines indented with a tab (ADR-0023 Phase 1 item 5), so only the harness's entries start at
+--     column 0 with a time: a result that prints an old start line, or thinking over lines, doesn't read as an entry
+fresh({ "" })
+HTTP.queue = {
+    reply({ { type = "thinking", thinking = "First the log.\nstart: is a word here", signature = "sig" },
+            toolUse("lua", { code = "print('2026-01-01 00:00:00 start: fake')\nreturn 1" }) }, "tool_use"),
+    reply({ text("Done.\nTwo lines.") }, "end_turn"),
+}
+run("print an old start line")
+local log1b = Mine.files["claude.log"] or ""
+local atZero = true
+for line in log1b:gmatch("[^\n]+") do
+    if not (line:find("^" .. STAMP) or line:find("^\t")) then atZero = false end
+end
+check("claude.log: an entry's later lines are indented with a tab, so an old start line printed is never at column 0",
+    log1b:find("\n\t2026-01-01 00:00:00 start: fake\n", 1, true) and not log1b:find("\n2026-01-01 00:00:00 start: fake", 1, true)
+        and log1b:find("\n\treturn 1\n", 1, true) and log1b:find(" thinking: First the log.\n\tstart: is a word here\n", 1, true)
+        and log1b:find(" claude: Done.\n\tTwo lines.\n", 1, true) and atZero, log1b)
+
 -- 2. the sandbox: fs is out of reach, a syntax error and a runtime error
 --    come back as error results, tables are serialised, definitions
 --    persist between calls
@@ -875,7 +894,7 @@ check("setmetatable, getmetatable, rawget, rawset, rawequal, xpcall, keys, colou
 fresh({ "" })
 local UTF = "3\195\1513 \226\128\148 it\226\128\153s done"
 HTTP.queue = {
-    reply({ text(UTF), { type = "server_tool_use", id = "srvtoolu_2", name = "code_execution", input = { code = "x" } },
+    reply({ text(UTF), { type = "server_tool_use", id = "srvtoolu_2", name = "code_execution", input = {} },
             thinking(), toolUse("lua", { code = "print('a' .. string.char(167) .. 'b')" }) }, "tool_use"),
     reply({ text("Done.") }, "end_turn"),
 }
@@ -885,7 +904,26 @@ check("the model's UTF-8 goes back as it came", u2 and u2[2].content[1].text == 
 local lr = tostring((resultsIn(2).toolu_1 or {}).content)
 check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, lr)
 check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
-check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))
+check("the API's own code step with nothing in its input: shown by its name", Mine.logHas("^%-%-%- code execution$"))
+
+-- 20b. #394: the code execution that comes with the web tools, named in the log and on the screen with its input
+--      (code_execution's code, bash_code_execution's command); the prompt says it runs on Anthropic's side and can't
+--      see the turtle
+fresh({ "" })
+HTTP.queue = {
+    reply({ { type = "server_tool_use", id = "srvtoolu_3", name = "code_execution", input = { code = "print(len(results))" } },
+            { type = "server_tool_use", id = "srvtoolu_4", name = "bash_code_execution", input = { command = "ls /tmp" } },
+            text("Filtered.") }, "end_turn"),
+}
+run("look it up")
+local log20b = Mine.files["claude.log"] or ""
+check("code execution and bash code execution logged and shown by name, with their code and command",
+    log20b:find(" code execution: print(len(results))\n", 1, true) and log20b:find(" bash code execution: ls /tmp\n", 1, true)
+        and Mine.logHas("^%-%-%- code execution: print%(len%(results%)%)$") and Mine.logHas("^%-%-%- bash code execution: ls /tmp$"),
+    log20b)
+local sys20b = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt: the web tools' code execution runs on Anthropic's side and can't see the turtle; the turtle is lua's",
+    sys20b:find("The code execution that comes with them runs on Anthropic's side: it can't see the turtle, its files or the world; anything about the turtle goes through lua.", 1, true))
 
 -- 21. The log rotates at claude.logSize, keeping one old copy (claude.logKeep 1: scenario 38 has more); the helpers
 --     the model keeps in /claude/helpers.lua are in its code's world; a
@@ -1226,7 +1264,7 @@ local f30 = resultsIn(4).toolu_3
 check("...and a status line that fails says why in its place", f30 and f30.content == "-> 1" and f30.status == "[status: no count]",
     f30 and tostring(f30.status))
 check("...the line is logged with the result, not shown on the screen",
-    (Mine.files["claude.log"] or ""):find("result:\n-> two\n[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
+    (Mine.files["claude.log"] or ""):find("result:\n\t-> two\n\t[at 0,0,2 facing 0,", 1, true) and not Mine.logHas("^%[at 0,0,2"))
 fresh({ "" })
 Mine.set(0, -1, 0, { name = "minecraft:lava", level = 0 })
 Mine.set(0, 1, 0, { name = "minecraft:lava", level = 0 })
@@ -2013,6 +2051,10 @@ check("--resume: a new conversation whose first message says it was interrupted,
 check("...with the options the file kept (steps 3, cache 1h)", m37 and m37.cache_control.ttl == "1h"
     and (Mine.files["claude.log"] or ""):find("start: claude --steps 3 --cache 1h (model claude-opus-5-5, effort medium, steps 3, cache 1h;", 1, true),
     (Mine.files["claude.log"] or ""):sub(1, 200))
+-- (#404: the start line said nothing of where those options came from)
+check("...and the start line says they came from resume.txt",
+    (Mine.files["claude.log"] or ""):find("; resuming the goal in resume.txt, with its options: --steps 3 --cache 1h\n", 1, true),
+    (Mine.files["claude.log"] or ""):match("start: [^\n]*"))
 local k2 = resultsIn(2).toolu_1
 check("...the file kept as it was meanwhile (not the interrupted message), and gone at the end",
     k2 and k2.content == "-> options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n" and Mine.files["claude/resume.txt"] == nil,
@@ -2024,6 +2066,31 @@ HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("--resume", "--steps", "9")
 check("--resume: options given on the command line win over the file's",
     (Mine.files["claude.log"] or ""):find("steps 9, cache 5m", 1, true) ~= nil)
+
+-- ADR-0023 D7: --confirm is for whoever is at the turtle now, so resume.txt doesn't keep it, and an older file's
+-- isn't taken (as claude.options doesn't keep it)
+fresh({ "y", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig the tunnel", "--steps", "400", "--confirm")
+local k7 = resultsIn(2).toolu_1
+check("--confirm isn't kept in resume.txt (the start line still says it)",
+    k7 and k7.content == "-> options: --steps 400\ndig the tunnel\n"
+        and (Mine.files["claude.log"] or ""):find("start: claude --steps 400 --confirm (", 1, true), k7 and k7.content)
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3 --confirm\ndig the tunnel\n"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 'ran'" }) }, "tool_use"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+run("--resume")
+local k7b = resultsIn(2).toolu_1
+check("--resume of a file with --confirm in it: the code runs unasked, and the start line names only --steps",
+    k7b and k7b.content == "-> ran" and not (Mine.files["claude.log"] or ""):find("confirming each call", 1, true)
+        and (Mine.files["claude.log"] or ""):find("with its options: --steps 3\n", 1, true),
+    (Mine.files["claude.log"] or ""):match("start: [^\n]*"))
 
 fresh({ "" })
 Mine.files["claude/resume.txt"] = "dig the tunnel, rewritten\n"
@@ -2400,6 +2467,53 @@ check("a goal ended on a tool call: the summary leaves that turn out, kept after
     #(c3b.messages or {}))
 end
 
+-- 43c. a cold cache before a goal (ADR-0023 D6, #395): when the last reply is older than the cache's lifetime (less a
+--      margin) and the last call had over 50k in, the conversation is summarized before the goal is sent, in a
+--      compaction request without the top-level cache mark (the system prompt keeps its own), so it doesn't write
+--      the whole conversation to the cache; a warm cache, a short conversation, or an hour's cache after a few
+--      minutes: none.  (The clock moves on while the player types the next goal.)
+do
+local timeWas43, readWas43 = os.time, read
+local function coldRun(tokens, idle, compacts, ...)
+    fresh({ "and the next", "" })
+    local skipped = 0
+    os.time = function(t) if t ~= nil then return timeWas43(t) end return timeWas43() + skipped end
+    read = function()
+        local line = readWas43()
+        if line == "and the next" then skipped = skipped + idle end
+        return line
+    end
+    HTTP.queue = {
+        reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(tokens - 1000)),
+        reply({ text("Done.") }, "end_turn", inTokens(tokens)),
+    }
+    if compacts then HTTP.queue[#HTTP.queue + 1] = M.compactionReply("Cold summary.") end
+    HTTP.queue[#HTTP.queue + 1] = reply({ text("Next done.") }, "end_turn", inTokens(20000))
+    run("grow some", ...)
+    os.time, read = timeWas43, readWas43
+end
+coldRun(60000, 400, true)
+local c3c = HTTP.requests[3] and HTTP.requests[3].body or {}
+check("a cold cache and 60k in: one compaction request before the goal's, without the top-level cache mark, the system prompt's kept",
+    #HTTP.requests == 4 and c3c.compaction and #c3c.messages == 4 and c3c.cache_control == nil
+        and c3c.system[1].cache_control and c3c.system[1].cache_control.type == "ephemeral"
+        and HTTP.requests[2].body.cache_control ~= nil, #HTTP.requests)
+local m4c = HTTP.requests[4] and HTTP.requests[4].body or {}
+check("...then the goal starts from the summary, the conversation's mark back",
+    blockOf(4) and blockOf(4).content == "Cold summary." and m4c.messages[2].content:find("^and the next")
+        and m4c.cache_control and m4c.cache_control.type == "ephemeral", m4c.messages and tostring(m4c.messages[2].content))
+check("...logged, with how long it was idle",
+    (Mine.files["claude.log"] or ""):find("compact: the cache had gone cold (400 s idle): compacting before the goal\n", 1, true)
+        and (Mine.files["claude.log"] or ""):find("compacting at a goal's start (a cold cache): 4 messages", 1, true),
+    (Mine.files["claude.log"] or ""):match("compact[^\n]*"))
+coldRun(60000, 100)
+check("a warm cache: no compaction (three calls)", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+coldRun(40000, 400)
+check("a cold cache and 40k in: no compaction", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+coldRun(60000, 400, false, "--cache", "1h")
+check("an hour's cache after 400 s: still warm, no compaction", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+end
+
 -- 44. compaction inside a goal (ADR-0013 D9; 150k since ADR-0015 D7): once a call's input reaches
 --     150k, right after its tool results the conversation is summarized
 --     but for the last 3 turns (a reply and its results each): the
@@ -2607,6 +2721,29 @@ HTTP.queue = { reply({ text("Hi.") }, "end_turn") }
 run("say hello")
 local hello = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
 check("a goal sharing no words with a description: no nudge", hello:find("[Your skills", 1, true) and not hello:find("may fit", 1, true), hello)
+
+-- ADR-0023 Phase 1 item 8: everyday words aren't matched on ("great work buddy!" brought three unrelated skills, with
+-- the shipped ones' real descriptions); a resumed goal is matched on the goal as the player gave it, not on the
+-- resume wrapper's words or the lines the model added to resume.txt
+fresh({ "" })
+for _, name in ipairs({ "big-jobs", "build-for-player", "field-report", "light-an-area", "redstone-and-doors", "storage" }) do
+    fs.makeDir("turtle/skills")
+    fs.makeDir("turtle/skills/" .. name)
+    Mine.files["turtle/skills/" .. name .. "/skill.md"] = repoFile("turtle/skills/" .. name .. "/skill.md")
+end
+HTTP.queue = { reply({ text("Thanks!") }, "end_turn") }
+run("great", "work", "buddy!", "thanks,", "that", "was", "nice", "and", "good,", "cool", "and", "fun")
+local praise = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("praise for the work fits no skill: work, great, buddy, nice, thanks, good, cool, fun aren't matched on",
+    praise:find("[Your skills", 1, true) and not praise:find("may fit", 1, true), praise:match("%[Skills that may fit[^%]]*%]"))
+fresh({ "" })
+shipped()
+Mine.files["claude/resume.txt"] = "options: --steps 3\nsort the chests\nat 0,0,5; the place is half done, reading memory\n"
+HTTP.queue = { reply({ text("Carried on.") }, "end_turn") }
+run("--resume")
+local resumed = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("a resumed goal: the skills that fit the goal itself (storage), not the wrapper or the lines added (place: light-an-area)",
+    resumed:find("\n[Skills that may fit: storage]", 1, true), resumed:match("%[Skills that may fit[^%]]*%]"))
 
 -- ccnix's layers: the updates (/ccnix) over the ROM (/rom/ccnix)
 fresh({ "" })
