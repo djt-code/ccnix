@@ -196,9 +196,12 @@
 -- while the conversation grows, and it's summarized (the API's
 -- compaction) to keep it in bounds: when a goal ends with the last call's
 -- input over 100k tokens, while you type the next goal (if you're
--- quicker, the goal waits for it; a /new or an empty line doesn't); and
--- inside a long goal once a call's input reaches 150k, right after the
--- code's results, the last 3 turns kept word for word.  The model writes
+-- quicker, the goal waits for it; a /new or an empty line doesn't); before
+-- a goal over 50k when the cache has gone cold (the last reply older than
+-- the --cache time), so the goal doesn't write the whole conversation to
+-- the cache again; and inside a long goal once a call's input reaches
+-- 150k, right after the code's results, the last 3 turns kept word for
+-- word.  The model writes
 -- the summary, having read all of it: the goal and how far it got, what
 -- you said, places, what's built, lessons, its helpers; and it goes on
 -- from that in place of what it summarized.  /new is cheaper still
@@ -343,9 +346,11 @@ CLEAR.HARD = { trigger = 50000, keep = 2, atLeast = 0, thinking = 3 }
 -- results, the last COMPACT.keep turns (a reply and its results each) kept
 -- word for word after the summary.  The summary call may think too,
 -- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
+-- Before a goal, when the cache has gone cold and the last call had over
+-- COMPACT.cold in, it's summarized first (COMPACT.beforeGoal).
 -- INSTRUCTIONS replace the API's own summary prompt (at most 16384
 -- characters, and they must say not to call tools).
-local COMPACT = { boundary = 100000, mid = 150000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
+local COMPACT = { boundary = 100000, mid = 150000, cold = 50000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
     INSTRUCTIONS = table.concat({
         "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
         "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
@@ -2255,7 +2260,8 @@ local function body(compact)
         -- the model dated its files days off without it.)
         system = { { type = "text", text = SYSTEM .. "\n\nToday is " .. os.date("!%Y-%m-%d", now()) .. " (UTC).",
                      cache_control = CACHE } },
-        cache_control = CACHE,
+        -- (not on a compaction for a cold cache, ADR-0023 D6: it would write the whole conversation to it)
+        cache_control = not (compact and compact.cold) and CACHE or nil,
         tools = TOOLS,
         messages = compact and compact.messages or messages,
         output_config = { effort = EFFORT },
@@ -2607,18 +2613,18 @@ end
 -- Summarize messages 1 to cut (`why` for the log), keeping the rest word
 -- for word after the summary: true once the conversation starts with it;
 -- false (logged) when no summary came, and the next request clears deep.
-function COMPACT.run(cut, why)
-    local done = COMPACT.ask(cut, why)
+function COMPACT.run(cut, why, cold)
+    local done = COMPACT.ask(cut, why, cold)
     if not done then CLEAR.deep = CLEAR.lastInput or 0 end
     return done
 end
 
-function COMPACT.ask(cut, why)
+function COMPACT.ask(cut, why, cold)
     local part = {}
     for i = 1, cut do part[i] = messages[i] end
     log(string.format("compacting at %s: %d messages, %d kept as they are; the last call had %d tokens in",
         why, cut, #messages - cut, CLEAR.lastInput or 0))
-    local asked = { messages = part, maxTokens = COMPACT.maxTokens }
+    local asked = { messages = part, maxTokens = COMPACT.maxTokens, cold = cold }
     for _ = 1, 2 do
         local started = now()
         local reply, err = request(asked)
@@ -2659,10 +2665,13 @@ end
 -- All of it: an assistant turn whose tool calls have no results (the API
 -- refuses that) stays out, kept.
 COMPACT.DROPPED = { [""] = true, ["/new"] = true }
+function COMPACT.cutAll()
+    return #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+end
 function COMPACT.whileAsking(label)
     if not COMPACT.due() then return ask(label) end
     say("grey", string.format("(the conversation, %dk tokens, is summarized while you type)", math.floor(CLEAR.lastInput / 1000 + 0.5)))
-    local cut = #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+    local cut = COMPACT.cutAll()
     if not (parallel and parallel.waitForAny) then
         local line = ask(label)
         if not COMPACT.DROPPED[text.trim(line)] then COMPACT.run(cut, "a goal's end") end
@@ -2680,6 +2689,25 @@ function COMPACT.whileAsking(label)
             while not w.done and not COMPACT.DROPPED[text.trim(w.line)] do os.pullEvent() end
         end)
     return w.line
+end
+
+-- Before a goal (ADR-0023 D6, #395): when the cache has gone cold (the
+-- last reply is older than the cache's lifetime, less CACHE_MARGIN) and
+-- the last call had over COMPACT.cold in, the goal's request would write
+-- the whole conversation to the cache again, at the write price.  It's
+-- summarized first instead, by a request without the top-level cache mark
+-- (the system prompt keeps its own), so that one doesn't write it either;
+-- the goal then goes on from the summary.  Not when a summary has just
+-- failed (CLEAR.deep: the deep clear does the work).
+function COMPACT.beforeGoal()
+    local last = replyLog.last
+    if not last or (CLEAR.lastInput or 0) <= COMPACT.cold or #messages <= 1 or CLEAR.deep then return end
+    local idle = now() - last.at
+    if idle < CACHE_SECONDS[opts.cache or "5m"] - CACHE_MARGIN then return end
+    say("grey", string.format("(the cache has gone cold: the conversation, %dk tokens, is summarized before the goal)",
+        math.floor(CLEAR.lastInput / 1000 + 0.5)))
+    log(string.format("compact: the cache had gone cold (%d s idle): compacting before the goal", idle))
+    COMPACT.run(COMPACT.cutAll(), "a goal's start (a cold cache)", true)
 end
 
 -- Inside a goal, right after a batch of tool results: once the last call's
@@ -2963,6 +2991,7 @@ local function main()
         if command then
             goal = command(arg)
         else
+            COMPACT.beforeGoal()
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)
             fileio.write(resume.file, resume.prefix .. " " .. resume.given .. "\n" .. (resume.goal or goal) .. "\n")

@@ -2467,6 +2467,53 @@ check("a goal ended on a tool call: the summary leaves that turn out, kept after
     #(c3b.messages or {}))
 end
 
+-- 43c. a cold cache before a goal (ADR-0023 D6, #395): when the last reply is older than the cache's lifetime (less a
+--      margin) and the last call had over 50k in, the conversation is summarized before the goal is sent, in a
+--      compaction request without the top-level cache mark (the system prompt keeps its own), so it doesn't write
+--      the whole conversation to the cache; a warm cache, a short conversation, or an hour's cache after a few
+--      minutes: none.  (The clock moves on while the player types the next goal.)
+do
+local timeWas43, readWas43 = os.time, read
+local function coldRun(tokens, idle, compacts, ...)
+    fresh({ "and the next", "" })
+    local skipped = 0
+    os.time = function(t) if t ~= nil then return timeWas43(t) end return timeWas43() + skipped end
+    read = function()
+        local line = readWas43()
+        if line == "and the next" then skipped = skipped + idle end
+        return line
+    end
+    HTTP.queue = {
+        reply({ toolUse("lua", { code = "return 1" }) }, "tool_use", inTokens(tokens - 1000)),
+        reply({ text("Done.") }, "end_turn", inTokens(tokens)),
+    }
+    if compacts then HTTP.queue[#HTTP.queue + 1] = M.compactionReply("Cold summary.") end
+    HTTP.queue[#HTTP.queue + 1] = reply({ text("Next done.") }, "end_turn", inTokens(20000))
+    run("grow some", ...)
+    os.time, read = timeWas43, readWas43
+end
+coldRun(60000, 400, true)
+local c3c = HTTP.requests[3] and HTTP.requests[3].body or {}
+check("a cold cache and 60k in: one compaction request before the goal's, without the top-level cache mark, the system prompt's kept",
+    #HTTP.requests == 4 and c3c.compaction and #c3c.messages == 4 and c3c.cache_control == nil
+        and c3c.system[1].cache_control and c3c.system[1].cache_control.type == "ephemeral"
+        and HTTP.requests[2].body.cache_control ~= nil, #HTTP.requests)
+local m4c = HTTP.requests[4] and HTTP.requests[4].body or {}
+check("...then the goal starts from the summary, the conversation's mark back",
+    blockOf(4) and blockOf(4).content == "Cold summary." and m4c.messages[2].content:find("^and the next")
+        and m4c.cache_control and m4c.cache_control.type == "ephemeral", m4c.messages and tostring(m4c.messages[2].content))
+check("...logged, with how long it was idle",
+    (Mine.files["claude.log"] or ""):find("compact: the cache had gone cold (400 s idle): compacting before the goal\n", 1, true)
+        and (Mine.files["claude.log"] or ""):find("compacting at a goal's start (a cold cache): 4 messages", 1, true),
+    (Mine.files["claude.log"] or ""):match("compact[^\n]*"))
+coldRun(60000, 100)
+check("a warm cache: no compaction (three calls)", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+coldRun(40000, 400)
+check("a cold cache and 40k in: no compaction", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+coldRun(60000, 400, false, "--cache", "1h")
+check("an hour's cache after 400 s: still warm, no compaction", #HTTP.requests == 3 and not HTTP.requests[3].body.compaction, #HTTP.requests)
+end
+
 -- 44. compaction inside a goal (ADR-0013 D9; 150k since ADR-0015 D7): once a call's input reaches
 --     150k, right after its tool results the conversation is summarized
 --     but for the last 3 turns (a reply and its results each): the
