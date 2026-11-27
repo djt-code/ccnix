@@ -1,6 +1,6 @@
 # ADR-0023: What the turtle's v7 test pass found: mod blocks, lava in the nether, the dimension, the log and the cold cache (eighth pass)
 
-**Status:** Accepted (2026-11-27): D1 to D8 as recommended (D1: `auto` by default, the mod's answer next, as B)
+**Status:** Accepted (2026-11-27): D1 to D8 as recommended (D1: `auto` by default, the mod's answer next, as B); released as ccnix 0.56.0 (2026-11-27)
 **Date:** 2026-11-27
 **Deciders:** Dan Theisen
 
