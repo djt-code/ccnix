@@ -115,7 +115,7 @@ set(1, 0, 0, { name = "minecraft:stone" })
 local why
 ok, why, hops = T.retrace()
 check("a block on the way back: false, why, and how far it got", ok == false and hops == 1 and at() == "(2,0,0)"
-    and why == "retrace stopped short of 1,0,0: blocked by minecraft:stone at 1,0,0", tostring(why))
+    and why == "retrace stopped short of 1,0,0: blocked by minecraft:stone at 1,0,0; opts.path = true routes round it", tostring(why))
 check("...the trail ends where the turtle is", keys(T.trail()) == "0,0,0 1,0,0 2,0,0", keys(T.trail()))
 ok, hops = T.retrace(nil, { dig = true })
 check("opts go to T.moveTo: with dig = true it gets through", ok == true and hops == 2 and at() == "(0,0,0)" and get(1, 0, 0) == nil, at())

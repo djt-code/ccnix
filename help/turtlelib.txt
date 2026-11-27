@@ -340,7 +340,7 @@ T.moveTo(x, y, z, opts)
       path    true, or a function(x, y, z, opts): when a straight run is
               blocked, ask a route finder (T.travel, from the path module, if
               there is one; or this function) to take it the rest of the way
-    The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4", "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }. The warning, when a cell it dug has a falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it". The turtle stays wherever it got to. (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
+    The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4" (with "; opts.path = true routes round it" when opts.path wasn't given), "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }. The warning, when a cell it dug has a falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it". The turtle stays wherever it got to. (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
 
 T.digCell(x, y, z, opts)
     Dig the one block at x, y, z and nothing else: go beside it (the path finder, digging nothing), dig it. True, the block's name (nil: it was empty) and a warning (sand over it); or false and why.
