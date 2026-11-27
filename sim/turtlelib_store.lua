@@ -15,12 +15,13 @@
 --     (ADR-0019 D2) only chests within opts.maxDistance (48) of where it began, the why saying what is farther and
 --     where, opts.far and a larger opts.maxDistance going there; T.prepare counting and fetching within it too;
 --     (ADR-0019 D6) of several pickaxes T.fetch and T.pull take the one that goes on as an upgrade (not worn, not
---     enchanted) first, and opts.pick chooses by the chest's item detail;
+--     enchanted) first, and opts.pick chooses by the chest's item detail; T.takeInto's opts.pick too (ADR-0023);
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
 --     the why; nothing is ever dropped in the world;
---   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep;
+--   * T.fetch and T.stow with opts.stay stay at the chest, T.stow's opts.keep; (ADR-0023) T.stow's opts.only puts away
+--     only what it names, and says what of that the job keeps;
 --   * T.cfg.tools (ADR-0013 D5): T.stow and opts.all put away the looted tools it doesn't list, never the one
 --     equipped, nor the pickaxe parked in the inventory while a crafting table or a hoe is on its side;
 --   * T.recount: the known chest on a side read again into the list, with the time; no known chest there, a bad side;
@@ -36,7 +37,9 @@
 --     out of place; at two bases, T.stow's note on an item whose chests are all far ranks them as it does (the chest
 --     for it before the other base's nearer bulk chest) and says which it is;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
---     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
+--     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once;
+--   * T.dropInto (ADR-0023 D5): into the chest on a side, n or the whole slot; with nothing there, or a block that holds
+--     nothing, refused and nothing dropped.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -487,6 +490,32 @@ do
         and why == "the container on the front has no more minecraft:diamond_pickaxe that opts.pick takes (got 0 of 1)", tostring(why))
 end
 
+do
+    -- (ADR-0023 Phase 2 item 1, #393) T.takeInto's opts.pick: two kinds of one name (AE2's facades, told apart by
+    -- displayName), the second kind wanted into slot 5
+    local FACADE = "ae2:facade"
+    setUp()
+    fill(3, 0, 1, { [1] = { FACADE, 30 }, [2] = { FACADE, 30 } })
+    local inv = W.get(3, 0, 1).inv
+    inv[1].displayName, inv[2].displayName = "Netherrack Facade", "Polished Blackstone Bricks Facade"
+    T.moveTo(3, 0, 0)
+    T.face(0)
+    local function chestKinds()
+        local out = {}
+        for _, it in pairs(W.get(3, 0, 1).inv) do out[#out + 1] = it.displayName .. " " .. it.count end
+        table.sort(out)
+        return table.concat(out, ", ")
+    end
+    local got = T.takeInto("front", FACADE, 20, 5, { pick = function(d) return d.displayName:find("Blackstone", 1, true) ~= nil end })
+    local it = W.S.inv[5]
+    check("T.takeInto with opts.pick: 20 of the facade kind it picks (by displayName) into slot 5, the other kind left", got == 20
+        and it and it.displayName == "Polished Blackstone Bricks Facade" and it.count == 20
+        and chestKinds() == "Netherrack Facade 30, Polished Blackstone Bricks Facade 10", tostring(got) .. " / " .. chestKinds())
+    local n, why = T.takeInto("front", FACADE, 30, 5, { pick = "Blackstone" })
+    check("...and a pick that isn't a function: refused, with why, nothing taken", n == 20 and why == "opts.pick is a function(detail)"
+        and W.S.inv[5].count == 20, tostring(n) .. " " .. tostring(why))
+end
+
 --------------------------------------------------------------------------
 -- T.stow
 --------------------------------------------------------------------------
@@ -560,6 +589,30 @@ do
     check("...the crafted stone went to the chest that holds stone", chestHas(-3, 0, 1, STONE) == 14)
     T.keep[DIRT] = nil
     T.clearCrafted()
+end
+
+do
+    -- (ADR-0023 Phase 1 item 6) opts.only: only the items it names go, and what the job keeps of them is said, not silent
+    setUp()
+    T.catalogue()
+    T.keep[DIRT] = true
+    W.give(1, DIRT, 20)
+    W.give(2, COBBLE, 10)
+    W.give(3, PLANKS, 6)
+    W.give(4, "minecraft:coal", 3)
+    local moves = W.S.moves
+    local ok, why, info = T.stow({ only = { DIRT } })
+    check("T.stow{ only = { kept dirt } }: nothing moves, and the why names the dirt and what keeps it", ok == false and W.S.moves == moves
+        and carrying(DIRT) == 20 and carrying(COBBLE) == 10 and info and info.left[DIRT] == 20 and info.stowed == 0
+        and tostring(why):find("20 dirt (the job keeps it (T.keep, or crafted this job): opts.all = true puts it away)", 1, true),
+        tostring(ok) .. " " .. tostring(why))
+    ok, why, info = T.stow({ only = { DIRT, "*_planks", "coal" } })
+    check("...with the planks and coal named too: the planks go (not the cobblestone it didn't name), the dirt and coal said",
+        ok == false and carrying(PLANKS) == 0 and carrying(COBBLE) == 10 and carrying(DIRT) == 20 and info.stowed == 6
+        and info.reasons["minecraft:coal"]:find("T.stow never puts it away", 1, true) and tostring(why):find("20 dirt", 1, true), tostring(why))
+    ok, info = T.stow({ only = "cobblestone" })
+    check("...and an item it names that isn't kept: true, as T.stow alone", ok == true and carrying(COBBLE) == 0 and info.stowed == 10, tostring(info))
+    T.keep[DIRT] = nil
 end
 
 do
@@ -1262,4 +1315,28 @@ do
     W.set(0, 0, 1, "minecraft:dirt")
     turtle.dig()
     check("a second copy of the library: one dump, the dirt in the bulk chest once", chestHas(0, 0, -3, DIRT) == 36 and here())
+end
+
+do
+    -- (ADR-0023 D5) T.dropInto: into the chest on that side, and refused, nothing dropped, with nothing there to hold it
+    fresh(true)
+    W.give(1, "minecraft:iron_nugget", 30)
+    turtle.select(1)
+    local n, why = T.dropInto("front", 10)
+    check("T.dropInto with nothing in front: refused, nothing dropped, and why", n == 0 and carrying("minecraft:iron_nugget") == 30
+        and (W.thrown or 0) == 0 and tostring(why):find("nothing on the front holds items", 1, true), tostring(n) .. " " .. tostring(why))
+    W.set(0, 0, 1, "minecraft:dirt")
+    n, why = T.dropInto("front")
+    check("...nor into a block that holds nothing (dirt)", n == 0 and carrying("minecraft:iron_nugget") == 30 and tostring(why):find("(minecraft:dirt)", 1, true),
+        tostring(why))
+    W.set(0, 0, 1, "minecraft:chest")
+    n, why = T.dropInto("front", 10)
+    check("T.dropInto(\"front\", 10) puts 10 into the chest in front", n == 10 and why == nil and chestHas(0, 0, 1, "minecraft:iron_nugget") == 10
+        and carrying("minecraft:iron_nugget") == 20, tostring(n) .. " " .. tostring(why))
+    W.set(0, 1, 0, "minecraft:chest")
+    n = T.dropInto("up")
+    check("...and \"up\" with no n: the whole slot into the chest above", n == 20 and chestHas(0, 1, 0, "minecraft:iron_nugget") == 20
+        and carrying("minecraft:iron_nugget") == 0, tostring(n))
+    check("...a bad side or an empty slot: 0 and why", select(2, T.dropInto("left")):find("\"front\", \"up\" or \"down\"", 1, true)
+        and select(2, T.dropInto("front")):find("is empty", 1, true))
 end

@@ -5,7 +5,8 @@
 -- protected area, lava (or fire, or a door, or the player's furnishings), a
 -- chest, an unbreakable block,
 -- something in the way, no fuel; digging only what it may; and asking a
--- route finder for a way when a straight run is blocked.
+-- route finder for a way when a straight run is blocked (and, when not
+-- asked, saying opts.path is there: ADR-0023 3).
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -97,17 +98,19 @@ clearWorld(); home(); DIGS = 0
 set(1, 0, 0, block("minecraft:stone"))
 local name, cell
 ok, why, name, cell = T.moveTo(3, 0, 0, { order = "x" })
-check("a block in the way, dig off: false, \"blocked by <block> at <cell>\", the block and the cell",
-    ok == false and why == "blocked by minecraft:stone at 1,0,0" and name == "minecraft:stone"
+check("a block in the way, dig off: false, \"blocked by <block> at <cell>\", the block and the cell; the why names opts.path (ADR-0023 3)",
+    ok == false and why == "blocked by minecraft:stone at 1,0,0; opts.path = true routes round it" and name == "minecraft:stone"
     and cell and cell.x == 1 and cell.y == 0 and cell.z == 0, tostring(why))
 check("...the turtle stayed where it got to, the block is there, nothing dug", at() == "(0,0,0)" and get(1, 0, 0) and DIGS == 0)
+ok, why = T.moveTo(3, 0, 0, { order = "x", path = false })
+check("...with opts.path = false, the why is the block alone", ok == false and why == "blocked by minecraft:stone at 1,0,0", tostring(why))
 ok = T.moveTo(3, 0, 0, { order = "x", dig = true })
 check("dig = true digs through it", ok and at() == "(3,0,0)" and get(1, 0, 0) == nil and DIGS == 1, at())
 
 clearWorld(); home(); DIGS = 0
 set(1, 0, 0, block("minecraft:stone"))
 ok, why = T.moveTo(3, 0, 0, { order = "x", dig = "minecraft:*_ore" })
-check("dig = a glob that doesn't match: blocked", ok == false and why == "blocked by minecraft:stone at 1,0,0" and DIGS == 0, tostring(why))
+check("dig = a glob that doesn't match: blocked", ok == false and why == "blocked by minecraft:stone at 1,0,0; opts.path = true routes round it" and DIGS == 0, tostring(why))
 ok = T.moveTo(3, 0, 0, { order = "x", dig = { "minecraft:*_ore", "minecraft:st*" } })
 check("a list of globs, one matching: dug", ok and DIGS == 1 and at() == "(3,0,0)", at())
 
@@ -134,12 +137,12 @@ T.diggable = {}
 clearWorld(); home(); DIGS = 0
 set(0, 1, 0, block("minecraft:dirt")); set(0, -1, 5, block("minecraft:gravel"))
 ok, why = T.moveTo(0, 3, 0)
-check("up: blocked by what is above", not ok and why == "blocked by minecraft:dirt at 0,1,0", tostring(why))
+check("up: blocked by what is above", not ok and why == "blocked by minecraft:dirt at 0,1,0; opts.path = true routes round it", tostring(why))
 ok = T.moveTo(0, 3, 0, { dig = true })
 check("...and dug through", ok and at() == "(0,3,0)")
 home(0, 0, 5)
 ok, why = T.moveTo(0, -2, 5)
-check("down: blocked by what is below", not ok and why == "blocked by minecraft:gravel at 0,-1,5", tostring(why))
+check("down: blocked by what is below", not ok and why == "blocked by minecraft:gravel at 0,-1,5; opts.path = true routes round it", tostring(why))
 
 --------------------------------------------------------------------------
 -- Protected areas, containers, bedrock
@@ -413,14 +416,14 @@ freshT()
 set(1, 0, 0, block("minecraft:stone")); set(2, 0, 0, block("minecraft:stone"))
 ok, why, name, cell = T.moveTo(3, 0, 0, { order = "x", digOnly = { "1,0,0" } })
 check("opts.digOnly: the cell it lists is dug (any block, with no opts.dig), the next one stops it and says why",
-    ok == false and why == "blocked by minecraft:stone at 2,0,0 (not a cell opts.digOnly lists)" and DIGS == 1 and get(1, 0, 0) == nil
+    ok == false and why == "blocked by minecraft:stone at 2,0,0 (not a cell opts.digOnly lists); opts.path = true routes round it" and DIGS == 1 and get(1, 0, 0) == nil
     and get(2, 0, 0) and at() == "(1,0,0)" and cell.x == 2, tostring(why))
 ok = T.moveTo(3, 0, 0, { order = "x", digOnly = { { x = 2, y = 0, z = 0 } } })
 check("...cells as { x, y, z } will do", ok == true and DIGS == 2 and at() == "(3,0,0)")
 freshT()
 set(1, 0, 0, block("minecraft:stone")); set(2, 0, 0, block("minecraft:dirt"))
 ok, why = T.moveTo(3, 0, 0, { order = "x", digOnly = { ["1,0,0"] = true, ["2,0,0"] = true }, dig = "*stone" })
-check("...a set of keys, and opts.dig still says which blocks", ok == false and why == "blocked by minecraft:dirt at 2,0,0" and DIGS == 1, tostring(why))
+check("...a set of keys, and opts.dig still says which blocks", ok == false and why == "blocked by minecraft:dirt at 2,0,0; opts.path = true routes round it" and DIGS == 1, tostring(why))
 ok, why = T.moveTo(3, 0, 0, { order = "x", digOnly = { "2,0" } })
 check("...a cell that isn't one: false and why", ok == false and why:find("opts.digOnly: a cell is", 1, true), tostring(why))
 check("T.cellSet: a list, a set and one cell", T.cellSet({ "1,2,3", { 4, 5, 6 } })["4,5,6"] and T.cellSet({ ["1,2,3"] = true })["1,2,3"]

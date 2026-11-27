@@ -101,8 +101,8 @@
 -- doc/claude-news.txt: the lines for each version since).
 --
 -- Resuming after a reboot: while a goal is under way /claude/resume.txt
--- holds it (a first line of the session's options, then the goal, to
--- which the model adds where it is), and it's removed when the goal ends
+-- holds it (a first line of the session's options but --confirm, then
+-- the goal, to which the model adds where it is), and it's removed when the goal ends
 -- or Ctrl+T stops claude.  With the settings ccnix.autostart = claude and
 -- claude.resume = true, a turtle that went down mid-goal (a server
 -- restart, its chunk unloaded) starts `claude --resume` at boot: the
@@ -129,10 +129,13 @@
 -- long its run took, and in a long one how long the chat went unheard.
 -- claude.listen = false turns it off.
 --
--- The log, claude.log beside the program: each entry with its time (UTC);
--- the options a session started with, the goals, the code and what it
--- did, the thinking, each call's tokens and how long it took, retries,
--- clears, and each goal's tokens in all.  A call that writes many tokens
+-- The log, claude.log beside the program: each entry with its time (UTC).
+-- Harness entries start at column 0 with the time; later lines of an entry
+-- (code, results, thinking) are indented with a tab, so a search for lines
+-- starting with a time finds the harness's entries alone.  It has the
+-- options a session started with, the goals, the code and what it did,
+-- the thinking, each call's tokens and how long it took, retries, clears,
+-- and each goal's tokens in all.  A call that writes many tokens
 -- to the cache after a long gap is the cache having run out (--cache 1h).
 -- At 256 KB (the setting claude.logSize, in bytes) it becomes claude.log.1,
 -- the older copies moving up to claude.log.3 (the setting claude.logKeep:
@@ -193,9 +196,12 @@
 -- while the conversation grows, and it's summarized (the API's
 -- compaction) to keep it in bounds: when a goal ends with the last call's
 -- input over 100k tokens, while you type the next goal (if you're
--- quicker, the goal waits for it; a /new or an empty line doesn't); and
--- inside a long goal once a call's input reaches 150k, right after the
--- code's results, the last 3 turns kept word for word.  The model writes
+-- quicker, the goal waits for it; a /new or an empty line doesn't); before
+-- a goal over 50k when the cache has gone cold (the last reply older than
+-- the --cache time), so the goal doesn't write the whole conversation to
+-- the cache again; and inside a long goal once a call's input reaches
+-- 150k, right after the code's results, the last 3 turns kept word for
+-- word.  The model writes
 -- the summary, having read all of it: the goal and how far it got, what
 -- you said, places, what's built, lessons, its helpers; and it goes on
 -- from that in place of what it summarized.  /new is cheaper still
@@ -298,7 +304,9 @@ local SKILLS = { shipped = "turtle/skills", own = "claude/skills", file = "skill
 for _, w in ipairs(text.words("the and for with from into onto that this these those then than when what where which who whom "
     .. "use using used your you our all any some can could please make get put set let now too also more most out off over "
     .. "under about its are was were been has have had not but how why one two each every there here them they their will "
-    .. "would should just like need want keep turtle player claude")) do
+    .. "would should just like need want keep turtle player claude "
+    -- (everyday words, ADR-0023: "great work buddy!" fitted three unrelated skills)
+    .. "work thing stuff great good nice cool fun well done thank thanks buddy mate pal yes okay sure lot")) do
     SKILLS.STOP[w] = true
 end
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
@@ -338,9 +346,11 @@ CLEAR.HARD = { trigger = 50000, keep = 2, atLeast = 0, thinking = 3 }
 -- results, the last COMPACT.keep turns (a reply and its results each) kept
 -- word for word after the summary.  The summary call may think too,
 -- so it gets COMPACT.maxTokens, and twice that once if it's cut off.
+-- Before a goal, when the cache has gone cold and the last call had over
+-- COMPACT.cold in, it's summarized first (COMPACT.beforeGoal).
 -- INSTRUCTIONS replace the API's own summary prompt (at most 16384
 -- characters, and they must say not to call tools).
-local COMPACT = { boundary = 100000, mid = 150000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
+local COMPACT = { boundary = 100000, mid = 150000, cold = 50000, keep = 3, maxTokens = 16000, beta = "compact-2026-09-04",
     INSTRUCTIONS = table.concat({
         "Summarize this conversation for the Claude model that drives a ComputerCraft turtle in it (Lua, with turtlelib as T).",
         "The model goes on from your summary alone, in place of everything before it, so keep what it needs to carry on, under short headings:",
@@ -397,22 +407,28 @@ local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|h
 -- that line is read with it.)
 local resume = { file = "claude/resume.txt", prefix = "options:",
                  options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true, ["goal-file"] = "=" },
-                 kept = { "model", "effort", "steps", "cache" } }      -- (the ones claude.options keeps)
+                 kept = { "model", "effort", "steps", "cache" },       -- (the ones claude.options keeps)
+                 filled = {} }      -- (the options the file gave, as "--steps 400", for the start line: #404)
 local opts, args = T.options({ ... }, resume.options)
 if not opts then
     print("claude: " .. args)
     print(USAGE)
     return
 end
--- --resume: the goal from the file, the options it was given under any given here
+-- --resume: the goal from the file, the options it was given under any given here.  Not --confirm (ADR-0023 D7):
+-- that one is for whoever is at the turtle now, so an older file's is left.
 if opts.resume then
     local saved = fileio.read(resume.file)
     if saved then
         local first, rest = text.cut(saved, "\n")
         local given = text.stripPrefix(first, resume.prefix)
         if given then
-            for k, v in pairs(T.options(text.words(given), resume.options) or {}) do
-                if opts[k] == nil then opts[k] = v end
+            local kept = T.options(text.words(given), resume.options) or {}
+            for _, k in ipairs(resume.kept) do
+                if opts[k] == nil and kept[k] ~= nil then
+                    opts[k] = kept[k]
+                    resume.filled[#resume.filled + 1] = "--" .. k .. " " .. kept[k]
+                end
             end
         else
             rest = saved            -- (the model rewrote it without the line)
@@ -542,7 +558,7 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit. The code execution that comes with them runs on Anthropic's side: it can't see the turtle, its files or the world; anything about the turtle goes through lua.
 
 Skills: a skill is a procedure for a kind of goal, a folder holding skill.md (a name and a one-line description between "---" lines, then the steps). The first message lists them, the shipped ones and yours, with where each is. Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits. When a task taught you a procedure worth repeating, write a skill: skill(name, description, body) in your code writes /claude/skills/<name>/skill.md (the name lowercase letters, digits and -; the description one line saying when to use it, "use when ..."); yours win over a shipped one of the same name, and are listed from the next session on.
 
@@ -791,11 +807,13 @@ function LOG.rotate()
     end
 end
 
--- Each entry in the log starts with when it was written (UTC).
+-- Each entry in the log starts with when it was written (UTC), and its later lines (code, results, thinking) are
+-- indented with a tab (ADR-0023): only the harness's entries start at column 0 with a time, so a result that prints
+-- an old start line doesn't read as one.
 local function log(line)
     LOG.rotate()
     local f = fs.open(LOG.file, "a")
-    if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. line); f.close() end
+    if f then f.writeLine(os.date("!%Y-%m-%d %H:%M:%S ", now()) .. text.replace(line, "\n", "\n\t")); f.close() end
 end
 
 -- A tool's output cut to MAX_OUTPUT: its start and its end, and how much went between.  (A little over is sent as it
@@ -2242,7 +2260,8 @@ local function body(compact)
         -- the model dated its files days off without it.)
         system = { { type = "text", text = SYSTEM .. "\n\nToday is " .. os.date("!%Y-%m-%d", now()) .. " (UTC).",
                      cache_control = CACHE } },
-        cache_control = CACHE,
+        -- (not on a compaction for a cold cache, ADR-0023 D6: it would write the whole conversation to it)
+        cache_control = not (compact and compact.cold) and CACHE or nil,
         tools = TOOLS,
         messages = compact and compact.messages or messages,
         output_config = { effort = EFFORT },
@@ -2297,9 +2316,12 @@ local function eventData(stream)
 end
 
 -- The API's own tools as shown: what they're called, and the input field
--- that says what they did (any other, such as the code a web search's
--- results are filtered with, shown by its name)
-local SERVER_TOOL = { web_search = { "web search", "query" }, web_fetch = { "web fetch", "url" } }
+-- that says what they did (#394: the code execution that filters the web
+-- tools' results, its code or its command, ADR-0023); one without that
+-- field, or any other tool, shown by its name
+local SERVER_TOOL = { web_search = { "web search", "query" }, web_fetch = { "web fetch", "url" },
+                      code_execution = { "code execution", "code" }, bash_code_execution = { "bash code execution", "command" },
+                      text_editor_code_execution = { "code execution's file editor", "path" } }
 
 -- Which field of a content block each kind of delta adds to
 local DELTA_FIELD = { text_delta = "text", thinking_delta = "thinking", signature_delta = "signature",
@@ -2591,18 +2613,18 @@ end
 -- Summarize messages 1 to cut (`why` for the log), keeping the rest word
 -- for word after the summary: true once the conversation starts with it;
 -- false (logged) when no summary came, and the next request clears deep.
-function COMPACT.run(cut, why)
-    local done = COMPACT.ask(cut, why)
+function COMPACT.run(cut, why, cold)
+    local done = COMPACT.ask(cut, why, cold)
     if not done then CLEAR.deep = CLEAR.lastInput or 0 end
     return done
 end
 
-function COMPACT.ask(cut, why)
+function COMPACT.ask(cut, why, cold)
     local part = {}
     for i = 1, cut do part[i] = messages[i] end
     log(string.format("compacting at %s: %d messages, %d kept as they are; the last call had %d tokens in",
         why, cut, #messages - cut, CLEAR.lastInput or 0))
-    local asked = { messages = part, maxTokens = COMPACT.maxTokens }
+    local asked = { messages = part, maxTokens = COMPACT.maxTokens, cold = cold }
     for _ = 1, 2 do
         local started = now()
         local reply, err = request(asked)
@@ -2643,10 +2665,13 @@ end
 -- All of it: an assistant turn whose tool calls have no results (the API
 -- refuses that) stays out, kept.
 COMPACT.DROPPED = { [""] = true, ["/new"] = true }
+function COMPACT.cutAll()
+    return #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+end
 function COMPACT.whileAsking(label)
     if not COMPACT.due() then return ask(label) end
     say("grey", string.format("(the conversation, %dk tokens, is summarized while you type)", math.floor(CLEAR.lastInput / 1000 + 0.5)))
-    local cut = #messages - (messages[#messages].role == "assistant" and #unanswered("") > 0 and 1 or 0)
+    local cut = COMPACT.cutAll()
     if not (parallel and parallel.waitForAny) then
         local line = ask(label)
         if not COMPACT.DROPPED[text.trim(line)] then COMPACT.run(cut, "a goal's end") end
@@ -2664,6 +2689,25 @@ function COMPACT.whileAsking(label)
             while not w.done and not COMPACT.DROPPED[text.trim(w.line)] do os.pullEvent() end
         end)
     return w.line
+end
+
+-- Before a goal (ADR-0023 D6, #395): when the cache has gone cold (the
+-- last reply is older than the cache's lifetime, less CACHE_MARGIN) and
+-- the last call had over COMPACT.cold in, the goal's request would write
+-- the whole conversation to the cache again, at the write price.  It's
+-- summarized first instead, by a request without the top-level cache mark
+-- (the system prompt keeps its own), so that one doesn't write it either;
+-- the goal then goes on from the summary.  Not when a summary has just
+-- failed (CLEAR.deep: the deep clear does the work).
+function COMPACT.beforeGoal()
+    local last = replyLog.last
+    if not last or (CLEAR.lastInput or 0) <= COMPACT.cold or #messages <= 1 or CLEAR.deep then return end
+    local idle = now() - last.at
+    if idle < CACHE_SECONDS[opts.cache or "5m"] - CACHE_MARGIN then return end
+    say("grey", string.format("(the cache has gone cold: the conversation, %dk tokens, is summarized before the goal)",
+        math.floor(CLEAR.lastInput / 1000 + 0.5)))
+    log(string.format("compact: the cache had gone cold (%d s idle): compacting before the goal", idle))
+    COMPACT.run(COMPACT.cutAll(), "a goal's start (a cold cache)", true)
 end
 
 -- Inside a goal, right after a batch of tool results: once the last call's
@@ -2727,10 +2771,11 @@ local function converse(goal)
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
             if b.type == "thinking" and (b.thinking or "") ~= "" then log("thinking: " .. b.thinking) end
-            if b.type == "server_tool_use" then         -- a web search or fetch, done by the API
+            if b.type == "server_tool_use" then         -- a web search or fetch, or its code, done by the API
                 local shows = SERVER_TOOL[b.name]
-                local what = shows and shows[1] .. ": " .. tostring((b.input or {})[shows[2]] or "")
-                    or tostring(b.name):gsub("_", " ")
+                local said = shows and type(b.input) == "table" and b.input[shows[2]]
+                local what = shows and (said and shows[1] .. ": " .. tostring(said) or shows[1])
+                    or (tostring(b.name):gsub("_", " "))
                 say("lightBlue", "--- " .. convert.fromUTF8(what))
                 log(what)
             end
@@ -2898,8 +2943,9 @@ local function main()
     if #resume.taken > 0 then
         say("yellow", "Options from the last session (claude.options): " .. table.concat(resume.taken, " ") .. ".")
     end
+    -- (and for resume.txt: not --confirm either, ADR-0023 D7)
+    resume.given = kept
     if CONFIRM then given[#given + 1] = "--confirm" end
-    resume.given = table.concat(given, " ")
     -- (where the options came from: the command line, the last session's claude.options, the goal kept in resume.txt)
     -- (ADR-0023 D1: the dimension and how it was told, on the start line and in the prompt, for the session)
     local inDimension = "in a dimension it couldn't tell"
@@ -2913,7 +2959,8 @@ local function main()
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel()), inDimension,
         #resume.taken > 0 and ("; from claude.options: " .. table.concat(resume.taken, " ")) or "",
-        resume.goal and "; resuming the goal in resume.txt" or ""))
+        resume.goal and ("; resuming the goal in resume.txt"
+            .. (#resume.filled > 0 and ", with its options: " .. table.concat(resume.filled, " ") or "")) or ""))
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
     local news = whatsNew()
@@ -2952,12 +2999,15 @@ local function main()
         if command then
             goal = command(arg)
         else
+            COMPACT.beforeGoal()
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)
             fileio.write(resume.file, resume.prefix .. " " .. resume.given .. "\n" .. (resume.goal or goal) .. "\n")
+            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own.  A resumed goal is
+            -- matched on the file's first line, the goal as it was given: not on the "You were interrupted" wrapper
+            -- or the lines the model added under it, ADR-0023)
+            local fit = goal ~= NOTES.given and SKILLS.fit(resume.goal and (text.cut(resume.goal, "\n")) or goal)
             resume.goal = nil
-            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own)
-            local fit = goal ~= NOTES.given and SKILLS.fit(goal)
             if fit then
                 startNotes[#startNotes + 1] = fit
                 log(fit)
