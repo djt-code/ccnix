@@ -264,3 +264,64 @@ in somewhere else, and the turtle chased it.
    the hole gets four sides, and the hole below it is filled as the bottom: 5 blocks for one falling column. The
    water lands in the bowl and stays there. Falling columns side by side get one closed trough round all of them.
    Water coming in through a wall is sealed as before.
+
+### As built (water from above)
+
+- **Where:** `seal` asks `traceIn` first (`turtle/mine.lua`), so every place that seals water coming in from outside
+  the tunnel traces it: the lanes' looks, `dry`, `stopFlow`, `sweep`, the walk out. It does so once for each place
+  water comes in, from the tunnel (not from a vein, a trip's way back, open-water mode or `mine reset`).
+- **What's traced:** flowing water, coming in through the ceiling or a wall. Not water under the floor (water
+  doesn't flow up: it's draining out), not a source (that's filled where it is, as before), and not lava: lava
+  is slow (a block every 30 ticks), so what's left of its column after its source is filled looks like more
+  coming, and while the turtle is out of the tunnel it flows into the block the turtle left (14 blocks of lava got
+  in, in the sim's lava shaft). Lava is sealed where it comes in, as before.
+- **The trace:** up a falling column, then to the strongest water beside it (the fewest turns first, and no more
+  turning once it knows a way), to a source, which it fills. It moves only through water, never into a protected
+  area (`T.guarded`), at most `TRACE_REACH = 16` moves out. Water runs at most 7 blocks on the flat from a
+  source, so 16 takes the longest stream there is plus a 9-block fall. A trace that turns back has cost twice its
+  reach in moves (about 13 s); further out than that, the bowl is cheaper. It comes back the way it went, then looks
+  where the water came in. It prints `Traced the water at (x,y,z) to its source N blocks up and M across: filled.`,
+  or `Filled the source of the water at ..., but it's still coming (more than one source).`, or `Couldn't trace the
+  water at ...: <why>.`
+- **What the game does that the design didn't count on:** water beside falling water stays flowing for good. The
+  game works out flowing water's level from the water beside it, and falling water counts as full. While the
+  turtle stands in a falling column, the water above lands on it and spreads round the column a block up. Once
+  the turtle has gone, the column keeps that spread water flowing. It spreads on and falls round the bowl, onto
+  the ceiling, and in at the next hole. The sim's water does the same: its first bowl, 5 blocks as designed,
+  flooded the cave floor and the tunnel. So:
+  - **The rim:** each open side of the bowl also gets a block on top. The turtle steps into the side, places up,
+    backs out and places the side. That's 9 blocks for a bowl in a cave, or 5 where the sides are rock above.
+  - **Coming down a column that's still falling** (not filled, or more feeds it than the source it filled), the
+    turtle climbs down beside the column where the way it faces is open, and backs into the column again at the
+    bottom. It turns from falling water there (another column). Without this, a cave 4 tall flooded (A5, A6).
+    Going up doesn't need it: nothing falls under the turtle, so what it spread drains.
+- **The trough:** falling water beside the bowl's block, over the tunnel, joins the trough if the ceiling under it
+  is open. The turtle steps in to look down: water landing on the ceiling beside the bowl looks the same from the
+  side. `TROUGH_MAX = 8` columns. The turtle puts in each block's outer sides (with the rim) and its hole from
+  above, then fills the hole it came up through from the tunnel, last. It keeps one block back for that, and
+  needs 9 bulk blocks on board to start. It prints `Caught the water falling in at (x,y,z): a bowl of N blocks
+  above the ceiling.` (or `a trough over K columns, N blocks`).
+- **The Done line** adds `Traced water coming in to its source and filled it N times.` and `Caught water falling
+  in through the ceiling in N bowls (M blocks).`
+
+**The sims** (`sim/mine_above.lua`): a 3x3 tunnel, 16 long, under a cave 2 tall (4 for A5 and A6). Water falls
+through the cave into a hole in the ceiling, and there's a second hole in the cave floor 5 blocks on. "Water in"
+counts the times water flowed into the open tunnel.
+
+| scenario | before (main) | now |
+|---|---|---|
+| A1: one source 4 above the ceiling, beside the top of a shaft | 134 + 288 + 144 + 1, water in 35 times, 35 blocks of water left in the tunnel, 11 on the cave floor | 144 + 212 + 144 + 1 = 501, traced and filled, water in 0 times, all dry |
+| A2: the source 17 above the ceiling, out of reach | 134 + 288 + 144 + 1, 35 left in the tunnel | 180 + 212 + 144 + 9 = 545, a bowl of 9, water in 21 times (while it traced), dry after |
+| A3: A1's source in a protected area | as A2 | 156 + 212 + 144 + 9 = 521, a bowl of 9 |
+| A4: a pool spilling down two shafts side by side | 134 + 292 + 144 + 2, 35 left in the tunnel | 164 + 222 + 144 + 15 = 545, one source filled, then a trough of 14 |
+| A5, A6: A2 and A4 under a cave 4 tall | as A2, A4 | 180 + 212 + 144 + 9; 168 + 222 + 144 + 15 |
+
+- **Before**, every one of them left the tunnel with 35 blocks of water in it (the plug's spread came in at the
+  second hole, behind the lanes), and the old count leaves out the going-over that would take.
+- **Turns:** the new code makes about a quarter fewer turns, because it no longer chases the water round the
+  tunnel.
+- **The real terrain** (`mine_terrain`): only `caves` changed. It traced one stream into the left wall, 7 blocks up
+  and 6 across, and filled its source. That cost 26 more moves and 8 more turns, and 4 fewer blocks: 2 seals
+  where there were 6. `mine_tunnel`, `mine_water` and `mine_homes` are unchanged.
+- **Not done:** water falling in through a wall from above (down the outside of the tunnel) is traced, but when it
+  can't be, it's sealed as before: no bowl.
