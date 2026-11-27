@@ -30,7 +30,8 @@
 --     without opts.digBelow (the floor untouched), and goes in when the build carries on with it; on solid ground (no
 --     free cell beside the floor) a floor cell beside it dug and put back too, and walled in, refused naming each;
 --   * (ADR-0023 1) a plan of AE2 cables (each placed as ae2:cable_bus): built, verified clean, counted there when
---     built again; a plan of stone over them still differs.
+--     built again; a plan of stone over them still differs;
+--   * (ADR-0023 7) a plan's torch with no state verifies clean over a wall torch; a soul torch over it differs.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -1028,4 +1029,21 @@ do
     local other = assert(T.blueprint.new({ anchor = { 0, 0, 3 }, legend = { s = "minecraft:stone" }, layers = { "ss" } }))
     diffs = T.verify(other, { inspect = "all" })
     check("...a plan of stone over the cable buses still differs", diffs and #diffs == 2, diffs and tostring(#diffs) or "nil")
+end
+
+--------------------------------------------------------------------------
+-- ADR-0023 7: a plan's torch with no state asked, found hung on a wall (as T.placeAt may put it), verifies clean
+--------------------------------------------------------------------------
+do
+    fresh()
+    W.fill(-2, -1, 1, 2, -1, 5, STONE)
+    W.set(-1, 0, 4, STONE)
+    W.set(0, 0, 4, "minecraft:wall_torch", { facing = "east" })
+    know(-4, -3, -4, 4, 4, 6)
+    local plan = assert(T.blueprint.new({ anchor = { 0, 0, 4 }, legend = { t = "minecraft:torch" }, layers = { "t" } }))
+    local diffs = T.verify(plan, { inspect = "all" })
+    check("a plan's torch with no state, found as a wall torch: verifies clean", diffs and #diffs == 0, diffs and diffs[1] and diffs[1].why or "nil")
+    local soul = assert(T.blueprint.new({ anchor = { 0, 0, 4 }, legend = { t = "minecraft:soul_torch" }, layers = { "t" } }))
+    diffs = T.verify(soul, { inspect = "all" })
+    check("...a soul torch over it still differs", diffs and #diffs == 1, diffs and tostring(#diffs) or "nil")
 end

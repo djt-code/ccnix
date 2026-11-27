@@ -189,14 +189,15 @@ local function infoOf(entry)
 end
 
 -- Is the block found the one a plan's entry asks for: the same name, or a block of its item (redstone_wire for
--- redstone, or the block T.placeAt learnt a mod item places: ae2:cable_bus for an AE2 cable), the wall form only when
--- it has a facing (a torch with none stands)?
+-- redstone, or the block T.placeAt learnt a mod item places: ae2:cable_bus for an AE2 cable)?  The wall form is when
+-- the entry asks no state, as T.placeAt takes it (a torch it hung on a wall), or a facing; not when it asks a state
+-- without one.
 local function isBlockOf(found, entry)
     if found == entry.name then return true end
     if found == nil then return false end
     if T.blockOfItem(entry.name) == found then return true end
     if T.itemOfBlock(found) ~= entry.name then return false end
-    return found ~= T.blockOfItem(entry.name, "wall") or (entry.state ~= nil and entry.state.facing ~= nil)
+    return found ~= T.blockOfItem(entry.name, "wall") or entry.state == nil or entry.state.facing ~= nil
 end
 
 -- Is the item a mod's whose block isn't known (no table has it, and T.placeAt hasn't learnt it)?  Such a cell goes
