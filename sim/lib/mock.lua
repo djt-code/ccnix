@@ -133,7 +133,7 @@ end
 -- into the turtle and back; in the turtle such a stack is `damaged` (it
 -- won't equip, as equipmentApi has it).
 --------------------------------------------------------------------------
-local EXTRAS = { "damage", "enchantments", "damaged" }
+local EXTRAS = { "damage", "enchantments", "damaged", "displayName" }
 
 -- The stack `to` given what `from` carries besides its name and count.
 local function withExtras(to, from)

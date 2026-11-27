@@ -604,7 +604,8 @@ T.raw = raw
 -- Hooks for whatever drives this module (claude sets them; each is called
 -- only when it is set):
 --   T.hooks.tool()    before the first dig or attack that goes ahead (the
---                     wrapped ones) or T.usePrimaryTool: it is cleared, then
+--                     wrapped ones; not a dig of air, nor one refused) or
+--                     T.usePrimaryTool: it is cleared, then
 --                     called, so it runs once.  claude's chat listener puts
 --                     the pickaxe back there, from where the chat box sat.
 --   T.hooks.heard(e)  each chat message T.report.ask's wait reads that isn't
@@ -947,6 +948,7 @@ end
 
 -- What a dig with no tool on gets back from CC, and what puts one on for T.cfg.equipToDig (below, with the upgrades)
 local NO_TOOL = "No tool to dig with"
+local NOTHING_TO_DIG = "Nothing to dig here"         -- (what the game says to a dig of air)
 local equipToDig
 
 -- What a dig of these drops instead of the block itself (the common ones, with a pickaxe and no silk touch), for
@@ -1024,7 +1026,17 @@ end
 -- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
 -- refused too.  A dig of a block a hoe tills is looked at again after, since
 -- the block may still be there, changed.  With T.cfg.equipToDig, a dig that
--- failed for want of a tool puts one aboard on and digs again.
+-- failed for want of a tool puts one aboard on and digs again.  With no
+-- block there it says so as the game does and digs nothing, before the
+-- tool hook: a dig of air doesn't swap the pickaxe on (ADR-0023).  Not with
+-- a hoe on: it tills the dirt under a block of air.
+local function hoeOn()
+    if not (turtle.getEquippedLeft and turtle.getEquippedRight) then return true end   -- (can't tell without swaps)
+    for _, it in ipairs({ turtle.getEquippedLeft() or false, turtle.getEquippedRight() or false }) do
+        if it and it.name and text.endsWith(it.name, "_hoe") then return true end
+    end
+    return false
+end
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -1040,6 +1052,7 @@ for name, side in pairs(DIG_SIDE) do
             return false, "no room for what digging " .. data.name .. " drops: every slot is full (T.cfg.digNeedsRoom; "
                 .. "stow or drop something first, or set it false to let drops fall)"
         end
+        if inspect and not ok and not hoeOn() then return false, NOTHING_TO_DIG end
         needTool()
         local putBack = ok and type(data) == "table" and data.name and joinPartStack(data.name)
         local res = table.pack(raw[name](...))
@@ -2916,7 +2929,8 @@ local function sideFuncs(side)
 end
 
 -- Drop up to n items from the selected slot into whatever is on `side`
--- ("front", "top" or "bottom"): turtle.drop's results.
+-- ("front", "top" or "bottom"): turtle.drop's results.  With nothing there
+-- they land on the ground, as turtle.drop's do: T.dropInto refuses instead.
 function T.dropSide(side, n) local _, drop = sideFuncs(side); return drop(n) end
 -- Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
 function T.suckSide(side, n) local suck = sideFuncs(side); return suck(n) end
@@ -2927,6 +2941,39 @@ function T.inspectSide(side) local _, _, inspect = sideFuncs(side); return inspe
 function T.containerOn(side)
     local ok, data = T.inspectSide(side)
     return ok and T.isContainer(data.name)
+end
+
+local DROP_SIDES = { front = "front", top = "top", up = "top", bottom = "bottom", down = "bottom" }
+
+-- Drop the selected slot (or n of it) into the inventory on `side` ("front", "up" or "down"; "top" and "bottom" too),
+-- never on the ground: how many went in, and why when fewer than asked.
+--
+-- It refuses, dropping nothing, when nothing on that side holds items: no block, or a block that isn't a chest or a
+-- barrel and isn't an inventory the turtle can read (a hopper, a shulker box, a furnace).  turtle.drop and T.dropSide
+-- throw the items on the ground there instead; that is what to use to throw junk away, or to feed a composter (not an
+-- inventory).  A container that fills up takes what fits: the rest stays in the slot, and the why says so.
+function T.dropInto(side, n)
+    local real = DROP_SIDES[side]
+    if not real then return 0, "the side is \"front\", \"up\" or \"down\", not " .. tostring(side) end
+    if n ~= nil and (type(n) ~= "number" or n < 1 or n ~= math.floor(n)) then
+        return 0, "n is a whole number of 1 or more (or nil: the whole slot)"
+    end
+    local slot = turtle.getSelectedSlot()
+    local have = turtle.getItemCount(slot)
+    if have == 0 then return 0, "slot " .. slot .. " (the selected slot) is empty" end
+    local ok, data = T.inspectSide(real)
+    local p = ok and peripheral and peripheral.wrap(real)
+    if not (ok and (T.isContainer(data.name) or (p and p.list and p.size))) then
+        return 0, "nothing on the " .. side .. " holds items (" .. (ok and data.name or "no block") .. "): nothing dropped. "
+            .. "Face a chest first; turtle.drop throws them on the ground"
+    end
+    local want = math.min(n or have, have)
+    T.dropSide(real, want)
+    local went = have - turtle.getItemCount(slot)
+    if went < want then
+        return went, "the " .. data.name .. " on the " .. side .. " is full: " .. (want - went) .. " stayed in slot " .. slot
+    end
+    return went
 end
 
 -- How many of each item the container on `side` holds ({ name = count }),
@@ -3256,17 +3303,23 @@ function T.restockFrom(side, name, target, opts)
     end
 end
 
--- Take `name` from the container on `side` into the turtle's slot `slot`
--- (empty, or holding some of it already) until that slot holds n (at most
--- a stack).  Needs a readable container.  Returns how many the slot holds.
-function T.takeInto(side, name, n, slot)
+-- Take `name` from the container on `side` into slot `slot` (empty, or
+-- with some already) until it holds n (a stack at most); opts.pick as
+-- T.pull's.  Needs a readable container.  Returns how many the slot holds.
+--
+-- opts.pick(detail), true for a stack it may take, chooses by the
+-- container's item detail (displayName, damage, enchantments...), as T.pull's does;
+-- one that isn't a function is refused: the count, and why.
+function T.takeInto(side, name, n, slot, opts)
+    local pick = opts and opts.pick
+    if pick ~= nil and type(pick) ~= "function" then return turtle.getItemCount(slot), "opts.pick is a function(detail)" end
     local suck, drop = sideFuncs(side)
     local chest = peripheral and peripheral.wrap(side)
     if not (chest and chest.list and chest.pushItems and chest.size) then return turtle.getItemCount(slot) end
     for _ = 1, 64 do
         local have = turtle.getItemCount(slot)
         if have >= n then break end
-        local found, held = frontStack(chest, name, suck, slot)
+        local found, held = frontStack(chest, name, suck, slot, pick)
         if not found then break end
         turtle.select(slot)
         local got = suck(math.min(n - have, frontCount(chest)))
@@ -3277,14 +3330,14 @@ function T.takeInto(side, name, n, slot)
     return turtle.getItemCount(slot)
 end
 
--- Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into
--- whatever slots will have it.  Returns how many it got and, when short of n, why.
+-- Take n (default 1) of `name` from the container on `side` ("front", "top", "bottom") into the turtle; opts.pick(detail)
+-- picks stacks by detail (displayName, damage, enchantments).  Returns how many it got, and why if short of n.
 --
 -- A part stack of it is topped up first, else an empty slot is used.  Sucking from a side takes the
 -- container's first stack whatever it is, so each time the wanted stack is moved to the front first (as
 -- T.takeInto does), and as many stacks are taken as it needs.  Of several stacks it takes the lowest slot's, but
 -- a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by
--- the container's item detail (name, count, damage, enchantments...): true for a stack it may take.  Needs a
+-- the container's item detail (name, count, displayName, damage, enchantments...): true for a stack it may take.  Needs a
 -- container it can read (a chest or a barrel).  When short of n, why is: no container, none left in it (that
 -- opts.pick takes), or no room in the turtle.  It moves stacks about in the container to get at them, so slot numbers
 -- read before (list(), getItemDetail) are stale after.  A clean tool's detail has damage = 0, not nil: a pick for worn
