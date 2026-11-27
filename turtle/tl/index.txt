@@ -72,7 +72,7 @@ T.neighbour(d) - The block next to the turtle in direction d.
 T.dirTo(p) - The direction from the turtle to the block next to it at p.
 T.look(d) - Face direction d (0 to 3, "up" or "down") and inspect there: returns turtle.inspect's ok, data.
 T.digDir(d) - Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected area holds. Returns turtle.dig's results (false and why if it can't).
-T.placeDir(d, text) - Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign. Returns turtle.place's results.
+T.placeDir(d, text) - Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign. Returns turtle.place's results; one the game says failed that used the item is true (an AE2 facade).
 T.attackDir(d) - Face direction d (0 to 3, "up" or "down") and attack there. Returns turtle.attack's results.
 T.suckDir(d) - Face direction d (0 to 3, "up" or "down") and pick up items there. Returns turtle.suck's results.
 T.moveDir(d) - Move one block in direction d (T.up/T.down/T.forward: digging what T.diggable allows, attacking what's in the way).

@@ -15,6 +15,8 @@ The put-back line after a call says what the side held when it was to be put bac
 settings.get(name), settings.getNames() and settings.getDetails(name) are in your code, read-only (T.saveSettings writes). The system prompt ends with today's date (UTC): date your files by it.
 T.sortChests' info.summary says how many stacks of how many kinds it moved: every misplaced stack in the base's chests, the player's too. T.pull moves stacks about in the chest: slot numbers read before are stale after. A clean tool's detail has damage = 0, not nil. T.gpsHere's second value is how the facing was found ("a scan" or "a step"). T.undo(n) counts entries: a paved cell is two (a dig and a place). T.blueprint.put sets cells in a plan's layers only: fill the box with air first for room. T.build() carries on the last plan given, finished or not.
 A goal may have several lines now: the player types Shift+Enter between them, or gives a file with /goal <file>. The prompt has a shell's keys and keeps the goals typed in /.claude_history (not yours to write).
+turtle.place (and placeUp, placeDown, T.placeDir) returns true when the item was used, even if the game said "Cannot place item here": an AE2 facade did place, and some used two. The second value says what the game said and how many it used. Your count check before and after a place can go.
+-- #392: CC: Tweaked's place on NeoForge (doc/bugs/cc-tweaked-place-onitemusefirst.md); ccnix-mod's mixin fixes it at the source.
 -- ADR-0020 (#339, #93): the prompt edits lines as a shell does; goals of several lines.
 -- ADR-0020 (#340-#342, #344-#351; D1-D4): the v6 test pass's findings.
 == 0.54.0
