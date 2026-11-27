@@ -212,3 +212,34 @@ only when the tunnel ahead is more than half water (source blocks). It shouldn't
      dig). Otherwise it carries on tunnelling as before, sealing as it goes.
 - A segment that starts at an end cap (the one before ended under water) is open water with a bulkhead, as
   before.
+
+### As built (the amendment)
+
+- **With a scanner:** as above; `waterAhead` in `turtle/mine.lua`. The trigger is D1's, unchanged.
+- **Counting (no scanner):** every look goes through `noteWater`: a source (or a waterlogged block) weighs 1,
+  flowing water a quarter (`FLOWING_WEIGHT`), filed by the cell's column (x, y) across the tunnel, walls and
+  floor included. A column counts its heaviest once. Not counted: looks on a trip, going over dug tunnel, or in
+  open-water mode. `WATER_COLUMNS = 4` within `WATER_SPAN` (4) slices starts a probe. A lone source the turtle
+  fills is one column. A fed source has it step in and seal round it: the source's own column and the four
+  round it, so a body of water passes 4 at its first wet block.
+- **The probe:** from the first source of that water (`columnsAt`), `PROBE_LEN = 4` blocks of up to five
+  lanes of the box: the top row's corners and middle, and the side columns half way up. They're dug as the
+  lanes dig them (`go`, then `scanHere`: water dried, filled or sealed, walls looked at). Every block it looks
+  at in that stretch counts, and the share is their weight over their number.
+  - **Getting there and back:** it goes out and back the way it went (in `trail`, as for a vein), so a trip
+    home meanwhile retraces its steps. It digs no new way from the water to the tunnel behind (the first
+    build dug one, and W1 flooded behind the home).
+  - **Bulk blocks first:** it carries enough to seal round every block (5 a block), or goes for them first, so
+    it isn't short with water left unsealed behind it.
+- **The decision:** over half, it prints `Water at z=N: the probe met P% (over half): working it as open
+  water.` and it's open water from the home, with the bulkhead (`No bulkhead: the probe met P% water ...` can't
+  follow a probe like that). Under half, it prints `... (under half): tunnelling on, sealing as it goes.`,
+  carries on with the lane it was on, and doesn't count again the water in the stretch it probed.
+- **--resume:** a stop mid-probe resumes the lane from its last saved block, which is before the probe. It
+  counts afresh, and probes again if it meets the water again.
+
+| scenario (no scanner) | before (49f7b6d) | now |
+|---|---|---|
+| W1: the lake | 1702 + 602 + 904 + 713, no bulkhead, 30 blocks of water behind home 1 | 1890 + 738 + 1030 + 839 = 4497, probe 98%, bulkhead, dry behind (main, before the amendment: 4065) |
+| W4: water under the bottom half | 1594 + 656 + 1059 + 467 = 3776, open water | 1012 + 1174 + 825 + 233 = 3244, three probes at 6%, careful mode |
+| W5: sporadic sources (7 lone ones, 6 of them two each in 3 columns) | 1856 + 882 + 1261 + 467 = 4466, open water and a bulkhead | 738 + 704 + 803 + 9 = 2254, no probe |
