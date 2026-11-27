@@ -1668,10 +1668,10 @@ local function decideDimension(mapCounts, fallback)
     end
     fallback = fallback or "overworld"
     local why = (dim == nil or counts[dim] < FEWEST) and "too few blocks round it to tell" or "a near tie"
-    why = why .. " (" .. countsText(counts) .. ")"
     info.sure, info.from = false, "the blocks round it"
-    info.why = why .. ": taken as the " .. fallback .. "; the setting " .. DIMENSION_SETTING .. " names it"
-    info.said = "in the " .. fallback .. "? not sure: " .. why .. " (`sysctl " .. DIMENSION_SETTING .. "=nether` names it)"
+    info.why = why .. " (" .. countsText(counts) .. "): taken as the " .. fallback .. "; the setting " .. DIMENSION_SETTING
+        .. " names it"
+    info.said = "in the " .. fallback .. "? not sure: " .. why .. " (" .. DIMENSION_SETTING .. " names it)"
     return fallback, info
 end
 

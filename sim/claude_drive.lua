@@ -155,7 +155,7 @@ local logText = Mine.files["claude.log"] or ""
 local STAMP = "%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d "
 local _, calls = logText:gsub("\n" .. STAMP .. "tokens: 175 in %(50 from the cache, 25 written to it, 100 new%), 20 out; %d+s\n", "")
 check("claude.log: each entry starts with its time, the first with the session's options",
-    logText:find("^" .. STAMP .. "start: claude %(model claude%-opus%-5%-5, effort medium, steps 60, cache 5m; at %(0,0,0%) facing 0, fuel 1000%)\n")
+    logText:find("^" .. STAMP .. "start: claude %(model claude%-opus%-5%-5, effort medium, steps 60, cache 5m; at %(0,0,0%) facing 0, fuel 1000; in the overworld%? not sure: too few blocks round it to tell %(turtle%.dimension names it%)%)\n")
         and logText:find("\n" .. STAMP .. "goal: go two forward and one right\n"), logText:sub(1, 200))
 check("claude.log: each call's tokens (from the cache, written, new, out) and how long it took", calls == 3, calls)
 check("claude.log: the goal's tokens in all when it's done",
@@ -2758,4 +2758,31 @@ HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
 run("--goal-file", "brief.txt")
 local g2 = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content
 check("#93: --goal-file at the start: the file's text is the first goal", g2 == "dig a tunnel\n20 long", tostring(g2))
+end
+
+-- ADR-0023 D1: the start line and the system prompt say the dimension and how it was told: by the setting
+-- turtle.dimension, and by the blocks round the turtle (the mine's rock is tuff and chests: too few to be sure)
+do
+local SETD = { ["turtle.dimension"] = "nether" }
+settings = { define = function() end, get = function(n) return SETD[n] end, set = function(n, v) SETD[n] = v end,
+             save = function() end }
+local function startLine() return ((Mine.files["claude.log"] or ""):match("start: claude[^\n]*")) or "" end
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("light the hall")
+local sysD = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("D1: the start line says the dimension the setting names: \"in the nether (turtle.dimension)\"",
+    startLine():find("fuel 1000; in the nether (turtle.dimension))", 1, true) ~= nil, startLine())
+check("...and the system prompt: \"The turtle is in the nether (turtle.dimension)\"",
+    sysD:find("The turtle is in the nether (turtle.dimension): T.dimension() says which", 1, true) ~= nil
+        and not sysD:find("@DIMENSION@", 1, true), sysD:match("The turtle is [^.]*") or "")
+SETD["turtle.dimension"] = nil
+fresh({ "" })
+HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
+run("light the hall")
+sysD = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("...auto, by the blocks: the overworld, not sure, both places",
+    startLine():find("; in the overworld? not sure: too few blocks round it to tell", 1, true) ~= nil
+        and sysD:find("The turtle is in the overworld? not sure", 1, true) ~= nil, startLine())
+settings = nil
 end
