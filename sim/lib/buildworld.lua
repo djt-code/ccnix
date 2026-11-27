@@ -21,8 +21,9 @@
 --     the lines between newlines, at most 15 characters each, four at most; one or two lines start on the
 --     second); the block keeps it as w.get(...).text, four strings.
 --   * Items carry the block they place (the item's name is the block's, except the few in ITEM_BLOCK: redstone
---     makes redstone_wire, seeds a crop; a water or lava bucket places its liquid).  A cell that is not
---     replaceable refuses.
+--     makes redstone_wire, seeds a crop; a water or lava bucket places its liquid; and a sim's w.placesAs, by full
+--     name, for a mod's item that places a block of another name, as AE2's cables are all ae2:cable_bus: dug, the
+--     block gives the item back).  A cell that is not replaceable refuses.
 --   * Digging: the drops go to the turtle; what hung on a dug block pops off.
 --   * A crafting grid and the workbench peripheral (the recipes in RECIPES, an independent table so that
 --     the library's own can be checked against it), chests, and a furnace (fuel through the sides and the
@@ -707,7 +708,7 @@ end
 function B.new(opts)
     opts = opts or {}
     local w = { S = M.state(), W = {}, entities = {}, ground = {}, time = 0, facing = opts.facing or "north",
-                frames = {}, placed = 0 }
+                frames = {}, placed = 0, placesAs = {} }
     local S, W = w.S, w.W
     local c0 = CIDX[w.facing] - 1
     S.get = function(x, y, z) return W[M.key(x, y, z)] end
@@ -801,6 +802,7 @@ function B.new(opts)
     end
     local DIRS6 = { "up", "down", "north", "east", "south", "west" }
     local function itemOf(b)
+        if b.drop then return b.drop end
         local s = short(b.name)
         if isWallSign(s) then return "minecraft:" .. s:sub(1, #s - 10) .. "_sign" end
         return "minecraft:" .. (DROP_AS[s] or s)
@@ -874,7 +876,7 @@ function B.new(opts)
             return true
         end
         if not isBlockItem(item) then return false end
-        local placed = ITEM_BLOCK[short(item)] and "minecraft:" .. ITEM_BLOCK[short(item)] or item
+        local placed = w.placesAs[item] or ITEM_BLOCK[short(item)] and "minecraft:" .. ITEM_BLOCK[short(item)] or item
         local fam = FAMILIES[familyOf(placed)]
         local ctx = {
             w = w, x = px, y = py, z = pz, face = face, clicked = clicked, replaceClicked = replaceClicked,
@@ -884,7 +886,7 @@ function B.new(opts)
         function ctx.near(dir) return (w.near(px, py, pz, dir)) end
         local state, name = fam.place(ctx)
         if not state then return false end
-        local block = { name = name or placed, state = state }
+        local block = { name = name or placed, state = state, drop = w.placesAs[item] and item or nil }
         if fam.name == "sign" and type(message) == "string" then block.text = signText(message) end
         w.put(px, py, pz, block)
         if fam.after then fam.after(w, px, py, pz, block) end

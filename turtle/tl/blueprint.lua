@@ -189,11 +189,21 @@ local function infoOf(entry)
 end
 
 -- Is the block found the one a plan's entry asks for: the same name, or a block of its item (redstone_wire for
--- redstone), the wall form only when it has a facing (a torch with none stands)?
+-- redstone, or the block T.placeAt learnt a mod item places: ae2:cable_bus for an AE2 cable)?  The wall form is when
+-- the entry asks no state, as T.placeAt takes it (a torch it hung on a wall), or a facing; not when it asks a state
+-- without one.
 local function isBlockOf(found, entry)
     if found == entry.name then return true end
-    if found == nil or T.itemOfBlock(found) ~= entry.name then return false end
-    return found ~= T.blockOfItem(entry.name, "wall") or (entry.state ~= nil and entry.state.facing ~= nil)
+    if found == nil then return false end
+    if T.blockOfItem(entry.name) == found then return true end
+    if T.itemOfBlock(found) ~= entry.name then return false end
+    return found ~= T.blockOfItem(entry.name, "wall") or entry.state == nil or entry.state.facing ~= nil
+end
+
+-- Is the item a mod's whose block isn't known (no table has it, and T.placeAt hasn't learnt it)?  Such a cell goes
+-- through T.placeAt, which learns the block if it has another name (an AE2 cable goes in as ae2:cable_bus).
+local function unlearnt(item)
+    return not text.startsWith(item, "minecraft:") and T.blockOfItem(item) == item
 end
 
 -- Is the entry a double slab (two slab items in one cell)?
@@ -868,7 +878,7 @@ local function putCell(cell, move, look, support)
         if found and type(data) == "table" and data.state and data.state.type == "double" then return true end
         return false, "the second half didn't go onto the slab at " .. cell.x .. "," .. cell.y .. "," .. cell.z
     end
-    local plain = asked == 0 and PLAIN_FAMILIES[infoOf(cell.entry).family]
+    local plain = asked == 0 and PLAIN_FAMILIES[infoOf(cell.entry).family] and not unlearnt(cell.name)
     -- (the map says it is there: a cell done before a crash, or a plan built over itself; opts.look goes to see)
     if not look and mapHolds(cell, want) then return true, true end
     if T.countItem(cell.name) == 0 then return false, "no " .. cell.name .. " on board" end
@@ -877,7 +887,7 @@ local function putCell(cell, move, look, support)
         if ok then
             local found, data = T.look("down")
             local here = found and type(data) == "table" and data.name or nil
-            if here == cell.name then return true, true end
+            if isBlockOf(here, cell.entry) then return true, true end
             T.selectItem(cell.name)
             if T.placeDir("down") then return true end
             if here then return false, here .. " is in the way at " .. cell.x .. "," .. cell.y .. "," .. cell.z end
@@ -996,12 +1006,13 @@ end
 -- false only warns, in info.sealed).
 -- Info is { name, done, total, failed = list of { n, x, y, z, item, why }, placed (cells put in this run), there
 -- (cells found already in place), finished, resumed, protected, short, order, fuel = { spent, estimate, perCell },
--- warnings, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
+-- warnings, lintSummary, topDrops, previous, sealed (a line for each placement that closed the turtle in: T.placeAt's warning;
 -- opts.exit refuses those instead, each cell failing with why) }.
 -- Once every cell has been tried, the plan is put through T.lint (what stops a two-tall player): its warnings are
--- info.warnings (each tagged where = "plan" or "around"); the plan's own are printed, a line a rule ("player: headroom
--- at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and those round it
--- (terrain, other buildings) as one count ("player: 4 more round it"); they never change the result.
+-- info.warnings (each tagged where = "plan" or "around"); info.lintSummary says them in lines: the plan's own a line a
+-- rule ("headroom at 3,1,4: ..."), drops on the plan's top (wall tops) as one count (their cells info.topDrops), and
+-- those round it (terrain, other buildings) as one count ("4 more round it").  Only how many is printed, for the
+-- player's chat ("lint: 24 warnings, in the result (info.lintSummary, info.warnings)"); they never change the result.
 function T.build(plan, opts)
     opts = opts or {}
     local saved = loadSaved()
@@ -1158,8 +1169,14 @@ function T.build(plan, opts)
         if not ok and warnings == "Terminated" then error(warnings, 0) end
         if ok and warnings then
             info.warnings, info.topDrops = warnings, lint.topDrops
-            for _, line in ipairs(lint.planSummary or lint.summary) do print("player: " .. line) end
-            if (lint.around or 0) > 0 then print("player: " .. lint.around .. " more round it (T.lint(box) lists them)") end
+            -- (ADR-0023 D8) the lines go in the result; the player's chat gets only how many
+            local lines = {}
+            for _, line in ipairs(lint.planSummary or lint.summary) do lines[#lines + 1] = line end
+            if (lint.around or 0) > 0 then lines[#lines + 1] = lint.around .. " more round it (T.lint(box) lists them)" end
+            info.lintSummary = lines
+            if #lines > 0 then
+                print("lint: " .. #warnings .. (#warnings == 1 and " warning" or " warnings") .. ", in the result (info.lintSummary, info.warnings)")
+            end
         end
     end
     if info.finished then return true, info end
