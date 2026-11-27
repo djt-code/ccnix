@@ -2656,6 +2656,29 @@ run("say hello")
 local hello = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
 check("a goal sharing no words with a description: no nudge", hello:find("[Your skills", 1, true) and not hello:find("may fit", 1, true), hello)
 
+-- ADR-0023 Phase 1 item 8: everyday words aren't matched on ("great work buddy!" brought three unrelated skills, with
+-- the shipped ones' real descriptions); a resumed goal is matched on the goal as the player gave it, not on the
+-- resume wrapper's words or the lines the model added to resume.txt
+fresh({ "" })
+for _, name in ipairs({ "big-jobs", "build-for-player", "field-report", "light-an-area", "redstone-and-doors", "storage" }) do
+    fs.makeDir("turtle/skills")
+    fs.makeDir("turtle/skills/" .. name)
+    Mine.files["turtle/skills/" .. name .. "/skill.md"] = repoFile("turtle/skills/" .. name .. "/skill.md")
+end
+HTTP.queue = { reply({ text("Thanks!") }, "end_turn") }
+run("great", "work", "buddy!", "thanks,", "that", "was", "nice", "and", "good,", "cool", "and", "fun")
+local praise = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("praise for the work fits no skill: work, great, buddy, nice, thanks, good, cool, fun aren't matched on",
+    praise:find("[Your skills", 1, true) and not praise:find("may fit", 1, true), praise:match("%[Skills that may fit[^%]]*%]"))
+fresh({ "" })
+shipped()
+Mine.files["claude/resume.txt"] = "options: --steps 3\nsort the chests\nat 0,0,5; the place is half done, reading memory\n"
+HTTP.queue = { reply({ text("Carried on.") }, "end_turn") }
+run("--resume")
+local resumed = HTTP.requests[1] and HTTP.requests[1].body.messages[1].content or ""
+check("a resumed goal: the skills that fit the goal itself (storage), not the wrapper or the lines added (place: light-an-area)",
+    resumed:find("\n[Skills that may fit: storage]", 1, true), resumed:match("%[Skills that may fit[^%]]*%]"))
+
 -- ccnix's layers: the updates (/ccnix) over the ROM (/rom/ccnix)
 fresh({ "" })
 skillFile("rom/ccnix/turtle/skills", "storage", "The ROM's storage.")

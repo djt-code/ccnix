@@ -301,7 +301,9 @@ local SKILLS = { shipped = "turtle/skills", own = "claude/skills", file = "skill
 for _, w in ipairs(text.words("the and for with from into onto that this these those then than when what where which who whom "
     .. "use using used your you our all any some can could please make get put set let now too also more most out off over "
     .. "under about its are was were been has have had not but how why one two each every there here them they their will "
-    .. "would should just like need want keep turtle player claude")) do
+    .. "would should just like need want keep turtle player claude "
+    -- (everyday words, ADR-0023: "great work buddy!" fitted three unrelated skills)
+    .. "work thing stuff great good nice cool fun well done thank thanks buddy mate pal yes okay sure lot")) do
     SKILLS.STOP[w] = true
 end
 local VERSION_FILE = "claude/.version"  -- the ccnix version the model last ran with
@@ -2960,9 +2962,11 @@ local function main()
             -- (a resumed goal is kept as the file had it, not as the model was told it)
             fs.makeDir(WRITE_DIR)
             fileio.write(resume.file, resume.prefix .. " " .. resume.given .. "\n" .. (resume.goal or goal) .. "\n")
+            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own.  A resumed goal is
+            -- matched on the file's first line, the goal as it was given: not on the "You were interrupted" wrapper
+            -- or the lines the model added under it, ADR-0023)
+            local fit = goal ~= NOTES.given and SKILLS.fit(resume.goal and (text.cut(resume.goal, "\n")) or goal)
             resume.goal = nil
-            -- (ADR-0013 D10: the skills whose words the goal shares, but not for the harness's own)
-            local fit = goal ~= NOTES.given and SKILLS.fit(goal)
             if fit then
                 startNotes[#startNotes + 1] = fit
                 log(fit)
