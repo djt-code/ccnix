@@ -12,8 +12,9 @@ you change lights (remove torches, swap a fire for a campfire, put furniture ove
   spawn: feet cell with room (it and the cell over it) above a full, sturdy floor, at or under
   the dimension's limit. Sky light isn't modelled: the result is a roofed place, or any place
   at night.
-- The turtle can't tell the dimension: pass `opts.dimension` ("overworld", "nether", "end") or
-  set `T.cfg.dimension` in your settings helper. Ask the player if you don't know.
+- The dimension is `T.dimension()`'s (the setting `turtle.dimension`, else the blocks round the
+  turtle), which `T.darkCells` and `T.planLights` use on their own; `opts.dimension` overrides it.
+  If it says it isn't sure (`info.sure` false), ask the player.
   - Overworld and End: block light 0 spawns, so any light at all makes a cell safe.
   - Nether: 7 or less for skeletons, wither skeletons, endermen; 11 or less for zombified
     piglins, piglins, hoglins, blazes (`info.groups`). Ghasts and magma cubes spawn whatever
@@ -25,8 +26,7 @@ you change lights (remove torches, swap a fire for a campfire, put furniture ove
 
 ## Steps
 1. Box: the area's air and floor cells, at most 65536 cells; several boxes for a big place.
-2. Make the map know it: `T.scanBox(box)` (names only). Then `T.darkCells(box, { dimension =
-   ... })`. Read `info.summary`; `info.unseen` > 0: scan more; `info.unsure` lists cells over a
+2. Make the map know it: `T.scanBox(box)` (names only). Then `T.darkCells(box)`. Read `info.summary`; `info.unseen` > 0: scan more; `info.unsure` lists cells over a
    slab or stair whose half the map lacks: `T.inspectAll` those (a top one is a floor).
 3. Plan where lights go, the player's way first:
    - flush: glowstone, shroomlight or a sea lantern set into the floor or ceiling (swap a block
@@ -37,8 +37,8 @@ you change lights (remove torches, swap a fire for a campfire, put furniture ove
      cell's head);
    - not a wall torch sticking into a walkway (T.lint's "light" rule) or a lantern at head
      height ("lantern" rule).
-4. Try them before placing: `T.darkCells(box, { dimension = d, with = { { x, y, z,
-   "minecraft:glowstone" }, ... } })`; `{ x, y, z, "air" }` takes a light away. Fewest lights
+4. Try them before placing: `T.darkCells(box, { with = { { x, y, z, "minecraft:glowstone" },
+   ... } })`; `{ x, y, z, "air" }` takes a light away. Fewest lights
    that bring `info.dark` to 0 (Nether: decide with the player which group you light for).
 5. Place, then `T.darkCells` again from the map, and `T.lint(box)` for lights in the way.
 6. Keep a list of the lights you placed in a file under /claude/ so a later change can be

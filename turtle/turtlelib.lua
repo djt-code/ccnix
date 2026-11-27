@@ -3555,7 +3555,7 @@ T.registry = {
     map = "tl.world", scan = "tl.world", scanBox = "tl.world", inspectAt = "tl.world", inspectAll = "tl.world",
     setOrigin = "tl.world", origin = "tl.world", toWorld = "tl.world", toLocal = "tl.world",
     alignMap = "tl.world", frameChanged = "tl.world", mergeScan = "tl.world",
-    gpsCheck = "tl.world", gpsHere = "tl.world",
+    gpsCheck = "tl.world", gpsHere = "tl.world", dimension = "tl.world",
     -- tl.attach: what a block holds, which a dig would drop
     attachedTo = "tl.attach",
     -- tl.path: routes

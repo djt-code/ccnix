@@ -1522,6 +1522,218 @@ function T.map.cube(cx, cy, cz)
 end
 
 --------------------------------------------------------------------------
+-- The dimension (ADR-0023 D1)
+--
+-- The setting turtle.dimension names it ("overworld", "nether", "end"), or
+-- is "auto" (the default): then the mod says, when ccnix-mod gives Lua the
+-- dimension (a global ccnixmod with a dimension function), else the blocks
+-- round the turtle do.  Blocks that occur naturally in one dimension only
+-- count for it: what the turtle sees next to it (up, down and ahead: no
+-- fuel, no turning) and, when that isn't enough, what the map has within
+-- 16 blocks.  A clear majority decides; too few, or a near tie, is the
+-- overworld, not sure.  A decision is kept for the boot (the turtle can't
+-- change dimension without being carried, which restarts it); one it isn't
+-- sure of is made again once the turtle is 16 blocks from where it was.
+--------------------------------------------------------------------------
+
+local DIMENSION_SETTING = "turtle.dimension"
+-- The dimensions by the names given for them (the game's too)
+local DIMENSION_OF = { overworld = "overworld", nether = "nether", the_nether = "nether", ["end"] = "end", the_end = "end" }
+-- ...and by the mod's resource names
+local MOD_DIMENSION = { ["minecraft:overworld"] = "overworld", ["minecraft:the_nether"] = "nether", ["minecraft:the_end"] = "end" }
+-- Blocks that occur naturally in one dimension only, and that dimension (water can't be placed in the nether)
+local NATURAL = {}
+for _, n in ipairs({ "netherrack", "basalt", "blackstone", "soul_sand", "soul_soil", "crimson_nylium", "warped_nylium",
+                     "nether_quartz_ore", "nether_gold_ore" }) do
+    NATURAL["minecraft:" .. n] = "nether"
+end
+NATURAL["minecraft:end_stone"] = "end"
+for _, n in ipairs({ "stone", "deepslate", "tuff", "dirt", "grass_block", "granite", "diorite", "andesite", "water" }) do
+    NATURAL["minecraft:" .. n] = "overworld"
+end
+local DIMENSION_ORDER = { "overworld", "nether", "end" }
+local NEAR = 16                               -- how far round the turtle the map's blocks count, and how far it goes before
+                                              -- a decision it wasn't sure of is made again
+local LOOK_DECIDES = 2                        -- the look alone decides with this many for one dimension and none for another
+local FEWEST, MAJORITY = 4, 2                 -- else: at least this many for one, and this many times the next
+
+local wroteCfg                                -- the T.cfg.dimension this copy wrote (one a program set differs)
+
+-- The dimension's name ("nether" for "minecraft:the_nether" too), or nil.
+local function dimensionName(name)
+    if type(name) ~= "string" then return nil end
+    local _, after = text.cut(name, ":")
+    return DIMENSION_OF[after or name]
+end
+
+-- The look next to the turtle: the counts by dimension and the names seen ({ up, down, ahead }).  Raw inspects: nothing
+-- turns, nothing goes in the map.
+local function lookNear()
+    local counts, names = {}, {}
+    for _, fn in ipairs({ "inspectUp", "inspectDown", "inspect" }) do
+        local f = turtle and turtle[fn]
+        local ok, seen, data = false, false, nil
+        if type(f) == "function" then ok, seen, data = pcall(f) end
+        local name = ok and seen and type(data) == "table" and data.name or nil
+        names[#names + 1] = name or AIR
+        local d = name and NATURAL[name]
+        if d then counts[d] = (counts[d] or 0) + 1 end
+    end
+    return counts, names
+end
+
+-- The map's blocks within NEAR of the turtle that count for a dimension: the counts by dimension, or nil if the map
+-- has none to give (unaligned, or no cubes).  The map loaded now is the one read: the caller has it ready.
+local function mapNear()
+    if not (S.frame and S.frame.aligned) or S.count == 0 then return nil end
+    local p = T.pos
+    local mb = mapBox(p.x - NEAR, p.y - NEAR, p.z - NEAR, p.x + NEAR, p.y + NEAR, p.z + NEAR)
+    local counts = {}
+    eachCube(mb, function(c)
+        local want = {}
+        for i, name in ipairs(c.pal) do
+            if NATURAL[name] then want[i + 1] = NATURAL[name] end
+        end
+        if next(want) == nil then return end
+        eachCell(c, mb, function(code)
+            local d = want[code]
+            if d then counts[d] = (counts[d] or 0) + 1 end
+        end)
+    end)
+    return counts
+end
+
+-- The counts as text: "nether 5, overworld 1" (most first), or "none".
+local function countsText(counts)
+    local list = {}
+    for _, d in ipairs(DIMENSION_ORDER) do
+        if (counts[d] or 0) > 0 then list[#list + 1] = d end
+    end
+    table.sort(list, function(a, b) return counts[a] > counts[b] end)
+    for i, d in ipairs(list) do list[i] = d .. " " .. counts[d] end
+    return #list > 0 and table.concat(list, ", ") or "none"
+end
+
+-- The dimension the counts give: the most counted (nil: none), and whether that's sure.  `alone` is for the look's
+-- three cells, which decide only when two or more agree and none disagrees.
+local function byCounts(counts, alone)
+    local best, top, second = nil, 0, 0
+    for _, d in ipairs(DIMENSION_ORDER) do
+        local n = counts[d] or 0
+        if n > top then best, top, second = d, n, top
+        elseif n > second then second = n end
+    end
+    if not best then return nil, false end
+    if alone then return best, top >= LOOK_DECIDES and second == 0 end
+    return best, top >= FEWEST and top >= MAJORITY * second
+end
+
+-- Decide the dimension by the mod or the blocks: dim and info (as T.dimension gives).  mapCounts() gives the map's
+-- counts near the turtle (nil: none), asked only when the look doesn't decide; `fallback` is the dimension when it
+-- isn't sure (the overworld unless told).
+local function decideDimension(mapCounts, fallback)
+    local api = rawget(_G, "ccnixmod")
+    local info = {}
+    if type(api) == "table" and type(api.dimension) == "function" then
+        local ok, res = pcall(api.dimension)
+        if ok and MOD_DIMENSION[res] then
+            info.from, info.mod, info.sure = "the mod", res, true
+            info.said = "in the " .. MOD_DIMENSION[res] .. ", from the mod"
+            return MOD_DIMENSION[res], info
+        end
+        info.mod = ok and res or nil
+        info.modWhy = ok and ("the mod says " .. tostring(res) .. ", which isn't the overworld, the nether or the end: "
+            .. "going by the blocks") or ("the mod's dimension failed (" .. tostring(res) .. "): going by the blocks")
+    end
+    local look, names = lookNear()
+    info.look, info.counts = names, look
+    local dim, sure = byCounts(look, true)
+    if sure then
+        info.from, info.sure = "the blocks next to it", true
+        info.said = "in the " .. dim .. ", from the blocks round it"
+        return dim, info
+    end
+    local near = mapCounts and mapCounts() or nil
+    local counts = {}
+    for _, d in ipairs(DIMENSION_ORDER) do
+        local n = (look[d] or 0) + (near and near[d] or 0)
+        if n > 0 then counts[d] = n end
+    end
+    info.near, info.counts = near, counts
+    dim, sure = byCounts(counts, false)
+    if sure then
+        info.from, info.sure = near and "the blocks round it and the map's near it" or "the blocks next to it", true
+        info.said = "in the " .. dim .. ", from the blocks round it"
+        return dim, info
+    end
+    fallback = fallback or "overworld"
+    local why = (dim == nil or counts[dim] < FEWEST) and "too few blocks round it to tell" or "a near tie"
+    why = why .. " (" .. countsText(counts) .. ")"
+    info.sure, info.from = false, "the blocks round it"
+    info.why = why .. ": taken as the " .. fallback .. "; the setting " .. DIMENSION_SETTING .. " names it"
+    info.said = "in the " .. fallback .. "? not sure: " .. why .. " (`sysctl " .. DIMENSION_SETTING .. "=nether` names it)"
+    return fallback, info
+end
+
+-- The setting's dimension: the name, or nil for auto; and a note when it's neither a dimension nor auto.
+local function settingDimension()
+    local v = T.setting(DIMENSION_SETTING, "auto",
+        "The dimension the turtle is in: overworld, nether, end, or auto (the mod says, else the blocks round it)")
+    if v == nil or v == "auto" then return nil end
+    local d = dimensionName(v)
+    if d then return d end
+    return nil, DIMENSION_SETTING .. " is " .. tostring(v) .. ", not overworld, nether, end or auto: going by the blocks"
+end
+
+-- The dimension now: dim, how ("set", "cfg" or "auto") and info.  The decision kept (on the turtle table, for every copy
+-- of the library) is used unless `again`, or it wasn't sure and the turtle has gone NEAR blocks since.
+local function dimensionNow(again, mapCounts, fallback)
+    local named, bad = settingDimension()
+    local dim, how, info
+    if named then
+        dim, how, info = named, "set", { said = "in the " .. named .. " (" .. DIMENSION_SETTING .. ")", sure = true }
+    elseif T.cfg.dimension ~= nil and T.cfg.dimension ~= wroteCfg and dimensionName(T.cfg.dimension) then
+        dim = dimensionName(T.cfg.dimension)
+        how, info = "cfg", { said = "in the " .. dim .. " (T.cfg.dimension)", sure = true }
+    else
+        local keeper = turtle or _G
+        local kept = keeper._ccnixDimension
+        local p = T.pos
+        local moved = kept and math.max(math.abs(p.x - kept.at.x), math.abs(p.y - kept.at.y), math.abs(p.z - kept.at.z))
+        if kept and not again and (kept.info.sure or moved < NEAR) then
+            dim, info = kept.dim, kept.info
+        else
+            dim, info = decideDimension(mapCounts, fallback)
+            keeper._ccnixDimension = { dim = dim, info = info, at = { x = p.x, y = p.y, z = p.z } }
+        end
+        how = "auto"
+        if bad then info.setting = bad end
+    end
+    wroteCfg = dim
+    rawset(T.cfg, "dimension", dim)
+    return dim, how, info
+end
+
+-- The dimension the turtle is in: "overworld", "nether" or "end", how it was decided ("set": the setting turtle.dimension;
+-- "auto": by the mod or the blocks round it; "cfg": T.cfg.dimension set by the program), and info.
+--
+-- The setting turtle.dimension (`sysctl turtle.dimension=nether`) names it; "auto" (the default) asks the mod when it
+-- gives Lua the dimension, else goes by blocks that occur naturally in one dimension only: netherrack, basalt,
+-- blackstone, soul sand and soil, the nylium and the nether ores for the nether; end stone for the end; stone,
+-- deepslate, tuff, dirt, grass, granite, diorite, andesite and water for the overworld.  What the turtle sees next to it
+-- (up, down, ahead: no fuel, no turning) decides when two or three agree; else the map's blocks within 16 count too, and
+-- a clear majority decides.  Too few, or a near tie, is the overworld, not sure (info.sure false, info.why says).
+-- Info is { said (a line: "in the nether, from the blocks round it"), sure, from, counts, look (the names seen), near
+-- (the map's counts), why }.  T.cfg.dimension follows it, so T.darkCells and T.planLights use it.  The decision is kept
+-- for the boot; one it wasn't sure of is made again 16 blocks on, or with opts.again.  A build of nether blocks in the
+-- overworld is what auto can get wrong: the setting is there for it.
+function T.dimension(opts)
+    opts = opts or {}
+    ensure()
+    return dimensionNow(opts.again, mapNear)
+end
+
+--------------------------------------------------------------------------
 -- Scans
 --------------------------------------------------------------------------
 
