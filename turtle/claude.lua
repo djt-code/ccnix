@@ -101,8 +101,8 @@
 -- doc/claude-news.txt: the lines for each version since).
 --
 -- Resuming after a reboot: while a goal is under way /claude/resume.txt
--- holds it (a first line of the session's options, then the goal, to
--- which the model adds where it is), and it's removed when the goal ends
+-- holds it (a first line of the session's options but --confirm, then
+-- the goal, to which the model adds where it is), and it's removed when the goal ends
 -- or Ctrl+T stops claude.  With the settings ccnix.autostart = claude and
 -- claude.resume = true, a turtle that went down mid-goal (a server
 -- restart, its chunk unloaded) starts `claude --resume` at boot: the
@@ -405,7 +405,8 @@ if not opts then
     print(USAGE)
     return
 end
--- --resume: the goal from the file, the options it was given under any given here
+-- --resume: the goal from the file, the options it was given under any given here.  Not --confirm (ADR-0023 D7):
+-- that one is for whoever is at the turtle now, so an older file's is left.
 if opts.resume then
     local saved = fileio.read(resume.file)
     if saved then
@@ -419,7 +420,6 @@ if opts.resume then
                     resume.filled[#resume.filled + 1] = "--" .. k .. " " .. kept[k]
                 end
             end
-            if opts.confirm == nil then opts.confirm = kept.confirm end
         else
             rest = saved            -- (the model rewrote it without the line)
         end
@@ -2904,8 +2904,9 @@ local function main()
     if #resume.taken > 0 then
         say("yellow", "Options from the last session (claude.options): " .. table.concat(resume.taken, " ") .. ".")
     end
+    -- (and for resume.txt: not --confirm either, ADR-0023 D7)
+    resume.given = kept
     if CONFIRM then given[#given + 1] = "--confirm" end
-    resume.given = table.concat(given, " ")
     -- (where the options came from: the command line, the last session's claude.options, the goal kept in resume.txt)
     log(string.format("start: claude%s (model %s, effort %s, steps %d, cache %s%s; at %s facing %d, fuel %s)%s%s",
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",

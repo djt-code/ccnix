@@ -2029,6 +2029,31 @@ run("--resume", "--steps", "9")
 check("--resume: options given on the command line win over the file's",
     (Mine.files["claude.log"] or ""):find("steps 9, cache 5m", 1, true) ~= nil)
 
+-- ADR-0023 D7: --confirm is for whoever is at the turtle now, so resume.txt doesn't keep it, and an older file's
+-- isn't taken (as claude.options doesn't keep it)
+fresh({ "y", "" })
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "local f = fs.open('claude/resume.txt', 'r'); local s = f.readAll(); f.close(); return s" }) }, "tool_use"),
+    reply({ text("Done.") }, "end_turn"),
+}
+run("dig the tunnel", "--steps", "400", "--confirm")
+local k7 = resultsIn(2).toolu_1
+check("--confirm isn't kept in resume.txt (the start line still says it)",
+    k7 and k7.content == "-> options: --steps 400\ndig the tunnel\n"
+        and (Mine.files["claude.log"] or ""):find("start: claude --steps 400 --confirm (", 1, true), k7 and k7.content)
+fresh({ "" })
+Mine.files["claude/resume.txt"] = "options: --steps 3 --confirm\ndig the tunnel\n"
+HTTP.queue = {
+    reply({ toolUse("lua", { code = "return 'ran'" }) }, "tool_use"),
+    reply({ text("Ok.") }, "end_turn"),
+}
+run("--resume")
+local k7b = resultsIn(2).toolu_1
+check("--resume of a file with --confirm in it: the code runs unasked, and the start line names only --steps",
+    k7b and k7b.content == "-> ran" and not (Mine.files["claude.log"] or ""):find("confirming each call", 1, true)
+        and (Mine.files["claude.log"] or ""):find("with its options: --steps 3\n", 1, true),
+    (Mine.files["claude.log"] or ""):match("start: [^\n]*"))
+
 fresh({ "" })
 Mine.files["claude/resume.txt"] = "dig the tunnel, rewritten\n"
 HTTP.queue = { reply({ text("Ok.") }, "end_turn") }
