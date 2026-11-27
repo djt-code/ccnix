@@ -583,7 +583,9 @@ local function gives(learned, famName, kind, row, want, h, base)
 end
 
 -- Every approach that can give `want` at the target, nearest first, the sure ones before the guesses.  Each is
--- { kind, h, sx, sy, sz, row, certain, key }.  tried: the keys of the approaches already used.
+-- { kind, h, sx, sy, sz, row, certain, key }.  tried: the keys of the approaches already used.  Nearest is by the
+-- moves to the stand, then the turns: a move costs fuel and a turn doesn't, so a turtle next to the target turns round
+-- to it rather than climb onto it to place it from above.
 local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, dig)
     local apps = {}
     -- A half slab of the item's own kind may be one the game takes as replaceable and skips (then it clicks the
@@ -614,7 +616,7 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
                             if not tried[key] then
                                 apps[#apps + 1] = { kind = kind, h = h, sx = sx, sy = sy, sz = sz, row = c.row,
                                                     certain = c.certain, key = key,
-                                                    cost = T.dist(T.pos, { x = sx, y = sy, z = sz }) + T.turnsTo(h) }
+                                                    cost = T.dist(T.pos, { x = sx, y = sy, z = sz }), turns = T.turnsTo(h) }
                             end
                             break
                         end
@@ -626,6 +628,7 @@ local function plan(famName, fam, item, learned, want, tx, ty, tz, base, tried, 
     table.sort(apps, function(a, b)
         if a.certain ~= b.certain then return a.certain end
         if a.cost ~= b.cost then return a.cost < b.cost end
+        if a.turns ~= b.turns then return a.turns < b.turns end
         return a.key < b.key
     end)
     return apps

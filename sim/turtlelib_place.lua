@@ -35,7 +35,8 @@
 --   * T.ignite: a fire from above, refused with no flint and steel, nothing solid under, a block in the cell;
 --   * (ADR-0023 1) a mod's item that places a block of another name (an AE2 cable, ae2:cable_bus): placed on the
 --     first try, how.placedAs, the pair learnt (kept after a restart, forgotten with T.forgetPlacements("item")); a
---     vanilla item that comes out as another block still fails.
+--     vanilla item that comes out as another block still fails;
+--   * (ADR-0023 2) next to the target and facing away from it, the turtle turns round rather than climb.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -1251,4 +1252,22 @@ do
     name, state = T.placeAt(0, 0, 3, "minecraft:moss_block")
     check("a vanilla item that comes out as another block still fails, dug back, nothing learnt", name == nil and W.get(0, 0, 3) == nil
         and (W.dug or 0) > 0 and learnedText() == nil and text.contains(tostring(state), "got dirt"), tostring(state))
+end
+
+--------------------------------------------------------------------------
+-- ADR-0023 2: a move costs more than a turn: next to the target and facing away, the turtle turns round to it
+-- rather than climb onto it and place from above
+--------------------------------------------------------------------------
+do
+    fresh("north", { stone(0, -1, 3), stone(0, -1, 2), stone(0, 0, 4) })
+    knowAll()
+    W.give(1, STONE, 8)
+    T.moveTo(0, 0, 2)
+    T.face(2)                                   -- (its back to the target, 0,0,3)
+    local moves = W.S.moves
+    local name, state, how = T.placeAt(0, 0, 3, STONE)
+    check("facing away from the cell next to it: it turns round and places sideways, no climb",
+        name == STONE and type(how) == "table" and how.approach == "front" and how.from.x == 0 and how.from.y == 0 and how.from.z == 2
+        and W.S.moves == moves and atCell(0, 0, 2) and has(0, 0, 3, "stone"),
+        tostring(state) .. " " .. (type(how) == "table" and tostring(how.approach) or "") .. " moves " .. (W.S.moves - moves))
 end
