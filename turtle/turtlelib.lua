@@ -1060,7 +1060,12 @@ for name, side in pairs(DIG_SIDE) do
 end
 
 -- The wrapped placements: place, then tell the listeners what went where
--- (the item, and what the cell holds now).
+-- (the item, and what the cell holds now).  A place the game says failed
+-- that used the item did place it: true, and what the game said and how
+-- many it used.  (CC: Tweaked 1.120 on NeoForge says that of an item that
+-- places itself, an AE2 facade: it goes on to its other places to try,
+-- and may put a second one on a block nearby.  ccnix-mod fixes it; this
+-- is right with the fix or without.)
 for name, side in pairs(PLACE_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -1069,12 +1074,22 @@ for name, side in pairs(PLACE_SIDE) do
             local it = turtle.getItemDetail(turtle.getSelectedSlot())
             item = it and it.name
         end
+        local slot = turtle.getSelectedSlot and turtle.getSelectedSlot()
+        local before = slot and turtle.getItemCount and turtle.getItemCount(slot) or 0
+        local res = table.pack(raw[name](...))
+        if not res[1] and before > 0 then
+            local used = before - turtle.getItemCount(slot)
+            if used > 0 then
+                res = table.pack(true, string.format("placed, though the game said \"%s\" (it used %d)",
+                    tostring(res[2]), used))
+            end
+        end
         return afterwards(function()
             forgetSeen(x, y, z)
             if not (W and W.listeners[1]) then return end
             local block, state = lookAt(side)
             tell({ kind = "place", x = x, y = y, z = z, item = item, block = block, state = state })
-        end, raw[name](...))
+        end, table.unpack(res, 1, res.n))
     end
 end
 
@@ -1835,7 +1850,10 @@ function T.digDir(d)
 end
 
 -- Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign.
--- Returns turtle.place's results.
+-- Returns turtle.place's results; one the game says failed that used the item is true (an AE2 facade).
+--
+-- The second value then says what the game said and how many it used: a facade's place may use a second one, on a
+-- block nearby (CC: Tweaked's place on NeoForge; ccnix-mod fixes it at the source).
 function T.placeDir(d, text)
     if d == "up" then return impl.placeUp(text) end
     if d == "down" then return impl.placeDown(text) end

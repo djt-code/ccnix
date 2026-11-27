@@ -291,7 +291,9 @@ T.digDir(d)
     Face direction d (0 to 3, "up" or "down") and dig there, through the wrapped dig, so a protected area holds. Returns turtle.dig's results (false and why if it can't).
 
 T.placeDir(d, text)
-    Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign. Returns turtle.place's results.
+    Face direction d (0 to 3, "up" or "down") and place the selected item there; text is written on a sign. Returns turtle.place's results; one the game says failed that used the item is true (an AE2 facade).
+
+    The second value then says what the game said and how many it used: a facade's place may use a second one, on a block nearby (CC: Tweaked's place on NeoForge; ccnix-mod fixes it at the source).
 
 T.attackDir(d)
     Face direction d (0 to 3, "up" or "down") and attack there. Returns turtle.attack's results.
