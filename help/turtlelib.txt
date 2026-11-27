@@ -494,7 +494,7 @@ T.ensureRoom(need, keepCount, goDump, warning)
 == Containers ==
 
 T.dropSide(side, n)
-    Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results.
+    Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results. With nothing there they land on the ground, as turtle.drop's do: T.dropInto refuses instead.
 
 T.suckSide(side, n)
     Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
@@ -504,6 +504,11 @@ T.inspectSide(side)
 
 T.containerOn(side)
     Is there a chest or barrel on `side`?
+
+T.dropInto(side, n)
+    Drop the selected slot (or n of it) into the inventory on `side` ("front", "up" or "down"; "top" and "bottom" too), never on the ground: how many went in, and why when fewer than asked.
+
+    It refuses, dropping nothing, when nothing on that side holds items: no block, or a block that isn't a chest or a barrel and isn't an inventory the turtle can read (a hopper, a shulker box, a furnace). turtle.drop and T.dropSide throw the items on the ground there instead; that is what to use to throw junk away, or to feed a composter (not an inventory). A container that fills up takes what fits: the rest stays in the slot, and the why says so.
 
 T.containerCounts(side)
     How many of each item the container on `side` holds ({ name = count }), or nil if it can't be read.

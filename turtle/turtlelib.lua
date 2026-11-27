@@ -2916,7 +2916,8 @@ local function sideFuncs(side)
 end
 
 -- Drop up to n items from the selected slot into whatever is on `side`
--- ("front", "top" or "bottom"): turtle.drop's results.
+-- ("front", "top" or "bottom"): turtle.drop's results.  With nothing there
+-- they land on the ground, as turtle.drop's do: T.dropInto refuses instead.
 function T.dropSide(side, n) local _, drop = sideFuncs(side); return drop(n) end
 -- Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
 function T.suckSide(side, n) local suck = sideFuncs(side); return suck(n) end
@@ -2927,6 +2928,39 @@ function T.inspectSide(side) local _, _, inspect = sideFuncs(side); return inspe
 function T.containerOn(side)
     local ok, data = T.inspectSide(side)
     return ok and T.isContainer(data.name)
+end
+
+local DROP_SIDES = { front = "front", top = "top", up = "top", bottom = "bottom", down = "bottom" }
+
+-- Drop the selected slot (or n of it) into the inventory on `side` ("front", "up" or "down"; "top" and "bottom" too),
+-- never on the ground: how many went in, and why when fewer than asked.
+--
+-- It refuses, dropping nothing, when nothing on that side holds items: no block, or a block that isn't a chest or a
+-- barrel and isn't an inventory the turtle can read (a hopper, a shulker box, a furnace).  turtle.drop and T.dropSide
+-- throw the items on the ground there instead; that is what to use to throw junk away, or to feed a composter (not an
+-- inventory).  A container that fills up takes what fits: the rest stays in the slot, and the why says so.
+function T.dropInto(side, n)
+    local real = DROP_SIDES[side]
+    if not real then return 0, "the side is \"front\", \"up\" or \"down\", not " .. tostring(side) end
+    if n ~= nil and (type(n) ~= "number" or n < 1 or n ~= math.floor(n)) then
+        return 0, "n is a whole number of 1 or more (or nil: the whole slot)"
+    end
+    local slot = turtle.getSelectedSlot()
+    local have = turtle.getItemCount(slot)
+    if have == 0 then return 0, "slot " .. slot .. " (the selected slot) is empty" end
+    local ok, data = T.inspectSide(real)
+    local p = ok and peripheral and peripheral.wrap(real)
+    if not (ok and (T.isContainer(data.name) or (p and p.list and p.size))) then
+        return 0, "nothing on the " .. side .. " holds items (" .. (ok and data.name or "no block") .. "): nothing dropped. "
+            .. "Face a chest first; turtle.drop throws them on the ground"
+    end
+    local want = math.min(n or have, have)
+    T.dropSide(real, want)
+    local went = have - turtle.getItemCount(slot)
+    if went < want then
+        return went, "the " .. data.name .. " on the " .. side .. " is full: " .. (want - went) .. " stayed in slot " .. slot
+    end
+    return went
 end
 
 -- How many of each item the container on `side` holds ({ name = count }),

@@ -125,10 +125,11 @@ T.dumpDownWait(keepCount, interval) - dumpDown, but while the container is full,
 T.inventoryLine(label) - Print one line listing what the turtle is carrying.
 T.ensureRoom(need, keepCount, goDump, warning) - Make sure at least `need` slots are free before working a tile whose drops must not spill, calling goDump() (the trip to the chest) if short. Returns true, or false once still short (printing `warning` once).
 Containers:
-T.dropSide(side, n) - Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results.
+T.dropSide(side, n) - Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results. With nothing there they land on the ground, as turtle.drop's do: T.dropInto refuses instead.
 T.suckSide(side, n) - Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
 T.inspectSide(side) - turtle.inspect on `side` ("front", "top" or "bottom"): ok, data.
 T.containerOn(side) - Is there a chest or barrel on `side`?
+T.dropInto(side, n) - Drop the selected slot (or n of it) into the inventory on `side` ("front", "up" or "down"; "top" and "bottom" too), never on the ground: how many went in, and why when fewer than asked.
 T.containerCounts(side) - How many of each item the container on `side` holds ({ name = count }), or nil if it can't be read.
 T.countContainer(side, name) - How many `name` the container on `side` holds, or nil if it can't be read.
 T.compactContainer(side) - Tidy the container on `side`: merge part stacks so everything sits in as few slots as it can, then sort it.

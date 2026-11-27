@@ -36,7 +36,9 @@
 --     out of place; at two bases, T.stow's note on an item whose chests are all far ranks them as it does (the chest
 --     for it before the other base's nearer bulk chest) and says which it is;
 --   * T.cfg.autoDump: setting it loads the module; the room running out on a dig sends the turtle to the chests and
---     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once.
+--     back; with no chests it takes the junk chest's trip; a dump that did nothing is not tried again at once;
+--   * T.dropInto (ADR-0023 D5): into the chest on a side, n or the whole slot; with nothing there, or a block that holds
+--     nothing, refused and nothing dropped.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -1262,4 +1264,28 @@ do
     W.set(0, 0, 1, "minecraft:dirt")
     turtle.dig()
     check("a second copy of the library: one dump, the dirt in the bulk chest once", chestHas(0, 0, -3, DIRT) == 36 and here())
+end
+
+do
+    -- (ADR-0023 D5) T.dropInto: into the chest on that side, and refused, nothing dropped, with nothing there to hold it
+    fresh(true)
+    W.give(1, "minecraft:iron_nugget", 30)
+    turtle.select(1)
+    local n, why = T.dropInto("front", 10)
+    check("T.dropInto with nothing in front: refused, nothing dropped, and why", n == 0 and carrying("minecraft:iron_nugget") == 30
+        and (W.thrown or 0) == 0 and tostring(why):find("nothing on the front holds items", 1, true), tostring(n) .. " " .. tostring(why))
+    W.set(0, 0, 1, "minecraft:dirt")
+    n, why = T.dropInto("front")
+    check("...nor into a block that holds nothing (dirt)", n == 0 and carrying("minecraft:iron_nugget") == 30 and tostring(why):find("(minecraft:dirt)", 1, true),
+        tostring(why))
+    W.set(0, 0, 1, "minecraft:chest")
+    n, why = T.dropInto("front", 10)
+    check("T.dropInto(\"front\", 10) puts 10 into the chest in front", n == 10 and why == nil and chestHas(0, 0, 1, "minecraft:iron_nugget") == 10
+        and carrying("minecraft:iron_nugget") == 20, tostring(n) .. " " .. tostring(why))
+    W.set(0, 1, 0, "minecraft:chest")
+    n = T.dropInto("up")
+    check("...and \"up\" with no n: the whole slot into the chest above", n == 20 and chestHas(0, 1, 0, "minecraft:iron_nugget") == 20
+        and carrying("minecraft:iron_nugget") == 0, tostring(n))
+    check("...a bad side or an empty slot: 0 and why", select(2, T.dropInto("left")):find("\"front\", \"up\" or \"down\"", 1, true)
+        and select(2, T.dropInto("front")):find("is empty", 1, true))
 end

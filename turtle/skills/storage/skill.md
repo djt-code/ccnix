@@ -43,7 +43,9 @@ a job that plans on what the chests hold, and after crafting or dropping by hand
 - Of several same-named items `T.fetch` and `T.pull` take a tool that will equip (not worn,
   not enchanted) first; `{ pick = function(d) return ... end }` chooses by the chest's item
   detail (`d.damage`, `d.enchantments`).
-- Counts go stale: after your own `turtle.drop`/`suck` at a known chest, call
+- Put things into a chest with `T.dropInto(side, n)` ("front", "up", "down"): with no chest
+  there it refuses and drops nothing, where `turtle.drop` throws them on the ground.
+- Counts go stale: after your own `T.dropInto`, `turtle.drop` or `suck` at a known chest, call
   `T.recount(side)` while still beside it. `T.craft` and `T.craftBatch` recount for you.
   Before a plan that depends on counts (`T.craftPlan`, a big build), `T.catalogue()`.
 - What there is: `T.inventoryReport{ sort = "count" }`, `info.text` as lines;
