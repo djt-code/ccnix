@@ -106,6 +106,21 @@
 -- half, and it goes on in open water; less, and it tunnels on as ever,
 -- sealing the water as it meets it.
 --
+-- Water coming into the tunnel from outside it (falling through a hole
+-- in the ceiling, or running in through a wall) is followed out, the way
+-- it flows (up a falling column, then along to stronger water), to its
+-- source, which is filled, so it stops for good.  It goes only through
+-- the water (no digging), never into a protected area, and no more than
+-- 16 blocks out, and comes back the way it went.  Where that doesn't
+-- stop it (a body of water, more than one source) or can't be done,
+-- water falling in through the ceiling is caught right over the hole in
+-- a bowl of bulk blocks: four sides (and a rim on them, where it's open
+-- round them), the hole filled as its bottom.  The water lands in it and
+-- stays there (water never overflows: it only runs down).  Falling
+-- columns side by side get one trough round them all.  Water it can't
+-- trace that runs in through a wall, a source, and lava are sealed where
+-- they come in, as before.
+--
 -- The turtle's own column and row are part of the tunnel: it stands in
 -- the mouth at one bottom (or top, for negative heights) corner, and the
 -- tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3
@@ -793,7 +808,8 @@ fillerDry = false    -- no filler on board, at its home or behind: don't go look
 fillerKeep = FILLER_KEEP  -- FILLER_KEEP_WET once water has used it up
 stats = { veins = 0, ore = 0, sealed = 0, filled = 0, torches = 0, relit = 0, homes = 0, fetched = 0, wet = 0,
           wood = 0, lava = 0, grown = 0, pickedUp = 0, thrown = 0, hauls = 0, waits = 0,
-          standing = 0, spawners = 0, spawnerTorches = 0, shell = 0, fill = 0, cap = 0, bulkhead = 0 }
+          standing = 0, spawners = 0, spawnerTorches = 0, shell = 0, fill = 0, cap = 0, bulkhead = 0,
+          traced = 0, bowls = 0, bowlBlocks = 0 }
 -- From the Geo Scanner (see there): the world direction of the tunnel's +z
 -- once lined up, this segment's blocks touching the tunnel ("rock",
 -- "ore", "fluid" or "air"), and its ore further out.
@@ -994,7 +1010,10 @@ end
 -- takes up (see scoop) is gone: inside the tunnel that's the end of it;
 -- in a wall, floor or ceiling the hole it leaves is filled as before.
 -- Out of bulk blocks, it goes for more first (as drying and filling do).
+-- Flowing water coming in from outside the tunnel is followed to its
+-- source first, or caught in a bowl (see traceIn).
 function seal(d)
+    if traceIn(d) then return true end
     if scoop(d) and inBox(neighbour(d)) then return true end
     if not fillerDry and not T.selectItem(function(n) return FILLER[n] end) then
         fillerKeep = FILLER_KEEP_WET       -- wet ground: carry more from now on
@@ -1040,7 +1059,8 @@ end
 -- turtle fills a source with a bulk block and digs it out.  If a fluid
 -- comes back, something next to that block feeds it (water from above,
 -- an aquifer): it steps in, seals the lava and water touching it outside
--- the tunnel, and fills the sources touching it inside, steps back, and
+-- the tunnel (flowing water there is followed to its source first, see
+-- traceIn), and fills the sources touching it inside, steps back, and
 -- tries again.  Those fillings in the tunnel are dug out again in their
 -- turn (ahead, by the lanes; behind, at the end of the segment), by when
 -- what fed them is sealed.  Flowing water nothing feeds drains away.
@@ -1055,8 +1075,13 @@ end
 -- beside it feeds: it comes from further off, along the tunnel.  Follow it
 -- upstream through the tunnel (up, if it's falling; else to stronger
 -- water beside it), as far as water spreads and falls, to where it comes
--- in from outside, seal that, and come back.  A source in the tunnel is left
--- for drying out when it's reached.  True if it sealed something.
+-- in from outside, and come back.  There, flowing water is followed on
+-- out of the tunnel to its source, which is filled (see traceIn); where
+-- it's still coming after that, or the source is out of reach, water
+-- falling in through the ceiling is caught in a bowl over the hole (see
+-- bowl), and anything else (a source, lava, water from a wall) is
+-- sealed where it comes in.  A source in the tunnel is left for drying
+-- out when it's reached.  True if it sealed something.
 -- Going over part of the tunnel (repair), it follows water no further
 -- than that part's far end: water from the next part (dug) is that
 -- part's to see to, when it's gone over in turn (fromOutside notes it
@@ -1132,6 +1157,278 @@ function stem(level)
     end
     unfed[k] = unfed[k] or true
     return sealed
+end
+
+-- Water from outside the tunnel (ADR-0022's amendment).  Plugging the
+-- block it comes in by isn't the end of water from above: it lands on the
+-- plug, spreads along the top of the ceiling and comes in somewhere else.
+-- So flowing water coming in from outside is followed out of the tunnel
+-- to its source, the way it flows: up a falling column, then along to
+-- stronger water, and the source is filled.  The turtle moves only
+-- through the water (no digging), never into a protected area, and no
+-- more than TRACE_REACH blocks out, and comes back the way it went.  If
+-- it's still coming after that (a body of water, more than one source),
+-- or the source is out of reach, water falling in through the ceiling is
+-- caught in a bowl right above the hole (see bowl), and the rest is
+-- sealed where it comes in, as before.
+-- Lava is sealed where it comes in, as ever: it's slow (a block every 30
+-- ticks), so what's left of a column after its source is filled looks
+-- like more coming, and while the turtle is out it flows into the block
+-- the turtle left.
+-- TRACE_REACH: water runs at most 7 blocks on the flat from a source, so
+-- 16 is a 9-block fall and the longest stream there is.  A trace that
+-- turns back has cost twice that in moves (about 13 s); a bowl is 5 to 9
+-- blocks and a few moves, so further out than that the bowl is cheaper.
+TRACE_REACH = 16
+TROUGH_MAX = 8       -- falling columns side by side caught in one trough, at most
+tracing = false      -- following water out of the tunnel (its looks aren't the tunnel's water)
+tracedAt = {}        -- key -> true: water coming in there has been traced once (not again)
+function isFiller(n) return FILLER[n] end
+
+-- The turtle is in fluid `name` of `level` outside the tunnel: the way
+-- upstream (up, if it's falling; else the neighbour with stronger flow,
+-- not back the way it came, the fewest turns first and no more turning
+-- once it knows a way), and what's there.  Nil if nothing feeds it.
+function upstream(name, level, back)
+    if level >= 8 then
+        local ok, data = look("up")
+        if ok and data.name == name then return "up", data end
+        return nil
+    end
+    local todo, best, bestData = {}, nil, nil
+    for e = 0, 3 do if e ~= back then todo[#todo + 1] = e end end
+    while #todo > 0 do
+        local i = 1
+        for j = 2, #todo do if turnsTo(todo[j]) < turnsTo(todo[i]) then i = j end end
+        if best and turnsTo(todo[i]) > 0 then break end
+        local e = table.remove(todo, i)
+        local ok, data = look(e)
+        if ok and data.name == name then
+            if isSource(data) then return e, data end
+            if strength(data) < level and (not bestData or strength(data) < strength(bestData)) then
+                best, bestData = e, data
+            end
+        end
+    end
+    return best, bestData
+end
+
+-- Follow the fluid in direction e (outside the tunnel, `data`) upstream
+-- to its source and fill it, then come back the way it went.  Up a
+-- falling column the turtle blocks it, so the water above lands on the
+-- turtle and spreads round the column a block up while it's there; the
+-- game keeps water beside falling water flowing for good.  Going up,
+-- the turtle takes that with it (what it left drains: nothing falls
+-- under it).  But coming down a column that's still falling (out of
+-- reach, a protected area, more than one source), each block it stops
+-- in would leave water spread round the one above it, where it's open (a
+-- cave).  So where the way it faces is open (air, or water spread there;
+-- it turns from falling water, another column), it steps out of the
+-- column and climbs down beside it, as far as it's open below, then backs
+-- into it again; where it's rock, it goes on down the column.  True if
+-- it filled the source; how far up and across that was from the tunnel;
+-- else why not.
+function traceOut(e, data)
+    local name, path, filledIt, reached = data.name, {}, false, nil
+    local from = here()
+    tracing = true
+    local why
+    local d, cur = e, data
+    while true do
+        local n = neighbour(d)
+        local area = T.guarded(n.x, n.y, n.z)
+        if #path >= TRACE_REACH then why = "its source is more than " .. TRACE_REACH .. " blocks out"; break end
+        if area then why = "it comes through the protected area " .. area; break end
+        if n.z < 1 or (#path > 0 and inBox(n)) then why = "it comes from the tunnel"; break end
+        if not moveDir(d) then why = "something is in its way"; break end
+        path[#path + 1] = d
+        trail[#trail + 1] = d
+        local nd, nData = upstream(name, tonumber(cur.state and cur.state.level) or 0, OPP[d])
+        if not nd then why = "nothing feeds it now"; break end
+        if isSource(nData) then
+            reached = neighbour(nd)
+            area = T.guarded(reached.x, reached.y, reached.z)
+            if area then why = "its source is in the protected area " .. area; break end
+            filledIt = seal(nd)
+            if not filledIt then why = "out of bulk blocks" end
+            break
+        end
+        d, cur = nd, nData
+    end
+    reached = reached or here()
+    local up, across = reached.y - from.y, math.abs(reached.x - from.x) + math.abs(reached.z - from.z)
+    -- still falling (not filled, or more feeds it than the source it filled)?
+    local falling = #path > 0 and (not filledIt or upstream(name, tonumber(cur.state and cur.state.level) or 0, OPP[path[#path]]) ~= nil)
+    local i = #path
+    while i >= 1 do
+        -- still falling: down beside the column where it's open (the way it
+        -- faces, or round from falling water there: another column), to
+        -- the lowest block it climbed it from (or the floor), and back in
+        if falling and path[i] == "up" and i > 1 and path[i - 1] == "up" then
+            local out
+            for _ = 1, 4 do
+                local q = neighbour(T.dir)
+                local ok, side = look(T.dir)
+                local level = ok and tonumber(side.state and side.state.level) or 0
+                if ok and not FLUID[side.name] then break end          -- (rock: shut in here)
+                if not ok or (level > 0 and level < 8) then
+                    if not inBox(q) and q.z >= 1 and not T.guarded(q.x, q.y, q.z) then out = T.dir end
+                    break
+                end
+                T.face((T.dir + 1) % 4)
+            end
+            if out and moveDir(out) then
+                -- (open below: air, or water spread there)
+                local down = 0
+                while i - down > 1 and path[i - down - 1] == "up" do
+                    local ok, below = look("down")
+                    local level = ok and tonumber(below.state and below.state.level) or 0
+                    if ok and not (FLUID[below.name] and level > 0 and level < 8) then break end
+                    if not moveDir("down") then break end
+                    down = down + 1
+                end
+                if not T.back() then go(OPP[out]) end
+                for _ = 1, down do trail[#trail] = nil end
+                i = i - down
+            end
+        end
+        local s = path[i]
+        if not (s ~= "up" and s ~= "down" and T.dir == s and T.back()) and not moveDir(OPP[s]) then go(OPP[s]) end
+        trail[#trail] = nil
+        i = i - 1
+    end
+    tracing = false
+    return filledIt, up, across, why
+end
+
+-- Before sealing the fluid in direction d: if it's water flowing in from
+-- outside the tunnel, follow it to its source and fill that (once for
+-- each place it comes in).  Still coming, or out of reach: a bowl for
+-- water falling in through the ceiling.  True if it's seen to (no seal
+-- needed there); false to seal it as before.
+function traceIn(d)
+    -- (water under the floor doesn't flow up into the tunnel: it's draining out)
+    if d == "down" or waterMode or digLimit or tracing or #trail > 0 or not inBox(T.pos) then return false end
+    local m = neighbour(d)
+    if inBox(m) or tracedAt[key(m)] then return false end
+    local ok, data = look(d)
+    if not (ok and data.name == WATER) or isSource(data) then return false end
+    tracedAt[key(m)] = true
+    if T.countItem(isFiller) < 1 or not T.hasFuel(T.homeCost() + T.cfg.fuelMargin + 2 * TRACE_REACH + 8) then
+        return false
+    end
+    local at = "(" .. key(m) .. ")"
+    local filledIt, up, across, why = traceOut(d, data)
+    local okm, now = look(d)
+    local coming = okm and now.name == data.name
+    if filledIt and not coming then
+        stats.traced = stats.traced + 1
+        print(string.format("Traced the water at %s to its source %d blocks up%s: filled.", at, up,
+            across > 0 and string.format(" and %d across", across) or ""))
+        return true
+    end
+    if filledIt then
+        print(string.format("Filled the source of the water at %s, but it's still coming (more than one source).", at))
+    elseif coming then
+        print(string.format("Couldn't trace the water at %s: %s.", at, why))
+    else
+        return true                        -- (it stopped meanwhile: nothing to seal)
+    end
+    if d == "up" and (tonumber(now.state and now.state.level) or 0) >= 8 then return bowl() end
+    return false
+end
+
+-- Water is falling into the tunnel through the ceiling, above the turtle
+-- (in the top row): catch it right above the hole.  The block over the
+-- hole gets four solid sides (bulk blocks where there's water, air or a
+-- soft block; rock is left), and the hole is filled as its bottom: 5
+-- blocks for one falling column.  The water lands in it and stays there:
+-- water doesn't overflow, it only runs down.  Where a side is open, it
+-- gets a block on top too (a rim: from the side's block, before it's put
+-- in), as water landing on the turtle while it stood in the bowl spread
+-- round the column there, and the game keeps water beside falling water
+-- flowing for good: 9 blocks in a cave.  Falling columns beside it, over
+-- the tunnel and falling through the ceiling, are caught with it in one
+-- closed trough (TROUGH_MAX): the turtle goes along the trough's blocks,
+-- putting in each one's outer sides, and fills each one's hole from
+-- above, but the one it came up through, which it fills from the tunnel,
+-- last.  True if it did.
+function bowl()
+    local hole = neighbour("up")
+    local c = { x = hole.x, y = hole.y + 1, z = hole.z }
+    if T.countItem(isFiller) < 9 or T.guarded(hole.x, hole.y, hole.z) or T.guarded(c.x, c.y, c.z) then return false end
+    if not moveDir("up") then return false end
+    trail[#trail + 1] = "up"
+    if not moveDir("up") then
+        moveDir("down")
+        trail[#trail] = nil
+        return false
+    end
+    trail[#trail + 1] = "up"
+    tracing = true
+    local placed, cells, count = 0, { [key(T.pos)] = true }, 1
+    -- a block put in direction d, keeping one back for the hole it came up through
+    local function add(d)
+        if T.countItem(isFiller) > 1 and putFiller(d) then placed = placed + 1 end
+    end
+    local function visit(entry)
+        local sides = {}                   -- (the fewest turns first)
+        for e = 0, 3 do sides[#sides + 1] = { e = e, q = neighbour(e) } end
+        table.sort(sides, function(a, b)
+            if turnsTo(a.e) ~= turnsTo(b.e) then return turnsTo(a.e) < turnsTo(b.e) end
+            return a.e < b.e
+        end)
+        for _, s in ipairs(sides) do
+            if not cells[key(s.q)] and not T.guarded(s.q.x, s.q.y, s.q.z) then
+                local ok, data = look(s.e)
+                local level = ok and tonumber(data.state and data.state.level) or 0
+                local column = false
+                -- falling water beside it, over the tunnel: another column
+                -- falling in, if the ceiling under it is open (else it's
+                -- water landing on the ceiling, which a side keeps out)
+                if ok and data.name == WATER and level >= 8 and count < TROUGH_MAX and s.q.x >= X0 and s.q.x <= X1
+                        and s.q.z >= 1 and s.q.z <= LENGTH and moveDir(s.e) then
+                    trail[#trail + 1] = s.e
+                    local okd, below = look("down")
+                    if not okd or FLUID[below.name] then
+                        column, cells[key(s.q)], count = true, true, count + 1
+                        visit(false)
+                    end
+                    if not moveDir(OPP[s.e]) then go(OPP[s.e]) end
+                    trail[#trail] = nil
+                end
+                if not column and (not ok or FLUID[data.name] or waterIn(data) or soft(data)) then
+                    if ok and not FLUID[data.name] and not protected(data.name) then digDir(s.e) end
+                    -- the rim: water from above landed on the turtle while
+                    -- it stood here and spread round the column a block up,
+                    -- where the column keeps it flowing for good (as the
+                    -- game has it): a block on top of the side keeps it in
+                    if moveDir(s.e) then
+                        add("up")
+                        if not T.back() then go(OPP[s.e]) end
+                    end
+                    add(s.e)
+                end
+            end
+        end
+        if not entry then add("down") end
+    end
+    visit(true)
+    tracing = false
+    for _ = 1, 2 do
+        if not moveDir("down") then go("down") end
+        trail[#trail] = nil
+    end
+    if putFiller("up") then placed = placed + 1 end
+    stats.bowls = stats.bowls + 1
+    stats.bowlBlocks = stats.bowlBlocks + placed
+    if count > 1 then
+        print(string.format("Caught the water falling in at (%s): a trough over %d columns, %d blocks above the ceiling.",
+            key(hole), count, placed))
+    else
+        print(string.format("Caught the water falling in at (%s): a bowl of %d blocks above the ceiling.", key(hole), placed))
+    end
+    return true
 end
 
 warnedWet = false
@@ -3276,6 +3573,7 @@ end
 -- its column: one column counts its most, however often it's met there.
 -- What it meets in a stretch it has probed is counted already.
 function noteWater(p, w)
+    if tracing then return end             -- (water outside, followed to its source: not the tunnel's)
     if probing and p.z >= probing.a and p.z <= probing.b then
         probing.cells[key(p)] = math.max(probing.cells[key(p)] or 0, w)
     end
@@ -4909,6 +5207,9 @@ final = string.format("%s: %d homes built, %d veins (%d ore blocks), %d fluid bl
     .. (stats.thrown > 0 and string.format(" Threw away %d bulk blocks no chest had room for.", stats.thrown) or "")
     .. (stats.shell + stats.fill > 0 and string.format(" Through open water: %d blocks of shell, %d filled in and dug"
         .. " out again%s.", stats.shell, stats.fill, stats.cap > 0 and string.format(", an end cap of %d", stats.cap) or "") or "")
+    .. (stats.traced > 0 and string.format(" Traced water coming in to its source and filled it %d times.", stats.traced) or "")
+    .. (stats.bowls > 0 and string.format(" Caught water falling in through the ceiling in %d bowls (%d blocks).", stats.bowls,
+        stats.bowlBlocks) or "")
     .. (stats.standing > 0 and string.format(" Went round %d blocks it doesn't dig%s.", stats.standing,
         stats.spawners > 0 and string.format(" (%d spawners, lit with %d torches)", stats.spawners, stats.spawnerTorches) or "") or "")
 print(final)
