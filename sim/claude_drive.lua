@@ -894,7 +894,7 @@ check("setmetatable, getmetatable, rawget, rawset, rawequal, xpcall, keys, colou
 fresh({ "" })
 local UTF = "3\195\1513 \226\128\148 it\226\128\153s done"
 HTTP.queue = {
-    reply({ text(UTF), { type = "server_tool_use", id = "srvtoolu_2", name = "code_execution", input = { code = "x" } },
+    reply({ text(UTF), { type = "server_tool_use", id = "srvtoolu_2", name = "code_execution", input = {} },
             thinking(), toolUse("lua", { code = "print('a' .. string.char(167) .. 'b')" }) }, "tool_use"),
     reply({ text("Done.") }, "end_turn"),
 }
@@ -904,7 +904,26 @@ check("the model's UTF-8 goes back as it came", u2 and u2[2].content[1].text == 
 local lr = tostring((resultsIn(2).toolu_1 or {}).content)
 check("a tool's Latin-1 goes as UTF-8", lr:find("a\194\167b", 1, true) ~= nil, lr)
 check("the screen shows x as CC has it, the dash and quote as ASCII", Mine.logHas("^3\2153 %- it's done$"))
-check("the API's own code step shown by its name", Mine.logHas("^%-%-%- code execution$"))
+check("the API's own code step with nothing in its input: shown by its name", Mine.logHas("^%-%-%- code execution$"))
+
+-- 20b. #394: the code execution that comes with the web tools, named in the log and on the screen with its input
+--      (code_execution's code, bash_code_execution's command); the prompt says it runs on Anthropic's side and can't
+--      see the turtle
+fresh({ "" })
+HTTP.queue = {
+    reply({ { type = "server_tool_use", id = "srvtoolu_3", name = "code_execution", input = { code = "print(len(results))" } },
+            { type = "server_tool_use", id = "srvtoolu_4", name = "bash_code_execution", input = { command = "ls /tmp" } },
+            text("Filtered.") }, "end_turn"),
+}
+run("look it up")
+local log20b = Mine.files["claude.log"] or ""
+check("code execution and bash code execution logged and shown by name, with their code and command",
+    log20b:find(" code execution: print(len(results))\n", 1, true) and log20b:find(" bash code execution: ls /tmp\n", 1, true)
+        and Mine.logHas("^%-%-%- code execution: print%(len%(results%)%)$") and Mine.logHas("^%-%-%- bash code execution: ls /tmp$"),
+    log20b)
+local sys20b = HTTP.requests[1] and HTTP.requests[1].body.system[1].text or ""
+check("the prompt: the web tools' code execution runs on Anthropic's side and can't see the turtle; the turtle is lua's",
+    sys20b:find("The code execution that comes with them runs on Anthropic's side: it can't see the turtle, its files or the world; anything about the turtle goes through lua.", 1, true))
 
 -- 21. The log rotates at claude.logSize, keeping one old copy (claude.logKeep 1: scenario 38 has more); the helpers
 --     the model keeps in /claude/helpers.lua are in its code's world; a

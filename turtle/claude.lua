@@ -553,7 +553,7 @@ Networking: prefer CC's own `http` (http.get(url [, headers]) -> a handle: h.rea
 
 Programs: run_program runs ccnix's own turtle programs, tested and careful about fuel, chests and getting home: mine (tunnels and branch mines), farm (crops), mow (grass and flowers) and home (back to a job's start); and ip and ping, for the network. Prefer one of them to writing your own loops when the job is theirs. Read its manual first (run_program with help = true); it runs until it finishes (or the person stops it) and its output comes back. They keep the same saved position as T, so T.pos is right afterwards; `--here` makes where the turtle stands their (0,0,0), and so yours.
 
-Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit.
+Memory: the memory tool keeps notes between sessions (where the base, chests and fuel are, what's been mined, what the person likes, jobs half done). Look at it before you start; write down what you'd want next time, briefly, and keep it pruned: what's current first, the old moved to an archive file outside /memories, in /claude/notes-archive/ (a file you view is sent on every call after, so keep notes.md short). When the conversation grows long it is summarized for you, and you go on from the summary. web_search and web_fetch look things up on the internet (recipes, how a mod's block works); they cost a little each, so use them when you need to know, not by habit. The code execution that comes with them runs on Anthropic's side: it can't see the turtle, its files or the world; anything about the turtle goes through lua.
 
 Skills: a skill is a procedure for a kind of goal, a folder holding skill.md (a name and a one-line description between "---" lines, then the steps). The first message lists them, the shipped ones and yours, with where each is. Before starting a goal, check the list and read with fs any that fit it: a skill's steps come before your own habits. When a task taught you a procedure worth repeating, write a skill: skill(name, description, body) in your code writes /claude/skills/<name>/skill.md (the name lowercase letters, digits and -; the description one line saying when to use it, "use when ..."); yours win over a shipped one of the same name, and are listed from the next session on.
 
@@ -2310,9 +2310,12 @@ local function eventData(stream)
 end
 
 -- The API's own tools as shown: what they're called, and the input field
--- that says what they did (any other, such as the code a web search's
--- results are filtered with, shown by its name)
-local SERVER_TOOL = { web_search = { "web search", "query" }, web_fetch = { "web fetch", "url" } }
+-- that says what they did (#394: the code execution that filters the web
+-- tools' results, its code or its command, ADR-0023); one without that
+-- field, or any other tool, shown by its name
+local SERVER_TOOL = { web_search = { "web search", "query" }, web_fetch = { "web fetch", "url" },
+                      code_execution = { "code execution", "code" }, bash_code_execution = { "bash code execution", "command" },
+                      text_editor_code_execution = { "code execution's file editor", "path" } }
 
 -- Which field of a content block each kind of delta adds to
 local DELTA_FIELD = { text_delta = "text", thinking_delta = "thinking", signature_delta = "signature",
@@ -2740,10 +2743,11 @@ local function converse(goal)
         for _, b in ipairs(reply.content) do
             if b.type == "text" and b.text ~= "" then print(convert.fromUTF8(b.text)); log("claude: " .. b.text) end
             if b.type == "thinking" and (b.thinking or "") ~= "" then log("thinking: " .. b.thinking) end
-            if b.type == "server_tool_use" then         -- a web search or fetch, done by the API
+            if b.type == "server_tool_use" then         -- a web search or fetch, or its code, done by the API
                 local shows = SERVER_TOOL[b.name]
-                local what = shows and shows[1] .. ": " .. tostring((b.input or {})[shows[2]] or "")
-                    or tostring(b.name):gsub("_", " ")
+                local said = shows and type(b.input) == "table" and b.input[shows[2]]
+                local what = shows and (said and shows[1] .. ": " .. tostring(said) or shows[1])
+                    or (tostring(b.name):gsub("_", " "))
                 say("lightBlue", "--- " .. convert.fromUTF8(what))
                 log(what)
             end
