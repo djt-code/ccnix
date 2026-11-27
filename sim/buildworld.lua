@@ -11,7 +11,8 @@
 --     doors (two blocks, a floor, hinge), trapdoors, fence gates, chests and furnaces, pistons, dispensers and
 --     droppers, observers (each way, up and down too), repeaters and comparators (on a floor); items that place
 --     a block of another name (redstone dust on a floor, seeds on farmland only);
---   * a cell that cannot take the block, replaceable cells, entities, items that are not blocks, buckets;
+--   * a cell that cannot take the block, replaceable cells, entities, items that are not blocks, buckets; a mod's
+--     item that places a block of another name (w.placesAs), which gives the item back when dug;
 --   * digging (the drops, a door's two halves, what hung on a dug block popping off) and inspect;
 --   * the crafting grid and the workbench, a chest, and a furnace by its faces with the time it takes.
 local PROJ = ...
@@ -669,4 +670,16 @@ do
     check("families by name", B.familyOf("minecraft:oak_trapdoor") == "trapdoor" and B.familyOf("minecraft:oak_door") == "door"
         and B.familyOf("minecraft:oak_fence_gate") == "fence_gate" and B.familyOf("minecraft:oak_fence") == "fence"
         and B.familyOf("minecraft:soul_wall_torch") == "torch" and B.familyOf("minecraft:cobblestone") == "block")
+end
+
+--------------------------------------------------------------------------
+-- A mod's item that places a block of another name (w.placesAs: AE2's cables are all ae2:cable_bus)
+--------------------------------------------------------------------------
+do
+    local w = world(nil, {})
+    w.placesAs["ae2:black_smart_cable"] = "ae2:cable_bus"
+    w.give(1, "ae2:black_smart_cable", 2)
+    check("a mod cable placed is an ae2:cable_bus, one used", turtle.place() == true and w.get(0, 0, 1).name == "ae2:cable_bus"
+        and w.carrying("ae2:black_smart_cable") == 1)
+    check("...dug, it gives the cable back", turtle.dig() == true and w.get(0, 0, 1) == nil and w.carrying("ae2:black_smart_cable") == 2)
 end

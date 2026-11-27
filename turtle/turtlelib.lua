@@ -2099,8 +2099,8 @@ end
 --   path    true, or a function(x, y, z, opts): when a straight run is
 --           blocked, ask a route finder (T.travel, from the path module, if
 --           there is one; or this function) to take it the rest of the way
--- The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4",
--- "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava
+-- The why is a sentence: "blocked by minecraft:obsidian at 3,12,-4" (with "; opts.path = true routes round it"
+-- when opts.path wasn't given), "protected: castle (...)", "avoiding minecraft:lava at ...", "digging minecraft:stone at 1,0,0 would release lava
 -- at 1,0,1 (opts.liquid = true digs it anyway)"; the cell is { x, y, z }.  The warning, when a cell it dug has a
 -- falling block over it as far as it knows, is "dug 1,0,0 under minecraft:gravel, which may fall into it".  The
 -- turtle stays wherever it got to.  (T.cfg.maxHeight and maxDrop, a program's grid, don't apply.)
@@ -2147,6 +2147,9 @@ function T.moveTo(x, y, z, opts)
                             elseif text.startsWith(noRoute, "no route") then why = why .. " (" .. noRoute .. ")"
                             else why = why .. " (no route: " .. noRoute .. ")" end
                         end
+                    elseif name and opts.path == nil and text.startsWith(why, "blocked by ") then
+                        -- (it goes in straight runs; the caller didn't say, so say how to go round)
+                        why = why .. "; opts.path = true routes round it"
                     end
                     return false, why, name, cell
                 end
@@ -3514,7 +3517,7 @@ function T.dumpJunk()
     -- (round what is in the way with the path finder, then a second try along the axes the other way round)
     local function go(p)
         if T.moveTo(p.x, p.y, p.z, { path = true, scan = false }) then return true end
-        return T.moveTo(p.x, p.y, p.z, { order = "xzy" })
+        return T.moveTo(p.x, p.y, p.z, { order = "xzy", path = false })
     end
     local ok, why = go(spot)
     if not ok then
