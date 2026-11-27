@@ -1,6 +1,6 @@
 # ADR-0022: mine through open water: the shell first, then fill and dig
 
-**Status:** Accepted (2026-11-26): D1 to D5 all A; built (see As built)
+**Status:** Accepted (2026-11-26): D1 to D5 all A; built (see As built); released in ccnix 0.55.0, the amendment (the bulkhead only where the tunnel is mostly water) in 0.56.0
 **Date:** 2026-11-26
 **Deciders:** Dan Theisen
 
