@@ -1182,6 +1182,10 @@ end
 
 -- Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with
 -- its state table if it's known.  True, or nil and why.  (Digs, placements, moves and scans note themselves.)
+--
+-- A nil state keeps the state the cell had, even under a new name: a level or a facing a look read stays.  An empty
+-- table clears it: T.map.set(x, y, z, "minecraft:lava", {}) notes lava with no known state (a cell once seen flowing,
+-- now a source, say), and T.map.get gives no state for it until a look reads one.
 function T.map.set(x, y, z, name, state)
     local ok, why = ready()
     if not ok then return nil, why end
