@@ -743,11 +743,13 @@ local function ensure()
         -- new dimension's, unless that one has a map of its own)
         if S.unsure and S.unsure == S.dim and S.dir == fs.combine(base, S.dim) and not fs.exists(dir) then
             flush()
-            makeDirs(dir)
-            for _, name in ipairs(fs.list(S.dir)) do fs.move(fs.combine(S.dir, name), fs.combine(dir, name)) end
-            fs.delete(S.dir)
-            print("The map begun here was taken for the " .. S.dim .. "'s (it wasn't sure of the dimension); the blocks say "
-                .. "the " .. dim .. ": it is the " .. dim .. "'s now.")
+            if fs.exists(S.dir) then
+                makeDirs(dir)
+                for _, name in ipairs(fs.list(S.dir)) do fs.move(fs.combine(S.dir, name), fs.combine(dir, name)) end
+                fs.delete(S.dir)
+                print("The map begun here was taken for the " .. S.dim .. "'s (it wasn't sure of the dimension); the blocks "
+                    .. "say the " .. dim .. ": it is the " .. dim .. "'s now.")
+            end
             S.dir, S.dim, was = nil, nil, nil
         end
         local moved = migrate(base, dim)
