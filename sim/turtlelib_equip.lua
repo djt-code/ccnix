@@ -4,6 +4,7 @@
 -- for the time it is used, on the side that holds no chunk controller,
 -- waited for until it shows up as a peripheral, and put back even when the
 -- code using it errors; and T.pull, a count of one item out of a mixed chest.
+-- A dig of air doesn't run the tool hook (ADR-0023).
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -309,6 +310,29 @@ said, dug, digWhy = quietly(function() return turtle.dig() end)
 check("T.cfg.tools names the job's tools: a pickaxe it doesn't name stays in the inventory",
     dug == false and digWhy == "No tool to dig with" and EQ.right == MODEM and carrying(PICK) == 1, tostring(digWhy))
 T.cfg.tools, T.cfg.equipToDig = nil, nil
+
+-- (ADR-0023 Phase 1 item 9) a dig of air: the tool hook (claude's: the pickaxe back on, the chat box off) waits for a
+-- dig that has a block to dig
+local inFront
+turtle.inspect = function()
+    if inFront then return true, { name = inFront, state = {} } end
+    return false, "No block to inspect"
+end
+reset(CONTROLLER, CHAT)
+put(3, PICK)
+local hooked = 0
+T.hooks.tool = function() hooked = hooked + 1; S.sel = 3; turtle.equipRight(); S.sel = 1 end
+T.cfg.equipToDig = true
+local dugWas = DUG
+said, dug, digWhy = quietly(function() return turtle.dig() end)
+check("a dig of air: \"Nothing to dig here\", and the equipment as it was (the chat box on, the pickaxe aboard, the hook not run)",
+    dug == false and digWhy == "Nothing to dig here" and EQ.left == CONTROLLER and EQ.right == CHAT and carrying(PICK) == 1
+        and hooked == 0 and DUG == dugWas and T.hooks.tool ~= nil, tostring(dug) .. " " .. tostring(digWhy) .. " " .. tostring(EQ.right))
+inFront = "minecraft:stone"
+said, dug = quietly(function() return turtle.dig() end)
+check("...and a dig of a block: the hook puts the pickaxe on, once, and it digs", dug == true and hooked == 1 and EQ.right == PICK
+    and T.hooks.tool == nil and DUG == dugWas + 1, tostring(EQ.right))
+T.hooks.tool, T.cfg.equipToDig, turtle.inspect = nil, nil, nil
 
 --------------------------------------------------------------------------
 -- pull

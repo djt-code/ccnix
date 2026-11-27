@@ -604,7 +604,8 @@ T.raw = raw
 -- Hooks for whatever drives this module (claude sets them; each is called
 -- only when it is set):
 --   T.hooks.tool()    before the first dig or attack that goes ahead (the
---                     wrapped ones) or T.usePrimaryTool: it is cleared, then
+--                     wrapped ones; not a dig of air, nor one refused) or
+--                     T.usePrimaryTool: it is cleared, then
 --                     called, so it runs once.  claude's chat listener puts
 --                     the pickaxe back there, from where the chat box sat.
 --   T.hooks.heard(e)  each chat message T.report.ask's wait reads that isn't
@@ -947,6 +948,7 @@ end
 
 -- What a dig with no tool on gets back from CC, and what puts one on for T.cfg.equipToDig (below, with the upgrades)
 local NO_TOOL = "No tool to dig with"
+local NOTHING_TO_DIG = "Nothing to dig here"         -- (what the game says to a dig of air)
 local equipToDig
 
 -- What a dig of these drops instead of the block itself (the common ones, with a pickaxe and no silk touch), for
@@ -1024,7 +1026,17 @@ end
 -- if any).  With T.cfg.digNeedsRoom, a dig with no room for its drop is
 -- refused too.  A dig of a block a hoe tills is looked at again after, since
 -- the block may still be there, changed.  With T.cfg.equipToDig, a dig that
--- failed for want of a tool puts one aboard on and digs again.
+-- failed for want of a tool puts one aboard on and digs again.  With no
+-- block there it says so as the game does and digs nothing, before the
+-- tool hook: a dig of air doesn't swap the pickaxe on (ADR-0023).  Not with
+-- a hoe on: it tills the dirt under a block of air.
+local function hoeOn()
+    if not (turtle.getEquippedLeft and turtle.getEquippedRight) then return true end   -- (can't tell without swaps)
+    for _, it in ipairs({ turtle.getEquippedLeft() or false, turtle.getEquippedRight() or false }) do
+        if it and it.name and text.endsWith(it.name, "_hoe") then return true end
+    end
+    return false
+end
 for name, side in pairs(DIG_SIDE) do
     impl[name] = function(...)
         local x, y, z = targetOf(side)
@@ -1040,6 +1052,7 @@ for name, side in pairs(DIG_SIDE) do
             return false, "no room for what digging " .. data.name .. " drops: every slot is full (T.cfg.digNeedsRoom; "
                 .. "stow or drop something first, or set it false to let drops fall)"
         end
+        if inspect and not ok and not hoeOn() then return false, NOTHING_TO_DIG end
         needTool()
         local putBack = ok and type(data) == "table" and data.name and joinPartStack(data.name)
         local res = table.pack(raw[name](...))
