@@ -98,6 +98,7 @@ for x = 0, W - 1 do for y = 0, H - 1 do
 end end
 check("W1: an end cap across the tunnel past its end (z=33)", capped == W * H, capped .. " of " .. W * H .. " blocks")
 check("W1: the tunnel behind home 1 never got water in it", most == 0, most .. " blocks at most")
+check("W1: a bulkhead (the lake fills the tunnel ahead, more than half of it)", logHas("^Bulkhead across the tunnel at z=15"))
 check("W1: no more than 6000 moves and 3000 turns", Mine.moves < 6000 and Mine.turns < 3000, summary())
 check("W1: back at the start", atStart())
 
@@ -133,7 +134,28 @@ run(tostring(W), tostring(H), "32", "--spacing", "16", "--no-lights")
 WATERY = false
 check("W3: finished", logHas("^Done"))
 check("W3: shelled only the bottom of the tunnel", logHas("Open water at z=%d+%.%.%d+: rows 0 to 2"), summary())
+check("W3: no bulkhead (the tunnel ahead is under half water), and it says why",
+    not logHas("^Bulkhead across") and logHas("^No bulkhead: %d+ of the %d+ cells ahead a scan saw are water or lava %(%d+%%: it takes more than half%)"))
 check("W3: the tunnel is dry", wetIn(1, 32) == 0, wetIn(1, 32) .. " blocks of water")
 check("W3: no water touching open space (sealed off)", wetOpen(32) == 0, wetOpen(32) .. " open faces")
 check("W3: dug to the end", leftIn(0, W - 1, 0, H - 1, 1, 32) == 0, leftIn(0, W - 1, 0, H - 1, 1, 32) .. " blocks left")
 check("W3: back at the start", atStart())
+
+-- W4. W3's water with no scanner: the water it meets doesn't reach the
+--     tunnel's top row: no bulkhead
+setup({ { name = "minecraft:chest", count = 4 }, { name = "minecraft:coal", count = 128 } })
+bulkAtStart(20)
+lake(-2, W + 1, -3, 1, 20, 30)
+startAt(); Mine.inv, Mine.files = {}, {}
+EQ = { left = "advancedperipherals:chunk_controller", right = "minecraft:diamond_pickaxe" }
+FUEL, DRY, PLACED = 20000, 0, 0
+WATERY = true
+settleWater()
+run(tostring(W), tostring(H), "32", "--spacing", "16", "--no-lights")
+WATERY = false
+check("W4: finished", logHas("^Done"))
+check("W4: no bulkhead: the water it met is all below the top row",
+    not logHas("^Bulkhead across") and logHas("^No bulkhead: the water it met is all below the tunnel's top row"), summary())
+check("W4: the tunnel is dry", wetIn(1, 32) == 0, wetIn(1, 32) .. " blocks of water")
+check("W4: dug to the end", leftIn(0, W - 1, 0, H - 1, 1, 32) == 0, leftIn(0, W - 1, 0, H - 1, 1, 32) .. " blocks left")
+check("W4: back at the start", atStart())

@@ -3180,16 +3180,21 @@ end
 -- once WATER_SOURCES water or lava sources turn up in the tunnel within
 -- WATER_SPAN blocks, or a scan from the home shows a third of the
 -- segment's sides in it, or the segment before left an end cap.  While a
--- segment is worked so, a bulkhead (a wall across the tunnel just behind
--- the home) keeps what water gets past off the tunnel behind: what goes
--- through it closes it again behind itself (see go), and it comes down
--- once the segment is dry.
+-- segment is worked so, and the tunnel ahead is more than half water
+-- (BULKHEAD_SHARE: see waterAhead), a bulkhead (a wall across the tunnel
+-- just behind the home) keeps what water gets past off the tunnel behind:
+-- what goes through it closes it again behind itself (see go), and it
+-- comes down once the segment is dry.  Where less of it is water (a lake
+-- bed along one side), the shell and the fill keep it out, and a bulkhead
+-- would be time spent for nothing.
 WATER_SOURCES = 6    -- sources met within...
 WATER_SPAN = 4       -- ...this many blocks of each other: open water
 WATER_SHARE = 1 / 3  -- (a scan from the home) share of the segment's sides in fluid: open water
+BULKHEAD_SHARE = 1 / 2   -- more than this share of the tunnel ahead water: a bulkhead behind the home
 FILLER_KEEP_WATER = 6 * 64   -- bulk blocks carried while it works in open water
 WATER_FILE = T.dataPath("mine.water")
 sourcesMet = {}      -- z of the sources it has met in the tunnel this segment
+sourceTop = nil      -- the highest row of those (y)
 seenOut = {}         -- key -> true (wet) or false: blocks outside the tunnel looked at this segment
 waterMode = false    -- working a stretch in open water
 wetTo = nil          -- (a chunk's fill) the furthest z it went into water
@@ -3231,7 +3236,10 @@ end
 
 -- A source of water or lava met at p (filled, or cut off).
 function noteSource(p)
-    if inBox(p) then sourcesMet[#sourcesMet + 1] = p.z end
+    if inBox(p) or (p.y > Y1 and inBox({ x = p.x, y = Y1, z = p.z })) then
+        if inBox(p) then sourcesMet[#sourcesMet + 1] = p.z end
+        sourceTop = math.max(sourceTop or p.y, p.y)
+    end
 end
 
 -- Has it met enough sources round z to call it open water?
@@ -3242,6 +3250,42 @@ function openWaterAt(z)
         if math.abs(s - z) <= WATER_SPAN then n = n + 1 end
     end
     return n >= WATER_SOURCES
+end
+
+-- How much of the tunnel ahead, from z = a on, is water: a share (0 to 1)
+-- and how it knows, or nil and why.  With scans covering at least half of
+-- its first SCAN_RADIUS slices: the share of the cells they cover that
+-- hold fluid.  Without them, it can't see the rows its lanes haven't
+-- reached (and meets the water in one lane first), so it goes by whether
+-- the water reaches the tunnel's top: sources met in its top row, or the
+-- ceiling's, say the tunnel is under water there (taken as all of it);
+-- none there, as under half.  A segment that starts at an end cap is
+-- taken as under water (the one before ended so).
+function waterAhead(a, b)
+    local fluid, seen, cells = 0, 0, 0
+    for z = a, math.min(b, a + SCAN_RADIUS - 1) do
+        for x = X0, X1 do
+            for y = Y0, Y1 do
+                cells = cells + 1
+                local said = scanSays({ x = x, y = y, z = z })
+                if said then
+                    seen = seen + 1
+                    if said == "fluid" then fluid = fluid + 1 end
+                end
+            end
+        end
+    end
+    if seen > 0 and seen * 2 >= cells then
+        return fluid / seen, string.format("%d of the %d cells ahead a scan saw are water or lava", fluid, seen)
+    end
+    if capZ == a then return 1, "the segment before ended under water (its end cap)" end
+    if #sourcesMet > 0 then
+        if sourceTop and sourceTop >= Y1 then
+            return 1, "the water it met reaches the tunnel's top row (no scan to say how much more)"
+        end
+        return 0, "the water it met is all below the tunnel's top row (no scan to say how much more)"
+    end
+    return nil, "nothing says how much of it is water"
 end
 
 -- May there be water or lava at p, as far as it knows?  (A scan or a
@@ -3525,7 +3569,15 @@ function openWater(z1, z2, opts)
     waterMode = true
     fillerKeep = math.max(fillerKeep, FILLER_KEEP_WATER)
     local seg = opts.seg or { z1, z2 }
-    if opts.bulkhead and home.k > 0 and not bulkheadZ then bulkheadUp() end
+    if opts.bulkhead and home.k > 0 and not bulkheadZ then
+        local share, how = waterAhead(z1, z2)
+        if share and share > BULKHEAD_SHARE then
+            bulkheadUp()
+        else
+            print(string.format("No bulkhead: %s%s.", how,
+                share and string.format(" (%d%%: it takes more than half)", math.floor(share * 100 + 0.5)) or ""))
+        end
+    end
     if capZ and capZ >= z1 and capZ <= z2 then capZ = nil; saveWater() end
     local a, done = z1, true
     local upTo = z1 - 1
@@ -3660,7 +3712,7 @@ function mineSegment(z1, z2, from)
     print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
         tostring(turtle.getFuelLevel())))
     known, targets, scanFrom, scanned = {}, {}, {}, {}
-    sourcesMet, seenOut = {}, {}
+    sourcesMet, sourceTop, seenOut = {}, nil, {}
     local wet0 = stats.wet
     local startLane, startZ = 1, nil
     if from then
@@ -3701,7 +3753,7 @@ function mineSegment(z1, z2, from)
             break
         end
         if upTo >= z2 then break end
-        za, water, sourcesMet = upTo + 1, false, {}
+        za, water, sourcesMet, sourceTop = upTo + 1, false, {}, nil
     end
     via = nil
     saveProgress(#lanes + 1, z2)

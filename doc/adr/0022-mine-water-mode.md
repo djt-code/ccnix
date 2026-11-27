@@ -190,3 +190,25 @@ here.
 4. [x] The trigger (D1) in `mineSegment` (`repair` keeps the careful mode for now).
 5. [x] Blocks from behind and the start (D4).
 6. [x] The header and help text, and the in-game checks.
+
+## Amendment (2026-11-27): the bulkhead only where the tunnel is mostly water
+
+The owner, from the field (turtle 23, a 10x10 with a Geo Scanner, building a bulkhead for a segment that wasn't
+fully under water): if the next stretch isn't fully submerged, the bulkhead is a waste of time. It should go up
+only when the tunnel ahead is more than half water (source blocks). It shouldn't go up for sporadic water.
+
+- **With a scanner:** open-water mode starts as before (D1). The bulkhead goes up only when more than half of the
+  tunnel cells the scans cover in the first `SCAN_RADIUS` slices ahead hold fluid (`BULKHEAD_SHARE`). Otherwise
+  it says `No bulkhead: N of the M cells ahead a scan saw are water or lava (P%: it takes more than half).`, and
+  the shell and fill do the work.
+- **Without a scanner** (the owner's design):
+  1. **Counting:** it counts the water it is next to, by column of the tunnel's cross-section (x, y). A source
+     counts 1 and flowing water 0.25. One lane running along a wet floor meets water in few columns, so
+     sporadic water and a wet floor stay under the threshold.
+  2. **Probing:** past the threshold (`WATER_COLUMNS`, within `WATER_SPAN` slices), it digs a few blocks
+     (`PROBE_LEN`) along the outside of the tunnel ahead: the top row and the two side columns. Those cells are
+     the tunnel's own, so the digging isn't wasted. It counts what it meets there, by the same weights.
+  3. **The decision:** more than half water, and it switches to open-water mode with the bulkhead (shell, fill,
+     dig). Otherwise it carries on tunnelling as before, sealing as it goes.
+- A segment that starts at an end cap (the one before ended under water) is open water with a bulkhead, as
+  before.
