@@ -674,24 +674,32 @@ local function openDir(dir)
 end
 
 -- A map for each dimension (ADR-0023 D2): .map/<dimension>/ holds its cubes, frames and pins, and .map/dimension
--- names the one in use last.
+-- names the one in use last: "nether", or "overworld unsure" when that map was filed under its dimension while the
+-- turtle wasn't sure of it (moved from the old .map/, or begun then), so a sure answer later can move it.
 local DIMENSION_FILE = "dimension"
 local MAP_DIMENSIONS = { "overworld", "nether", "end" }
 local mapDimension, switchedTo, holderDimension   -- (with the dimension, below)
 
--- The dimension .map/dimension names (the map in use last), or nil.
+-- The dimension .map/dimension names (the map in use last), or nil; and true if it was filed there unsure.
 local function lastDimension(base)
-    local name = text.trim(fileio.read(fs.combine(base, DIMENSION_FILE)) or "")
-    return (name == "overworld" or name == "nether" or name == "end") and name or nil
+    local w = text.words(fileio.read(fs.combine(base, DIMENSION_FILE)) or "")
+    local name = w[1]
+    if not (name == "overworld" or name == "nether" or name == "end") then return nil, false end
+    return name, w[2] == "unsure"
+end
+
+-- Write .map/dimension: the map in use, and whether it was filed under it unsure.
+local function recordDimension(base, dim, unsure)
+    fileio.write(fs.combine(base, DIMENSION_FILE), dim .. (unsure and " unsure" or "") .. "\n")
 end
 
 -- The map from before there was one a dimension (its cubes, frames and pins straight in .map/) moved into
 -- .map/<dim>/: the dimension .map/dimension names if a move was under way, else `dim`.  True if there was one.
 --
--- .map/dimension is written first, and each file is moved on its own, the frames last: a stop part way loses nothing,
--- and the next start moves the rest to the same place.  A file the dimension's folder already has is kept, and the
--- old one deleted.
-local function migrate(base, dim)
+-- .map/dimension is written first (with "unsure" when `unsure`: the dimension isn't sure, so a sure answer later moves
+-- the map again), and each file is moved on its own, the frames last: a stop part way loses nothing, and the next start
+-- moves the rest to the same place.  A file the dimension's folder already has is kept, and the old one deleted.
+local function migrate(base, dim, unsure)
     local listed, names = pcall(fs.list, base)
     if not listed then return false end
     local files = {}
@@ -699,8 +707,10 @@ local function migrate(base, dim)
         if parseName(name) or name == FRAME_FILE or name == PINS_FILE then files[#files + 1] = name end
     end
     if #files == 0 then return false end
-    local into = lastDimension(base) or dim
-    fileio.write(fs.combine(base, DIMENSION_FILE), into .. "\n")
+    local last, lastUnsure = lastDimension(base)
+    local into = last or dim
+    if last then unsure = lastUnsure end
+    recordDimension(base, into, unsure)
     local dir = fs.combine(base, into)
     makeDirs(dir)
     table.sort(files, function(a, b) return a ~= FRAME_FILE and (b == FRAME_FILE or a < b) end)
@@ -734,30 +744,43 @@ local function ensure()
     S.choosing = false
     if not ok then error(dim, 0) end
     if same and dim == S.dim then
-        if sure then S.unsure = nil end
+        if sure and S.unsure then                -- (a sure answer agrees: the map is that dimension's for good)
+            S.unsure = nil
+            recordDimension(base, dim, false)
+        end
         return
     end
     if S.dim ~= dim or S.dir ~= fs.combine(base, dim) then
         local dir = fs.combine(base, dim)
-        -- (a map begun this boot while it wasn't sure of the dimension holds the blocks that now say otherwise: it is the
-        -- new dimension's, unless that one has a map of its own)
-        if S.unsure and S.unsure == S.dim and S.dir == fs.combine(base, S.dim) and not fs.exists(dir) then
-            flush()
-            if fs.exists(S.dir) then
+        -- (a map filed under a dimension while it wasn't sure of it, this boot or before, holds the blocks that now say
+        -- otherwise: it is the new dimension's, unless that one has a map of its own)
+        local last, lastUnsure = lastDimension(base)
+        local from = S.dim or last
+        local fromUnsure = S.dim and S.unsure == S.dim or (not S.dim and lastUnsure)
+        local fromDir = from and fs.combine(base, from)
+        if sure and from and from ~= dim and fromUnsure and not fs.exists(dir) then
+            if S.dir then flush() end
+            if fs.exists(fromDir) then
                 makeDirs(dir)
-                for _, name in ipairs(fs.list(S.dir)) do fs.move(fs.combine(S.dir, name), fs.combine(dir, name)) end
-                fs.delete(S.dir)
-                print("The map begun here was taken for the " .. S.dim .. "'s (it wasn't sure of the dimension); the blocks "
+                for _, name in ipairs(fs.list(fromDir)) do fs.move(fs.combine(fromDir, name), fs.combine(dir, name)) end
+                fs.delete(fromDir)
+                print("The map was taken for the " .. from .. "'s (it wasn't sure of the dimension); the blocks "
                     .. "say the " .. dim .. ": it is the " .. dim .. "'s now.")
             end
-            S.dir, S.dim, was = nil, nil, nil
+            S.dir, S.dim, S.unsure, was = nil, nil, nil, nil
+            if fs.exists(base) then recordDimension(base, dim, false) end
         end
-        local moved = migrate(base, dim)
+        local moved = migrate(base, dim, not sure)
         local existed = fs.exists(dir)
         openDir(dir)
         S.dim = dim
-        S.unsure = not sure and not moved and not existed and dim or nil
-        if fs.exists(base) and lastDimension(base) ~= dim then fileio.write(fs.combine(base, DIMENSION_FILE), dim .. "\n") end
+        last, lastUnsure = lastDimension(base)
+        if sure then S.unsure = nil
+        elseif moved or not existed then S.unsure = dim
+        else S.unsure = last == dim and lastUnsure and dim or nil end
+        if fs.exists(base) and (last ~= dim or lastUnsure ~= (S.unsure ~= nil)) then
+            recordDimension(base, dim, S.unsure ~= nil)
+        end
         if was and was ~= dim then switchedTo(was, dim) end
     end
     S.prog = prog
@@ -1875,9 +1898,9 @@ end
 function mapDimension(base)
     local function evidence()
         if not S.dir then
-            local last = lastDimension(base)
+            local last, lastUnsure = lastDimension(base)
             openDir(last and fs.combine(base, last) or base)
-            S.dim = last
+            S.dim, S.unsure = last, lastUnsure and last or nil
         end
         return mapNear()
     end

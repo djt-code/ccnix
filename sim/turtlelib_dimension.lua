@@ -11,7 +11,9 @@
 --   * (D2) a map for each dimension: an old map (cubes straight in .map/) is moved into .map/overworld/ and read there,
 --     frame and origin too, and it says so; a move stopped part way goes on where .map/dimension says; a change of
 --     dimension switches maps and says so, and back again the first is as it was, moved with a re-zero made meanwhile;
---     a map begun while it wasn't sure, whose blocks then say the nether, becomes the nether's.
+--     a map begun while it wasn't sure, whose blocks then say the nether, becomes the nether's; an old map first read
+--     while unsure is filed under the overworld marked unsure (.map/dimension), and a later boot sure of the nether moves
+--     it; turtle.dimension set first files it in the nether at once; a sure answer that agrees clears the mark.
 local PROJ = ...
 package.path = PROJ .. "/turtle/?.lua;" .. PROJ .. "/lib/?.lua;" .. PROJ .. "/sim/lib/?.lua;" .. package.path
 local M = require("mock")
@@ -288,4 +290,61 @@ do
     check("a map begun while not sure, whose blocks then say the nether, becomes the nether's", d == "nether"
         and files(".map/overworld/") == "" and files(".map/nether/") ~= "" and T.map.get(0, -2, 0) == NETHERRACK,
         tostring(d) .. " " .. tostring(info.why) .. " / " .. files(".map/nether/"))
+end
+
+do
+    -- ADR-0023 D2, the castle at home: an old map, the first look after the update not sure (only built blocks round
+    -- the turtle and in the map), so it's filed under the overworld, marked unsure; a later boot sure of the nether moves
+    -- it to the nether's folder
+    local BRICKS = "minecraft:nether_bricks"
+    local function round(name) W.set(0, 1, 0, name); W.set(0, -1, 0, name); W.set(0, 0, 1, name) end
+    local function oldCastle()
+        fresh(BRICKS)
+        W.fill(2, 0, 2, 4, 0, 4, "minecraft:polished_blackstone_bricks")
+        know(-2, -1, -2, 5, 1, 5)
+        asOldMap()
+    end
+    oldCastle()
+    reboot()
+    SAID = {}
+    local first = T.map.get(3, 0, 3)
+    check("D2: an old map read while not sure is filed under the overworld, marked unsure in .map/dimension",
+        first == "minecraft:polished_blackstone_bricks" and W.S.files[".map/dimension"] == "overworld unsure\n"
+        and files(".map/overworld/") ~= "", tostring(first) .. " / " .. tostring(W.S.files[".map/dimension"]))
+    round(NETHERRACK)
+    reboot()
+    SAID = {}
+    local later = T.map.get(3, 0, 3)
+    check("...a later boot sure of the nether moves it to .map/nether/, its cells found there, and says so",
+        later == "minecraft:polished_blackstone_bricks" and files(".map/overworld/") == "" and files(".map/nether/") ~= ""
+        and W.S.files[".map/dimension"] == "nether\n" and saidHas("The map was taken for the overworld's"),
+        tostring(later) .. " / " .. files(".map/nether/") .. " / " .. table.concat(SAID, " | "))
+    -- the setting named before the first boot: straight into the nether's folder, nothing to move later
+    oldCastle()
+    SETTINGS["turtle.dimension"] = "nether"
+    reboot()
+    SAID = {}
+    local named = T.map.get(3, 0, 3)
+    check("...with turtle.dimension=nether set first: straight into .map/nether/, sure, no move after",
+        named == "minecraft:polished_blackstone_bricks" and files(".map/overworld/") == "" and files(".map/nether/") ~= ""
+        and W.S.files[".map/dimension"] == "nether\n" and not saidHas("The map was taken for"),
+        tostring(named) .. " / " .. tostring(W.S.files[".map/dimension"]))
+    SETTINGS["turtle.dimension"] = nil
+    -- a sure answer that agrees clears the mark: a later sure nether finds the overworld's map where it is, and starts
+    -- the nether's empty
+    oldCastle()
+    reboot()
+    T.map.get(3, 0, 3)
+    round(STONE)
+    reboot()
+    T.map.get(3, 0, 3)
+    local cleared = W.S.files[".map/dimension"]
+    round(NETHERRACK)
+    reboot()
+    SAID = {}
+    local there = T.map.get(3, 0, 3)
+    check("...a sure answer that agrees clears the mark; a later sure nether then starts the nether's map, the overworld's kept",
+        cleared == "overworld\n" and there == nil and files(".map/overworld/") ~= ""
+        and saidHas("the map is the nether's now (the overworld's is kept)") and not saidHas("The map was taken for"),
+        tostring(cleared) .. " / " .. tostring(there) .. " / " .. table.concat(SAID, " | "))
 end
