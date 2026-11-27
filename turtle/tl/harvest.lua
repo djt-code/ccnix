@@ -11,9 +11,10 @@
 -- T.map.find gives.  Each block is dug from the nearest cell next to it that the map shows free, tunnelling to one when
 -- opts.move allows digging.  The turtle stays where the last block was.
 --
--- T.refuelFromLava finds the nearest lava source the map knows, goes next to it, takes it up with an empty bucket (a
--- turtle that places an empty bucket on a source takes it up, as mine's scoop does), burns the bucket of lava for 1000
--- fuel and goes back where it began.
+-- T.refuelFromLava finds the nearest lava source the map knows within reach (those it has seen at level 0 first), goes
+-- next to it, takes it up with an empty bucket (a turtle that places an empty bucket on a source takes it up, as mine's
+-- scoop does), burns the bucket of lava for 1000 fuel and goes back where it began.  In the nether, with none in reach,
+-- it digs down to the lava sea and back (ADR-0023 D3).
 --
 -- T.fuelFor adds up what a route, a build and some scans will cost in fuel and says whether the tank and the fuel on board
 -- will do.  A scan of radius 8 or less costs nothing (the Geo Scanner's free radius by default); a wider one is an
@@ -420,18 +421,135 @@ local function triesText(tries)
     return out
 end
 
+-- How far from where it starts T.refuelFromLava looks for lava by default (opts.within), and how far down it digs for
+-- the nether's lava sea (opts.depth)
+local WITHIN, DEPTH = 64, 128
+local SEA_LEVELS = 4                          -- the most levels of the lava sea it goes into for more buckets
+
+-- Is this lava data a source (level 0, or no level said)?
+local function isSource(data)
+    return type(data) == "table" and LAVA[data.name] and not (data.state and data.state.level ~= nil
+        and tonumber(data.state.level) ~= 0)
+end
+
+-- Take up the lava source on side d with the empty bucket and burn it.  "taken", or why not.
+local function scoop(d)
+    if T.countItem(BUCKET) == 0 then return "no empty bucket" end
+    local sel = turtle.getSelectedSlot()
+    local placed = T.selectItem(BUCKET) and T.placeDir(d)
+    turtle.select(sel)
+    if not placed then return "the bucket would not take it up" end
+    if not burnBucket() then return "took lava up but it would not burn" end
+    return "taken"
+end
+
+-- The nether's way (ADR-0023 D3): straight down from where the turtle is to the lava sea, digging what is in the way
+-- and dropping through caverns, sources taken at the surface (the one under it, then round it, a level or more into
+-- it), and back up the shaft.  Stops at `target`, when another bucket wouldn't fit, or with why.  Returns what it did:
+-- { from (y), depth, dug, fell, took, stopped }; the turtle ends where it began, or `back` is false and why.
+local function downToTheSea(target, fits, opts)
+    local start = T.here()
+    local down = { from = start.y, depth = 0, dug = 0, fell = 0, took = 0 }
+    local most = opts.depth or DEPTH
+    local function short() return turtle.getFuelLevel() < target and fits() end
+    -- the shaft: down while it isn't lava
+    local surface = false
+    while not down.stopped do
+        local below = { x = T.pos.x, y = T.pos.y - 1, z = T.pos.z }
+        local fuel = turtle.getFuelLevel()
+        if fuel ~= "unlimited" and fuel <= (start.y - T.pos.y) + 2 then
+            down.stopped = "only fuel enough to come back up"
+            break
+        end
+        if start.y - T.pos.y >= most then
+            down.stopped = "went down " .. most .. " blocks (opts.depth) without reaching lava"
+            break
+        end
+        local seen, data = T.look("down")
+        local name = seen and type(data) == "table" and data.name or nil
+        if name and LAVA[name] and isSource(data) then
+            surface = true
+            break
+        elseif name and not LAVA[name] and not AIRS[name] then
+            local area = T.guarded(below.x, below.y, below.z)
+            local lq, lx, ly, lz = T.liquidNear(below.x, below.y, below.z)
+            if area then
+                down.stopped = "protected: " .. area .. " (" .. name .. " at " .. T.posKey(below) .. "): not dug"
+            elseif lq and not opts.liquid then
+                down.stopped = "digging " .. name .. " at " .. T.posKey(below) .. " would release " .. (LAVA[lq] and "lava" or "water")
+                    .. " at " .. lx .. "," .. ly .. "," .. lz .. " (opts.liquid = true digs it anyway)"
+            else
+                local dug, why = T.digDir("down")
+                if dug then down.dug = down.dug + 1
+                else down.stopped = "couldn't dig " .. name .. " at " .. T.posKey(below) .. (why and (": " .. tostring(why)) or "") end
+            end
+        elseif not name then
+            down.fell = down.fell + 1                    -- (a cavern: dropping through it)
+        end
+        if not down.stopped and not turtle.down() then
+            local _, now = T.look("down")
+            down.stopped = "couldn't go down to " .. T.posKey(below) .. " (" .. tostring(type(now) == "table" and now.name
+                or "nothing to dig") .. ")"
+        end
+        breathe()
+    end
+    -- the surface: the source under it, then into it and the ones round it, a level at a time
+    if surface then
+        down.at = T.pos.y - 1
+        local levels = 0
+        while short() and levels < SEA_LEVELS do
+            local took = scoop("down")
+            if took ~= "taken" then
+                if down.took == 0 then down.stopped = took end
+                break
+            end
+            down.took = down.took + 1
+            levels = levels + 1
+            if not (short() and turtle.down()) then break end
+            for d = 0, 3 do
+                if not short() then break end
+                local seen, data = T.look(d)
+                if seen and isSource(data) then
+                    if scoop(d) == "taken" then down.took = down.took + 1 end
+                end
+            end
+            if short() then
+                local seen, data = T.look("down")
+                if not (seen and isSource(data)) then break end
+            end
+        end
+    end
+    -- back up the shaft (digging what fell into it)
+    down.depth = start.y - T.pos.y
+    while T.pos.y < start.y do
+        if not turtle.up() then
+            local seen = T.look("up")
+            if not (seen and T.digDir("up") and turtle.up()) then
+                return down, false, "couldn't come back up the shaft at " .. T.posKey(T.pos)
+            end
+        end
+    end
+    return down, true
+end
+
 -- Fill the tank from lava the map knows: go to the nearest source, take it up with an empty bucket, burn it, and
 -- come back, facing as before.  Returns true, fuel gained, info; false, why, fuel gained, info; nil, why.
 --
 -- `target` is the fuel level to reach (default the tank's limit); it stops there, or when another bucket would not fit
 -- the tank (1000 each), or when no lava source is left to reach.  It needs an empty bucket aboard (a lava bucket aboard
--- is burned first).  The lava comes from the map (T.scan puts it there), the nearest first; a cell is looked at before
--- the bucket goes on it, and one that proves to be flowing, not a source, is passed over.  Lava in a protected area is
--- left (the area T.inside names is the job's), and so is lava in opts.exclude, a list of areas' names and boxes.
--- opts.tries (default 20) is how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan =
--- false }, never into lava).  Info, once it has gone looking, is { tries = { { x, y, z, found } } }: each cell tried, in
--- order, and what it found there ("taken", "flowing", "out of reach", "not lava (minecraft:air)", ...); when it comes
--- back short, the why says what the tries that came to nothing found, and where.
+-- is burned first).  The lava comes from the map (T.scan puts it there) within opts.within (default 64) of where it
+-- starts: sources it has seen (level 0) first, then cells known by name only (a scan's), each the nearest; a cell is
+-- looked at before the bucket goes on it, and one that proves to be flowing, not a source, is passed over, and so is the
+-- rest of its column and those beside it (a lava fall).  Lava in a protected area is left (the area T.inside names is
+-- the job's), and so is lava in opts.exclude, a list of areas' names and boxes.  In the nether (T.dimension) with no
+-- source within reach, it digs straight down to the lava sea (never into a protected area, nor where lava or water would
+-- come in: opts.liquid), drops through caverns, takes the sources at its surface and comes back up the shaft; info.down
+-- says how: { depth, dug, fell, took, at, stopped }, opts.depth the most it goes down (128).  opts.tries (default 20) is
+-- how many lava cells it will try, opts.move is T.moveTo's (default { path = true, scan = false }, never into lava).
+-- Info, once it has gone looking, is { tries = { { x, y, z, found } }, beyond (sources past opts.within), columns
+-- (cells passed over in a flowing column), down }: each cell tried, in order, and what it found there ("taken",
+-- "flowing", "out of reach", "not lava (minecraft:air)", ...); when it comes back short, the why says what the tries
+-- that came to nothing found, and where.
 function T.refuelFromLava(target, opts)
     opts = opts or {}
     local skip, badExclude = excluded(opts.exclude)
@@ -450,32 +568,61 @@ function T.refuelFromLava(target, opts)
         return false, "no empty bucket aboard to take lava up with", gained()
     end
     local move = opts.move or MOVE
+    local within = opts.within or WITHIN
     local from, dir = T.here(), T.dir
     local found, why = T.map.find("minecraft:lava")
-    if not found then return nil, "the map has no lava to look in: " .. tostring(why) end
-    local candidates, left = {}, 0
-    for _, c in ipairs(found) do
+    local candidates, left, beyond = {}, 0, 0
+    for _, c in ipairs(found or {}) do
         local _, state = T.map.get(c.x, c.y, c.z)
-        if not (state and state.level and tonumber(state.level) ~= 0) then
-            if T.guarded(c.x, c.y, c.z) or skip(c) then left = left + 1 else candidates[#candidates + 1] = c end
+        local lvl = state and state.level ~= nil and tonumber(state.level) or nil
+        if lvl == nil or lvl == 0 then
+            if T.guarded(c.x, c.y, c.z) or skip(c) then left = left + 1
+            elseif T.dist(from, c) > within then beyond = beyond + 1
+            else
+                c.seen = lvl == 0                        -- (a source it has looked at, before those known by name only)
+                candidates[#candidates + 1] = c
+            end
         end
     end
-    if #candidates == 0 and left > 0 then
-        return false, "the lava sources the map knows are protected or excluded (" .. left .. " left alone)", gained()
+    local info = { tries = {}, beyond = beyond, columns = 0 }
+    local nether = #candidates == 0 and select(1, T.dimension()) == "nether"
+    if not found and not nether then return nil, "the map has no lava to look in: " .. tostring(why) end
+    local farText = beyond > 0 and (beyond .. " beyond opts.within (" .. within .. ")") or nil
+    if #candidates == 0 and not nether then
+        if left > 0 or beyond > 0 then
+            local parts = {}
+            if left > 0 then parts[#parts + 1] = left .. " protected or excluded" end
+            if farText then parts[#parts + 1] = farText end
+            return false, "the lava sources the map knows are out of bounds (" .. table.concat(parts, ", ") .. ")", gained(), info
+        end
+        return false, "the map knows no lava source", gained()
     end
-    if #candidates == 0 then return false, "the map knows no lava source", gained() end
     local tries, stopWhy = opts.tries or 20, nil
     local tried = 0
-    local info = { tries = {} }
+    local flowingColumns = {}
+    local function inFlowing(c) return flowingColumns[c.x .. "," .. c.z] end
     while turtle.getFuelLevel() < target and fits() and #candidates > 0 and tried < tries do
+        -- (cells known by name only in a column found flowing are passed over)
+        for i = #candidates, 1, -1 do
+            if not candidates[i].seen and inFlowing(candidates[i]) then
+                table.remove(candidates, i)
+                info.columns = info.columns + 1
+            end
+        end
+        if #candidates == 0 then break end
         local best = 1
         for i = 2, #candidates do
-            if T.dist(T.pos, candidates[i]) < T.dist(T.pos, candidates[best]) then best = i end
+            local a, b = candidates[i], candidates[best]
+            if a.seen ~= b.seen then
+                if a.seen then best = i end
+            elseif T.dist(T.pos, a) < T.dist(T.pos, b) then
+                best = i
+            end
         end
         local c = table.remove(candidates, best)
         tried = tried + 1
         local scooped = false
-        local found = "out of reach"                     -- (no stand beside it the turtle could get to)
+        local result = "out of reach"                    -- (no stand beside it the turtle could get to)
         for _, s in ipairs(standsFor(c, false)) do
             local ok = T.moveTo(s.x, s.y, s.z, move)
             if ok then
@@ -484,23 +631,26 @@ function T.refuelFromLava(target, opts)
                 if not (seen and type(data) == "table" and LAVA[data.name]) then
                     local name = seen and type(data) == "table" and data.name or AIR
                     T.map.set(c.x, c.y, c.z, name, seen and data.state or nil)
-                    found = "not lava (" .. name .. ")"
+                    result = "not lava (" .. name .. ")"
                 elseif data.state and tonumber(data.state.level) ~= 0 then
                     T.map.set(c.x, c.y, c.z, data.name, data.state)
-                    found = "flowing"
+                    result = "flowing"
+                    for dx = -1, 1 do
+                        for dz = -1, 1 do flowingColumns[(c.x + dx) .. "," .. (c.z + dz)] = true end
+                    end
                 else
                     local sel = turtle.getSelectedSlot()
                     if T.selectItem(BUCKET) and T.placeDir(d) then
-                        scooped, found = true, "taken"
+                        scooped, result = true, "taken"
                     else
-                        stopWhy, found = "the bucket would not take the lava up at " .. T.posKey(c), "the bucket would not take it up"
+                        stopWhy, result = "the bucket would not take the lava up at " .. T.posKey(c), "the bucket would not take it up"
                     end
                     turtle.select(sel)
                 end
                 break
             end
         end
-        info.tries[#info.tries + 1] = { x = c.x, y = c.y, z = c.z, found = found }
+        info.tries[#info.tries + 1] = { x = c.x, y = c.y, z = c.z, found = result }
         if scooped and not burnBucket() then
             info.tries[#info.tries].found = "taken, but it would not burn"
             stopWhy = "took lava up but it would not burn"
@@ -509,13 +659,26 @@ function T.refuelFromLava(target, opts)
     end
     local back, backWhy = reach(from, move)
     T.face(dir)
-    local ok = turtle.getFuelLevel() >= target or not fits()
     if not back then return false, "couldn't get back to " .. T.posKey(from) .. ": " .. tostring(backWhy), gained(), info end
+    -- the nether, nothing taken within reach: down to the lava sea, from where it began
+    local short = turtle.getFuelLevel() < target and fits()
+    if short and not stopWhy and (nether or select(1, T.dimension()) == "nether") then
+        local down, home, homeWhy = downToTheSea(target, fits, opts)
+        info.down = down
+        T.face(dir)
+        if not home then return false, homeWhy, gained(), info end
+        if turtle.getFuelLevel() >= target or not fits() then return true, gained(), info end
+        return false, "went " .. down.depth .. " down for the nether's lava sea and took " .. down.took .. " bucket"
+            .. (down.took == 1 and "" or "s") .. ": " .. tostring(down.stopped or "no more sources there"), gained(), info
+    end
+    local ok = turtle.getFuelLevel() >= target or not fits()
     if ok then return true, gained(), info end
-    local why = stopWhy or (#candidates == 0 and "no more lava sources it could reach") or ("gave up after " .. tried .. " tries")
+    local whyNot = stopWhy or (#candidates == 0 and "no more lava sources it could reach") or ("gave up after " .. tried .. " tries")
     local said = not stopWhy and triesText(info.tries)
-    if said then why = why .. ": " .. said end
-    return false, why, gained(), info
+    if said then whyNot = whyNot .. ": " .. said end
+    if not stopWhy and info.columns > 0 then whyNot = whyNot .. "; " .. info.columns .. " passed over in columns found flowing" end
+    if not stopWhy and farText then whyNot = whyNot .. "; " .. farText end
+    return false, whyNot, gained(), info
 end
 
 --------------------------------------------------------------------------
