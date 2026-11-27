@@ -1,4 +1,4 @@
-<!-- Draft of a report for CC: Tweaked (github.com/cc-tweaked/CC-Tweaked). Not filed yet. Tracked here as ccnix #392. -->
+<!-- Draft of a report for CC: Tweaked (github.com/cc-tweaked/CC-Tweaked). Not filed, for now (the owner's call, 2026-11-27). Tracked here as ccnix #392. Until CC: Tweaked fixes it: ccnix-mod's TurtlePlaceResultMixin fixes it at the source, and turtlelib's wrapped place goes by the item count, so the Lua is right on a patched CC or an unpatched one. -->
 
 # `turtle.place()` returns false after placing an item that places itself in `onItemUseFirst` (NeoForge)
 
