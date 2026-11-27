@@ -1,6 +1,6 @@
 # ADR-0022: mine through open water: the shell first, then fill and dig
 
-**Status:** Proposed (2026-11-26)
+**Status:** Accepted (2026-11-26): D1 to D5 all A; built (see As built)
 **Date:** 2026-11-26
 **Deciders:** Dan Theisen
 
@@ -62,7 +62,7 @@ A **water mode** for a stretch of a segment. It is the same work in a new order:
 
 The careful block-by-block mode stays for scattered water: a seep, one source, a waterlogged block.
 
-## Options considered (the owner's calls)
+## Options considered (the owner's calls: all A, 2026-11-26)
 
 ### D1. When water mode starts
 
@@ -132,15 +132,61 @@ ocean gives almost nothing to dig. The fill blocks are only borrowed.
 - **In game:** one `needs-in-game-test` check per item.
 - **ccnix-mod:** nothing.
 
+## As built
+
+- **The trigger (D1):** 6 sources met within 4 blocks of each other in a segment's lanes; the segment before
+  left an end cap at its start; or, with a scanner, a scan from the home showing a third of the sides it saw
+  in the segment's first 8 blocks in fluid. Not in the first segment: there's no open side to work from.
+  Going over a dug segment isn't switched yet: the careful mode, with `seal` now going for blocks (#388),
+  dries a flooded one (13c).
+- **Faces (D2):** a scan or a look says; what neither has seen counts as wet. With a scanner, a chunk goes no
+  further than the scan from its open side sees.
+- **The fill's lanes:** one row in three; a lane on the bottom row when the floor is wet, and on the top row
+  when the ceiling is. Going out, a lane shells the floor or ceiling. Backing out, it fills above, below and
+  ahead.
+  - **The end cap:** at the segment's end, the lane places ahead into the next slice where there's water
+    (it looks first, facing along, so with no turn), and does the rows above and below it too.
+  - **Where the water ends:** a lane, or a wall column, stops once it has dug through two blocks of rock
+    after meeting water. A chunk whose last slice met no water ends open-water mode, and the rest of the
+    segment is dug as ever.
+- **The dig:** a lane every third row in every column, as with a scanner, since the walls are shelled. The
+  walls it has just shelled aren't looked at again.
+- **The bulkhead:** a wall across the tunnel one block behind the home, put up at the start of a segment's
+  open-water work. `go` closes it behind anything that passes through it. It comes down once the segment is
+  dug. In place of the door the Decision describes, the end cap and each chunk's filled last slice stand
+  between the dry tunnel and the water. Only the lane being filled is open, and a packet that gets through
+  stops at the bulkhead.
+- **Blocks (D4):** 6 stacks are carried in open water. Short, it goes to the home, then the homes behind and
+  the start (`fillerFromBehind`, as many as needed). With none anywhere it stops: "Out of bulk blocks for the
+  shell ... put cobblestone ... in the start's bottom chest".
+
+**The sims** (`sim/mine_water.lua`). The count is moves, turns, digs and blocks placed, each about 8 ticks in
+game. Looks take about one tick, and the careful mode makes many more of them, but they aren't counted
+here.
+
+| scenario | careful mode (before) | open-water mode |
+|---|---|---|
+| W1: a 5x5 tunnel into a lake (13 of its 16 blocks wet, past its end) | 982 + 1832 + 853 + 662 = 4329 | 1766 + 628 + 931 + 740 = 4065 |
+| W2: carried on through the end cap, 8 wet blocks then rock | 610 + 1022 + 421 + 359 = 2412 | 1268 + 380 + 524 + 462 = 2634 |
+| W3: water under the bottom half only (scanner) | 762 + 486 + 825 + 233 = 2306 | 1284 + 268 + 933 + 341 = 2826 |
+
+- **Turns:** open water costs a third of the turns.
+- **Moves:** it costs about twice the moves, so more fuel. Each fill lane is walked out through the water and
+  backed out again.
+- **Overall:** in the sim it is a little cheaper in a lake and dearer where only a few rows are wet.
+- **In game,** the careful mode chases water that keeps flowing back. The sim's water settles at once, so the
+  sim is kinder to the careful mode than the game is. Field numbers decide whether the trigger should be
+  stricter.
+
 ## Action items
 
 ### Phase 0
-1. [ ] The scenarios above, with today's numbers as the baseline.
+1. [x] The scenarios above, with today's numbers as the baseline.
 
 ### Phase 1 (once D1 to D5 are decided)
-1. [ ] The shell walk with placements and no looks, for exposed faces only (D2).
-2. [ ] The fill in chunks, with the cap between them, then the dig.
-3. [ ] The end cap and the bulkhead (D3).
-4. [ ] The trigger (D1) in `mineSegment` and `repair`.
-5. [ ] Blocks from behind and the start (D4).
-6. [ ] The header and help text, and the in-game checks.
+1. [x] The shell walk with placements and no looks, for exposed faces only (D2).
+2. [x] The fill in chunks, with the cap between them, then the dig.
+3. [x] The end cap and the bulkhead (D3).
+4. [x] The trigger (D1) in `mineSegment` (`repair` keeps the careful mode for now).
+5. [x] Blocks from behind and the start (D4).
+6. [x] The header and help text, and the in-game checks.
