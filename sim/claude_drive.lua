@@ -2013,6 +2013,10 @@ check("--resume: a new conversation whose first message says it was interrupted,
 check("...with the options the file kept (steps 3, cache 1h)", m37 and m37.cache_control.ttl == "1h"
     and (Mine.files["claude.log"] or ""):find("start: claude --steps 3 --cache 1h (model claude-opus-5-5, effort medium, steps 3, cache 1h;", 1, true),
     (Mine.files["claude.log"] or ""):sub(1, 200))
+-- (#404: the start line said nothing of where those options came from)
+check("...and the start line says they came from resume.txt",
+    (Mine.files["claude.log"] or ""):find("; resuming the goal in resume.txt, with its options: --steps 3 --cache 1h\n", 1, true),
+    (Mine.files["claude.log"] or ""):match("start: [^\n]*"))
 local k2 = resultsIn(2).toolu_1
 check("...the file kept as it was meanwhile (not the interrupted message), and gone at the end",
     k2 and k2.content == "-> options: --steps 3 --cache 1h\ndig the tunnel\nat 0,0,5, 12 blocks left\n" and Mine.files["claude/resume.txt"] == nil,

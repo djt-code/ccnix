@@ -397,7 +397,8 @@ local USAGE = "Usage: claude [goal words...] [--model id] [--effort low|medium|h
 -- that line is read with it.)
 local resume = { file = "claude/resume.txt", prefix = "options:",
                  options = { confirm = true, model = "=", effort = "=", steps = "=", cache = "=", resume = true, ["goal-file"] = "=" },
-                 kept = { "model", "effort", "steps", "cache" } }      -- (the ones claude.options keeps)
+                 kept = { "model", "effort", "steps", "cache" },       -- (the ones claude.options keeps)
+                 filled = {} }      -- (the options the file gave, as "--steps 400", for the start line: #404)
 local opts, args = T.options({ ... }, resume.options)
 if not opts then
     print("claude: " .. args)
@@ -411,9 +412,14 @@ if opts.resume then
         local first, rest = text.cut(saved, "\n")
         local given = text.stripPrefix(first, resume.prefix)
         if given then
-            for k, v in pairs(T.options(text.words(given), resume.options) or {}) do
-                if opts[k] == nil then opts[k] = v end
+            local kept = T.options(text.words(given), resume.options) or {}
+            for _, k in ipairs(resume.kept) do
+                if opts[k] == nil and kept[k] ~= nil then
+                    opts[k] = kept[k]
+                    resume.filled[#resume.filled + 1] = "--" .. k .. " " .. kept[k]
+                end
             end
+            if opts.confirm == nil then opts.confirm = kept.confirm end
         else
             rest = saved            -- (the model rewrote it without the line)
         end
@@ -2905,7 +2911,8 @@ local function main()
         #given > 0 and " " .. table.concat(given, " ") or "", MODEL, EFFORT, MAX_STEPS, opts.cache or "5m",
         CONFIRM and ", confirming each call" or "", T.posString(), T.dir, tostring(turtle.getFuelLevel()),
         #resume.taken > 0 and ("; from claude.options: " .. table.concat(resume.taken, " ")) or "",
-        resume.goal and "; resuming the goal in resume.txt" or ""))
+        resume.goal and ("; resuming the goal in resume.txt"
+            .. (#resume.filled > 0 and ", with its options: " .. table.concat(resume.filled, " ") or "")) or ""))
     local failed = loadHelpers()
     if failed then say("red", failed); startNotes[#startNotes + 1] = failed end
     local news = whatsNew()
