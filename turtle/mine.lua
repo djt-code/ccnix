@@ -106,6 +106,21 @@
 -- half, and it goes on in open water; less, and it tunnels on as ever,
 -- sealing the water as it meets it.
 --
+-- Water coming into the tunnel from outside it (falling through a hole
+-- in the ceiling, or running in through a wall) is followed out, the way
+-- it flows (up a falling column, then along to stronger water), to its
+-- source, which is filled, so it stops for good.  It goes only through
+-- the water (no digging), never into a protected area, and no more than
+-- 16 blocks out, and comes back the way it went.  Where that doesn't
+-- stop it (a body of water, more than one source) or can't be done,
+-- water falling in through the ceiling is caught right over the hole in
+-- a bowl of bulk blocks: four sides (and a rim on them, where it's open
+-- round them), the hole filled as its bottom.  The water lands in it and
+-- stays there (water never overflows: it only runs down).  Falling
+-- columns side by side get one trough round them all.  Water it can't
+-- trace that runs in through a wall, a source, and lava are sealed where
+-- they come in, as before.
+--
 -- The turtle's own column and row are part of the tunnel: it stands in
 -- the mouth at one bottom (or top, for negative heights) corner, and the
 -- tunnel starts with the block in front of it.  `mine 3 3 32` digs a 3x3
@@ -1044,7 +1059,8 @@ end
 -- turtle fills a source with a bulk block and digs it out.  If a fluid
 -- comes back, something next to that block feeds it (water from above,
 -- an aquifer): it steps in, seals the lava and water touching it outside
--- the tunnel, and fills the sources touching it inside, steps back, and
+-- the tunnel (flowing water there is followed to its source first, see
+-- traceIn), and fills the sources touching it inside, steps back, and
 -- tries again.  Those fillings in the tunnel are dug out again in their
 -- turn (ahead, by the lanes; behind, at the end of the segment), by when
 -- what fed them is sealed.  Flowing water nothing feeds drains away.
@@ -1059,8 +1075,13 @@ end
 -- beside it feeds: it comes from further off, along the tunnel.  Follow it
 -- upstream through the tunnel (up, if it's falling; else to stronger
 -- water beside it), as far as water spreads and falls, to where it comes
--- in from outside, seal that, and come back.  A source in the tunnel is left
--- for drying out when it's reached.  True if it sealed something.
+-- in from outside, and come back.  There, flowing water is followed on
+-- out of the tunnel to its source, which is filled (see traceIn); where
+-- it's still coming after that, or the source is out of reach, water
+-- falling in through the ceiling is caught in a bowl over the hole (see
+-- bowl), and anything else (a source, lava, water from a wall) is
+-- sealed where it comes in.  A source in the tunnel is left for drying
+-- out when it's reached.  True if it sealed something.
 -- Going over part of the tunnel (repair), it follows water no further
 -- than that part's far end: water from the next part (dug) is that
 -- part's to see to, when it's gone over in turn (fromOutside notes it
