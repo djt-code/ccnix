@@ -134,8 +134,8 @@ T.containerCounts(side) - How many of each item the container on `side` holds ({
 T.countContainer(side, name) - How many `name` the container on `side` holds, or nil if it can't be read.
 T.compactContainer(side) - Tidy the container on `side`: merge part stacks so everything sits in as few slots as it can, then sort it.
 T.restockFrom(side, name, target, opts) - Pull `name` out of the container on `side` until the turtle holds `target` of it (opts: label for messages, quiet, room: free slots to leave, default 1).
-T.takeInto(side, name, n, slot) - Take `name` from the container on `side` into the turtle's slot `slot` (empty, or holding some of it already) until that slot holds n (at most a stack). Needs a readable container. Returns how many the slot holds.
-T.pull(side, name, n, opts) - Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into whatever slots will have it. Returns how many it got and, when short of n, why.
+T.takeInto(side, name, n, slot, opts) - Take `name` from the container on `side` into slot `slot` (empty, or with some already) until it holds n (a stack at most); opts.pick as T.pull's. Needs a readable container. Returns how many the slot holds.
+T.pull(side, name, n, opts) - Take n (default 1) of `name` from the container on `side` ("front", "top", "bottom") into the turtle; opts.pick(detail) picks stacks by detail (displayName, damage, enchantments). Returns how many it got, and why if short of n.
 Junk:
 T.setJunkChest(x, y, z, side) - Remember the junk chest: it stands on `side` of the cell x, y, z (the turtle's frame): "up" or "top", "down" or "bottom", or a heading 0 to 3. True, or nil and why.
 T.junkChest() - Where the junk chest is, as { x, y, z, side } (side a heading 0 to 3, "up" or "down"), or nil if none is set.
@@ -245,7 +245,7 @@ Cataloguing:
 T.catalogue(spots, opts) - Go round the chests and note what each holds: only the spots given ({ x, y, z, side }: the turtle's stand, the chest's side), else every chest known. True, info; false, why, info if some couldn't be read; nil, why.
 Where an item is, and fetching it:
 T.where(name) - Which chests hold the item `name` (or a glob of item names; the namespace may be left out), as written down: a list of { x, y, z, side, count, bulk, seen, age }, the nearest to the turtle first, and the total. Moves nothing.
-T.fetch(name, n, opts) - Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+T.fetch(name, n, opts) - Go to the chests within 48 blocks that hold `name` (or a glob), take n (default 1; opts.pick as T.pull's) and come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if short of n.
 What there is, everywhere:
 T.inventoryReport(opts) - Every item across the chests (as last read) and the turtle, with totals, sorted by name: a list of { name, total, turtle, chests, places, age }, and info { kinds, items, chests, oldest, text }. Moves nothing.
 Putting away:

@@ -42,7 +42,8 @@ a job that plans on what the chests hold, and after crafting or dropping by hand
   `{ far = true }` goes there (fuel and time: ask first).
 - Of several same-named items `T.fetch` and `T.pull` take a tool that will equip (not worn,
   not enchanted) first; `{ pick = function(d) return ... end }` chooses by the chest's item
-  detail (`d.damage`, `d.enchantments`).
+  detail (`d.displayName`, `d.damage`, `d.enchantments`): one kind of facade of several.
+  `T.takeInto(side, name, n, slot, { pick = ... })` the same, into one slot.
 - Put things into a chest with `T.dropInto(side, n)` ("front", "up", "down"): with no chest
   there it refuses and drops nothing, where `turtle.drop` throws them on the ground.
 - Counts go stale: after your own `T.dropInto`, `turtle.drop` or `suck` at a known chest, call

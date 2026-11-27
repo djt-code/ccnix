@@ -15,7 +15,7 @@
 --     (ADR-0019 D2) only chests within opts.maxDistance (48) of where it began, the why saying what is farther and
 --     where, opts.far and a larger opts.maxDistance going there; T.prepare counting and fetching within it too;
 --     (ADR-0019 D6) of several pickaxes T.fetch and T.pull take the one that goes on as an upgrade (not worn, not
---     enchanted) first, and opts.pick chooses by the chest's item detail;
+--     enchanted) first, and opts.pick chooses by the chest's item detail; T.takeInto's opts.pick too (ADR-0023);
 --   * T.stow: an item into the chest that holds it, the rest into the bulk chest; what the job keeps, tools, fuel and
 --     peripherals stay aboard unless opts.all (never the tools); a full chest and a missing bulk chest leave the item
 --     aboard and say so, each item with its reason (every chest it was tried at: full, gone; no bulk chest) in info and
@@ -488,6 +488,32 @@ do
     got, why = T.pull("front", PICK, 1, { pick = function() return false end })
     check("...none it takes at the chest: nothing, and why", got == 0 and left() == "enchanted"
         and why == "the container on the front has no more minecraft:diamond_pickaxe that opts.pick takes (got 0 of 1)", tostring(why))
+end
+
+do
+    -- (ADR-0023 Phase 2 item 1, #393) T.takeInto's opts.pick: two kinds of one name (AE2's facades, told apart by
+    -- displayName), the second kind wanted into slot 5
+    local FACADE = "ae2:facade"
+    setUp()
+    fill(3, 0, 1, { [1] = { FACADE, 30 }, [2] = { FACADE, 30 } })
+    local inv = W.get(3, 0, 1).inv
+    inv[1].displayName, inv[2].displayName = "Netherrack Facade", "Polished Blackstone Bricks Facade"
+    T.moveTo(3, 0, 0)
+    T.face(0)
+    local function chestKinds()
+        local out = {}
+        for _, it in pairs(W.get(3, 0, 1).inv) do out[#out + 1] = it.displayName .. " " .. it.count end
+        table.sort(out)
+        return table.concat(out, ", ")
+    end
+    local got = T.takeInto("front", FACADE, 20, 5, { pick = function(d) return d.displayName:find("Blackstone", 1, true) ~= nil end })
+    local it = W.S.inv[5]
+    check("T.takeInto with opts.pick: 20 of the facade kind it picks (by displayName) into slot 5, the other kind left", got == 20
+        and it and it.displayName == "Polished Blackstone Bricks Facade" and it.count == 20
+        and chestKinds() == "Netherrack Facade 30, Polished Blackstone Bricks Facade 10", tostring(got) .. " / " .. chestKinds())
+    local n, why = T.takeInto("front", FACADE, 30, 5, { pick = "Blackstone" })
+    check("...and a pick that isn't a function: refused, with why, nothing taken", n == 20 and why == "opts.pick is a function(detail)"
+        and W.S.inv[5].count == 20, tostring(n) .. " " .. tostring(why))
 end
 
 --------------------------------------------------------------------------

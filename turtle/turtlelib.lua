@@ -3303,17 +3303,23 @@ function T.restockFrom(side, name, target, opts)
     end
 end
 
--- Take `name` from the container on `side` into the turtle's slot `slot`
--- (empty, or holding some of it already) until that slot holds n (at most
--- a stack).  Needs a readable container.  Returns how many the slot holds.
-function T.takeInto(side, name, n, slot)
+-- Take `name` from the container on `side` into slot `slot` (empty, or
+-- with some already) until it holds n (a stack at most); opts.pick as
+-- T.pull's.  Needs a readable container.  Returns how many the slot holds.
+--
+-- opts.pick(detail), true for a stack it may take, chooses by the
+-- container's item detail (displayName, damage, enchantments...), as T.pull's does;
+-- one that isn't a function is refused: the count, and why.
+function T.takeInto(side, name, n, slot, opts)
+    local pick = opts and opts.pick
+    if pick ~= nil and type(pick) ~= "function" then return turtle.getItemCount(slot), "opts.pick is a function(detail)" end
     local suck, drop = sideFuncs(side)
     local chest = peripheral and peripheral.wrap(side)
     if not (chest and chest.list and chest.pushItems and chest.size) then return turtle.getItemCount(slot) end
     for _ = 1, 64 do
         local have = turtle.getItemCount(slot)
         if have >= n then break end
-        local found, held = frontStack(chest, name, suck, slot)
+        local found, held = frontStack(chest, name, suck, slot, pick)
         if not found then break end
         turtle.select(slot)
         local got = suck(math.min(n - have, frontCount(chest)))
@@ -3324,14 +3330,14 @@ function T.takeInto(side, name, n, slot)
     return turtle.getItemCount(slot)
 end
 
--- Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into
--- whatever slots will have it.  Returns how many it got and, when short of n, why.
+-- Take n (default 1) of `name` from the container on `side` ("front", "top", "bottom") into the turtle; opts.pick(detail)
+-- picks stacks by detail (displayName, damage, enchantments).  Returns how many it got, and why if short of n.
 --
 -- A part stack of it is topped up first, else an empty slot is used.  Sucking from a side takes the
 -- container's first stack whatever it is, so each time the wanted stack is moved to the front first (as
 -- T.takeInto does), and as many stacks are taken as it needs.  Of several stacks it takes the lowest slot's, but
 -- a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by
--- the container's item detail (name, count, damage, enchantments...): true for a stack it may take.  Needs a
+-- the container's item detail (name, count, displayName, damage, enchantments...): true for a stack it may take.  Needs a
 -- container it can read (a chest or a barrel).  When short of n, why is: no container, none left in it (that
 -- opts.pick takes), or no room in the turtle.  It moves stacks about in the container to get at them, so slot numbers
 -- read before (list(), getItemDetail) are stale after.  A clean tool's detail has damage = 0, not nil: a pick for worn

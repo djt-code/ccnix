@@ -824,8 +824,8 @@ local function namesToPull(name, side)
     return out
 end
 
--- Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before
--- (opts.stay: stay at the last chest).  Returns how many came aboard, and why if that is short of n.
+-- Go to the chests within 48 blocks that hold `name` (or a glob), take n (default 1; opts.pick as T.pull's) and come back
+-- facing as before (opts.stay: stay at the last chest).  Returns how many came aboard, and why if short of n.
 --
 -- `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the
 -- items that match are taken, by name.  The chests come nearest first, each read again as it is visited (so a chest
@@ -833,7 +833,8 @@ end
 -- room.  As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }):
 -- what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there.
 -- Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and
--- opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...).
+-- opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (displayName, damage,
+-- enchantments...).
 -- opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 function T.fetch(name, n, opts)
     opts = opts or {}
