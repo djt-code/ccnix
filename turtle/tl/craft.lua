@@ -723,14 +723,16 @@ local function allOutputs()
 end
 
 -- A plan's working state: left (what there is, by name), spare (made over what was asked, by name), base (taken from
--- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order).
+-- what there is), short (found nowhere and not to be made), steps ({ name, n, crafts } in order), via (by the name of
+-- an item short because each recipe for it goes round through it: what the nearest recipe would have taken).
 local function newState(stock)
-    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {}, roundTo = {} }
+    return { left = copyOf(stock), spare = {}, base = {}, short = {}, steps = {}, roundTo = {}, via = {} }
 end
 
 local function copyState(st)
     local out = { left = copyOf(st.left), spare = copyOf(st.spare), base = copyOf(st.base), short = copyOf(st.short), steps = {},
-                  roundTo = copyOf(st.roundTo) }
+                  roundTo = copyOf(st.roundTo), via = {} }
+    for k, v in pairs(st.via) do out.via[k] = v end
     for i, s in ipairs(st.steps) do out.steps[i] = { name = s.name, n = s.n, crafts = s.crafts } end
     return out
 end
@@ -839,8 +841,9 @@ end
 -- n of the item: what was made over before first, then what there is (unless `top`: a target is made), then made by
 -- the recipe that leaves the least short; what is left is short.  A recipe that needs the item it is making on the way
 -- (coal from a coal block from coal) is not one: st.loop says it went round, even when what there is would cover it (an
--- ingot from a block from the ingots there are).  A target whose every recipe goes round is taken from what there is.
--- Changes st.
+-- ingot from a block from the ingots there are).  A target whose every recipe goes round is taken from what there is;
+-- when there isn't enough, the item itself is short (ADR-0023 D4: an ingot, not the block it would come from), and
+-- st.via says what the nearest of those recipes would have taken.  Changes st.
 local function fromStock(st, name, n)
     local use = math.min(st.left[name] or 0, n)
     if use > 0 then
@@ -861,14 +864,18 @@ function resolve(st, name, n, visiting, top)
     if not top then n = fromStock(st, name, n) end
     if n == 0 then return end
     visiting[name] = true
-    local best, bestShort
+    local best, bestShort, round, roundShort
     local before, came = shortTotal(st), {}
     for _, cand in ipairs(candidatesFor(name)) do
         local trial = copyState(st)
         expand(trial, cand, name, n, visiting)
         for k in pairs(trial.roundTo) do came[k] = true end
         local s = shortTotal(trial) - before
-        if not trial.loop and (not best or s < bestShort) then best, bestShort = trial, s end
+        -- (a trial that only works by making this item out of itself is a loop too, even when the loop was found a
+        -- level down: 9 ingots from a block that is short is no way to an ingot)
+        local roundHere = trial.roundTo[name] and not st.roundTo[name]
+        if roundHere and not trial.loop and (not round or s < roundShort) then round, roundShort = trial, s end
+        if not trial.loop and not roundHere and (not best or s < bestShort) then best, bestShort = trial, s end
         if best and s == 0 then break end
         breathe()
     end
@@ -883,6 +890,13 @@ function resolve(st, name, n, visiting, top)
     if not best then
         for k in pairs(came) do st.roundTo[k] = true end
         st.short[name] = (st.short[name] or 0) + n
+        if round then
+            local took = {}
+            for k, v in pairs(round.short) do
+                if v > (st.short[k] or 0) and k ~= name then took[k] = v - (st.short[k] or 0) end
+            end
+            if next(took) then st.via[name] = took end
+        end
         return
     end
     for k, v in pairs(best) do st[k] = v end
@@ -930,9 +944,10 @@ end
 -- made, and what can't be made is short.  The targets themselves are made, not taken from what there is.  Smelting is
 -- not planned: charcoal or glass that isn't there is short.  The plan is { targets, steps = { { name, n, crafts } } in
 -- the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it),
--- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok, far }.  As T.fetch, only chests
--- within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all.  A short plan's far
--- ({ name = n }) is what the chests beyond would give it, and the why says where they are.
+-- short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"; an item whose every recipe goes round
+-- through it, as an ingot with none there, is short itself, and the why says what it would be made from), ok, far }.
+-- As T.fetch, only chests within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them
+-- all.  A short plan's far ({ name = n }) is what the chests beyond would give it, and the why says where they are.
 function T.craftPlan(targets, opts)
     opts = opts or {}
     if type(targets) ~= "table" then return nil, "T.craftPlan wants the items to make: { [name] = n } or { { name, n }, ... }" end
@@ -956,6 +971,13 @@ function T.craftPlan(targets, opts)
     local plan = { targets = want, steps = st.steps, base = st.base, short = st.short, ok = next(st.short) == nil }
     if plan.ok then return plan end
     local why = "short of " .. countsText(st.short) .. " (not there, and not to be crafted from what is)"
+    for _, name in ipairs(tables.sortedKeys(st.via)) do
+        if st.short[name] then
+            local took = {}
+            for _, k in ipairs(tables.sortedKeys(st.via[name])) do took[#took + 1] = st.via[name][k] .. " " .. shortName(k) end
+            why = why .. "; " .. shortName(name) .. " would be made from " .. table.concat(took, ", ")
+        end
+    end
     if not (far and next(far)) then return plan, why end
     -- (ADR-0019 D2) what the chests beyond the reach would add: the plan again with them counted, and what it takes
     -- over what is here; the nearest chest that holds some of it said)

@@ -494,7 +494,7 @@ T.ensureRoom(need, keepCount, goDump, warning)
 == Containers ==
 
 T.dropSide(side, n)
-    Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results.
+    Drop up to n items from the selected slot into whatever is on `side` ("front", "top" or "bottom"): turtle.drop's results. With nothing there they land on the ground, as turtle.drop's do: T.dropInto refuses instead.
 
 T.suckSide(side, n)
     Pick up up to n items from `side` ("front", "top" or "bottom") into the selected slot.
@@ -504,6 +504,11 @@ T.inspectSide(side)
 
 T.containerOn(side)
     Is there a chest or barrel on `side`?
+
+T.dropInto(side, n)
+    Drop the selected slot (or n of it) into the inventory on `side` ("front", "up" or "down"; "top" and "bottom" too), never on the ground: how many went in, and why when fewer than asked.
+
+    It refuses, dropping nothing, when nothing on that side holds items: no block, or a block that isn't a chest or a barrel and isn't an inventory the turtle can read (a hopper, a shulker box, a furnace). turtle.drop and T.dropSide throw the items on the ground there instead; that is what to use to throw junk away, or to feed a composter (not an inventory). A container that fills up takes what fits: the rest stays in the slot, and the why says so.
 
 T.containerCounts(side)
     How many of each item the container on `side` holds ({ name = count }), or nil if it can't be read.
@@ -521,13 +526,15 @@ T.restockFrom(side, name, target, opts)
 
     Sucking from a side always takes from the container's first occupied slot regardless of what it is, so with a readable container the wanted stack is moved to the front first (frontStack) and exactly what's needed is taken. Otherwise anything else that comes out is set aside and dropped back once we're done (fuel is kept).
 
-T.takeInto(side, name, n, slot)
-    Take `name` from the container on `side` into the turtle's slot `slot` (empty, or holding some of it already) until that slot holds n (at most a stack). Needs a readable container. Returns how many the slot holds.
+T.takeInto(side, name, n, slot, opts)
+    Take `name` from the container on `side` into slot `slot` (empty, or with some already) until it holds n (a stack at most); opts.pick as T.pull's. Needs a readable container. Returns how many the slot holds.
+
+    opts.pick(detail), true for a stack it may take, chooses by the container's item detail (displayName, damage, enchantments...), as T.pull's does; one that isn't a function is refused: the count, and why.
 
 T.pull(side, name, n, opts)
-    Take n (default 1) of the item `name` out of the container on `side` ("front", "top" or "bottom") into whatever slots will have it. Returns how many it got and, when short of n, why.
+    Take n (default 1) of `name` from the container on `side` ("front", "top", "bottom") into the turtle; opts.pick(detail) picks stacks by detail (displayName, damage, enchantments). Returns how many it got, and why if short of n.
 
-    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Of several stacks it takes the lowest slot's, but a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by the container's item detail (name, count, damage, enchantments...): true for a stack it may take. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it (that opts.pick takes), or no room in the turtle. It moves stacks about in the container to get at them, so slot numbers read before (list(), getItemDetail) are stale after. A clean tool's detail has damage = 0, not nil: a pick for worn ones tests (d.damage or 0) > 0.
+    A part stack of it is topped up first, else an empty slot is used. Sucking from a side takes the container's first stack whatever it is, so each time the wanted stack is moved to the front first (as T.takeInto does), and as many stacks are taken as it needs. Of several stacks it takes the lowest slot's, but a tool that would go on as an upgrade (not worn, not enchanted) before the rest; opts.pick(detail) chooses by the container's item detail (name, count, displayName, damage, enchantments...): true for a stack it may take. Needs a container it can read (a chest or a barrel). When short of n, why is: no container, none left in it (that opts.pick takes), or no room in the turtle. It moves stacks about in the container to get at them, so slot numbers read before (list(), getItemDetail) are stale after. A clean tool's detail has damage = 0, not nil: a pick for worn ones tests (d.damage or 0) > 0.
 
 == Junk ==
 
@@ -744,7 +751,7 @@ T.canCraft(name, n, opts)
 T.craftPlan(targets, opts)
     Plan crafting { [name] = n } down the recipe tree against the inventory and chests within 48 blocks: { steps, base, short, ok }, and why when short; nil, why. T.prepare{ need = plan.base } fetches it, T.craftBatch(plan) crafts it.
 
-    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"), ok, far }. As T.fetch, only chests within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all. A short plan's far ({ name = n }) is what the chests beyond would give it, and the why says where they are.
+    `targets` is { [name] = n } or { { name, n }, ... }. The tree is followed down (torches need sticks and coal, sticks planks, planks logs) against what the inventory and the chests T.catalogue has read hold (opts.chest, a side: the inventory and that chest instead; opts.stock: counts by name to plan with): what there is is used first, what isn't is made, and what can't be made is short. The targets themselves are made, not taken from what there is. Smelting is not planned: charcoal or glass that isn't there is short. The plan is { targets, steps = { { name, n, crafts } } in the order to make them, base = { name = n } (what to have at the chest: T.prepare{ need = plan.base } fetches it), short = { name = n } (a name, or what would do: "coal or charcoal", "*_planks"; an item whose every recipe goes round through it, as an ingot with none there, is short itself, and the why says what it would be made from), ok, far }. As T.fetch, only chests within opts.maxDistance (48) of the turtle (or opts.near) count; opts.far = true counts them all. A short plan's far ({ name = n }) is what the chests beyond would give it, and the why says where they are.
 
 == Crafting from a chest ==
 
@@ -1124,9 +1131,9 @@ T.where(name)
     It is the list T.catalogue made, kept right by T.fetch and T.stow as they go; seen is when the chest was read (seconds) and age how long ago that was, so an old count can be read again first. Nil and why when no chest is known.
 
 T.fetch(name, n, opts)
-    Go to the chests within 48 blocks that hold `name` (or a glob) and take n of it (default 1), then come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if that is short of n.
+    Go to the chests within 48 blocks that hold `name` (or a glob), take n (default 1; opts.pick as T.pull's) and come back facing as before (opts.stay: stay at the last chest). Returns how many came aboard, and why if short of n.
 
-    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (damage, enchantments...). opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
+    `name` is an item's name (minecraft: assumed), or a glob of them as T.where takes ("*_sword"): at each chest the items that match are taken, by name. The chests come nearest first, each read again as it is visited (so a chest that no longer has it is put right in the list and the next is tried); it stops when it has n or the turtle has no room. As T.stow, it goes only to chests within opts.maxDistance (48) of where it began (or opts.near, { x, y, z }): what only farther chests hold, the why says how many and where the nearest is, and opts.far = true goes there. Of several stacks it takes as T.pull does: a tool not worn or enchanted first (only those go on as upgrades), and opts.pick(detail), true for a stack it may take, chooses by the chest's item detail (displayName, damage, enchantments...). opts.move is T.moveTo's; opts.stay saves the walk back when another chest is next.
 
 == What there is, everywhere ==
 
@@ -1140,7 +1147,7 @@ T.inventoryReport(opts)
 T.stow(opts)
     Put what the turtle carries away, each item into the nearest chest that will have it, within 48 blocks (as near: one for it, then one holding it, then the bulk chest). True, info; false, why, info if some stayed aboard; nil, why.
 
-    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. The chests that will have an item are a chest for it (its holds; the most specific holds win, T.addChest), one that holds some already and isn't for other things, and the bulk chest: of those, the nearest, and of those as near (8 blocks more at most), the first of that order. Chests over opts.maxDistance (48) from where it began (or opts.near, { x, y, z }) aren't gone to unless opts.far: an item with only those stays aboard, the why saying where the one it would go to is (the nearest chest for it, else holding it, else the bulk chest) and how far (two bases: the other one's chests aren't a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it. A chest for other things never takes an item, and a full chest for it sends it on to the next place. What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: move (T.moveTo's), keep (names, a list or set, globs too, that stay aboard whatever), stay (stay at the last chest), maxDistance, far, near, box.
+    By default it puts away what is junk (T.isJunk: not kept by T.keep, not crafted this job, not a tool, fuel, a bucket or a peripheral); opts.all puts away what the job keeps as well (the end of a job), still never a tool, fuel or a peripheral. With T.cfg.tools set, the tools it doesn't name (but not one equipped) are put away too. It goes to the nearest chest that wants something, drops what that chest should have, reads it again for the list and goes on, then comes back facing as before. The chests that will have an item are a chest for it (its holds; the most specific holds win, T.addChest), one that holds some already and isn't for other things, and the bulk chest: of those, the nearest, and of those as near (8 blocks more at most), the first of that order. Chests over opts.maxDistance (48) from where it began (or opts.near, { x, y, z }) aren't gone to unless opts.far: an item with only those stays aboard, the why saying where the one it would go to is (the nearest chest for it, else holding it, else the bulk chest) and how far (two bases: the other one's chests aren't a trip for a few items); opts.box ({ x1, y1, z1, x2, y2, z2 }) takes only the chests in it. A chest for other things never takes an item, and a full chest for it sends it on to the next place. What no chest is for or holds, with no bulk chest, or what does not fit, stays aboard. Info is { stowed, chests, left = { name = count }, reasons = { name = why } }: each item left aboard with why, every chest it was tried at ("chest at 3,0,1 full, bulk chest at 0,0,-3 full", "no chest holds it and no bulk chest"), and the why returned says them all. opts: only (names, a list or set, globs too: only those go; of them, what the job keeps stays aboard as above, and the why names each and what keeps it), move (T.moveTo's), keep (names that stay aboard whatever), stay (stay at the last chest), maxDistance, far, near, box.
 
 == Sorting the chests ==
 
@@ -1222,6 +1229,8 @@ T.map.get(x, y, z)
 
 T.map.set(x, y, z, name, state)
     Note a cell in the map by hand: the block `name` (nil: forget it) at x, y, z of the turtle's frame, with its state table if it's known. True, or nil and why. (Digs, placements, moves and scans note themselves.)
+
+    A nil state keeps the state the cell had, even under a new name: a level or a facing a look read stays. An empty table clears it: T.map.set(x, y, z, "minecraft:lava", {}) notes lava with no known state (a cell once seen flowing, now a source, say), and T.map.get gives no state for it until a look reads one.
 
 T.map.top(x, z, lo, hi)
     The y of the highest solid cell known in the column x, z (not air, water, lava or fire), and its name; nil and why if the map knows none. lo and hi (optional) keep to the cells from y lo up to y hi.
