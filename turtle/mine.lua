@@ -4183,9 +4183,13 @@ function mineSegment(z1, z2, from)
     -- open water from the start (the segment before left an end cap, or
     -- the scans from the home say so), or met on the way: worked from the
     -- home, the other way.  (Not from the start: no open side to work from.)
+    -- The scan comes first, end cap or not: it's what says whether the
+    -- tunnel ahead is water enough for a bulkhead (see waterAhead), where
+    -- the cap only says the segment before ended in some.
     local water = false
     if home.k > 0 and not from then
-        water = capZ == z1 or (hasScanner and takeScan(z1, z2) and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
+        local scanned = hasScanner and takeScan(z1, z2)
+        water = capZ == z1 or (scanned and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
     end
     local za = z1
     while true do
