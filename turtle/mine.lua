@@ -819,6 +819,7 @@ known, targets = {}, {}
 -- And, for following veins without turning to look: where this
 -- segment's scans were taken, and the ore and fluid they saw.
 scanFrom, scanned = {}, {}
+scannedAt = {}             -- key -> the cell, for each entry in scanned
 -- What this segment's scans say is at p: "ore" or "fluid", "clear" (a
 -- scan covered it and saw neither), or nil (none covered it).
 function scanSays(p)
@@ -3025,13 +3026,20 @@ function record(blocks, z1, z2, toCell)
     scans = scans + 1
     local from = { x = T.pos.x, y = T.pos.y, z = T.pos.z }
     scanFrom[#scanFrom + 1] = from
+    -- (the newest scan wins: water or ore an older one saw, where this one
+    -- sees rock or nothing, has been sealed, dried or dug since)
+    for k, p in pairs(scannedAt) do
+        if math.max(math.abs(p.x - from.x), math.abs(p.y - from.y), math.abs(p.z - from.z)) <= SCAN_RADIUS then
+            scanned[k], scannedAt[k] = nil, nil
+        end
+    end
     for _, e in ipairs(blocks) do
         local p = toCell(e)
         local k = key(p)
         seen[k] = true
         local data = { name = e.name, tags = tagSet(e.tags), state = e.state }
         local kind = isTarget(data) and "ore" or (leaky(data) and "fluid") or "rock"
-        if kind ~= "rock" then scanned[k] = kind end
+        if kind ~= "rock" then scanned[k], scannedAt[k] = kind, p end
         local out = outside(p)
         if out == 1 then known[k] = kind end
         local zTop = z2 == LENGTH and z2 + SCAN_REACH or z2
@@ -3548,6 +3556,8 @@ FLOWING_WEIGHT = 1 / 4
 PROBE_LEN = 4        -- blocks of each probe lane, from the water's edge on
 WATER_SHARE = 1 / 3  -- (a scan from the home) share of the segment's sides in fluid: open water
 BULKHEAD_SHARE = 1 / 2   -- more than this share of the tunnel ahead water: a bulkhead behind the home
+POCKET_SHARE = 1 / 5     -- (a scan where it met water, mid-segment) this much of the tunnel ahead and
+                         -- its sides water: open water; less, a pocket (sealed as it's met)
 FILLER_KEEP_WATER = 6 * 64   -- bulk blocks carried while it works in open water
 WATER_FILE = T.dataPath("mine.water")
 sourcesMet = {}      -- z of the sources it has met in the tunnel this segment
@@ -3897,18 +3907,26 @@ function put(d, what)
 end
 
 -- Before a stretch of work: the fuel, room and bulk blocks for it, a trip
--- home first if they're short.  No bulk blocks anywhere: it stops.
+-- home first if they're short.  The bulk blocks no more than it can carry
+-- with UNLOAD_ROOM slots free (each wall and lane asks again for its own,
+-- so a chunk can start short).  Next to none anywhere: it stops.
 function readyFor(moves, blocks)
     local function isFiller(n) return FILLER[n] end
     if not T.hasFuel(T.homeCost() + T.cfg.fuelMargin + moves + 10) then trip("Low on fuel")
     elseif T.freeSlots() < 2 then trip("Inventory nearly full") end
-    if T.countItem(isFiller) < blocks then
-        fillerWant = blocks
+    local slots = 0                        -- (empty, or holding bulk blocks)
+    for s = 1, 16 do
+        local it = turtle.getItemDetail(s)
+        if not it or FILLER[it.name] then slots = slots + 1 end
+    end
+    local want = math.min(blocks, math.max(64, (slots - UNLOAD_ROOM) * 64))
+    if T.countItem(isFiller) < want then
+        fillerWant = want
         trip("Out of blocks for the shell")
         fillerWant = nil
-        if T.countItem(isFiller) < blocks then
+        if T.countItem(isFiller) < math.min(want, 64) then
             stop(string.format("Out of bulk blocks for the shell at z=%d (needs %d): put cobblestone (or any bulk"
-                .. " block) in the start's bottom chest, then `mine --resume`.", T.pos.z, blocks))
+                .. " block) in the start's bottom chest, then `mine --resume`.", T.pos.z, want))
         end
     end
 end
@@ -4104,8 +4122,10 @@ function openWater(z1, z2, opts)
             upTo = b
         end
         a = b + 1
-        -- (no water met in the chunk's last slice: it's ended)
-        if done and (wetTo or 0) < b then break end
+        -- (no water met in the chunk's last slice: it's ended.  With a
+        -- scanner, the scan for the next chunk says: a chunk cut short by
+        -- the blocks it carries may end before the water starts.)
+        if done and not hasScanner and (wetTo or 0) < b then break end
     end
     waterMode, fillerKeep = wasMode, keep
     return done and upTo or nil
@@ -4188,6 +4208,53 @@ function scansSayWater(z1, z2)
     return seen >= 8 and wet / seen >= WATER_SHARE
 end
 
+-- (with a scanner) Water met at z while digging the lanes (see
+-- openWaterAt), now it has sealed and dried what it met: a scan from here
+-- says whether there's more of it round the rest of the segment.  Of the
+-- blocks the scan saw from z - WATER_SPAN to z + SCAN_RADIUS, in the
+-- tunnel not dug yet and round its sides, POCKET_SHARE or more water: open
+-- water (true).  Less: false, and it carries on with the lane, sealing as
+-- it goes, rather than going home to work the segment as open water and
+-- dig its lanes again.  nil if the scan failed.
+function scanSaysOpen(z, z1, z2)
+    if not takeScan(z1, z2) then return nil end
+    local seen, wet = 0, 0
+    for zz = math.max(z1, z - WATER_SPAN), math.min(z2, z + SCAN_RADIUS) do
+        for x = X0 - 1, X1 + 1 do
+            for y = Y0 - 1, Y1 + 1 do
+                local p = { x = x, y = y, z = zz }
+                local sideX, sideY = x < X0 or x > X1, y < Y0 or y > Y1
+                if not (sideX and sideY) and (sideX or sideY or not opened[key(p)]) then
+                    local said = scanSays(p)
+                    if said then
+                        seen = seen + 1
+                        if said == "fluid" then wet = wet + 1 end
+                    end
+                end
+            end
+        end
+    end
+    sourcesMet = {}                        -- (counted afresh from here)
+    local share = seen > 0 and wet / seen or 0
+    local open = share >= POCKET_SHARE
+    print(string.format("Water at z=%d: a scan from here sees %d%% of the tunnel ahead and its sides wet (%d of %d): %s.",
+        z, math.floor(share * 100 + 0.5), wet, seen,
+        open and "working it as open water" or "tunnelling on, sealing as it goes"))
+    return open
+end
+
+-- Where the lanes carry on in za..z2 after open water took over: they had
+-- got to lane `left.lane` at left.z (the lanes before it dug end to end).
+-- From where that lane got to, or (an outward lane short of za) from the
+-- end of the lane before; nil to start over (the first lane).
+function carryOn(left, za, z2)
+    if not left then return nil end
+    if left.lane % 2 == 0 then return { lane = left.lane, z = math.max(left.z, za) } end
+    if left.z >= za then return { lane = left.lane, z = math.min(left.z, z2) } end
+    if left.lane > 1 then return { lane = left.lane - 1, z = za } end
+    return nil
+end
+
 -- Mine the segment from z1 to z2, starting and ending at the home.
 -- `from`: how far it got before (resuming): its finished lanes are gone
 -- over only for water getting in, and it carries on from there.  In open
@@ -4200,7 +4267,7 @@ function mineSegment(z1, z2, from)
     for _, lane in ipairs(lanes) do laneAt[lane.x .. "," .. lane.y] = true end
     print(string.format("Segment z=%d..%d from home %d: %d lanes, fuel %s.", z1, z2, home.k, #lanes,
         tostring(turtle.getFuelLevel())))
-    known, targets, scanFrom, scanned = {}, {}, {}, {}
+    known, targets, scanFrom, scanned, scannedAt = {}, {}, {}, {}, {}
     sourcesMet, waterCols, probed, probedZ, seenOut = {}, {}, nil, {}, {}
     local wet0 = stats.wet
     local startLane, startZ = 1, nil
@@ -4230,17 +4297,31 @@ function mineSegment(z1, z2, from)
         water = capZ == z1 or (scanned and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
     end
     local za = z1
+    local left, carry = nil, nil   -- (where the lanes got to when open water took over, and where they carry on)
+    local calm = nil               -- (z..z of the last scan that said tunnel on)
     while true do
         if not water then
             if za > z1 then tunnelTo({ x = lanes[1].x, y = lanes[1].y, z = za - 1 }) end
             -- (without a scanner, water met is probed first: under half
             -- water, it carries on from where it was)
-            local at = za == z1 and from or nil
+            local at = za == z1 and from or carry
             repeat
                 local how, i, z = digLanes(lanes, za, z2, { from = at, save = true, watch = home.k > 0 })
                 water, at = how == "water", nil
-                if water and not hasScanner and not probeWater(z, za, z2, lanes, i) then
-                    water, at = false, { lane = i, z = z }
+                if water then
+                    -- (with a scanner, a scan from here; without one, or if
+                    -- the scan fails, the probe)
+                    -- (water met where the last scan said tunnel on: that
+                    -- scan saw it already)
+                    local open
+                    if hasScanner and calm and z >= calm[1] and z <= calm[2] then open, sourcesMet = false, {}
+                    elseif hasScanner then
+                        open = scanSaysOpen(z, z1, z2)
+                        if open == false then calm = { z - WATER_SPAN, z + SCAN_RADIUS } end
+                    end
+                    if open == nil and not probeWater(z, za, z2, lanes, i) then open = false end
+                    if open == false then water, at = false, { lane = i, z = z } end
+                    left = { lane = i, z = z }
                 end
             until not at
         end
@@ -4252,11 +4333,16 @@ function mineSegment(z1, z2, from)
         local upTo = openWater(za, z2, { bulkhead = true, seg = { z1, z2 } })
         if not upTo then                       -- (something in the way: the rest as ever)
             tunnelHome()
-            digLanes(lanes, za, z2, {})
+            digLanes(lanes, za, z2, { from = carryOn(left, za, z2) })
             break
         end
         if upTo >= z2 then break end
         za, water, sourcesMet, waterCols = upTo + 1, false, {}, {}
+        carry = carryOn(left, za, z2)
+        if carry then
+            print(string.format("Out of the water at z=%d: the lanes carry on from lane %d of %d, where they had got to.",
+                za, carry.lane, #lanes))
+        end
     end
     via = nil
     saveProgress(#lanes + 1, z2)
