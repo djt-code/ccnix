@@ -335,6 +335,7 @@ VEIN_REACH = 4       -- how far a vein is followed out from the tunnel
 SCAN_RADIUS = 8      -- Geo Scanner radius (free of fuel up to 8)
 SCAN_REACH = 6       -- with a scanner: how far out from the tunnel ore is fetched
 ROOM = 2             -- empty slots wanted before each dig
+UNLOAD_ROOM = ROOM + 4   -- empty slots an unload leaves: bulk blocks kept aboard give way
 FILLER_KEEP = 64     -- bulk blocks kept on board for sealing...
 FILLER_KEEP_WET = 192 -- ...once it has run out drying out water
 FUEL_KEEP = 32       -- fuel items carried, so it tops up on the way instead of going home
@@ -1951,22 +1952,30 @@ function chestCounts(side) return T.containerCounts(side) or {} end
 -- filler from the bulk chest (floors and seals), torches from the
 -- valuables chest.
 function restockKit()
-    restockSet(home.bulk, FILLER, fillerKeep)
+    restockSet(home.bulk, FILLER, fillerKeep, UNLOAD_ROOM)
     restockSet(home.val, TORCHES, TORCH_KEEP)
     restockSet(home.val, T.fuel, FUEL_KEEP)
     updateWoodNeed(true)
 end
 
--- Up to `keep` of the items in `set` on board, from the chest on `side`.
-function restockSet(side, set, keep)
+-- Up to `keep` of the items in `set` on board, from the chest on `side`,
+-- leaving `room` slots free (ROOM).  The kinds the chest has most of
+-- first, so they come aboard in whole stacks (bulk blocks of a dozen
+-- kinds, a few of each, would fill every slot).
+function restockSet(side, set, keep, room)
     local test = function(n) return set[n] end
     local counts = chestCounts(side)
-    for _, name in ipairs(tables.sortedKeys(counts)) do
+    local names = tables.sortedKeys(counts)
+    table.sort(names, function(p, q)
+        if counts[p] ~= counts[q] then return counts[p] > counts[q] end
+        return p < q
+    end)
+    for _, name in ipairs(names) do
         local n = counts[name]
         local have = T.countItem(test)
         if have >= keep then break end
         if set[name] then
-            T.restockFrom(side, name, T.countItem(name) + math.min(n, keep - have), { quiet = true, room = ROOM })
+            T.restockFrom(side, name, T.countItem(name) + math.min(n, keep - have), { quiet = true, room = room or ROOM })
         end
     end
 end
@@ -2020,7 +2029,29 @@ function unload(only)
     T.tidyInventory()
     if home.val ~= "front" or home.face == T.dir then T.compactContainer(home.val) end
     if only == nil then restockKit() end
+    if only ~= "everything" then keepRoom() end
     return fits, "full"
+end
+
+-- After an unload, UNLOAD_ROOM slots free: else the bulk blocks it keeps
+-- aboard (in open water FILLER_KEEP_WATER of them, in part stacks of
+-- whatever it dug) leave it about ROOM, and the next block of a new kind
+-- it digs sends it home again, a trip a block.  The smallest stacks go to
+-- the bulk chest (or the floor, if it's full) till there's room.
+function keepRoom()
+    while T.freeSlots() < UNLOAD_ROOM do
+        local slot, least
+        for s = 1, 16 do
+            local it = turtle.getItemDetail(s)
+            if it and FILLER[it.name] and (not least or it.count < least) then slot, least = s, it.count end
+        end
+        if not slot then return end
+        turtle.select(slot)
+        dropSide(home.bulk, least)
+        local left = turtle.getItemCount(slot)
+        if left > 0 then throwAway(slot, left) end
+        if turtle.getItemCount(slot) > 0 then return end   -- (nowhere to put it)
+    end
 end
 
 -- Out of filler at a home whose bulk chest has none: a home's bulk chest
@@ -2038,7 +2069,7 @@ function fillerFromBehind()
         if not fuelToGoOn(2 * (working.z - homeAt(k).z)) then break end
         home = homeAt(k)
         if not tunnelHome() then break end
-        restockSet(home.bulk, FILLER, fillerKeep)
+        restockSet(home.bulk, FILLER, fillerKeep, UNLOAD_ROOM)
         if T.countItem(isFiller) >= want then
             print(string.format("Took %d bulk blocks from home %d.", T.countItem(isFiller), k))
             break
@@ -3938,7 +3969,7 @@ function shellWalls(a, b, plan)
             end
             up = not up
             -- (rock behind the wall two slices running: the water's ended)
-            if shelled then dry = 0 elseif dry then dry = dry + 1 end
+            if shelled then dry = 0; wetTo = math.max(wetTo or a - 1, z) elseif dry then dry = dry + 1 end
             if dry and dry >= 2 then break end
         end
         if not pushTo({ x = w.x, y = T.pos.y, z = a - 1 }) then return false end
@@ -3978,13 +4009,16 @@ function fillChunk(a, b, last, plan)
         -- going: along the lane, the floor or ceiling shelled, as far as
         -- there's water (two blocks of rock running: the water's ended,
         -- and the rock past is as good as a fill)
+        -- (a block it dug itself this chunk, the shell's column, it goes
+        -- into without digging too: that isn't water met)
         local rock, stop = nil, far      -- (blocks of rock running, once it's met water)
         for z = a, far do
+            local ours = opened[key(neighbour(0))]
             local ok, dug = push(0)
             if not ok then return false end
             if l.y == Y0 and plan.floor then put("down", "shell") end
             if l.y == Y1 and plan.ceiling then put("up", "shell") end
-            if not dug then rock = 0; wetTo = math.max(wetTo, z) elseif rock then rock = rock + 1 end
+            if not dug and not ours then rock = 0; wetTo = math.max(wetTo, z) elseif dug and rock then rock = rock + 1 end
             if rock and rock >= 2 then stop = z; break end
         end
         if last and stop == far then               -- the end cap, past the end
@@ -4032,7 +4066,11 @@ function openWater(z1, z2, opts)
     local a, done = z1, true
     local upTo = z1 - 1
     while a <= z2 and done do
-        if not pushTo({ x = 0, y = 0, z = a - 1 }) then done = false; break end
+        -- (the scan from the middle of the tunnel: from a corner, a tunnel
+        -- over SCAN_RADIUS wide or tall has its far side unseen, and what
+        -- no scan saw counts as water, so dry rock was worked as open water)
+        local mid = { x = X0 + math.floor((X1 - X0) / 2), y = Y0 + math.floor((Y1 - Y0) / 2), z = a - 1 }
+        if not pushTo(hasScanner and mid or { x = 0, y = 0, z = a - 1 }) then done = false; break end
         if hasScanner then takeScan(seg[1], seg[2]) end
         local reach = hasScanner and math.min(z2, a + SCAN_RADIUS - 1) or z2
         -- (with a scanner, as far as the scan from here sees: past it, all
@@ -4183,9 +4221,13 @@ function mineSegment(z1, z2, from)
     -- open water from the start (the segment before left an end cap, or
     -- the scans from the home say so), or met on the way: worked from the
     -- home, the other way.  (Not from the start: no open side to work from.)
+    -- The scan comes first, end cap or not: it's what says whether the
+    -- tunnel ahead is water enough for a bulkhead (see waterAhead), where
+    -- the cap only says the segment before ended in some.
     local water = false
     if home.k > 0 and not from then
-        water = capZ == z1 or (hasScanner and takeScan(z1, z2) and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
+        local scanned = hasScanner and takeScan(z1, z2)
+        water = capZ == z1 or (scanned and scansSayWater(z1, z1 + SCAN_RADIUS - 1))
     end
     local za = z1
     while true do
