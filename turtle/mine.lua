@@ -3938,7 +3938,7 @@ function shellWalls(a, b, plan)
             end
             up = not up
             -- (rock behind the wall two slices running: the water's ended)
-            if shelled then dry = 0 elseif dry then dry = dry + 1 end
+            if shelled then dry = 0; wetTo = math.max(wetTo or a - 1, z) elseif dry then dry = dry + 1 end
             if dry and dry >= 2 then break end
         end
         if not pushTo({ x = w.x, y = T.pos.y, z = a - 1 }) then return false end
@@ -3978,13 +3978,16 @@ function fillChunk(a, b, last, plan)
         -- going: along the lane, the floor or ceiling shelled, as far as
         -- there's water (two blocks of rock running: the water's ended,
         -- and the rock past is as good as a fill)
+        -- (a block it dug itself this chunk, the shell's column, it goes
+        -- into without digging too: that isn't water met)
         local rock, stop = nil, far      -- (blocks of rock running, once it's met water)
         for z = a, far do
+            local ours = opened[key(neighbour(0))]
             local ok, dug = push(0)
             if not ok then return false end
             if l.y == Y0 and plan.floor then put("down", "shell") end
             if l.y == Y1 and plan.ceiling then put("up", "shell") end
-            if not dug then rock = 0; wetTo = math.max(wetTo, z) elseif rock then rock = rock + 1 end
+            if not dug and not ours then rock = 0; wetTo = math.max(wetTo, z) elseif dug and rock then rock = rock + 1 end
             if rock and rock >= 2 then stop = z; break end
         end
         if last and stop == far then               -- the end cap, past the end
