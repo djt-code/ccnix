@@ -4032,7 +4032,11 @@ function openWater(z1, z2, opts)
     local a, done = z1, true
     local upTo = z1 - 1
     while a <= z2 and done do
-        if not pushTo({ x = 0, y = 0, z = a - 1 }) then done = false; break end
+        -- (the scan from the middle of the tunnel: from a corner, a tunnel
+        -- over SCAN_RADIUS wide or tall has its far side unseen, and what
+        -- no scan saw counts as water, so dry rock was worked as open water)
+        local mid = { x = X0 + math.floor((X1 - X0) / 2), y = Y0 + math.floor((Y1 - Y0) / 2), z = a - 1 }
+        if not pushTo(hasScanner and mid or { x = 0, y = 0, z = a - 1 }) then done = false; break end
         if hasScanner then takeScan(seg[1], seg[2]) end
         local reach = hasScanner and math.min(z2, a + SCAN_RADIUS - 1) or z2
         -- (with a scanner, as far as the scan from here sees: past it, all
